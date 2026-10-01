@@ -38,7 +38,7 @@
 
     THE POSITIVE CONTROLS, and why neither needs a file to be edited:
 
-        .\verify-perimeter.ps1 -Artifact <dev>\artifacts\no-such-file.exe
+        .\verify-perimeter.ps1 -Artifact .\no-such-file.exe
             gate 1 must FAIL, naming the file it could not measure. This replaced the old
             `-MaxBytes 1` control when the ceiling went away (task T-45-0): the gate no longer
             judges the number, so the only thing left to prove is that it really opens the
@@ -54,19 +54,25 @@
     Written without a single Cyrillic character and for Windows PowerShell 5.1: no `&&`, no
     `??`, no ternary. Decision R-05, as release.ps1 states it.
 
+    THE ARTIFACT (stage E89, decision 152.3). -Artifact names it. Without it the file is
+    LangSwitcher.exe in the folder the LANGSW_ARTIFACTS environment variable names, and without
+    that variable in <repository>\dist\ -- the rule release.ps1 writes by. The variable is read
+    after tools\local.ps1, the untracked file of this machine's own folders.
+
     Exit code: 0 only if the artifact could be measured and gates 2 and 3 pass -- or, under a
     control, only if the gate under control really failed.
 
     Examples:
       .\verify-perimeter.ps1
-      .\verify-perimeter.ps1 -Artifact <dev>\artifacts\LangSwitcher.exe
+      .\verify-perimeter.ps1 -Artifact ..\dist\LangSwitcher.exe
       .\verify-perimeter.ps1 -Previous 1413240              # prints the growth over e44
       .\verify-perimeter.ps1 -ExtraMarkers serde            # crate control: must PASS
 #>
 [CmdletBinding()]
 param(
-    # The file NFR-07 is about: the signed product the user runs.
-    [string]$Artifact = '<dev>\artifacts\LangSwitcher.exe',
+    # The file NFR-07 is about: the signed product the user runs. Empty means LangSwitcher.exe
+    # in the artifact folder; see the header.
+    [string]$Artifact = '',
     # Size of the artifact of the PREVIOUS delivery, in bytes. Given, it turns into the growth
     # line decision 106.2 asks every delivery report to carry. Zero means "not given".
     [long]$Previous = 0,
@@ -77,13 +83,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- This machine's own folders (stage E89) ------------------------------------------------
+# First, so that the LANGSW_ARTIFACTS it sets is the one read below. See the header.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
 $ScriptDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ScriptDir
 
-if (-not $env:CARGO_HOME)       { $env:CARGO_HOME       = '<dev>\tools\cargo' }
-if (-not $env:RUSTUP_HOME)      { $env:RUSTUP_HOME      = '<dev>\tools\rustup' }
-if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = '<dev>\cache\target' }
-if ($env:PATH -notlike '*<dev>\tools\cargo\bin*') { $env:PATH = "<dev>\tools\cargo\bin;$env:PATH" }
+# cargo comes from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89).
+if (-not $Artifact) {
+    $artifactDir = $env:LANGSW_ARTIFACTS
+    if (-not $artifactDir) { $artifactDir = Join-Path $ProjectDir 'dist' }
+    $Artifact = Join-Path $artifactDir 'LangSwitcher.exe'
+}
 
 # The crates a network capability arrives through in a Rust program. Names are matched whole,
 # against the crate name `cargo tree` prints, so `native-tls` cannot be missed by a substring

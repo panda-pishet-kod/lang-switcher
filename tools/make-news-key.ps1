@@ -11,8 +11,10 @@
     silence the feed, and a stolen working key can be answered with a letter signed by the
     reserve one telling people to update.
 
-    WHERE THE PRIVATE HALVES GO. Encrypted PKCS#8 files in <dev>\tools\admin\news-keys\,
-    with one password in a file beside them. The password file is named in capitals because it
+    WHERE THE PRIVATE HALVES GO. Encrypted PKCS#8 files in the folder -KeyDir names, or the
+    LANGSW_NEWS_KEYS environment variable without it (read after tools\local.ps1, the untracked
+    file of this machine's own folders), with one password in a file beside them. Keys have no
+    default place: without either, the script refuses before it does anything (stage E89). The password file is named in capitals because it
     is an instruction: MOVE IT OFF THIS MACHINE. A password kept next to the thing it encrypts
     protects nothing.
 
@@ -34,12 +36,27 @@
 
 [CmdletBinding()]
 param(
-    [string]$KeyDir = '<dev>\tools\admin\news-keys',
+    # The folder of the key files. Empty means LANGSW_NEWS_KEYS; see the header.
+    [string]$KeyDir = '',
     [string]$WorkingContainer = 'LangSwitcherNewsWorking',
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
+
+# This machine's own folders (stage E89): first, so that the LANGSW_NEWS_KEYS it sets is read
+# below. tools\local.example.ps1 shows the form of the file.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+if (-not $KeyDir) { $KeyDir = $env:LANGSW_NEWS_KEYS }
+
+# Before anything else is touched -- the key store included: a folder for keys is a choice,
+# and a script has no business guessing it.
+if (-not $KeyDir) {
+    Write-Host ''
+    Write-Host '  FAIL: no key folder. Name it with -KeyDir <folder>, or set LANGSW_NEWS_KEYS'
+    Write-Host '  in tools\local.ps1 (tools\local.example.ps1 shows the form). Nothing was done.'
+    exit 2
+}
 
 function Write-Section([string]$title) {
     Write-Host ''

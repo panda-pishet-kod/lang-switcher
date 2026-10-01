@@ -6,7 +6,7 @@
         verify-version.ps1 passes                          (task T-22-11)
           -> rebuild the shipping configuration
             -> verify-criterion8.ps1 passes
-              -> copy to <dev>\artifacts\LangSwitcher.exe
+              -> copy to <artifact folder>\LangSwitcher.exe
                 -> sign the copy
                   -> signtool verify /pa
                     -> verify-perimeter.ps1 passes         (task T-22-11)
@@ -32,6 +32,15 @@
     Task T-09-2 needs this: the Inno Setup installer packages an ALREADY SIGNED product, and
     rebuilding by hand before every installer build is the direct route to packaging an
     unsigned one.
+
+    WHERE THE ARTIFACT GOES (stage E89, decision 152.3). -Artifact names the file. Without it
+    the file is LangSwitcher.exe in the folder the LANGSW_ARTIFACTS environment variable names,
+    and without that variable in <repository>\dist\, created when the copy is made. The
+    variable is read after tools\local.ps1, the untracked file of this machine's own folders
+    (tools\local.example.ps1 shows its form); that file fills only what is empty, so a caller
+    that sets a variable itself keeps its own value. cargo comes from PATH, and its folders
+    are cargo's own defaults unless CARGO_HOME, RUSTUP_HOME and CARGO_TARGET_DIR are set: this
+    script no longer supplies the author's folders for them.
 
     THE SIGNATURE. The certificate is CN=Panda_Pishet_Kod, thumbprint below, private key in
     Cert:\CurrentUser\My and NOT exportable, so there is no .pfx and none can be made. The
@@ -65,10 +74,10 @@ param(
     [string]$Thumbprint = '8F038C7D00DACFCE34EC742EC97CCEBFD8465CAC',
     # Build, verify and copy, but do not sign. For a dry run of everything before the signature.
     [switch]$SkipSign,
-    # Where the shipping artifact goes. The directory is outside the project and holds other
-    # people's artifacts from the setup stage; this script touches this one file and nothing
-    # else in it.
-    [string]$Artifact = '<dev>\artifacts\LangSwitcher.exe',
+    # Where the shipping artifact goes. Empty means LangSwitcher.exe in the artifact folder --
+    # LANGSW_ARTIFACTS, or <repository>\dist\ without it; see the header. The folder may hold
+    # other artifacts of the machine; this script touches this one file and nothing else in it.
+    [string]$Artifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
     # verify-perimeter.ps1, which turns it into the growth line decision 106.2 asks every
@@ -78,19 +87,40 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- This machine's own folders (stage E89) ------------------------------------------------
+# First, so that everything below reads the LANGSW_* variables it sets. See the header.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
 $ScriptDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ScriptDir
 
 # --- Environment --------------------------------------------------------------------------
-# Only what is not already set, so a caller with an isolated target directory keeps it.
-if (-not $env:CARGO_HOME)       { $env:CARGO_HOME       = '<dev>\tools\cargo' }
-if (-not $env:RUSTUP_HOME)      { $env:RUSTUP_HOME      = '<dev>\tools\rustup' }
-if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = '<dev>\cache\target' }
+# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89). The
+# SDK folder stays: signtool lives there.
 $SdkBin = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64'
-if ($env:PATH -notlike '*<dev>\tools\cargo\bin*') { $env:PATH = "<dev>\tools\cargo\bin;$env:PATH" }
-if ($env:PATH -notlike "*$SdkBin*")                { $env:PATH = "$SdkBin;$env:PATH" }
+if ($env:PATH -notlike "*$SdkBin*") { $env:PATH = "$SdkBin;$env:PATH" }
 
-$ReleaseExe = Join-Path $env:CARGO_TARGET_DIR 'release\LangSwitcher.exe'
+# Where cargo builds: CARGO_TARGET_DIR when a caller set it -- an isolated acceptance run keeps
+# its own -- and cargo's default <repository>\target otherwise.
+$TargetDir = $env:CARGO_TARGET_DIR
+if (-not $TargetDir) { $TargetDir = Join-Path $ProjectDir 'target' }
+$ReleaseExe = Join-Path $TargetDir 'release\LangSwitcher.exe'
+
+# --- The artifact --------------------------------------------------------------------------
+# -Artifact, else LANGSW_ARTIFACTS, else <repository>\dist\ -- the one folder this script may
+# create, at the copy, because nobody named it.
+$ArtifactFrom = '-Artifact'
+$ArtifactDirIsDefault = $false
+if (-not $Artifact) {
+    if ($env:LANGSW_ARTIFACTS) {
+        $Artifact = Join-Path $env:LANGSW_ARTIFACTS 'LangSwitcher.exe'
+        $ArtifactFrom = 'LANGSW_ARTIFACTS'
+    } else {
+        $Artifact = Join-Path (Join-Path $ProjectDir 'dist') 'LangSwitcher.exe'
+        $ArtifactFrom = 'default <repository>\dist'
+        $ArtifactDirIsDefault = $true
+    }
+}
 
 function Write-Section { param([string]$Text)
     Write-Host ''
@@ -112,7 +142,8 @@ Write-Host '====================================================================
 Write-Host ' Lang_Switcher -- shipping build, criterion 8, signature'
 Write-Host '======================================================================'
 Write-Host ("Project    {0}" -f $ProjectDir)
-Write-Host ("Artifact   {0}" -f $Artifact)
+Write-Host ("Artifact   {0}  [{1}]" -f $Artifact, $ArtifactFrom)
+Write-Host ("Target dir {0}" -f $TargetDir)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 if ($SkipSign) { Write-Host 'Signing     SKIPPED by -SkipSign' }
 
@@ -165,6 +196,10 @@ if (-not (Test-Path $ReleaseExe)) {
 # --- 3. Copy to the artifact directory ------------------------------------------------------
 Write-Section 'Step 3: copy to the artifact directory'
 $artifactDir = Split-Path -Parent $Artifact
+if ((-not (Test-Path $artifactDir)) -and $ArtifactDirIsDefault) {
+    New-Item -ItemType Directory -Path $artifactDir | Out-Null
+    Write-Host ("  created the default artifact directory {0}" -f $artifactDir)
+}
 if (-not (Test-Path $artifactDir)) {
     Write-Host ("FAIL: the artifact directory does not exist: {0}" -f $artifactDir)
     exit 4

@@ -103,10 +103,13 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$PrivateKeyStore = 'Cert:\CurrentUser\My',
 
-    # Where the public part is written. TOOLCHAIN.md section 5 keeps it here. The directory has
-    # to exist already; this script creates one file in it and touches nothing else.
-    [ValidateNotNullOrEmpty()]
-    [string]$PublicCertPath = '<dev>\artifacts\LangSwitcher-CodeSigning.cer',
+    # Where the public part is written. Empty means LangSwitcher-CodeSigning.cer in the artifact
+    # folder: the one the LANGSW_ARTIFACTS environment variable names (read after tools\local.ps1,
+    # the untracked file of this machine's own folders), or <repository>\dist\ without it, which
+    # is created when missing (stage E89, decision 152.3). A folder named by the parameter or by
+    # the variable has to exist already; this script creates one file in it and touches nothing
+    # else.
+    [string]$PublicCertPath = '',
 
     # The LocalMachine stores the public part is installed into. Section 8.3 names these two.
     [ValidateNotNullOrEmpty()]
@@ -119,9 +122,23 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# This machine's own folders (stage E89): first, so that the LANGSW_ARTIFACTS it sets is read
+# below. tools\local.example.ps1 shows the form of the file.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
 # True exactly when -WhatIf was given. Read once: every "would have" branch below keys off it,
 # and the elevation check must not stop a run that is only printing a plan.
 $DryRun = [bool]$WhatIfPreference
+
+$PublicDirIsDefault = $false
+if (-not $PublicCertPath) {
+    $publicFolder = $env:LANGSW_ARTIFACTS
+    if (-not $publicFolder) {
+        $publicFolder = Join-Path (Split-Path -Parent $PSScriptRoot) 'dist'
+        $PublicDirIsDefault = $true
+    }
+    $PublicCertPath = Join-Path $publicFolder 'LangSwitcher-CodeSigning.cer'
+}
 
 if (-not [System.IO.Path]::IsPathRooted($PublicCertPath)) {
     $PublicCertPath = Join-Path (Get-Location).ProviderPath $PublicCertPath
@@ -189,7 +206,14 @@ if ($isAdmin) {
 }
 
 $publicDir = Split-Path -Parent $PublicCertPath
-if (Test-Path -LiteralPath $publicDir) {
+if ($PublicDirIsDefault -and -not (Test-Path -LiteralPath $publicDir)) {
+    if ($DryRun) {
+        Write-Host ("  public file directory {0} does not exist -- a real run would create it (the default)." -f $publicDir)
+    } else {
+        New-Item -ItemType Directory -Path $publicDir | Out-Null
+        Write-Host ("  created the default public file directory {0}" -f $publicDir)
+    }
+} elseif (Test-Path -LiteralPath $publicDir) {
     Write-Host ("  public file directory: {0}" -f $publicDir)
 } elseif ($DryRun) {
     Write-Host ("  public file directory {0} does NOT exist -- a real run would stop here." -f $publicDir)

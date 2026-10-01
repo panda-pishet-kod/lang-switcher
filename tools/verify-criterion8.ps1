@@ -11,7 +11,7 @@
     WHAT THIS SCRIPT DOES, and why each part is not decoration.
 
     1. It REBUILDS EACH CONFIGURATION IMMEDIATELY BEFORE ITS OWN MEASUREMENT. Both
-       configurations write the same file, <dev>\cache\target\release\LangSwitcher.exe, so a
+       configurations write the same file, <target>\release\LangSwitcher.exe, so a
        measurement taken without a build in front of it measures the leftover of the previous
        one. The controller was caught by exactly this while checking task T-03-4-2: the first
        "release without testing" measurement found the channel name, because what lay on disk
@@ -89,21 +89,25 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- This machine's own folders (stage E89) ------------------------------------------------
+# tools\local.ps1 is the untracked file of this machine's own values (tools\local.example.ps1
+# shows its form). Loaded first, so that a CARGO_TARGET_DIR it sets is the one read below; it
+# fills only what is empty, so a caller's own value stays.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
 if (-not $ProjectDir) { $ProjectDir = Split-Path -Parent $PSScriptRoot }
 $ProjectDir = (Resolve-Path $ProjectDir).Path
 
 # --- Environment --------------------------------------------------------------------------
-# Set only what is not already set. A caller building in an isolated target directory
-# (<dev>\cache\target-<id>, decision R-27) must keep it: overriding CARGO_TARGET_DIR here
-# would send that caller's artifacts into the shared tree behind its back.
-if (-not $env:CARGO_HOME)       { $env:CARGO_HOME       = '<dev>\tools\cargo' }
-if (-not $env:RUSTUP_HOME)      { $env:RUSTUP_HOME      = '<dev>\tools\rustup' }
-if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = '<dev>\cache\target' }
-if ($env:PATH -notlike '*<dev>\tools\cargo\bin*') {
-    $env:PATH = "<dev>\tools\cargo\bin;$env:PATH"
-}
+# Nothing is set here any more (stage E89): cargo comes from PATH, and CARGO_HOME, RUSTUP_HOME
+# and CARGO_TARGET_DIR keep cargo's own defaults unless a caller set them. A caller building in
+# an isolated target directory (a target-<id> folder of its own, decision R-27) keeps it: this
+# script reads CARGO_TARGET_DIR and never writes it, so that caller's artifacts are not sent
+# into a shared tree behind its back.
+$TargetDir = $env:CARGO_TARGET_DIR
+if (-not $TargetDir) { $TargetDir = Join-Path $ProjectDir 'target' }
 
-$ReleaseExe = Join-Path $env:CARGO_TARGET_DIR 'release\LangSwitcher.exe'
+$ReleaseExe = Join-Path $TargetDir 'release\LangSwitcher.exe'
 
 # --- The five strings -------------------------------------------------------------------
 # Position 1 is copied character for character from `PIPE_NAME_PREFIX` in src\control.rs,
@@ -196,7 +200,7 @@ Write-Host '====================================================================
 Write-Host ' Acceptance criterion 8, section 13 of SPEC -- SEC-04a traces'
 Write-Host '======================================================================'
 Write-Host ("Project        {0}" -f $ProjectDir)
-Write-Host ("Target dir     {0}" -f $env:CARGO_TARGET_DIR)
+Write-Host ("Target dir     {0}" -f $TargetDir)
 Write-Host ("Release binary {0}" -f $ReleaseExe)
 
 # ==========================================================================================

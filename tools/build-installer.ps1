@@ -6,7 +6,7 @@
 
         tools\release.ps1                    (build, criterion 8, sign the product)
           -> ISCC installer\LangSwitcher.iss (package the SIGNED product)
-            -> copy to <dev>\artifacts\LangSwitcher-setup.exe
+            -> copy to <artifact folder>\LangSwitcher-setup.exe
               -> sign the copy
                 -> signtool verify /pa
 
@@ -18,8 +18,19 @@
     not one. release.ps1 also re-proves acceptance criterion 8 of section 13, so
     the packaged build is the one without the `testing` feature.
 
-    Skip it with -SkipProductBuild only when <dev>\artifacts\LangSwitcher.exe is
-    already known good; the script still refuses to run if that file is missing.
+    Skip it with -SkipProductBuild only when the signed LangSwitcher.exe of the
+    artifact folder is already known good; the script still refuses to run if that
+    file is missing.
+
+    WHERE THINGS ARE (stage E89, decision 152.3). The artifact folder is the one the
+    LANGSW_ARTIFACTS environment variable names, and <repository>\dist\ without it --
+    the same rule release.ps1 follows, so the two scripts meet on the same file. The
+    Inno Setup compiler is -Iscc, else LANGSW_ISCC, else ISCC.exe on PATH, else
+    Inno Setup 6 under Program Files (x86) or Program Files; found nowhere, the script
+    refuses and says how to name it. The variables are read after tools\local.ps1,
+    the untracked file of this machine's own folders (tools\local.example.ps1 shows
+    its form). The installer script has no default product of its own: it is always
+    given /DSourceExe=<the signed product> below.
 
     THE SIGNATURE. Certificate CN=Panda_Pishet_Kod, thumbprint below, private key
     in Cert:\CurrentUser\My and NOT exportable. The command needs no administrator
@@ -51,6 +62,7 @@
       7  the copy does not match the compiled installer
       8  signing failed, even without a timestamp
       9  signtool verify /pa failed
+     10  ISCC.exe was found neither by -Iscc, LANGSW_ISCC, PATH nor Program Files
 
     Examples:
       .\build-installer.ps1
@@ -61,12 +73,15 @@ param(
     # SHA-1 thumbprint of the code signing certificate. TOOLCHAIN.md section 5.
     [string]$Thumbprint = '8F038C7D00DACFCE34EC742EC97CCEBFD8465CAC',
     # The signed product the installer packages. Produced by tools\release.ps1.
-    [string]$ProductArtifact = '<dev>\artifacts\LangSwitcher.exe',
-    # Where the finished installer goes. This exact path is hardwired into the
-    # LangSw-Install scheduled task and cannot be renamed.
-    [string]$SetupArtifact = '<dev>\artifacts\LangSwitcher-setup.exe',
+    # Empty means LangSwitcher.exe in the artifact folder; see the header.
+    [string]$ProductArtifact = '',
+    # Where the finished installer goes. Empty means LangSwitcher-setup.exe in the
+    # artifact folder. On the author's machine the LangSw-Install scheduled task runs
+    # the installer by this name from that folder, so the name cannot be changed.
+    [string]$SetupArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
-    [string]$Iscc = '<dev>\tools\InnoSetup\ISCC.exe',
+    # The Inno Setup 6 compiler. Empty means LANGSW_ISCC, PATH, then Program Files.
+    [string]$Iscc = '',
     # Do not rebuild and re-sign the product first. See the header.
     [switch]$SkipProductBuild,
     # Compile and copy, but do not sign. For a dry run of everything before the
@@ -76,21 +91,64 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- This machine's own folders (stage E89) ------------------------------------------------
+# First, so that everything below reads the LANGSW_* variables it sets. See the header.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
 $ScriptDir  = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ScriptDir
 $IssFile    = Join-Path $ProjectDir 'installer\LangSwitcher.iss'
 $IssOutput  = Join-Path $ProjectDir 'installer\Output\LangSwitcher-setup.exe'
 
 # --- Environment ----------------------------------------------------------------------------
-# Only what is not already set, so a caller with an isolated target directory keeps it.
-if (-not $env:CARGO_HOME)       { $env:CARGO_HOME       = '<dev>\tools\cargo' }
-if (-not $env:RUSTUP_HOME)      { $env:RUSTUP_HOME      = '<dev>\tools\rustup' }
-if (-not $env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR = '<dev>\cache\target' }
+# cargo from PATH, with cargo's own defaults for whatever CARGO_* is not set (stage E89). The
+# SDK folder stays: signtool lives there.
 $SdkBin  = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64'
-$InnoBin = '<dev>\tools\InnoSetup'
-if ($env:PATH -notlike '*<dev>\tools\cargo\bin*') { $env:PATH = "<dev>\tools\cargo\bin;$env:PATH" }
-if ($env:PATH -notlike "*$SdkBin*")                { $env:PATH = "$SdkBin;$env:PATH" }
-if ($env:PATH -notlike "*$InnoBin*")               { $env:PATH = "$InnoBin;$env:PATH" }
+if ($env:PATH -notlike "*$SdkBin*") { $env:PATH = "$SdkBin;$env:PATH" }
+
+# --- The artifact folder and the compiler ----------------------------------------------------
+# LANGSW_ARTIFACTS, else <repository>\dist\ -- the rule of release.ps1. Only the default folder
+# may be created here, at the copy, because nobody named it.
+$ArtifactDirIsDefault = $false
+$ArtifactDir = $env:LANGSW_ARTIFACTS
+if (-not $ArtifactDir) {
+    $ArtifactDir = Join-Path $ProjectDir 'dist'
+    $ArtifactDirIsDefault = $true
+}
+if (-not $ProductArtifact) { $ProductArtifact = Join-Path $ArtifactDir 'LangSwitcher.exe' }
+if (-not $SetupArtifact)   { $SetupArtifact   = Join-Path $ArtifactDir 'LangSwitcher-setup.exe' }
+
+$IsccFrom = '-Iscc'
+if (-not $Iscc -and $env:LANGSW_ISCC) {
+    $Iscc = $env:LANGSW_ISCC
+    $IsccFrom = 'LANGSW_ISCC'
+}
+if (-not $Iscc) {
+    $onPath = @(Get-Command 'ISCC.exe' -CommandType Application -ErrorAction SilentlyContinue)
+    if ($onPath.Count -gt 0) {
+        $Iscc = $onPath[0].Path
+        $IsccFrom = 'PATH'
+    }
+}
+if (-not $Iscc) {
+    foreach ($programs in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if (-not $programs) { continue }
+        $candidate = Join-Path $programs 'Inno Setup 6\ISCC.exe'
+        if (Test-Path -LiteralPath $candidate) {
+            $Iscc = $candidate
+            $IsccFrom = 'Program Files'
+            break
+        }
+    }
+}
+if (-not $Iscc) {
+    Write-Host ''
+    Write-Host 'FAIL: ISCC.exe, the Inno Setup 6 compiler, was not found: not given by -Iscc,'
+    Write-Host '      not named by LANGSW_ISCC, not on PATH, not under Program Files.'
+    Write-Host '      Name it with -Iscc <full path>, or set LANGSW_ISCC in tools\local.ps1'
+    Write-Host '      (tools\local.example.ps1 shows the form).'
+    exit 10
+}
 
 function Write-Section { param([string]$Text)
     Write-Host ''
@@ -115,6 +173,7 @@ Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Script     {0}" -f $IssFile)
 Write-Host ("Product    {0}" -f $ProductArtifact)
 Write-Host ("Installer  {0}" -f $SetupArtifact)
+Write-Host ("ISCC       {0}  [{1}]" -f $Iscc, $IsccFrom)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 if ($SkipProductBuild) { Write-Host 'Product    NOT rebuilt, -SkipProductBuild was given' }
 if ($SkipSign)         { Write-Host 'Signing    SKIPPED by -SkipSign' }
@@ -180,6 +239,10 @@ $compiledHash = Show-Binary -Path $IssOutput -Label 'compiled installer:'
 # the setup stage.
 Write-Section 'Step 3: copy to the artifact directory'
 $artifactDir = Split-Path -Parent $SetupArtifact
+if ((-not (Test-Path $artifactDir)) -and $ArtifactDirIsDefault) {
+    New-Item -ItemType Directory -Path $artifactDir | Out-Null
+    Write-Host ("  created the default artifact directory {0}" -f $artifactDir)
+}
 if (-not (Test-Path $artifactDir)) {
     Write-Host ("FAIL: the artifact directory does not exist: {0}" -f $artifactDir)
     exit 6

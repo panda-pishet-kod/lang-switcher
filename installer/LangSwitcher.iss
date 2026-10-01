@@ -3,8 +3,9 @@
 ;
 ;  WHAT THIS SCRIPT PACKAGES
 ;
-;    <dev>\artifacts\LangSwitcher.exe -- the ALREADY SIGNED shipping build
-;    produced by tools\release.ps1.  Not a freshly compiled binary.  Section 8.2
+;    LangSwitcher.exe of the artifact folder -- the ALREADY SIGNED shipping build
+;    produced by tools\release.ps1, handed to this script as /DSourceExe= by
+;    tools\build-installer.ps1.  Not a freshly compiled binary.  Section 8.2
 ;    of SPEC.md: a uiAccess="true" image needs BOTH an Authenticode signature the
 ;    machine trusts AND a location under %ProgramFiles%.  Packaging an unsigned
 ;    binary produces an installer whose product cannot start, and the defect then
@@ -50,10 +51,12 @@
 #define AppExeName     "LangSwitcher.exe"
 #define AppCopyright   "Copyright (C) 2026 Panda_Pishet_Kod"
 
-; The signed shipping artifact.  Overridable with ISCC /DSourceExe=... so that a
-; dry run can point at something else; the default is what release.ps1 writes.
+; The signed shipping artifact, always given on the command line:
+; tools\build-installer.ps1 runs ISCC /DSourceExe=<signed image>.  There is no
+; default (stage E89, decision 152.3): a default would be a path of one machine,
+; and a compile without the define would package whatever happened to lie there.
 #ifndef SourceExe
-  #define SourceExe "<dev>\artifacts\LangSwitcher.exe"
+  #error SourceExe is not defined: run tools\build-installer.ps1, it passes /DSourceExe=<signed image>
 #endif
 
 ; res\langswitcher-active.ico -- the tray icon of the running product, reused for

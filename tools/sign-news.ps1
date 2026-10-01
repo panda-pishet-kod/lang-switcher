@@ -25,8 +25,14 @@
     travels through a tool that helpfully rewrites CRLF would stop verifying with no visible
     change.
 
+    THE KEYS (stage E89, decision 152.3). The working key lives in the Windows key store under
+    -Container and needs no folder. The reserve key is read from reserve.p8 in the folder -KeyDir
+    names, or LANGSW_NEWS_KEYS without it; the variable is read after tools\local.ps1, the
+    untracked file of this machine's own folders. Keys have no default place: -Reserve without
+    either is refused.
+
     Usage:
-      pwsh -File tools\sign-news.ps1 <dev>\artifacts\news-site\news.toml
+      pwsh -File tools\sign-news.ps1 <site folder>\news.toml
       pwsh -File tools\sign-news.ps1 <file> -Reserve         # sign with the reserve key
       pwsh -File tools\sign-news.ps1 <file> -Check           # check only, write nothing
 #>
@@ -36,12 +42,18 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Path,
     [string]$Container = 'LangSwitcherNewsWorking',
-    [string]$KeyDir = '<dev>\tools\admin\news-keys',
+    # The folder of reserve.p8. Empty means LANGSW_NEWS_KEYS; see the header.
+    [string]$KeyDir = '',
     [switch]$Reserve,
     [switch]$Check
 )
 
 $ErrorActionPreference = 'Stop'
+
+# This machine's own folders (stage E89): first, so that the LANGSW_NEWS_KEYS it sets is read
+# below. tools\local.example.ps1 shows the form of the file.
+if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+if (-not $KeyDir) { $KeyDir = $env:LANGSW_NEWS_KEYS }
 
 $BODY_CAP = 192 * 1024
 $NEWS_KEPT = 3
@@ -183,6 +195,9 @@ Write-Host '--- signature ------------------------------------------------------
 if ($Reserve) {
     # The reserve key does not live on this machine: it is brought back from its encrypted copy
     # for this one signature, and the password is asked for rather than stored.
+    if (-not $KeyDir) {
+        Fail 'no key folder for the reserve key: name it with -KeyDir <folder> or set LANGSW_NEWS_KEYS (tools\local.example.ps1 shows the form)'
+    }
     $file = Join-Path $KeyDir 'reserve.p8'
     if (-not (Test-Path $file)) { Fail ("no reserve key at {0}" -f $file) }
 
