@@ -47,6 +47,14 @@
     before it builds anything (exit 10). It used to put the folder of one SDK version on PATH,
     and a machine with another version had no signtool at all.
 
+    THE BUILD MACHINE'S FOLDERS ARE KEPT OUT OF THE IMAGE (stage E90). The compiler writes the
+    absolute paths of the registry crates (under CARGO_HOME) and of the standard library's
+    sources (under the toolchain's sysroot) into the panic locations of the program -- the e89
+    image carried forty-seven of them. Every build of this script and of verify-criterion8.ps1
+    runs with --remap-path-prefix for both, through CARGO_ENCODED_RUSTFLAGS: the registry
+    becomes /cargo, the standard library /rustc/<commit> -- the path a toolchain without the
+    rust-src component writes anyway. verify-perimeter.ps1 gate 4 checks the signed image.
+
     THE SIGNATURE. The certificate is CN=Panda_Pishet_Kod, thumbprint below, private key in
     Cert:\CurrentUser\My and NOT exportable, so there is no .pfx and none can be made. The
     command needs no administrator rights -- established by the setup stage, TOOLCHAIN.md
@@ -67,7 +75,8 @@
     passed, the copy was made, -- unless -SkipSign was given -- the signature was applied and
     verified, the artifact could be measured for NFR-07, and criterion 4 holds. 8 is the
     version gate, 9 the perimeter gate; 1 to 7 are as they were; 10 -- signtool was not found
-    and signing was asked.
+    and signing was asked; 11 -- rustc did not tell its sysroot and commit, so the remap of the
+    build machine's folders cannot be made.
 
     Examples:
       .\release.ps1
@@ -140,6 +149,32 @@ if (-not $SignTool) {
     }
 }
 
+# The build machine's folders out of the image -- see the header. Flags already set are kept;
+# the two of this script are added once, so a second run in the same process changes nothing.
+$cargoHome = $env:CARGO_HOME
+if (-not $cargoHome) { $cargoHome = Join-Path $env:USERPROFILE '.cargo' }
+$sysroot = (& rustc --print sysroot | Out-String).Trim()
+$commit = ([string](@(& rustc -vV) -match '^commit-hash:')) -replace '^commit-hash:\s*', ''
+if ((-not $sysroot) -or (-not $commit)) {
+    Write-Host ("FAIL: rustc did not tell its sysroot ({0}) and commit ({1})." -f $sysroot, $commit)
+    exit 11
+}
+$Remap = @(
+    ('--remap-path-prefix=' + $cargoHome.TrimEnd('\') + '=/cargo'),
+    ('--remap-path-prefix=' + (Join-Path $sysroot 'lib\rustlib\src\rust') + '=/rustc/' + $commit.Trim())
+)
+$unit = [string][char]0x1F
+$flags = @()
+if ($env:CARGO_ENCODED_RUSTFLAGS) {
+    $flags = @($env:CARGO_ENCODED_RUSTFLAGS -split $unit)
+} elseif ($env:RUSTFLAGS) {
+    $flags = @($env:RUSTFLAGS -split '\s+' | Where-Object { $_ })
+}
+foreach ($flag in $Remap) {
+    if ($flags -notcontains $flag) { $flags += $flag }
+}
+$env:CARGO_ENCODED_RUSTFLAGS = $flags -join $unit
+
 # Where cargo builds: CARGO_TARGET_DIR when a caller set it -- an isolated acceptance run keeps
 # its own -- and cargo's default <repository>\target otherwise.
 $TargetDir = $env:CARGO_TARGET_DIR
@@ -186,6 +221,7 @@ Write-Host ("Artifact   {0}  [{1}]" -f $Artifact, $ArtifactFrom)
 Write-Host ("Target dir {0}" -f $TargetDir)
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
+Write-Host ("Remap      {0}" -f ($Remap -join '  '))
 if ($SkipSign) { Write-Host 'Signing     SKIPPED by -SkipSign' }
 
 # --- 0. One version, nine places -------------------------------------------------------------

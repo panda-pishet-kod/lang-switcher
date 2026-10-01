@@ -59,14 +59,23 @@
     that variable in <repository>\dist\ -- the rule release.ps1 writes by. The variable is read
     after tools\local.ps1, the untracked file of this machine's own folders.
 
-    Exit code: 0 only if the artifact could be measured and gates 2 and 3 pass -- or, under a
-    control, only if the gate under control really failed.
+    GATE 4 (stage E90, debt E89-B-2) -- the folders of the build machine are not in the image.
+    The compiler writes absolute source paths into the panic locations of a Rust program; the
+    e89 image carried forty-seven of them, under CARGO_HOME and under the toolchain's sysroot.
+    release.ps1 now remaps both; this gate reads the signed file and refuses it if it still
+    names CARGO_HOME, RUSTUP_HOME, the sysroot of rustc, the project folder or USERPROFILE --
+    byte for byte, in UTF-8 and UTF-16LE, without regard to case. Positive control:
+    -ExtraPathNeedles '/rustc/' -- every Rust image carries that prefix, so the gate must FAIL.
+
+    Exit code: 0 only if the artifact could be measured and gates 2, 3 and 4 pass -- or, under
+    a control, only if the gate under control really failed.
 
     Examples:
       .\verify-perimeter.ps1
       .\verify-perimeter.ps1 -Artifact ..\dist\LangSwitcher.exe
       .\verify-perimeter.ps1 -Previous 1413240              # prints the growth over e44
       .\verify-perimeter.ps1 -ExtraMarkers serde            # crate control: must PASS
+      .\verify-perimeter.ps1 -ExtraPathNeedles '/rustc/'    # path control: must PASS
 #>
 [CmdletBinding()]
 param(
@@ -78,7 +87,10 @@ param(
     [long]$Previous = 0,
     # Crate names added to the marker list. `serde` is the positive control: it is in the
     # tree, so the gate has to fire on it.
-    [string[]]$ExtraMarkers = @()
+    [string[]]$ExtraMarkers = @(),
+    # Strings added to the folders gate 4 looks for. '/rustc/' is the positive control: every
+    # Rust image carries it, so the gate has to fire on it.
+    [string[]]$ExtraPathNeedles = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -293,6 +305,67 @@ if ($addressFailed) {
     Write-Host '  RESULT: pass'
 }
 
+# --- Gate 4: the build machine's folders are not in the image (stage E90) -----------------------
+#
+# The needles are the folders of THIS machine, asked of the environment and of rustc at run time --
+# never typed here, so the gate means the same on any machine. CARGO_HOME and RUSTUP_HOME fall back
+# to cargo's own defaults under USERPROFILE, and USERPROFILE itself is a needle: a user name in a
+# shipped image is the commonest leak of a Rust program. The file is read once and turned into one
+# character per byte through ISO-8859-1 (the trick of verify-criterion8.ps1); each needle is looked
+# for as UTF-8 and as UTF-16LE bytes, both sides folded to lower case the same way.
+Write-Host ''
+Write-Host '--- Gate 4: the build machine''s folders are not in the image ----------'
+
+$pathNeedles = New-Object System.Collections.Generic.List[string]
+$cargoHomeNeedle = $env:CARGO_HOME
+if ((-not $cargoHomeNeedle) -and $env:USERPROFILE) { $cargoHomeNeedle = Join-Path $env:USERPROFILE '.cargo' }
+$rustupHomeNeedle = $env:RUSTUP_HOME
+if ((-not $rustupHomeNeedle) -and $env:USERPROFILE) { $rustupHomeNeedle = Join-Path $env:USERPROFILE '.rustup' }
+$sysrootNeedle = ''
+try { $sysrootNeedle = (& rustc --print sysroot | Out-String).Trim() } catch { $sysrootNeedle = '' }
+foreach ($folder in @($cargoHomeNeedle, $rustupHomeNeedle, $sysrootNeedle, $ProjectDir, $env:USERPROFILE)) {
+    if ($folder -and -not $pathNeedles.Contains($folder.TrimEnd('\'))) { $pathNeedles.Add($folder.TrimEnd('\')) }
+}
+foreach ($extra in $ExtraPathNeedles) {
+    if ($extra) { $pathNeedles.Add($extra) }
+}
+$pathControl = ($ExtraPathNeedles.Count -gt 0)
+if ($pathControl) { Write-Host ("  + {0}  *** POSITIVE CONTROL: the path gate must FAIL ***" -f ($ExtraPathNeedles -join ', ')) }
+
+$latin1 = [System.Text.Encoding]::GetEncoding(28591)
+$haystack = $latin1.GetString($bytes).ToLowerInvariant()
+
+function Measure-Needle([string]$haystack, [string]$needle) {
+    $count = 0
+    $at = $haystack.IndexOf($needle, [System.StringComparison]::Ordinal)
+    while ($at -ge 0) {
+        $count++
+        $at = $haystack.IndexOf($needle, $at + 1, [System.StringComparison]::Ordinal)
+    }
+    return $count
+}
+
+$pathHits = 0
+foreach ($needle in $pathNeedles) {
+    $u8 = Measure-Needle $haystack ($latin1.GetString([System.Text.Encoding]::UTF8.GetBytes($needle)).ToLowerInvariant())
+    $u16 = Measure-Needle $haystack ($latin1.GetString([System.Text.Encoding]::Unicode.GetBytes($needle)).ToLowerInvariant())
+    $pathHits += $u8 + $u16
+    $verdict = 'absent'
+    if (($u8 + $u16) -gt 0) { $verdict = 'FOUND' }
+    Write-Host ("  {0,-7} {1,-66} UTF-8 {2,3}  UTF-16LE {3,3}" -f $verdict, $needle, $u8, $u16)
+}
+
+$pathFailed = ($pathHits -gt 0)
+if ($pathNeedles.Count -eq 0) {
+    Write-Host '  FAIL: not one folder to look for -- the gate would have measured nothing.'
+    $pathFailed = $true
+} elseif ($pathFailed) {
+    Write-Host ("  RESULT: FAIL -- the image names a folder of the build machine {0} time(s)" -f $pathHits)
+} else {
+    Write-Host ("  none of the {0} folders is in the image" -f $pathNeedles.Count)
+    Write-Host '  RESULT: pass'
+}
+
 # --- Verdict ------------------------------------------------------------------------------------
 Write-Host ''
 Write-Host '======================================================================'
@@ -309,12 +382,24 @@ if ($crateControl) {
     exit 1
 }
 
-if ($crateFailed -or $addressFailed) {
+if ($pathControl) {
+    if ($pathFailed) {
+        Write-Host ' POSITIVE CONTROL PASSED: the path gate really failed'
+        Write-Host '======================================================================'
+        exit 0
+    }
+
+    Write-Host ' POSITIVE CONTROL FAILED: the path gate missed a string that is in every Rust image'
+    Write-Host '======================================================================'
+    exit 1
+}
+
+if ($crateFailed -or $addressFailed -or $pathFailed) {
     Write-Host ' RESULT: FAIL'
     Write-Host '======================================================================'
     exit 1
 }
 
-Write-Host ' RESULT: PASS -- criterion 4 and SEC-03 addresses hold; NFR-07 measured above'
+Write-Host ' RESULT: PASS -- criterion 4, SEC-03 addresses and the build folders hold; NFR-07 measured above'
 Write-Host '======================================================================'
 exit 0

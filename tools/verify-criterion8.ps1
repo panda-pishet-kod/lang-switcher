@@ -288,15 +288,28 @@ if ($debugControlled.Count -gt 0) {
     Write-Host '--- B2. Release with debug assertions forced ON -- POSITIVE CONTROL ----'
     Write-Host 'RUSTFLAGS overrides the profile key, so this is the build a person chasing a bug'
     Write-Host 'would have made -- and the one that used to pass this criterion in silence.'
+    # Stage E90: release.ps1 builds with CARGO_ENCODED_RUSTFLAGS (the remap of the build machine's
+    # folders), and while that variable is set cargo IGNORES RUSTFLAGS -- setting RUSTFLAGS here
+    # would leave debug assertions off and fail this control for the wrong reason. So the flag is
+    # added to whichever variable is in force, and the variable is put back as it was.
     $savedFlags = $env:RUSTFLAGS
+    $savedEncoded = $env:CARGO_ENCODED_RUSTFLAGS
     try {
-        $env:RUSTFLAGS = '-C debug-assertions=on'
+        if ($savedEncoded) {
+            $unit = [string][char]0x1F
+            $env:CARGO_ENCODED_RUSTFLAGS = $savedEncoded + $unit + '-C' + $unit + 'debug-assertions=on'
+        } else {
+            $env:RUSTFLAGS = '-C debug-assertions=on'
+        }
         Invoke-Cargo -CargoArgs @('build', '--release') -What 'cargo build --release (debug assertions on)'
     } finally {
         if ($null -eq $savedFlags) {
             Remove-Item Env:\RUSTFLAGS -ErrorAction SilentlyContinue
         } else {
             $env:RUSTFLAGS = $savedFlags
+        }
+        if ($savedEncoded) {
+            $env:CARGO_ENCODED_RUSTFLAGS = $savedEncoded
         }
     }
     $hashAsserted = Measure-Binary -Path $ReleaseExe -Label 'Release, debug assertions on:'
