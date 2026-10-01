@@ -46,7 +46,7 @@
 ; out, so the task, its [Registry] entry and the knob are gone together.
 
 #define AppName        "Lang Switcher"
-#define AppVersion     "0.88.0"
+#define AppVersion     "0.89.0"
 #define AppPublisher   "Panda_Pishet_Kod"
 #define AppExeName     "LangSwitcher.exe"
 #define AppCopyright   "Copyright (C) 2026 Panda_Pishet_Kod"
@@ -83,10 +83,10 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
-VersionInfoVersion=0.88.0.0
+VersionInfoVersion=0.89.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=0.88.0.0
+VersionInfoProductVersion=0.89.0.0
 VersionInfoDescription={#AppName} Setup
 VersionInfoCopyright={#AppCopyright}
 
