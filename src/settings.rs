@@ -2554,9 +2554,10 @@ pub fn autostart_command() -> Option<String> {
 /// ⛔⛔ **The guard against litter, and the first thing task T-55-1 put in.** From that task on the
 /// start of the program makes the registry agree with `general.autostart` (решение 120.4 (б)), and
 /// `general.autostart` defaults to `true`. Without this guard every debug build somebody runs,
-/// every test binary that attaches a tray and every bench under `<dev>` would write its own path
-/// into `HKCU\…\Run`. That is not a guess: a debug instance started with autostart on did exactly
-/// that in this project, and nothing in the session that ran it could take the value out again.
+/// every test binary that attaches a tray and every bench on a development machine would write its
+/// own path into `HKCU\…\Run`. That is not a guess: a debug instance started with autostart on did
+/// exactly that in this project, and nothing in the session that ran it could take the value out
+/// again.
 ///
 /// **Two conditions, and both are required:**
 ///
@@ -2567,9 +2568,10 @@ pub fn autostart_command() -> Option<String> {
 ///    all.
 ///
 /// The path alone keeps out every test binary (`<target>\debug\deps`), every bench and every
-/// release build under `<dev>`; the profile is a second and independent reason, for a debug image
-/// copied into the folder by hand. **The `testing` feature is deliberately not a condition:** the
-/// plain battery runs without it, so it would guard half the runs, and the path guards all of them.
+/// release build in a development folder; the profile is a second and independent reason, for a
+/// debug image copied into the folder by hand. **The `testing` feature is deliberately not a
+/// condition:** the plain battery runs without it, so it would guard half the runs, and the path
+/// guards all of them.
 ///
 /// Compared component by component and without regard to case — the file system does not care, and
 /// the environment is free to spell `Program Files` either way. Pure, and public so that both

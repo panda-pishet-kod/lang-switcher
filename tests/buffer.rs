@@ -3727,7 +3727,7 @@ fn the_layout_read_leaves_fr10_and_fr11_exactly_as_they_were() {
 /// any other held key does. `Held::apply` used to flip the toggle on every one of them, and the
 /// comment above it claimed that this "is what the keyboard does to the light as well".
 ///
-/// It is not. The probe crate `<dev>\sandbox\probes\capsrepeat` sent the system five repeated
+/// It is not. The probe crate `capsrepeat` of the author's sandbox sent the system five repeated
 /// `Down` events for `VK_CAPITAL` with no `Up` between them and read `GetKeyState(VK_CAPITAL) & 1`
 /// after each: the system flipped the toggle **once**, in three runs out of three, each preceded
 /// by a positive control showing the reading does follow a real press.

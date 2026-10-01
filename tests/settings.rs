@@ -15144,14 +15144,14 @@ fn only_the_installed_release_image_may_register_itself() {
         (
             "a release build where cargo leaves it",
             false,
-            Path::new(r"<dev>\cache\target\release\LangSwitcher.exe"),
+            Path::new(r"C:\Builds\LangSwitcher\target\release\LangSwitcher.exe"),
             program_files,
             false,
         ),
         (
             "a test binary",
             false,
-            Path::new(r"<dev>\cache\target\debug\deps\tray-0123456789abcdef.exe"),
+            Path::new(r"C:\Builds\LangSwitcher\target\debug\deps\tray-0123456789abcdef.exe"),
             program_files,
             false,
         ),

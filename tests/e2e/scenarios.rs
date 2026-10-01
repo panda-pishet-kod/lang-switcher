@@ -8349,11 +8349,12 @@ const RACE_REPORT_BOUND: Duration = Duration::from_millis(400);
 
 /// Where the raw numbers of the series are written — one line per circle, appended as it happens.
 ///
-/// Beside the report, because the task says the next task will need them. Under `%TEMP%` when
-/// that directory does not exist, because losing a quarter-hour series to a missing folder would
-/// be the wrong trade. No new environment variable (Р-53).
+/// Beside the report — in [`crate::reports_dir`] — because the task says the next task will need
+/// them. Under `%TEMP%` when that directory does not exist, because losing a quarter-hour series
+/// to a missing folder would be the wrong trade. The folder is the one `LANGSW_CONTROL` names
+/// (decision 152.3), where it used to be a path of the author's machine.
 fn race_raw_path() -> std::path::PathBuf {
-    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    let beside = crate::reports_dir();
     if beside.is_dir() {
         beside.join("T-10-16-серия.csv")
     } else {
@@ -9201,10 +9202,10 @@ const VOICE_KEYS: [&str; 2] = ["last_replacement_changed", "last_replacement_dir
 /// Where the raw numbers of this experiment are written — one line per press, appended as it
 /// happens, so a run cut short leaves everything up to that point on disk.
 ///
-/// Beside the report when that directory exists, under `%TEMP%` otherwise. No new environment
-/// variable (Р-53).
+/// Beside the report — in [`crate::reports_dir`] — when that directory exists, under `%TEMP%`
+/// otherwise: [`race_raw_path`]'s terms.
 fn voice_raw_path() -> std::path::PathBuf {
-    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    let beside = crate::reports_dir();
     if beside.is_dir() {
         beside.join("T-10-17-серия.csv")
     } else {
@@ -9960,7 +9961,7 @@ const PHASE_FRESH: &str = "ntcn";
 
 /// Where the raw numbers of this experiment go — one line per circle, appended as it happens.
 fn phase_raw_path() -> std::path::PathBuf {
-    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    let beside = crate::reports_dir();
     if beside.is_dir() {
         beside.join("T-10-18-серия.csv")
     } else {
@@ -10889,10 +10890,10 @@ const THREADS_MAX_STEPS: usize = 24;
 
 /// Where the raw numbers of this series go — one line per circle, appended as it happens.
 ///
-/// Beside the report, as T-10-16 and T-10-18 wrote theirs; `%TEMP%` if that directory is gone.
-/// No new environment variable (Р-53).
+/// Beside the report — in [`crate::reports_dir`] — as T-10-16 and T-10-18 wrote theirs; `%TEMP%`
+/// if that directory is gone.
 fn threads_raw_path() -> std::path::PathBuf {
-    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    let beside = crate::reports_dir();
     if beside.is_dir() {
         beside.join("T-10-19-серия.csv")
     } else {
@@ -11905,10 +11906,10 @@ fn threads_summary(
 /// Where the raw numbers of the detector of task **T-10-20** are written — one line per circle,
 /// appended as it happens, so a run cut short leaves everything up to that point on disk.
 ///
-/// Beside the report when that directory exists, under `%TEMP%` otherwise. No new environment
-/// variable (Р-53) — [`race_raw_path`]'s terms exactly.
+/// Beside the report — in [`crate::reports_dir`] — when that directory exists, under `%TEMP%`
+/// otherwise: [`race_raw_path`]'s terms exactly.
 fn belief_raw_path() -> std::path::PathBuf {
-    let beside = std::path::PathBuf::from(r"<dev>\control\Lang_Switcher\reports");
+    let beside = crate::reports_dir();
     if beside.is_dir() {
         beside.join("T-10-20-серия.csv")
     } else {

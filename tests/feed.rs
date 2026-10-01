@@ -513,21 +513,30 @@ fn the_ceilings_are_the_ones_fr_102_names() {
 /// This test cannot: it takes the file the author is about to publish and puts it through
 /// [`feed::read_document`] with the real [`feed::FEED_KEYS`].
 ///
-/// ⚠ `#[ignore]` because it reads a path **outside the repository** — the site is built in
-/// `<dev>\artifacts\news-site\`, and on any other machine there is nothing there. Run it by
-/// hand:
+/// ⚠ `#[ignore]` because it reads a file **outside the repository** — the feed file as the site
+/// is built on the author's machine, named by the environment variable `LANGSW_NEWS_SITE` (stage
+/// E89, decision 152.3; `tools\local.ps1` sets it there). Without the variable the test prints
+/// `SKIPPED_NO_NEWS_SITE` and passes: on any other machine there is no such file, and a red here
+/// would say nothing about the program. Run it by hand:
 ///
 /// ```text
 /// cargo test --test feed -- --ignored
 /// ```
 #[test]
-#[ignore = "reads the site under <dev>\\artifacts, which exists only on the author's machine"]
+#[ignore = "reads the feed file LANGSW_NEWS_SITE names, which exists only on the author's machine"]
 fn the_file_that_will_be_published_verifies_with_the_shipped_keys() {
-    const SITE: &str = r"<dev>\artifacts\news-site\news.toml";
+    let Some(site) = std::env::var_os("LANGSW_NEWS_SITE").filter(|value| !value.is_empty()) else {
+        println!("SKIPPED_NO_NEWS_SITE: LANGSW_NEWS_SITE is not set — no feed file to read");
+        return;
+    };
+    let site = std::path::PathBuf::from(site);
 
-    let text = match std::fs::read_to_string(SITE) {
+    let text = match std::fs::read_to_string(&site) {
         Ok(text) => text,
-        Err(error) => panic!("{SITE}: {error} — sign the file before running this"),
+        Err(error) => panic!(
+            "{}: {error} — sign the file before running this",
+            site.display()
+        ),
     };
 
     let feed = feed::read_document(&text, "ru", feed::verify_signature)

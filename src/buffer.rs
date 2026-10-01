@@ -1034,7 +1034,7 @@ impl Held {
             //
             // The line above used to flip on every `Down` and the comment used to say that this
             // "is what the keyboard does to the light as well". It is not. The probe crate
-            // `<dev>\sandbox\probes\capsrepeat` sends the system a run of repeated `Down`
+            // `capsrepeat` of the author's sandbox sends the system a run of repeated `Down`
             // events for `VK_CAPITAL` with no `Up` between them — which is exactly what
             // typematic is on the wire, repeated make codes with no break code — and reads
             // `GetKeyState(VK_CAPITAL) & 1` after each. Over five repeats the system flipped the

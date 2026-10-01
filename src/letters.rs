@@ -875,7 +875,7 @@ pub mod links {
     ///
     /// `:` and `@` in what is left make the answer `None` rather than a shorter host — a port
     /// and a set of credentials are both ways of writing a host that is not the host it looks
-    /// like, and neither of the three addresses of this program has either. The same two
+    /// like, and none of the five addresses of this program has either. The same two
     /// characters are refused for the same reason by [`super::feed::split_https`].
     fn host_of(url: &str) -> Option<&str> {
         if !url
@@ -1353,9 +1353,11 @@ pub enum Action {
 
 /// One button of a letter: what it says, what it does, and whether it can be pressed.
 ///
-/// `enabled` is false for exactly one reason in stage А — the address it would open is still a
-/// placeholder (полномочия П7 and П8). The button is **drawn and disabled** rather than hidden,
-/// because that is what the user asked for: «кнопка пусть будет, вместо пути заглушка».
+/// `enabled` is false for one of two reasons: the address it would open is still a placeholder
+/// (полномочия П7 and П8), or its host is not one of the program's own — the gate of
+/// [`links::is_allowed`], task T-41-1, finding С52 (see [`Button::link`]). The button is **drawn
+/// and disabled** rather than hidden, because that is what the user asked for: «кнопка пусть
+/// будет, вместо пути заглушка».
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     /// The caption, out of the string table of the locale in force (FR-94).

@@ -5742,8 +5742,9 @@ fn a_start_on_false_removes_the_value_and_leaves_an_absent_one_alone() {
 
 /// **Agreement is left alone — and a value that points somewhere else is not agreement.** A value
 /// equal to the command this image would write is not written again; a value under our name that
-/// names another image — a build that once registered itself from `<dev>`, an older install — is
-/// replaced, because a `Run` value that starts something else is not autostart of this program.
+/// names another image — a build that once registered itself from a development folder, an older
+/// install — is replaced, because a `Run` value that starts something else is not autostart of
+/// this program.
 #[test]
 fn a_start_in_agreement_writes_nothing_and_a_value_naming_another_image_is_rewritten() {
     let _locale = locale_turn();
@@ -5766,7 +5767,7 @@ fn a_start_in_agreement_writes_nothing_and_a_value_naming_another_image_is_rewri
         &window,
         Some(home.config()),
         true,
-        Some(r#""<dev>\cache\target\debug\LangSwitcher.exe""#.to_owned()),
+        Some(r#""C:\Builds\LangSwitcher\target\debug\LangSwitcher.exe""#.to_owned()),
         false,
         &foreign,
     ));

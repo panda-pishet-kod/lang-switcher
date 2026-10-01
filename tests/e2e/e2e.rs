@@ -57,8 +57,33 @@ use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUn
 
 use report::Report;
 
-/// Where the protocol of position 2 is written.
-const WORD_PROTOCOL: &str = r"<dev>\control\Lang_Switcher\reports\T-04-3-позиция-2.md";
+/// The file the protocol of position 2 is written to, in [`reports_dir`].
+const WORD_PROTOCOL: &str = "T-04-3-позиция-2.md";
+
+/// Where the bench writes what it keeps beside the reports: the protocol of position 2 and the
+/// raw series of the experiments T-10-16 to T-10-20.
+///
+/// `<LANGSW_CONTROL>\reports` when the environment variable names the project's control folder —
+/// on the author's machine `tools\local.ps1` sets it (stage E89, decision 152.3) — and
+/// `<target>\e2e-reports` otherwise, made on demand, where `<target>` is `CARGO_TARGET_DIR` when
+/// set and the `target` folder of this crate when not. The callers keep their own answer to a
+/// folder that is not there: the series fall back to `%TEMP%`, the protocol reports the failed
+/// write — as they did when the folder was a path of the author's machine.
+fn reports_dir() -> std::path::PathBuf {
+    if let Some(control) = std::env::var_os("LANGSW_CONTROL").filter(|value| !value.is_empty()) {
+        return std::path::PathBuf::from(control).join("reports");
+    }
+
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
+    let reports = target.join("e2e-reports");
+
+    // Best effort, see above: a folder that cannot be made is answered where it is used.
+    let _ = std::fs::create_dir_all(&reports);
+    reports
+}
 
 fn main() -> std::process::ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -1227,10 +1252,14 @@ fn write_word_protocol(protocol: &str, rows: &[report::Row]) {
         ));
     }
 
-    if let Err(error) = std::fs::write(WORD_PROTOCOL, text) {
-        eprintln!("не удалось записать протокол позиции 2: {error}");
+    let path = reports_dir().join(WORD_PROTOCOL);
+    if let Err(error) = std::fs::write(&path, text) {
+        eprintln!(
+            "не удалось записать протокол позиции 2 в {}: {error}",
+            path.display()
+        );
     } else {
-        println!("  протокол позиции 2 записан в {WORD_PROTOCOL}");
+        println!("  протокол позиции 2 записан в {}", path.display());
     }
 }
 

@@ -1,5 +1,12 @@
 # Lang Switcher
 
+**Lang Switcher for Windows** fixes text typed in the wrong keyboard layout. Type `ghbdtn` with
+the English layout on, press `Pause/Break`, and the word becomes `привет` while the active window
+switches to the Russian layout; press again and the original comes back. It is a small tray program
+for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
+[Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
+The rest of this README and all other documents of the project are in Russian.
+
 Резидентная утилита для Windows, исправляющая текст, набранный в неверной раскладке клавиатуры.
 По нажатию `Pause/Break` последнее набранное слово перекодируется в другую раскладку,
 а раскладка активного окна переключается на соответствующую.
@@ -70,17 +77,15 @@ Automation; уважает список исключений процессов;
 | `installer/` | `LangSwitcher.iss` — сценарий Inno Setup; `Output/` — собранный подписанный установщик |
 
 Артефакты сборки в репозиторий не попадают: переменная `CARGO_TARGET_DIR` уводит их
-в `<dev>\cache\target`. В каталоге проекта — только чистый код.
+в каталог, заданный ею; без неё `cargo` пишет в `target\`, и `.gitignore` не пускает его в дерево.
+В каталоге проекта — только чистый код.
 
 ## Где всё остальное
 
-| Что | Где |
-|---|---|
-| Состояние проекта, бэклог, решения, вопросы | `<dev>\control\Lang_Switcher\` |
-| Точные версии инструментов, пути, отпечаток сертификата | `<dev>\control\Lang_Switcher\TOOLCHAIN.md` |
-| Инструментарий: rustup, cargo, Build Tools, Inno Setup, VS Code | `<dev>\tools\` |
-| Микро-crate'ы под проверку конкретного поведения Win32 | `<dev>\sandbox\probes\` |
-| Сборки, установщики, публичная часть сертификата, иконки | `<dev>\artifacts\` |
+Контур проекта — состояние, бэклог, решения, вопросы, точные версии инструментов, отчёты этапов,
+— инструментарий (rustup, cargo, Build Tools, Inno Setup), микро-crate'ы для проверки отдельных
+черт поведения Win32, сборки, установщики и публичная часть сертификата живут у автора вне
+репозитория. Скрипты поставки находят папки машины через переменные окружения — раздел ниже.
 
 ## Сборка
 
@@ -97,6 +102,17 @@ cargo clippy -- -D warnings
 ```bash
 cargo test
 ```
+
+## Переменные окружения поставки
+
+| Переменная | Что задаёт | Без неё |
+|---|---|---|
+| `LANGSW_ARTIFACTS` | папку подписанного образа, установщика и публичного сертификата | `dist\` в корне репозитория |
+| `LANGSW_ISCC` | путь к `ISCC.exe`, компилятору Inno Setup 6 | поиск в `PATH`, затем в Program Files |
+| `LANGSW_NEWS_KEYS` | папку ключей подписи ленты автора | `make-news-key.ps1` и `sign-news.ps1 -Reserve` отказываются |
+| `LANGSW_NEWS_SITE`, `LANGSW_CONTROL` | файл ленты для теста `tests\feed.rs`; папку контура для стенда `tests\e2e` | тест печатает `SKIPPED_NO_NEWS_SITE`; стенд пишет в `<target>\e2e-reports\` |
+
+Удобнее всего задать их в `tools\local.ps1` — файл не отслеживается; образец — `tools\local.example.ps1`.
 
 ## Две конфигурации сборки
 

@@ -38,8 +38,8 @@ const ACTIVATE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A helper script of the bench, beside the bench's own source.
 ///
-/// ⚠ `<dev>\tools\admin\` is read-only for this task — the scripts there belong to the setup
-/// stage. The bench's own live in `tests\e2e\`, as the task requires.
+/// ⚠ The setup stage's own scripts live outside the repository, in the author's tools folder, and
+/// are read-only for this task. The bench's own live in `tests\e2e\`, as the task requires.
 pub fn script(name: &str) -> Result<PathBuf, String> {
     // Resolved from the manifest directory at compile time: the bench runs out of a build
     // directory that contains no scripts, so the path cannot be derived from the executable.
