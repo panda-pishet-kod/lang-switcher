@@ -46,6 +46,13 @@
 ; out, so the task, its [Registry] entry and the knob are gone together.
 
 #define AppName        "Lang Switcher"
+; The name with the platform, where the name stands alone and could be taken for a namesake
+; (decision 149.2, backlog Q-149-1, done in stage E90 by decision 153.4): the wizard, the
+; properties of the installer file, the Start menu folder and the entry in Apps & features.
+; AppName itself stays the short name of the PROGRAM: the shortcuts are named by it -- and the
+; heading of the program's notifications is the name of its shortcut -- and so is the autostart
+; value below.  AppId is not touched, so an update is still the same application.
+#define AppTitle       "Lang Switcher for Windows"
 #define AppVersion     "0.89.0"
 #define AppPublisher   "Panda_Pishet_Kod"
 #define AppExeName     "LangSwitcher.exe"
@@ -78,16 +85,16 @@
 ; must never change: a new AppId turns every future update into a second parallel
 ; installation with its own uninstall entry.
 AppId={{1A22BDD8-916A-490E-8269-66869A611388}
-AppName={#AppName}
+AppName={#AppTitle}
 AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
+AppVerName={#AppTitle} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
 VersionInfoVersion=0.89.0.0
 VersionInfoCompany={#AppPublisher}
-VersionInfoProductName={#AppName}
+VersionInfoProductName={#AppTitle}
 VersionInfoProductVersion=0.89.0.0
-VersionInfoDescription={#AppName} Setup
+VersionInfoDescription={#AppTitle} Setup
 VersionInfoCopyright={#AppCopyright}
 
 ; Section 8.4: install into %ProgramFiles% with a single elevation.  admin asks
@@ -109,7 +116,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; 64-bit Program Files even in a 32-bit install mode, so the path cannot drift.
 DefaultDirName={commonpf64}\Lang_Switcher
 DisableDirPage=yes
-DefaultGroupName={#AppName}
+DefaultGroupName={#AppTitle}
+; Inno Setup would otherwise reuse the Start menu folder of the installed version on an update,
+; and the folder "Lang Switcher" of every installation before e90 would never get the new name.
+; The old folder itself is removed by [InstallDelete] below.
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 
@@ -126,7 +137,7 @@ CloseApplicationsFilter=*.exe
 RestartApplications=no
 
 Uninstallable=yes
-UninstallDisplayName={#AppName}
+UninstallDisplayName={#AppTitle}
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile={#IconFile}
 
@@ -155,6 +166,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; reinstall of the identical version.  Version-number comparison would silently
 ; skip the copy and leave a stale binary that still passes every file listing.
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
+
+[InstallDelete]
+; The Start menu folder of the versions before e90 was named "Lang Switcher" (the short name);
+; since e90 it is "Lang Switcher for Windows".  Without this line an update would leave the old
+; folder and its two shortcuts behind, beside the new ones.  {autoprograms} is the all-users Start
+; menu here, because Setup runs elevated (PrivilegesRequired=admin).
+Type: filesandordirs; Name: "{autoprograms}\{#AppName}"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
