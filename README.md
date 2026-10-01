@@ -3,7 +3,7 @@
 **Lang Switcher for Windows** fixes text typed in the wrong keyboard layout. Type `ghbdtn` with
 the English layout on, press `Pause/Break`, and the word becomes `привет` while the active window
 switches to the Russian layout; press again and the original comes back. It is a small tray program
-for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
+for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds will be published on the
 [Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
 The rest of this README and all other documents of the project are in Russian.
 
@@ -87,6 +87,8 @@ Automation; уважает список исключений процессов;
 — инструментарий (rustup, cargo, Build Tools, Inno Setup), микро-crate'ы для проверки отдельных
 черт поведения Win32, сборки, установщики и публичная часть сертификата живут у автора вне
 репозитория. Скрипты поставки находят папки машины через переменные окружения — раздел ниже.
+Ссылки в коде и комментариях вида «решение 120.4», `DECISIONS`, `STATE.md`, `TOOLCHAIN.md`,
+`scratchpad-…` ведут в этот внутренний журнал автора; он не публикуется.
 
 ## Сборка
 
@@ -109,7 +111,7 @@ cargo test
 | Переменная | Что задаёт | Без неё |
 |---|---|---|
 | `LANGSW_ARTIFACTS` | папку подписанного образа, установщика и публичного сертификата | `dist\` в корне репозитория |
-| `LANGSW_ISCC` | путь к `ISCC.exe`, компилятору Inno Setup 6 | поиск в `PATH`, затем в Program Files |
+| `LANGSW_ISCC`, `LANGSW_SIGNTOOL` | пути к `ISCC.exe` (Inno Setup 6) и `signtool.exe` (Windows SDK) | поиск в `PATH`, затем в Program Files и Windows Kits |
 | `LANGSW_NEWS_KEYS` | папку ключей подписи ленты автора | `make-news-key.ps1` и `sign-news.ps1 -Reserve` отказываются |
 | `LANGSW_NEWS_SITE`, `LANGSW_CONTROL` | файл ленты для теста `tests\feed.rs`; папку контура для стенда `tests\e2e` | тест печатает `SKIPPED_NO_NEWS_SITE`; стенд пишет в `<target>\e2e-reports\` |
 
