@@ -7,11 +7,11 @@
       processorArchitecture="amd64"/>
 
   <!-- asInvoker, with UI access explicitly not requested. This is the manifest of TWO
-       images, and section 8.2 of SPEC is the reason for both: Windows starts an image that
-       requests UI access only when the machine trusts its signature AND it lies in
-       %ProgramFiles%. Otherwise CreateProcess refuses it with error 740 in any folder, and
-       ShellExecute with error 8235 when the signature is not trusted (build.rs lists the
-       measured refusals).
+       images, and section 8.2 of SPEC is the reason for both: Windows grants an image that
+       requests UI access its privilege only through ShellExecute, and only when the machine
+       trusts its signature AND it lies in %ProgramFiles%. CreateProcess refuses such an image
+       with error 740 in any folder, whatever its signature; ShellExecute refuses it with error
+       8235 when the signature is not trusted (build.rs lists the measured refusals).
 
        1. The Debug build, cargo test and cargo run. The test harness is built from the same
           bin target, and the Release manifest would make cargo test fail before a single

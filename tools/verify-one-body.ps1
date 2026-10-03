@@ -47,14 +47,14 @@
         alignment: .rsrc SizeOfRawData, SizeOfInitializedData, SizeOfImage, and the file
         offset, the address and the data directories of every section after .rsrc.
 
-    Measured on the e91 pair: the base manifest (3097 bytes) is 796 bytes longer than the full
-    one (2301), its comments being longer; the data of the 217 resources that follow it in
-    app.rc moves by +800 (resource data is 8-byte aligned); the section grows past its file and
-    memory alignment, so .rsrc SizeOfRawData and SizeOfInitializedData move by +1024, and
-    SizeOfImage, the address of .reloc and its data directory by +4096 -- every one of them by
-    exactly that, which is what this script checks. The base image is 1024 bytes the larger.
-    With the manifests of the base commit (317 bytes apart) the shift was +312 and nothing
-    crossed an alignment: the list above covers both cases.
+    Measured on the pairs of stage E91: the base manifest is several hundred bytes longer than
+    the full one, its comments being longer, and the data of the 217 resources that follow it
+    in app.rc moves by that length rounded up to 8 bytes. With the manifests of the base commit
+    the shift was +312 and nothing crossed an alignment; with longer comments it was +800, the
+    section grew past its file and memory alignment, and .rsrc SizeOfRawData and
+    SizeOfInitializedData moved by +1024, SizeOfImage, the address of .reloc and its data
+    directory by +4096 -- every one of them by exactly that, which is what this script checks.
+    The list above covers both cases; the numbers of each delivery are in its release log.
 
     THE CONTROLS (task T-91-1):
         positive  two builds of the full image in a row -- zero differences, PASS (SEC-08);
