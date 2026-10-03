@@ -6,13 +6,23 @@
       version="0.90.0.0"
       processorArchitecture="amd64"/>
 
-  <!-- Development manifest: asInvoker, with UI access explicitly not requested.
-       Section 8.2 of SPEC requires exactly this split, and the reason is not stylistic.
-       A binary whose manifest requests UI access cannot be launched at all unless it is
-       signed AND sitting in %ProgramFiles%. Windows fails CreateProcess with error 740
-       instead of degrading gracefully. Embedding the release manifest into test binaries
-       therefore makes cargo test fail before a single test runs. Measured in task H-9,
-       not assumed.
+  <!-- asInvoker, with UI access explicitly not requested. This is the manifest of TWO
+       images, and section 8.2 of SPEC is the reason for both: Windows starts an image that
+       requests UI access only when the machine trusts its signature AND it lies in
+       %ProgramFiles%. Otherwise CreateProcess refuses it with error 740 in any folder, and
+       ShellExecute with error 8235 when the signature is not trusted (build.rs lists the
+       measured refusals).
+
+       1. The Debug build, cargo test and cargo run. The test harness is built from the same
+          bin target, and the Release manifest would make cargo test fail before a single
+          test runs. Measured in task H-9, not assumed.
+
+       2. The BASE image of the delivery, LangSwitcher-base.exe (stage E91, question 155):
+          the same Release built with LANGSW_NO_UIACCESS=1. It starts on any machine; the
+          hotkey does not reach the windows of programs run as administrator. The installer
+          puts it down first and keeps it wherever the full image cannot be trusted.
+          tools\verify-one-body.ps1 proves that the two Release images differ in this
+          resource and in the fields derived from the hash of the content, and nowhere else.
 
        Two notes for whoever edits this file.
 

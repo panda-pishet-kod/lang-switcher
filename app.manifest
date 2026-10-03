@@ -10,10 +10,12 @@
        token only gains the right to bypass UIPI when installing global hooks and calling
        SendInput. Administrator rights are NOT granted.
 
-       Section 8.2 of SPEC: a binary carrying uiAccess="true" only starts when it is signed
-       AND located in %ProgramFiles%. Outside those conditions CreateProcess fails with
-       error 740 and there is no graceful degradation, which is why the Debug build gets
-       app-dev.manifest instead.
+       Section 8.2 of SPEC: Windows starts an image carrying uiAccess="true" only when the
+       machine trusts its signature AND it lies in %ProgramFiles%. Otherwise it refuses:
+       CreateProcess with error 740 in any folder, ShellExecute with error 8235 when the
+       signature is not trusted; a trusted signature outside %ProgramFiles% starts with
+       UIAccess = 0 (build.rs lists the measurements). That is why the Debug build and the
+       base image of the delivery, LangSwitcher-base.exe, get app-dev.manifest instead.
 
        Note for whoever edits this file: an XML comment may not contain a double hyphen.
        Two hyphens in a row here produce a manifest that parses nowhere, and Windows

@@ -1,5 +1,6 @@
 <#
-    release.ps1 -- build the shipping configuration, prove criterion 8 over it, then sign it.
+    release.ps1 -- build the shipping configuration, prove criterion 8 over it, then sign it;
+    then build the base image from the same tree, prove it is the same body, and sign it too.
 
     THE ORDER MATTERS AND IS THE POINT OF THIS FILE.
 
@@ -10,6 +11,24 @@
                 -> sign the copy
                   -> signtool verify /pa
                     -> verify-perimeter.ps1 passes         (task T-22-11)
+                      -> build the base image (LANGSW_NO_UIACCESS=1)          (stage E91)
+                        -> verify-one-body.ps1 passes over the two unsigned builds
+                          -> copy to <artifact folder>\LangSwitcher-base.exe
+                            -> sign the copy, signtool verify /pa
+                              -> verify-perimeter.ps1 passes over it
+
+    TWO IMAGES (stage E91, question 155). LangSwitcher.exe is the FULL image -- app.manifest,
+    uiAccess. LangSwitcher-base.exe is the BASE image: the same Release, built with
+    LANGSW_NO_UIACCESS=1, which build.rs answers with app-dev.manifest. Windows starts the full
+    image only where the machine trusts its signature; the base one starts anywhere and does not
+    reach the windows of programs run as administrator. The installer puts the base image down
+    first and replaces it with the full one where it can (installer\local-trust.ps1). The two
+    are one body, and that is proved, not assumed: tools\verify-one-body.ps1 compares the two
+    UNSIGNED builds -- kept under <target dir>\one-body\ -- and refuses any difference but the
+    manifest and the fields the linker derives from the hash of the content. Criterion 8 is
+    measured over the full image; the base image, one body with it, gets the gates of
+    verify-perimeter.ps1 over its own signed file. A LANGSW_NO_UIACCESS the caller had set is
+    removed first: with it every "full" build of this script would be a base one.
 
     The two gates task T-22-11 added stand where the thing they are about exists. The version
     check is FIRST, because a tree whose nine version values disagree must not be compiled at
@@ -28,6 +47,10 @@
     STATE.md), so "sign whatever is on disk" is a way to ship the build WITH the `testing`
     feature and never find out. verify-criterion8.ps1 finishes by rebuilding the shipping
     configuration precisely so that the file this script then copies is the right one.
+    The base image is written into that same file, so AFTER THIS SCRIPT <target dir>\release\
+    LangSwitcher.exe IS THE BASE IMAGE, unsigned -- the next `cargo build --release` without the
+    variable rebuilds the full one (build.rs reruns on its change). The two unsigned builds the
+    one-body check compared stay in <target dir>\one-body\.
 
     Task T-09-2 needs this: the Inno Setup installer packages an ALREADY SIGNED product, and
     rebuilding by hand before every installer build is the direct route to packaging an
@@ -73,15 +96,19 @@
 
     Exit code: 0 only if the nine version values agree, the build succeeded, criterion 8
     passed, the copy was made, -- unless -SkipSign was given -- the signature was applied and
-    verified, the artifact could be measured for NFR-07, and criterion 4 holds. 8 is the
-    version gate, 9 the perimeter gate; 1 to 7 are as they were; 10 -- signtool was not found
-    and signing was asked; 11 -- rustc did not tell its sysroot and commit, so the remap of the
-    build machine's folders cannot be made.
+    verified, the artifact could be measured for NFR-07, and criterion 4 holds -- and all of
+    that again for the base image, with the one-body check between. 8 is the version gate, 9
+    the perimeter gate; 1 to 7 are as they were; 10 -- signtool was not found and signing was
+    asked; 11 -- rustc did not tell its sysroot and commit, so the remap of the build machine's
+    folders cannot be made; 12 -- the base image did not build; 13 -- verify-one-body.ps1 failed;
+    14 -- the copy of the base image does not match its build; 15 -- signing the base image
+    failed; 16 -- its signature does not verify; 17 -- the perimeter gate failed over it.
 
     Examples:
       .\release.ps1
       .\release.ps1 -SkipSign
       .\release.ps1 -Thumbprint <other thumbprint>
+      .\release.ps1 -Artifact <folder>\LangSwitcher.exe     # the base image beside it
 #>
 [CmdletBinding()]
 param(
@@ -93,6 +120,9 @@ param(
     # LANGSW_ARTIFACTS, or <repository>\dist\ without it; see the header. The folder may hold
     # other artifacts of the machine; this script touches this one file and nothing else in it.
     [string]$Artifact = '',
+    # Where the base image goes (stage E91). Empty means <name>-base.exe beside -Artifact:
+    # LangSwitcher-base.exe in the artifact folder.
+    [string]$BaseArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
     # verify-perimeter.ps1, which turns it into the growth line decision 106.2 asks every
@@ -105,6 +135,12 @@ $ErrorActionPreference = 'Stop'
 # --- This machine's own folders (stage E89) ------------------------------------------------
 # First, so that everything below reads the LANGSW_* variables it sets. See the header.
 if (Test-Path "$PSScriptRoot\local.ps1") { . "$PSScriptRoot\local.ps1" }
+
+# The variable that turns a Release build into the base image (stage E91, build.rs). Set by a
+# caller, it would make every "full" build below a base one; this script sets it itself, for the
+# base build only.
+$NoUiAccessFromCaller = $env:LANGSW_NO_UIACCESS
+Remove-Item Env:LANGSW_NO_UIACCESS -ErrorAction SilentlyContinue
 
 $ScriptDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $ScriptDir
@@ -180,6 +216,11 @@ $env:CARGO_ENCODED_RUSTFLAGS = $flags -join $unit
 $TargetDir = $env:CARGO_TARGET_DIR
 if (-not $TargetDir) { $TargetDir = Join-Path $ProjectDir 'target' }
 $ReleaseExe = Join-Path $TargetDir 'release\LangSwitcher.exe'
+# The two UNSIGNED builds the one-body check compares (stage E91): the full one is kept here
+# before it is signed, because the base build then overwrites $ReleaseExe.
+$OneBodyDir = Join-Path $TargetDir 'one-body'
+$OneBodyFull = Join-Path $OneBodyDir 'LangSwitcher-full.exe'
+$OneBodyBase = Join-Path $OneBodyDir 'LangSwitcher-base.exe'
 
 # --- The artifact --------------------------------------------------------------------------
 # -Artifact, else LANGSW_ARTIFACTS, else <repository>\dist\ -- the one folder this script may
@@ -195,6 +236,9 @@ if (-not $Artifact) {
         $ArtifactFrom = 'default <repository>\dist'
         $ArtifactDirIsDefault = $true
     }
+}
+if (-not $BaseArtifact) {
+    $BaseArtifact = Join-Path (Split-Path -Parent $Artifact) ([System.IO.Path]::GetFileNameWithoutExtension($Artifact) + '-base.exe')
 }
 
 function Write-Section { param([string]$Text)
@@ -212,13 +256,51 @@ function Show-Binary { param([string]$Path, [string]$Label)
     return $hash
 }
 
+# Sign one file and verify the signature; the same command for the full and the base image, so
+# the two can never be signed differently. Returns $true when the timestamp countersignature is
+# there; on a failure it exits with the code the caller names for that image. The output of
+# signtool goes to Out-Host: inside a function it would otherwise become part of the value
+# returned, and "$stamped" would be an array that is always true.
+function Set-ArtifactSignature { param([string]$Path, [int]$SignFailCode, [int]$VerifyFailCode)
+    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <file>" -f $Thumbprint, $TimestampUrl)
+    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $Path | Out-Host
+    $signCode = $LASTEXITCODE
+    $stamped = $true
+    if ($signCode -ne 0) {
+        $stamped = $false
+        Write-Host ''
+        Write-Host ("  signtool returned {0}. The usual cause is that the timestamp service" -f $signCode)
+        Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
+        Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
+        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <file>" -f $Thumbprint)
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $Path | Out-Host
+        $signCode = $LASTEXITCODE
+        if ($signCode -ne 0) {
+            Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)
+            exit $SignFailCode
+        }
+    }
+    Write-Host '  signtool verify /pa <file>'
+    & $SignTool verify /pa $Path | Out-Host
+    $verifyCode = $LASTEXITCODE
+    if ($verifyCode -ne 0) {
+        Write-Host ("FAIL: signtool verify /pa returned {0}" -f $verifyCode)
+        exit $VerifyFailCode
+    }
+    return $stamped
+}
+
 Write-Host ''
 Write-Host '======================================================================'
 Write-Host ' Lang_Switcher -- shipping build, criterion 8, signature'
 Write-Host '======================================================================'
 Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Artifact   {0}  [{1}]" -f $Artifact, $ArtifactFrom)
+Write-Host ("Base image {0}" -f $BaseArtifact)
 Write-Host ("Target dir {0}" -f $TargetDir)
+if ($NoUiAccessFromCaller) {
+    Write-Host ("LANGSW_NO_UIACCESS was set by the caller ({0}) and is removed: see the header" -f $NoUiAccessFromCaller)
+}
 Write-Host ("Thumbprint {0}" -f $Thumbprint)
 Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
 Write-Host ("Remap      {0}" -f ($Remap -join '  '))
@@ -289,44 +371,19 @@ if ($builtHash -ne $copyHash) {
     exit 5
 }
 Write-Host '  the copy is byte for byte the binary criterion 8 was measured over'
+# The unsigned full image, kept for the one-body check of step 8 (stage E91).
+if (-not (Test-Path -LiteralPath $OneBodyDir)) { New-Item -ItemType Directory -Path $OneBodyDir | Out-Null }
+Copy-Item -Path $ReleaseExe -Destination $OneBodyFull -Force
 
-# --- 4. Sign --------------------------------------------------------------------------------
+# --- 4 and 5. Sign and verify -------------------------------------------------------------
 $timestamped = $false
 if ($SkipSign) {
-    Write-Section 'Step 4: signature -- SKIPPED'
+    Write-Section 'Steps 4 and 5: signature -- SKIPPED'
     Write-Host '  -SkipSign was given. The artifact is UNSIGNED and will not run from'
     Write-Host '  %ProgramFiles%: a uiAccess binary needs both a signature and that location.'
 } else {
-    Write-Section 'Step 4: sign the copy'
-    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <artifact>" -f $Thumbprint, $TimestampUrl)
-    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $Artifact
-    $signCode = $LASTEXITCODE
-
-    if ($signCode -eq 0) {
-        $timestamped = $true
-    } else {
-        Write-Host ''
-        Write-Host ("  signtool returned {0}. The usual cause is that the timestamp service" -f $signCode)
-        Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
-        Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
-        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <artifact>" -f $Thumbprint)
-        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $Artifact
-        $signCode = $LASTEXITCODE
-        if ($signCode -ne 0) {
-            Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)
-            exit 6
-        }
-    }
-
-    # --- 5. Verify the signature ------------------------------------------------------------
-    Write-Section 'Step 5: verify the signature'
-    Write-Host '  signtool verify /pa <artifact>'
-    & $SignTool verify /pa $Artifact
-    $verifyCode = $LASTEXITCODE
-    if ($verifyCode -ne 0) {
-        Write-Host ("FAIL: signtool verify /pa returned {0}" -f $verifyCode)
-        exit 7
-    }
+    Write-Section 'Steps 4 and 5: sign the copy and verify the signature'
+    $timestamped = Set-ArtifactSignature -Path $Artifact -SignFailCode 6 -VerifyFailCode 7
 }
 
 # --- 6. NFR-07 and criterion 4 ----------------------------------------------------------------
@@ -350,23 +407,89 @@ if ($perimeter -ne 0) {
     exit 9
 }
 
-# --- 7. Summary -----------------------------------------------------------------------------
+# --- 7. The base image ----------------------------------------------------------------------
+# Stage E91. The same tree, the same flags, LANGSW_NO_UIACCESS=1: build.rs then embeds
+# app-dev.manifest. The variable is set for this one build and removed whatever happens.
+Write-Section 'Step 7: build the base image (LANGSW_NO_UIACCESS=1)'
+Push-Location $ProjectDir
+try {
+    $env:LANGSW_NO_UIACCESS = '1'
+    & cargo build --release
+    $code = $LASTEXITCODE
+} finally {
+    Remove-Item Env:LANGSW_NO_UIACCESS -ErrorAction SilentlyContinue
+    Pop-Location
+}
+if (($code -ne 0) -or (-not (Test-Path $ReleaseExe))) {
+    Write-Host ("FAIL: cargo build --release of the base image returned {0}" -f $code)
+    exit 12
+}
+Copy-Item -Path $ReleaseExe -Destination $OneBodyBase -Force
+Write-Host '  ok'
+
+# --- 8. One body -----------------------------------------------------------------------------
+Write-Section 'Step 8: the full and the base image are one body'
+& (Join-Path $ScriptDir 'verify-one-body.ps1') -Full $OneBodyFull -Base $OneBodyBase -RequireFullAndBase
+$oneBody = $LASTEXITCODE
+if ($oneBody -ne 0) {
+    Write-Host ''
+    Write-Host ("FAIL: verify-one-body.ps1 returned {0}. The base image was not copied and not signed." -f $oneBody)
+    exit 13
+}
+
+# --- 9. Copy, sign and verify the base image --------------------------------------------------
+Write-Section 'Step 9: the base image -- copy, sign, verify'
+$baseDir = Split-Path -Parent $BaseArtifact
+if (-not (Test-Path $baseDir)) {
+    Write-Host ("FAIL: the directory of the base image does not exist: {0}" -f $baseDir)
+    exit 14
+}
+Copy-Item -Path $ReleaseExe -Destination $BaseArtifact -Force
+$baseBuiltHash = Show-Binary -Path $ReleaseExe -Label 'base image built (unsigned):'
+$baseCopyHash = Show-Binary -Path $BaseArtifact -Label 'copy in the artifact directory:'
+if ($baseBuiltHash -ne $baseCopyHash) {
+    Write-Host 'FAIL: the copy of the base image does not match its build.'
+    exit 14
+}
+$baseTimestamped = $false
+if ($SkipSign) {
+    Write-Host '  -SkipSign was given: the base image is UNSIGNED.'
+} else {
+    $baseTimestamped = Set-ArtifactSignature -Path $BaseArtifact -SignFailCode 15 -VerifyFailCode 16
+}
+
+# --- 10. The perimeter over the base image ------------------------------------------------------
+Write-Section 'Step 10: the perimeter over the base image'
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $BaseArtifact
+$basePerimeter = $LASTEXITCODE
+if ($basePerimeter -ne 0) {
+    Write-Host ''
+    Write-Host ("FAIL: verify-perimeter.ps1 returned {0} over the base image; it must not be shipped." -f $basePerimeter)
+    exit 17
+}
+
+# --- 11. Summary ----------------------------------------------------------------------------
 Write-Section 'Result'
-$finalHash = Show-Binary -Path $Artifact -Label 'shipping artifact:'
+$finalHash = Show-Binary -Path $Artifact -Label 'shipping artifact, FULL image:'
+$baseFinalHash = Show-Binary -Path $BaseArtifact -Label 'shipping artifact, BASE image:'
 Write-Host ''
-Write-Host ("  unsigned build SHA-256  {0}" -f $builtHash)
-Write-Host ("  artifact SHA-256        {0}" -f $finalHash)
+Write-Host ("  full: unsigned build SHA-256  {0}" -f $builtHash)
+Write-Host ("        artifact SHA-256        {0}" -f $finalHash)
+Write-Host ("  base: unsigned build SHA-256  {0}" -f $baseBuiltHash)
+Write-Host ("        artifact SHA-256        {0}" -f $baseFinalHash)
 if (-not $SkipSign) {
-    Write-Host '  (the two differ by design: a signature is appended to the file)'
-    if ($timestamped) {
-        Write-Host '  timestamp: PRESENT'
+    Write-Host '  (each pair differs by design: a signature is appended to the file)'
+    if ($timestamped -and $baseTimestamped) {
+        Write-Host '  timestamp: PRESENT on both'
     } else {
-        Write-Host '  timestamp: ABSENT -- DEVIATION, record it in the report'
+        Write-Host ("  timestamp: full {0}, base {1} -- DEVIATION, record it in the report" -f $timestamped, $baseTimestamped)
     }
 }
+Write-Host ('  {0} now holds the BASE image (see the header)' -f $ReleaseExe)
 Write-Host ''
 Write-Host '======================================================================'
 Write-Host ' RESULT: PASS'
 Write-Host ("  {0}" -f $Artifact)
+Write-Host ("  {0}" -f $BaseArtifact)
 Write-Host '======================================================================'
 exit 0

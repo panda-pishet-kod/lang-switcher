@@ -484,10 +484,13 @@ IDI_TRAY_DARK_PAUSED_UNREAD  ICON  "res/langswitcher-darkbar-paused-unread.ico"
 
 // The manifest is chosen by a /d define passed from build.rs, NOT hard-wired.
 //
-// A binary carrying uiAccess="true" refuses to start unless it is both signed and located
-// in %ProgramFiles% -- CreateProcess returns 740 rather than degrading. Wiring the uiAccess
-// manifest in unconditionally makes `cargo test` fail before a single test runs, because
-// the test harness is built from this same bin target. Measured during task H-9.
+// Windows starts an image carrying uiAccess="true" only when the machine trusts its signature
+// AND it lies in %ProgramFiles%: otherwise CreateProcess refuses it with 740 in any folder and
+// ShellExecute with 8235 (build.rs lists the measured refusals). Wiring the uiAccess manifest
+// in unconditionally would make `cargo test` fail before a single test runs, because the test
+// harness is built from this same bin target -- measured during task H-9. LANGSW_UIACCESS is
+// defined for the FULL Release image only; the Debug build and the BASE Release image
+// (LANGSW_NO_UIACCESS=1, stage E91) take app-dev.manifest.
 #ifdef LANGSW_UIACCESS
 1 24 "app.manifest"
 #else
