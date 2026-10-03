@@ -28,7 +28,7 @@
 associated materials.
 
 **"Maintainer"** means the copyright holder of the Project, currently
-Panda_Pishet_Kod, and any successor to whom the Project's copyright is transferred.
+Panda Koder, and any successor to whom the Project's copyright is transferred.
 
 **"You"** means the individual or legal entity accepting this Agreement. For a legal
 entity, "You" includes any entity that controls, is controlled by, or is under common

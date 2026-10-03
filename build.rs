@@ -48,7 +48,11 @@ fn main() {
         Ok(value) if value == "1" => true,
         other => panic!("LANGSW_NO_UIACCESS must be 1 or unset, not {other:?}"),
     };
-    let macros: &[&str] = if release && !base { &["LANGSW_UIACCESS=1"] } else { &[] };
+    let macros: &[&str] = if release && !base {
+        &["LANGSW_UIACCESS=1"]
+    } else {
+        &[]
+    };
 
     // SEC-08, "the build is reproducible" -- and this line is what makes it true. Measured by
     // task T-09-1, not assumed: two Release builds of identical sources from the cleanest

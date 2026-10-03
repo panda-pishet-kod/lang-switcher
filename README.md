@@ -167,7 +167,7 @@ Release-сборка **обязана** быть подписана довере
 
 ## Лицензия и авторство
 
-Copyright © 2026 Panda_Pishet_Kod
+Copyright © 2026 Panda Koder
 
 Исходный код распространяется под двойной лицензией **MIT или Apache-2.0** — на выбор
 получателя; тексты лежат в [`LICENSE-MIT`](LICENSE-MIT) и [`LICENSE-APACHE`](LICENSE-APACHE),

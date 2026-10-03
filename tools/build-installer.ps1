@@ -49,7 +49,7 @@
     the check of the product's signature in step 1 is skipped with a warning, because
     an unsigned dry run is exactly what -SkipSign is for.
 
-    THE SIGNATURE. Certificate CN=Panda_Pishet_Kod, thumbprint below, private key
+    THE SIGNATURE. Certificate CN=Panda Koder, thumbprint below, private key
     in Cert:\CurrentUser\My and NOT exportable. The command needs no administrator
     rights (TOOLCHAIN.md section 5). If the RFC3161 timestamp service cannot be
     reached the script retries without a countersignature, says so loudly, and
@@ -102,6 +102,10 @@ param(
     # the installer by this name from that folder, so the name cannot be changed.
     [string]$SetupArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    # What the signature of the installer says it is and where it comes from (/d and /du,
+    # decision 155.4) -- the same words as the signature of the program (release.ps1).
+    [string]$SignDescription = 'Lang Switcher for Windows',
+    [string]$SignUrl = 'https://panda-pishet-kod.dev/langswitcher/',
     # The Inno Setup 6 compiler. Empty means LANGSW_ISCC, PATH, then Program Files.
     [string]$Iscc = '',
     # Do not rebuild and re-sign the product first. See the header.
@@ -348,8 +352,8 @@ if ($SkipSign) {
     Write-Host '  -SkipSign was given. The installer is UNSIGNED.'
 } else {
     Write-Section 'Step 4: sign the installer'
-    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <installer>" -f $Thumbprint, $TimestampUrl)
-    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $SetupArtifact
+    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /d ""{1}"" /du {2} /td SHA256 /tr {3} <installer>" -f $Thumbprint, $SignDescription, $SignUrl, $TimestampUrl)
+    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /d $SignDescription /du $SignUrl /td SHA256 /tr $TimestampUrl $SetupArtifact
     $signCode = $LASTEXITCODE
 
     if ($signCode -eq 0) {
@@ -359,8 +363,8 @@ if ($SkipSign) {
         Write-Host ("  signtool returned {0}. The usual cause is that the timestamp service" -f $signCode)
         Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
         Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
-        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <installer>" -f $Thumbprint)
-        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $SetupArtifact
+        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /d ""{1}"" /du {2} <installer>" -f $Thumbprint, $SignDescription, $SignUrl)
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 /d $SignDescription /du $SignUrl $SetupArtifact
         $signCode = $LASTEXITCODE
         if ($signCode -ne 0) {
             Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)

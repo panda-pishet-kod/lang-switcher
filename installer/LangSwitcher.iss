@@ -72,9 +72,9 @@
 ; value below.  AppId is not touched, so an update is still the same application.
 #define AppTitle       "Lang Switcher for Windows"
 #define AppVersion     "0.90.0"
-#define AppPublisher   "Panda_Pishet_Kod"
+#define AppPublisher   "Panda Koder"
 #define AppExeName     "LangSwitcher.exe"
-#define AppCopyright   "Copyright (C) 2026 Panda_Pishet_Kod"
+#define AppCopyright   "Copyright (C) 2026 Panda Koder"
 
 ; The signed shipping artifact, always given on the command line:
 ; tools\build-installer.ps1 runs ISCC /DSourceExe=<signed image>.  There is no

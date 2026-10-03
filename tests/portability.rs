@@ -33,6 +33,18 @@
 //! named the sixty-two lines decision 152 counted, and one more the count had not seen: the reason
 //! of an `#[ignore]` attribute in `tests\feed.rs`, where the path was written with doubled
 //! backslashes.
+//!
+//! # The second sweep: the author's name (task T-91-3, decision 155.4)
+//!
+//! «Panda Koder» is who; the forms with hyphens or underscores, all lower case, are where — the
+//! site, the repository, the channel (155.2). Until stage E91 the name of the author stood in the
+//! tree in the form of an address joined by underscores: in the version resource, the installer,
+//! the manifests, the licence, the certificate. That form may now stay in exactly one kind of
+//! line: a QUOTE of the string the owner had removed in stage E81 — «версия {0} · Панда, он же …»
+//! — which is history and not a name. A quote is told by its phrase «он же» on the line itself or
+//! on the line before it (one quote is wrapped), and their number per file is fixed in [`QUOTES`].
+//! The needle is assembled at run time ([`former_name`]), so that this file, which the sweep reads
+//! too, does not carry it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -161,16 +173,11 @@ fn files_below(folder: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// **The sweep of decision 152: not one line of the tree names the author's development folder.**
-///
-/// Red, it names every line it found, by file and number, with the line itself — the list a
-/// person fixes from. The checks in front of it are what make a green answer mean something: the
-/// root files it insists on are there, the files it must have read were read, and the count of
-/// files read is not a count of a walk that went nowhere.
-#[test]
-fn no_file_of_the_tree_names_the_authors_development_folder() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-
+/// Every file of the tree the sweeps read — the root files and everything below [`FOLDERS`],
+/// without the binary kinds and the files of the machine — as its path from the root and its
+/// text. Both sweeps of this file walk the tree through it, so they cannot drift apart in what
+/// they read. Before it the walk lived inside the first sweep.
+fn read_the_tree(root: &Path) -> Vec<(String, String)> {
     for name in ROOT_FILES {
         assert!(
             root.join(name).is_file(),
@@ -192,15 +199,32 @@ fn no_file_of_the_tree_names_the_authors_development_folder() {
         files_below(&root.join(folder), &mut paths);
     }
 
+    paths
+        .into_iter()
+        .filter(|path| is_read(root, path))
+        .map(|path| {
+            let name = relative(root, &path);
+            let bytes =
+                fs::read(&path).unwrap_or_else(|error| panic!("{name} must be readable: {error}"));
+            (name, String::from_utf8_lossy(&bytes).into_owned())
+        })
+        .collect()
+}
+
+/// **The sweep of decision 152: not one line of the tree names the author's development folder.**
+///
+/// Red, it names every line it found, by file and number, with the line itself — the list a
+/// person fixes from. The checks in front of it are what make a green answer mean something: the
+/// root files it insists on are there, the files it must have read were read, and the count of
+/// files read is not a count of a walk that went nowhere.
+#[test]
+fn no_file_of_the_tree_names_the_authors_development_folder() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
     let mut read = Vec::new();
     let mut offenders = Vec::new();
 
-    for path in paths.into_iter().filter(|path| is_read(root, path)) {
-        let name = relative(root, &path);
-        let bytes =
-            fs::read(&path).unwrap_or_else(|error| panic!("{name} must be readable: {error}"));
-        let text = String::from_utf8_lossy(&bytes);
-
+    for (name, text) in read_the_tree(root) {
         for (index, line) in text.split('\n').enumerate() {
             let line = line.trim_end_matches('\r');
             if names_the_development_folder(line) {
@@ -287,4 +311,139 @@ fn the_matcher_finds_every_spelling_of_the_folder_and_nothing_else() {
             "the matcher must not take this for the folder: {line}"
         );
     }
+}
+
+/// The author's former name — the form of an address, joined by underscores — assembled at run
+/// time, so that this file, which the sweep reads, never carries it whole.
+fn former_name() -> String {
+    ["Panda", "Pishet", "Kod"].join("_")
+}
+
+/// The phrase of the removed string «версия {0} · Панда, он же …» that marks a quote of it.
+const QUOTE_MARK: &str = "он же";
+
+/// The quotes of that string, per file — history of decision 142.2 п. 5, not a name, and kept
+/// (decision 155.4). Measured on the base of stage E91 (`882cc75`): six lines in four files.
+const QUOTES: [(&str, usize); 4] = [
+    ("app.rc", 1),
+    ("src/letters.rs", 1),
+    ("src/settings.rs", 1),
+    ("tests/settings.rs", 3),
+];
+
+/// What a line of the tree is to the second sweep.
+#[derive(Debug, PartialEq)]
+enum NameUse {
+    /// The line does not carry the former name.
+    Clean,
+    /// It carries it inside a quote of the removed string: «он же» on it or on the line before.
+    Quote,
+    /// It carries it as a name — the line this sweep exists to find.
+    Name,
+}
+
+fn name_use(previous: &str, line: &str, needle: &str) -> NameUse {
+    if !line.contains(needle) {
+        NameUse::Clean
+    } else if line.contains(QUOTE_MARK) || previous.contains(QUOTE_MARK) {
+        NameUse::Quote
+    } else {
+        NameUse::Name
+    }
+}
+
+/// **The sweep of decision 155.4: the author is «Panda Koder»; the former form of the name is left
+/// only in the six quotes of the removed string.**
+///
+/// Red, it names every line that still carries the former name as a name — on the base of stage
+/// E91 the twelve lines of the replacement — and any change in the number of quotes per file.
+#[test]
+fn the_author_is_named_panda_koder_and_the_former_form_lives_only_in_quotes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let needle = former_name();
+
+    let mut read = 0;
+    let mut names = Vec::new();
+    let mut quotes: Vec<(String, usize)> = Vec::new();
+
+    for (name, text) in read_the_tree(root) {
+        read += 1;
+        let mut previous = String::new();
+        for (index, line) in text.split('\n').enumerate() {
+            let line = line.trim_end_matches('\r');
+            match name_use(&previous, line, &needle) {
+                NameUse::Clean => {}
+                NameUse::Quote => match quotes.iter_mut().find(|(file, _)| *file == name) {
+                    Some((_, count)) => *count += 1,
+                    None => quotes.push((name.clone(), 1)),
+                },
+                NameUse::Name => names.push(format!("  {name}:{}: {}", index + 1, line.trim())),
+            }
+            previous = line.to_owned();
+        }
+    }
+
+    // The same floor as the first sweep: a walk that read next to nothing finds next to nothing.
+    assert!(read >= 80, "{read} files read — fewer than the tree holds");
+
+    assert!(
+        names.is_empty(),
+        "{} line(s) still name the author by the former form, not «Panda Koder» ({read} files read):\n{}",
+        names.len(),
+        names.join("\n")
+    );
+
+    quotes.sort();
+    let mut expected: Vec<(String, usize)> = QUOTES
+        .iter()
+        .map(|(file, count)| ((*file).to_owned(), *count))
+        .collect();
+    expected.sort();
+    assert_eq!(
+        quotes, expected,
+        "the quotes of the removed string, per file, are not the six of decision 155.4"
+    );
+}
+
+/// **The second sweep tells a name from a quote, and finds the former name in no other form.**
+///
+/// A name alone is a name; with «он же» on its line, or on the line before (the one wrapped
+/// quote), it is a quote. The address forms — all lower case — and the new name are not the
+/// former name at all.
+#[test]
+fn the_former_name_is_found_and_a_quote_is_told_from_a_name() {
+    let needle = former_name();
+
+    assert_eq!(
+        name_use("", &format!("Copyright (c) 2026 {needle}"), &needle),
+        NameUse::Name
+    );
+    assert_eq!(
+        name_use(
+            "",
+            &format!("«версия {{0}} · Панда, он же {needle}»"),
+            &needle
+        ),
+        NameUse::Quote
+    );
+    assert_eq!(
+        name_use(
+            "carried «версия {0} · Панда, он же",
+            &format!("{needle}» under"),
+            &needle
+        ),
+        NameUse::Quote
+    );
+    assert_eq!(
+        name_use("", "https://t.me/panda_pishet_kod", &needle),
+        NameUse::Clean
+    );
+    assert_eq!(
+        name_use("", "https://panda-pishet-kod.dev/langswitcher/", &needle),
+        NameUse::Clean
+    );
+    assert_eq!(
+        name_use("", "Copyright (c) 2026 Panda Koder", &needle),
+        NameUse::Clean
+    );
 }

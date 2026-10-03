@@ -511,11 +511,11 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "CompanyName",      "Panda_Pishet_Kod"
+            VALUE "CompanyName",      "Panda Koder"
             VALUE "FileDescription",  "Lang Switcher"
             VALUE "FileVersion",      "0.90.0.0"
             VALUE "InternalName",     "LangSwitcher.exe"
-            VALUE "LegalCopyright",   "Copyright © 2026 Panda_Pishet_Kod"
+            VALUE "LegalCopyright",   "Copyright © 2026 Panda Koder"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
             VALUE "ProductVersion",   "0.90.0.0"

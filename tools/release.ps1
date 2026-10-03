@@ -78,10 +78,13 @@
     becomes /cargo, the standard library /rustc/<commit> -- the path a toolchain without the
     rust-src component writes anyway. verify-perimeter.ps1 gate 4 checks the signed image.
 
-    THE SIGNATURE. The certificate is CN=Panda_Pishet_Kod, thumbprint below, private key in
+    THE SIGNATURE. The certificate is CN=Panda Koder, thumbprint below, private key in
     Cert:\CurrentUser\My and NOT exportable, so there is no .pfx and none can be made. The
     command needs no administrator rights -- established by the setup stage, TOOLCHAIN.md
-    section 5.
+    section 5. Since stage E91 (decision 155.4) the signature also names the program and its
+    page: /d "Lang Switcher for Windows" and /du https://panda-pishet-kod.dev/langswitcher/ --
+    the address is links::PROGRAM_URL of src\letters.rs, so gate 3 of verify-perimeter.ps1,
+    which reads the signed file, finds it declared.
 
     The timestamp countersignature needs the network. If the service cannot be reached the
     signature is still worth having locally, so this script falls back to signing without
@@ -124,6 +127,10 @@ param(
     # LangSwitcher-base.exe in the artifact folder.
     [string]$BaseArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    # What the signature says the file is and where it comes from (/d and /du of signtool,
+    # decision 155.4). The address must be one src\letters.rs declares: see the header.
+    [string]$SignDescription = 'Lang Switcher for Windows',
+    [string]$SignUrl = 'https://panda-pishet-kod.dev/langswitcher/',
     # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
     # verify-perimeter.ps1, which turns it into the growth line decision 106.2 asks every
     # delivery report to carry. Zero means "not given".
@@ -262,8 +269,8 @@ function Show-Binary { param([string]$Path, [string]$Label)
 # signtool goes to Out-Host: inside a function it would otherwise become part of the value
 # returned, and "$stamped" would be an array that is always true.
 function Set-ArtifactSignature { param([string]$Path, [int]$SignFailCode, [int]$VerifyFailCode)
-    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /td SHA256 /tr {1} <file>" -f $Thumbprint, $TimestampUrl)
-    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /td SHA256 /tr $TimestampUrl $Path | Out-Host
+    Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /d ""{1}"" /du {2} /td SHA256 /tr {3} <file>" -f $Thumbprint, $SignDescription, $SignUrl, $TimestampUrl)
+    & $SignTool sign /sha1 $Thumbprint /fd SHA256 /d $SignDescription /du $SignUrl /td SHA256 /tr $TimestampUrl $Path | Out-Host
     $signCode = $LASTEXITCODE
     $stamped = $true
     if ($signCode -ne 0) {
@@ -272,8 +279,8 @@ function Set-ArtifactSignature { param([string]$Path, [int]$SignFailCode, [int]$
         Write-Host ("  signtool returned {0}. The usual cause is that the timestamp service" -f $signCode)
         Write-Host '  cannot be reached. Retrying WITHOUT a countersignature.'
         Write-Host '  *** THIS IS A DEVIATION AND MUST BE WRITTEN UP AS ONE ***'
-        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 <file>" -f $Thumbprint)
-        & $SignTool sign /sha1 $Thumbprint /fd SHA256 $Path | Out-Host
+        Write-Host ("  signtool sign /sha1 {0} /fd SHA256 /d ""{1}"" /du {2} <file>" -f $Thumbprint, $SignDescription, $SignUrl)
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 /d $SignDescription /du $SignUrl $Path | Out-Host
         $signCode = $LASTEXITCODE
         if ($signCode -ne 0) {
             Write-Host ("FAIL: signing failed even without a timestamp, exit code {0}" -f $signCode)

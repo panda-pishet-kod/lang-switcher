@@ -73,9 +73,10 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     # Subject and, since the certificate is self-issued, issuer. The default is the certificate
-    # this project already signs with (TOOLCHAIN.md section 5); the script is not tied to it.
+    # this project signs with (TOOLCHAIN.md section 5) -- the name of the author, Panda Koder,
+    # since stage E91 (decision 155.4); the script is not tied to it.
     [ValidateNotNullOrEmpty()]
-    [string]$Subject = 'CN=Panda_Pishet_Kod',
+    [string]$Subject = 'CN=Panda Koder',
 
     # Lifetime. Five years matches the existing certificate. NotBefore is left to the cmdlet,
     # which backdates it by ten minutes to survive clock skew.
