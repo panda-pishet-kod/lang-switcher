@@ -3,13 +3,31 @@
 ;
 ;  WHAT THIS SCRIPT PACKAGES
 ;
-;    LangSwitcher.exe of the artifact folder -- the ALREADY SIGNED shipping build
-;    produced by tools\release.ps1, handed to this script as /DSourceExe= by
-;    tools\build-installer.ps1.  Not a freshly compiled binary.  Section 8.2
-;    of SPEC.md: a uiAccess="true" image needs BOTH an Authenticode signature the
-;    machine trusts AND a location under %ProgramFiles%.  Packaging an unsigned
-;    binary produces an installer whose product cannot start, and the defect then
-;    looks like an installer defect, which it is not.
+;    Two ALREADY SIGNED images of one build, produced by tools\release.ps1 and handed
+;    to this script by tools\build-installer.ps1 -- not freshly compiled binaries:
+;      /DSourceExe=      LangSwitcher.exe, the FULL image (uiAccess);
+;      /DSourceExeBase=  LangSwitcher-base.exe, the BASE image (no uiAccess), the
+;                        same body (tools\verify-one-body.ps1);
+;    and installer\local-trust.ps1, the helper, with /DAuthorThumbprint= -- the
+;    certificate the full image is signed with.  Section 8.2 of SPEC.md: a
+;    uiAccess="true" image needs BOTH an Authenticode signature the machine trusts
+;    AND a location under %ProgramFiles%.  Packaging an unsigned binary produces an
+;    installer whose product cannot start, and the defect then looks like an
+;    installer defect, which it is not.
+;
+;  THE FULL IMAGE BY DEFAULT, THE BASE ONE AS THE FALLBACK (stage E91, question 155)
+;
+;    The base image becomes the program file first: it starts on any machine.  The
+;    full one is put beside it under a temporary name, and after the files are
+;    copied [Code] runs the helper, which answers 0 -- the author's signature is
+;    trusted here, the full image may stay as it is -- or 1 -- it made a certificate
+;    on this machine, signed the full image with it and destroyed the key -- and only
+;    then does the full image replace the base one.  Any other answer, /NOLOCALCERT
+;    included, leaves the base image, which does not reach the windows of programs
+;    run as administrator; the program starts whatever the outcome.  No page and no
+;    question (155.6); one line on the Ready page says what will happen.  The
+;    uninstaller removes the local certificate; the author's certificate is never
+;    touched.
 ;
 ;  WHY THIS FILE IS PURE ASCII
 ;
@@ -65,6 +83,19 @@
 #ifndef SourceExe
   #error SourceExe is not defined: run tools\build-installer.ps1, it passes /DSourceExe=<signed image>
 #endif
+; Stage E91: the base image and the certificate of the full one come the same way, and for the
+; same reason have no defaults.
+#ifndef SourceExeBase
+  #error SourceExeBase is not defined: run tools\build-installer.ps1, it passes /DSourceExeBase=<signed base image>
+#endif
+#ifndef AuthorThumbprint
+  #error AuthorThumbprint is not defined: run tools\build-installer.ps1, it passes /DAuthorThumbprint=<SHA-1>
+#endif
+
+; The temporary name of the full image beside the program file, and the public part of the
+; certificate the helper makes on this machine (installer\local-trust.ps1 writes it).
+#define FullTempName   "LangSwitcher-full.tmp"
+#define LocalCertFile  "LangSwitcher-local.cer"
 
 ; res\langswitcher-active.ico -- the tray icon of the running product, reused for
 ; the installer, the Start menu shortcut and the entry in Apps & features.
@@ -159,13 +190,22 @@ WizardStyle=modern
 ; the finished file (TOOLCHAIN.md section 5).
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; The messages of this installer that are its own live in lang\<Language>.isl, the second file
+; of each entry (stage E91): the line of the Ready page and the window of a failed certificate.
+Name: "english"; MessagesFile: "compiler:Default.isl,lang\English.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
 ; reinstall of the identical version.  Version-number comparison would silently
 ; skip the copy and leave a stale binary that still passes every file listing.
-Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
+;
+; Stage E91: the BASE image becomes the program file first, so that the program starts
+; whatever the helper answers; the FULL image lies beside it under a temporary name until
+; [Code] makes it the program file (helper 0 or 1) or deletes it (anything else).  The helper
+; itself is never copied: [Code] extracts it into {tmp}.
+Source: "{#SourceExeBase}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
+Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#FullTempName}"; Flags: ignoreversion
+Source: "local-trust.ps1"; Flags: dontcopy
 
 [InstallDelete]
 ; The Start menu folder of the versions before e90 was named "Lang Switcher" (the short name);
@@ -196,8 +236,13 @@ Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
 ; elevated process inherits high integrity.  The product is meant to run at MEDIUM
 ; integrity with uiAccess, not as an administrator, so it is launched back as the
 ; user who started Setup.
+; shellexec (stage E91, defect D2 of decision 155v): without it Setup starts the program
+; through CreateProcess, and CreateProcess refuses an image that asks for uiAccess with
+; error 740 in ANY folder (T-09-2) -- the "CreateProcess failed; code 740" window the owner
+; saw on a clean machine.  ShellExecute goes through the AppInfo service, which is what grants
+; uiAccess; the base image starts through it just the same.
 Filename: "{app}\{#AppExeName}"; Description: "Start {#AppName} now"; \
-    Flags: nowait postinstall skipifsilent runasoriginaluser
+    Flags: nowait postinstall skipifsilent runasoriginaluser shellexec
 
 [Code]
 
@@ -242,6 +287,220 @@ begin
   end;
 end;
 #endif
+
+(* ---------------------------------------------------------------------------
+  The full image and the local certificate (stage E91, question 155).
+  A comment of this kind and not in braces: the constants below carry braces.
+
+  The Files section has put the BASE image down as the program file and the FULL
+  image beside it as {#FullTempName}.  After the files, installer\local-trust.ps1 is
+  run -- extracted into {tmp}, through ExecAndLogOutput, so that every line it
+  prints lands in this log -- and its exit code decides:
+    0  the author's signature is trusted here: the full image replaces the base
+    1  a certificate was made on this machine and the full image signed with it:
+       the full image replaces the base one
+    2  /NOLOCALCERT: the base image stays, and nothing is said
+    anything else, or no answer: the base image stays; one window says so, or,
+       in a silent run, one line of this log
+  The replacement is one MoveFileEx over the program file, checked by SHA-256,
+  and the temporary file is gone at the end whatever happened.  The program
+  starts in every case.
+
+  The line on the Ready page (155.8) is shown when a certificate is going to be
+  made: not under /NOLOCALCERT, and not when the author's certificate is already
+  in a Root store of this machine -- that is read from the registry, a forecast
+  for one line of text; the helper decides by the signature itself.
+  --------------------------------------------------------------------------- *)
+const
+  MOVEFILE_REPLACE_EXISTING = $00000001;
+  MOVEFILE_WRITE_THROUGH = $00000008;
+
+var
+  NoLocalCert: Boolean;
+  AuthorTrustedHere: Boolean;
+
+function MoveFileEx(lpExistingFileName, lpNewFileName: String; dwFlags: Cardinal): Boolean;
+  external 'MoveFileExW@kernel32.dll stdcall';
+
+function YesNo(const Value: Boolean): String;
+begin
+  if Value then Result := 'yes' else Result := 'no';
+end;
+
+function HasSwitch(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+      Result := True;
+end;
+
+function IsInMachineRoot(const Thumbprint: String): Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SOFTWARE\Microsoft\SystemCertificates\ROOT\Certificates\' + Thumbprint) or
+            RegKeyExists(HKLM, 'SOFTWARE\Policies\Microsoft\SystemCertificates\Root\Certificates\' + Thumbprint) or
+            RegKeyExists(HKLM, 'SOFTWARE\Microsoft\EnterpriseCertificates\Root\Certificates\' + Thumbprint);
+end;
+
+<event('InitializeSetup')>
+function InitializeLocalTrust(): Boolean;
+begin
+  NoLocalCert := HasSwitch('/NOLOCALCERT');
+  AuthorTrustedHere := IsInMachineRoot('{#AuthorThumbprint}');
+  Log('Lang Switcher: /NOLOCALCERT ' + YesNo(NoLocalCert) +
+      '; the author''s certificate {#AuthorThumbprint} is in a machine Root store: ' + YesNo(AuthorTrustedHere));
+  Result := True;
+end;
+
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
+  MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  Result := '';
+  if MemoUserInfoInfo <> '' then Result := Result + MemoUserInfoInfo + NewLine + NewLine;
+  if MemoDirInfo <> '' then Result := Result + MemoDirInfo + NewLine + NewLine;
+  if MemoTypeInfo <> '' then Result := Result + MemoTypeInfo + NewLine + NewLine;
+  if MemoComponentsInfo <> '' then Result := Result + MemoComponentsInfo + NewLine + NewLine;
+  if MemoGroupInfo <> '' then Result := Result + MemoGroupInfo + NewLine + NewLine;
+  if MemoTasksInfo <> '' then Result := Result + MemoTasksInfo + NewLine + NewLine;
+  if (not NoLocalCert) and (not AuthorTrustedHere) then
+    Result := Result + CustomMessage('LocalCertReady');
+end;
+
+<event('CurStepChanged')>
+procedure CurStepLocalTrust(CurStep: TSetupStep);
+var
+  AppDir, ExeFile, FullFile, Helper, PowerShell, Params, FullHash: String;
+  Code: Integer;
+  Replaced: Boolean;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  AppDir := ExpandConstant('{app}');
+  ExeFile := AppDir + '\{#AppExeName}';
+  FullFile := AppDir + '\{#FullTempName}';
+  (* In 64-bit install mode Exec and its kin turn WOW64 file system redirection off,
+     so the sys constant here is the 64-bit System32 and this is the 64-bit Windows
+     PowerShell; the helper prints which one it is. *)
+  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Code := -1;
+  Replaced := False;
+  try
+    ExtractTemporaryFile('local-trust.ps1');
+    Helper := ExpandConstant('{tmp}\local-trust.ps1');
+    Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Helper +
+              '" -FullImage "' + FullFile + '" -AppDir "' + AppDir +
+              '" -AuthorThumbprint {#AuthorThumbprint}';
+    if NoLocalCert then
+      Params := Params + ' -NoLocalCert';
+    Log('Lang Switcher: running the helper: "' + PowerShell + '" ' + Params);
+    if not ExecAndLogOutput(PowerShell, Params, ExpandConstant('{tmp}'), SW_SHOWNORMAL,
+                            ewWaitUntilTerminated, Code, nil) then
+    begin
+      Log('Lang Switcher: the helper could not be started: ' + SysErrorMessage(Code));
+      Code := -1;
+    end;
+  except
+    Log('Lang Switcher: the helper failed to run: ' + GetExceptionMessage);
+    Code := -1;
+  end;
+  Log('Lang Switcher: the helper returned ' + IntToStr(Code));
+
+  if (Code = 0) or (Code = 1) then
+  begin
+    try
+      FullHash := GetSHA256OfFile(FullFile);
+      if MoveFileEx(FullFile, ExeFile, MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH) then
+      begin
+        if GetSHA256OfFile(ExeFile) = FullHash then
+        begin
+          Replaced := True;
+          if Code = 0 then
+            Log('Lang Switcher: branch 0 -- the program file is the FULL image, signed by the author; no certificate was made')
+          else
+            Log('Lang Switcher: branch 1 -- the program file is the FULL image, signed with the certificate made on this computer');
+        end
+        else
+          Log('Lang Switcher: after the move the program file is not the full image (SHA-256 differs)');
+      end
+      else
+        Log('Lang Switcher: replacing the program file failed: ' + SysErrorMessage(DLLGetLastError()));
+    except
+      Log('Lang Switcher: replacing the program file failed: ' + GetExceptionMessage);
+    end;
+  end;
+
+  if FileExists(FullFile) then
+    if not DeleteFile(FullFile) then
+      Log('Lang Switcher: could not delete ' + FullFile);
+
+  if not Replaced then
+  begin
+    Log('Lang Switcher: the program file is the BASE image -- it does not work in windows of programs run as administrator');
+    if Code <> 2 then
+    begin
+      if WizardSilent() then
+        Log('Lang Switcher: ' + CustomMessage('LocalCertFailed'))
+      else
+        MsgBox(CustomMessage('LocalCertFailed'), mbInformation, MB_OK);
+    end;
+  end;
+end;
+
+{ Uninstall: the certificate this computer got from the helper leaves LocalMachine\Root
+  before the files go.  It is named by its public part in the program folder -- the
+  SHA-1 of a DER certificate is its thumbprint -- and removed by certutil, the tool
+  every Windows has; the file goes only once the certificate is gone, so that a
+  failure leaves the trace in place.  The author's certificate is never touched. }
+<event('CurUninstallStepChanged')>
+procedure CurUninstallLocalTrust(CurUninstallStep: TUninstallStep);
+var
+  CerFile, Thumb, CertUtil: String;
+  Code: Integer;
+begin
+  if CurUninstallStep <> usUninstall then
+    Exit;
+  CerFile := ExpandConstant('{app}\{#LocalCertFile}');
+  if not FileExists(CerFile) then
+  begin
+    Log('Lang Switcher: no local certificate on this computer (' + CerFile + ' is absent)');
+    Exit;
+  end;
+  try
+    Thumb := Uppercase(GetSHA1OfFile(CerFile));
+  except
+    Log('Lang Switcher: the local certificate file cannot be read: ' + GetExceptionMessage);
+    Exit;
+  end;
+  if CompareText(Thumb, '{#AuthorThumbprint}') = 0 then
+  begin
+    Log('Lang Switcher: ' + CerFile + ' names the author''s certificate, which is never removed here');
+    Exit;
+  end;
+  CertUtil := ExpandConstant('{sys}\certutil.exe');
+  Log('Lang Switcher: removing the local certificate ' + Thumb + ' from LocalMachine\Root');
+  if not ExecAndLogOutput(CertUtil, '-delstore Root ' + Thumb, '', SW_SHOWNORMAL, ewWaitUntilTerminated, Code, nil) then
+  begin
+    Log('Lang Switcher: certutil could not be started: ' + SysErrorMessage(Code) + '; the file is kept');
+    Exit;
+  end;
+  Log('Lang Switcher: certutil -delstore returned ' + IntToStr(Code));
+  if not ExecAndLogOutput(CertUtil, '-store Root ' + Thumb, '', SW_SHOWNORMAL, ewWaitUntilTerminated, Code, nil) then
+  begin
+    Log('Lang Switcher: certutil could not be started for the check; the file is kept');
+    Exit;
+  end;
+  if Code = 0 then
+    Log('Lang Switcher: the local certificate ' + Thumb + ' is STILL in LocalMachine\Root; the file is kept as its trace')
+  else
+  begin
+    if DeleteFile(CerFile) then
+      Log('Lang Switcher: the local certificate ' + Thumb + ' is gone from LocalMachine\Root; its file is deleted')
+    else
+      Log('Lang Switcher: the local certificate is gone, but ' + CerFile + ' could not be deleted');
+  end;
+end;
 
 { ---------------------------------------------------------------------------
   Uninstall: leave nothing behind EXCEPT the user's configuration.

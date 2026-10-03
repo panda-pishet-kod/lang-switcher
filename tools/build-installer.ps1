@@ -4,8 +4,9 @@
 
     THE ORDER MATTERS, FOR THE SAME REASON IT MATTERS IN release.ps1.
 
-        tools\release.ps1                    (build, criterion 8, sign the product)
-          -> ISCC installer\LangSwitcher.iss (package the SIGNED product)
+        tools\release.ps1                    (build, criterion 8, sign the product --
+                                              the full image and the base image)
+          -> ISCC installer\LangSwitcher.iss (package the SIGNED images and the helper)
             -> copy to <artifact folder>\LangSwitcher-setup.exe
               -> sign the copy
                 -> signtool verify /pa
@@ -13,10 +14,20 @@
     WHY release.ps1 RUNS FIRST AND NOT "USE WHATEVER IS ON DISK". Section 8.2 of
     SPEC.md: an image with uiAccess="true" starts only when it is BOTH signed with
     a certificate the machine trusts AND located under %ProgramFiles%. Package an
-    unsigned or stale product and the installed program fails to start with
-    CreateProcess error 740, which looks exactly like an installer defect and is
+    unsigned or stale product and Windows refuses the installed full image --
+    ShellExecute with error 8235 when the signature is not trusted, CreateProcess
+    with 740 in any folder -- which looks exactly like an installer defect and is
     not one. release.ps1 also re-proves acceptance criterion 8 of section 13, so
     the packaged build is the one without the `testing` feature.
+
+    TWO IMAGES AND A HELPER (stage E91, question 155). The installer carries the
+    full image (-ProductArtifact, LangSwitcher.exe) and the base image
+    (-BaseArtifact, LangSwitcher-base.exe) of one build, and installer\local-trust.ps1,
+    which makes the full image trusted on the user's machine. Both images must be
+    signed: step 1 checks both. The certificate the full image is signed with is read
+    out of its signature, not out of -Thumbprint, and passed as /DAuthorThumbprint=:
+    the helper accepts only a full image signed by exactly that certificate, and the
+    uninstaller never removes it.
 
     Skip it with -SkipProductBuild only when the signed LangSwitcher.exe of the
     artifact folder is already known good; the script still refuses to run if that
@@ -83,6 +94,9 @@ param(
     # The signed product the installer packages. Produced by tools\release.ps1.
     # Empty means LangSwitcher.exe in the artifact folder; see the header.
     [string]$ProductArtifact = '',
+    # The signed base image (stage E91), produced by tools\release.ps1 beside the product.
+    # Empty means LangSwitcher-base.exe in the artifact folder.
+    [string]$BaseArtifact = '',
     # Where the finished installer goes. Empty means LangSwitcher-setup.exe in the
     # artifact folder. On the author's machine the LangSw-Install scheduled task runs
     # the installer by this name from that folder, so the name cannot be changed.
@@ -158,6 +172,7 @@ if (-not $ArtifactDir) {
     $ArtifactDirIsDefault = $true
 }
 if (-not $ProductArtifact) { $ProductArtifact = Join-Path $ArtifactDir 'LangSwitcher.exe' }
+if (-not $BaseArtifact)    { $BaseArtifact    = Join-Path $ArtifactDir 'LangSwitcher-base.exe' }
 if (-not $SetupArtifact)   { $SetupArtifact   = Join-Path $ArtifactDir 'LangSwitcher-setup.exe' }
 
 $IsccFrom = '-Iscc'
@@ -214,6 +229,7 @@ Write-Host '====================================================================
 Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Script     {0}" -f $IssFile)
 Write-Host ("Product    {0}" -f $ProductArtifact)
+Write-Host ("Base image {0}" -f $BaseArtifact)
 Write-Host ("Installer  {0}" -f $SetupArtifact)
 Write-Host ("ISCC       {0}  [{1}]" -f $Iscc, $IsccFrom)
 Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
@@ -238,22 +254,42 @@ if (-not (Test-Path $ProductArtifact)) {
     Write-Host ("FAIL: the signed product is missing: {0}" -f $ProductArtifact)
     exit 2
 }
-$productHash = Show-Binary -Path $ProductArtifact -Label 'product to be packaged:'
+if (-not (Test-Path $BaseArtifact)) {
+    Write-Host ("FAIL: the signed base image is missing: {0}" -f $BaseArtifact)
+    exit 2
+}
+$productHash = Show-Binary -Path $ProductArtifact -Label 'product to be packaged, FULL image:'
+$baseHash = Show-Binary -Path $BaseArtifact -Label 'product to be packaged, BASE image:'
 
-# The packaged product must already be signed, or the installed copy will not run
-# from %ProgramFiles% (section 8.2). Checked, not assumed.
+# Both images must already be signed (section 8.2; the helper checks the full one's signature
+# on the user's machine). Checked, not assumed.
 if (-not $SignTool) {
-    Write-Host '  WARNING: signtool.exe was not found, so the signature of the product is NOT checked.'
+    Write-Host '  WARNING: signtool.exe was not found, so the signatures of the images are NOT checked.'
     Write-Host '  Continuing only because -SkipSign was given: an unsigned dry run is what it is for.'
 } else {
-    Write-Host '  signtool verify /pa <product>'
-    & $SignTool verify /pa $ProductArtifact
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ''
-        Write-Host '  WARNING: the product does not carry a valid signature.'
-        Write-Host '  The installed program will fail to start with CreateProcess error 740.'
-        Write-Host '  Continuing, because a deliberately unsigned dry run is a legitimate use.'
+    foreach ($image in @($ProductArtifact, $BaseArtifact)) {
+        Write-Host ("  signtool verify /pa {0}" -f $image)
+        & $SignTool verify /pa $image
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ''
+            Write-Host '  WARNING: this image does not carry a valid signature. Windows will refuse the installed'
+            Write-Host '  full image (8235 through ShellExecute where the signature is not trusted), and the'
+            Write-Host '  helper will keep the base image. Continuing, because a deliberately unsigned dry run'
+            Write-Host '  is a legitimate use.'
+        }
     }
+}
+
+# The certificate the full image is signed with -- read out of the signature, the one truth of
+# what is packaged. Unsigned (a -SkipSign dry run): -Thumbprint, said aloud.
+$AuthorThumbprint = ''
+$fullSignature = Get-AuthenticodeSignature -LiteralPath $ProductArtifact
+if ($fullSignature.SignerCertificate) {
+    $AuthorThumbprint = $fullSignature.SignerCertificate.Thumbprint
+    Write-Host ("  the full image is signed by {0} ({1}), status here {2}" -f $AuthorThumbprint, $fullSignature.SignerCertificate.Subject, $fullSignature.Status)
+} else {
+    $AuthorThumbprint = $Thumbprint.ToUpperInvariant()
+    Write-Host ("  WARNING: the full image is not signed; the installer is told -Thumbprint {0}" -f $AuthorThumbprint)
 }
 
 # --- 2. Compile the script ----------------------------------------------------------------------
@@ -266,6 +302,8 @@ if (Test-Path $IssOutput) { Remove-Item -Path $IssOutput -Force }
 
 $isccArgs = @()
 $isccArgs += ('/DSourceExe=' + $ProductArtifact)
+$isccArgs += ('/DSourceExeBase=' + $BaseArtifact)
+$isccArgs += ('/DAuthorThumbprint=' + $AuthorThumbprint)
 $isccArgs += $IssFile
 
 Write-Host ("  {0} {1}" -f $Iscc, ($isccArgs -join ' '))
@@ -345,8 +383,10 @@ if ($SkipSign) {
 Write-Section 'Result'
 $finalHash = Show-Binary -Path $SetupArtifact -Label 'installer artifact:'
 Write-Host ''
-Write-Host ("  packaged product SHA-256  {0}" -f $productHash)
-Write-Host ("  installer SHA-256         {0}" -f $finalHash)
+Write-Host ("  packaged full image SHA-256  {0}" -f $productHash)
+Write-Host ("  packaged base image SHA-256  {0}" -f $baseHash)
+Write-Host ("  author certificate           {0}" -f $AuthorThumbprint)
+Write-Host ("  installer SHA-256            {0}" -f $finalHash)
 if (-not $SkipSign) {
     if ($timestamped) {
         Write-Host '  timestamp: PRESENT'
