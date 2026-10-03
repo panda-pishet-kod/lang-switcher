@@ -29,15 +29,19 @@
 ;    uninstaller removes the local certificate; the author's certificate is never
 ;    touched.
 ;
-;  WHY THIS FILE IS PURE ASCII
+;  WHY THIS FILE IS PURE ASCII, AND IN WHICH LANGUAGE THE WIZARD SPEAKS
 ;
-;    Inno Setup 6 reads an .iss without a byte order mark in the system ANSI code
-;    page.  The tooling that writes files here does not emit a BOM (decision R-05,
-;    the same trap that governs .ps1 files).  Cyrillic in this file would therefore
-;    be mangled at compile time in a way that is invisible until a user sees it.
-;    Consequence, stated plainly: the installer user interface is English only,
-;    while the product itself is bilingual (FR-94).  Section 8.4 asks for no
-;    installer localisation, so this is a limitation, not an unmet requirement.
+;    This script stays ASCII (decision R-05, the rule of the .ps1 files): it is
+;    read by more tools than the compiler, and ASCII is the one encoding none of
+;    them can misread.  Its words for the user are not in it.  Since stage E91
+;    (decisions 155.10...155.12) the wizard speaks the language of Windows: the
+;    official translations of Inno Setup for the languages of the program, and,
+;    for the messages that are this installer's own, the files lang\<Language>.isl,
+;    UTF-8 without a byte order mark -- read as UTF-8 by this compiler since Inno
+;    Setup 6.3.0, measured on 6.7.3 (scratchpad-E91, probe P12: MATCH).  English is
+;    the first language and the fallback; Greek has no official translation, so a
+;    Greek Windows gets English (155.11).  No language dialog: ShowLanguageDialog=no,
+;    and /LANG=<name> picks one by hand.
 ;
 ;  WHY THE INSTALL DIRECTORY IS NOT A CHOICE
 ;
@@ -181,6 +185,15 @@ SetupLogging=yes
 
 OutputDir=Output
 OutputBaseFilename=LangSwitcher-setup
+
+; The language of the wizard is the language of Windows (decision 155.12): the UI language,
+; matched first exactly, then by the primary language, then the first entry -- English.
+; UsePreviousLanguage=no: by default Inno takes the language of the installed version, and every
+; version before e91 was installed in English for want of any other -- an update would speak
+; English on every Windows.
+ShowLanguageDialog=no
+LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=no
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -191,8 +204,25 @@ WizardStyle=modern
 
 [Languages]
 ; The messages of this installer that are its own live in lang\<Language>.isl, the second file
-; of each entry (stage E91): the line of the Ready page and the window of a failed certificate.
+; of each entry (stage E91): the line of the Ready page, the window of a failed certificate and
+; the question about the settings file. English first: it is the fallback. Then the twelve
+; official translations for the languages of the program, and Brazilian Portuguese with the
+; same messages as Portuguese (155.12). Greek: no official file -- English (155.11).
+; tests\installer_languages.rs holds every entry to its file and every file to English.isl.
 Name: "english"; MessagesFile: "compiler:Default.isl,lang\English.isl"
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl,lang\Russian.isl"
+Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl,lang\Ukrainian.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl,lang\German.isl"
+Name: "french"; MessagesFile: "compiler:Languages\French.isl,lang\French.isl"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl,lang\Spanish.isl"
+Name: "portuguese"; MessagesFile: "compiler:Languages\Portuguese.isl,lang\Portuguese.isl"
+Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl,lang\Italian.isl"
+Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl,lang\Polish.isl"
+Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl,lang\Czech.isl"
+Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl,lang\Turkish.isl"
+Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl,lang\Hebrew.isl"
+Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl,lang\Arabic.isl"
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl,lang\BrazilianPortuguese.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
@@ -241,7 +271,8 @@ Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
 ; error 740 in ANY folder (T-09-2) -- the "CreateProcess failed; code 740" window the owner
 ; saw on a clean machine.  ShellExecute goes through the AppInfo service, which is what grants
 ; uiAccess; the base image starts through it just the same.
-Filename: "{app}\{#AppExeName}"; Description: "Start {#AppName} now"; \
+; The caption is Inno's own LaunchProgram, translated in every official .isl (155.12).
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
     Flags: nowait postinstall skipifsilent runasoriginaluser shellexec
 
 [Code]
@@ -554,9 +585,9 @@ begin
       else
       begin
         if SuppressibleMsgBox(
-             'Remove the Lang Switcher settings file as well?' + #13#10 + #13#10 +
+             CustomMessage('RemoveSettingsQuestion') + #13#10 + #13#10 +
              ConfigFile + #13#10 + #13#10 +
-             'Choose No to keep your settings for a later reinstall.',
+             CustomMessage('RemoveSettingsKeep'),
              mbConfirmation, MB_YESNO, IDNO) = IDYES then
         begin
           DeleteFile(ConfigFile);
