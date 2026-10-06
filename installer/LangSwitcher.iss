@@ -115,6 +115,13 @@
 #define RunKey     "Software\Microsoft\Windows\CurrentVersion\Run"
 #define RunValue   "Lang Switcher"
 
+; The mutex the running product holds (FR-82).  MUST MATCH src\app.rs LITERALLY:
+;   MUTEX_NAME = w!(r"Local\Lang_Switcher.SingleInstance")
+; The uninstaller looks for it to refuse removing a running program (decision
+; 155.24); under another name the check would never fire, and nothing but
+; tests\installer_uninstall.rs would say so.
+#define ProductMutex "Local\Lang_Switcher.SingleInstance"
+
 [Setup]
 ; AppId is the identity Windows matches an upgrade against.  It is a constant and
 ; must never change: a new AppId turns every future update into a second parallel
@@ -475,6 +482,38 @@ begin
         Log('Lang Switcher: ' + CustomMessage('LocalCertFailed'))
       else
         MsgBox(CustomMessage('LocalCertFailed'), mbInformation, MB_OK);
+    end;
+  end;
+end;
+
+{ Uninstall, before anything is removed: the program must not be running
+  (decisions 155.23, 155.24).  Inno's uninstaller does not close programs -- the
+  Restart Manager of CloseApplications serves Setup only -- and a running
+  LangSwitcher.exe keeps its file locked: the uninstaller skips the file, the
+  folder stays and the program goes on living in the tray.  The product holds the
+  mutex ProductMutex while it runs; while the mutex exists, the person is asked to
+  exit the program and click OK, in Inno's own words (UninstallAppRunningError,
+  translated in every language of this installer).  Cancel aborts the uninstall
+  before a single file, value or certificate is touched.  /SUPPRESSMSGBOXES gets
+  the default answer, Cancel: a silent uninstall of a running program is aborted
+  with a non-zero exit code instead of leaving it half removed.  The mutex lives
+  in the session namespace (Local\): a copy running in ANOTHER user's session is
+  not seen, and its file stays, as before this check.  The [Setup] directive
+  AppMutex is not used: it would stop Setup at startup too, and an update closes
+  the product by itself (CloseApplications above). }
+<event('InitializeUninstall')>
+function InitializeUninstallProgramRunning(): Boolean;
+begin
+  Result := True;
+  while CheckForMutexes('{#ProductMutex}') do
+  begin
+    Log('Lang Switcher: the program is running (mutex {#ProductMutex} exists)');
+    if SuppressibleMsgBox(FmtMessage(SetupMessage(msgUninstallAppRunningError), ['{#AppTitle}']),
+         mbError, MB_OKCANCEL, IDCANCEL) <> IDOK then
+    begin
+      Log('Lang Switcher: the uninstall is cancelled while the program runs; nothing was removed');
+      Result := False;
+      Exit;
     end;
   end;
 end;
