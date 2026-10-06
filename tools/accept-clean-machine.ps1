@@ -30,14 +30,20 @@
       4  silent install with LANGSW_TRUST_FAIL_AT=delete-key, the failure seam of the helper,
          right after the signature: the helper answers 18, names the step, undoes everything --
          no certificate in Root, none in My, no key -- and the program file is the BASE image;
-         uninstall.
+         uninstall;
+      5  silent install, the program started through explorer.exe, then the silent uninstall
+         WITHOUT stopping it -- the way a person uninstalls (decision 155.24; rounds 1-4 stop the
+         program first): the uninstaller refuses with a non-zero exit code and says so in its
+         log, the program still runs, its file, the uninstaller and the local certificate are
+         all still there; then the program is stopped and the uninstall removes everything.
       Then: the events of Microsoft Defender and of Code Integrity since the start, and the
       summary. Exit 0 only if every row is PASS.
 
     WHAT IT DOES NOT SEE -- the hand of the person, by the memo reports\ACCEPT-CLEAN-MACHINE-E91.md:
     the yellow UAC prompt of a double-click install, the language of the wizard, the line on the
     Ready page, "Launch Lang Switcher" without an error window, the word converted in Notepad and
-    in Notepad run as administrator, the start after signing in again, /LANG=hebrew.
+    in Notepad run as administrator, the start after signing in again, /LANG=hebrew, and the
+    window that asks to exit the running program when it is uninstalled from Apps.
 
     -DryRun prints the plan and the read-only measurements of step 0 and installs nothing, starts
     nothing, writes no file. It is the only way to run this script on the author's machine.
@@ -401,13 +407,14 @@ if ($DryRun) {
     Out-Line '  2  silent install /NOLOCALCERT; helper 2; BASE image, no certificate, UIAccess 0; uninstall'
     Out-Line '  3  two silent installs; Root holds exactly the second local certificate; uninstall'
     Out-Line '  4  silent install, LANGSW_TRUST_FAIL_AT=delete-key; helper 18; BASE image; Root 0, My 0; uninstall'
+    Out-Line '  5  silent install; the program runs; silent uninstall refused, nothing removed; stop; uninstall'
     Out-Line ('  report: {0}' -f $Report)
     Out-Line ('dry run: {0} PASS, {1} FAIL (step 0 only)' -f $script:pass, $script:fail)
     exit 0
 }
 if (-not $admin) { Out-Line 'STOP: run this from an elevated Windows PowerShell'; exit 2 }
 if ($authorTrusted) { Out-Line 'STOP: this machine trusts the author''s certificate -- it is not a clean machine; nothing was done'; exit 2 }
-if ((Test-Path -LiteralPath $AppDir) -or ($controlRoot -gt 0)) { Out-Line 'STOP: Lang Switcher or a local certificate is already here; uninstall it first; nothing was done'; exit 2 }
+if ((Test-Path -LiteralPath $AppDir) -or ($controlRoot -gt 0)) { Out-Line 'STOP: Lang Switcher or a local certificate is already here; uninstall it first (exit the program from its tray menu; delete the program folder if it stays); nothing was done'; exit 2 }
 New-Item -ItemType Directory -Path $Work | Out-Null
 Out-Line ('INFO  logs of this run: ' + $Work)
 
@@ -454,6 +461,41 @@ $named = @(Get-StatusLines $r.Log | Where-Object { $_ -match 'FAILED at step del
 Out-Row $named 'round 4: the log names the step' ('"FAILED at step delete-key" found: ' + $named)
 $null = Test-Installed 'round 4' 'BASE (uiAccess=false)' $false
 Invoke-Uninstall 'round4-uninstall'
+
+# --- 5. Uninstall while the program runs (decision 155.24) -----------------------------------------
+Out-Line ''
+Out-Line '--- 5. Silent uninstall while the program runs: refused, nothing removed; then removed'
+$r = Invoke-Setup 'round5-setup' @() ''
+Out-Row ($r.Code -eq 0) 'round 5: Setup succeeds' ('exit ' + $r.Code)
+Stop-Product
+Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $AppExe + '"')
+$running = $null
+$deadline = (Get-Date).AddSeconds(20)
+while (($null -eq $running) -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 500
+    $running = Get-Process -Name 'LangSwitcher' -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+$runningText = 'no LangSwitcher process within 20 s'
+if ($null -ne $running) { $runningText = 'pid ' + $running.Id }
+Out-Row ($null -ne $running) 'round 5: the program runs before the uninstall' $runningText
+# The program takes its mutex at start; three seconds is the wait Test-Launch gives it too.
+Start-Sleep -Seconds 3
+$log5 = Join-Path $Work 'round5-uninstall-refused.log'
+$p5 = Start-Process -FilePath $Uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="' + $log5 + '"')) -Wait -PassThru
+Start-Sleep -Seconds 5
+Out-Line ('       uninstall while running: first process exit {0}, log {1}' -f $p5.ExitCode, $log5)
+Add-Appendix 'uninstall log, round5-uninstall-refused' $log5
+foreach ($l in (Get-StatusLines $log5)) { Out-Line ('         | ' + ($l -replace '^.*?(Lang Switcher:)', '$1')) }
+$refused = @(Get-StatusLines $log5 | Where-Object { $_ -match 'the uninstall is cancelled while the program runs' }).Count -gt 0
+Out-Row ($p5.ExitCode -ne 0) 'round 5: the uninstall of the running program is refused (exit not 0)' ('first process exit ' + $p5.ExitCode)
+Out-Row $refused 'round 5: the log names the refusal' ('"the uninstall is cancelled while the program runs" found: ' + $refused)
+$stillRunning = ($null -ne $running) -and (-not $running.HasExited)
+Out-Row $stillRunning 'round 5: the program still runs' $runningText
+$kept = (Test-Path -LiteralPath $AppExe) -and (Test-Path -LiteralPath $Uninstaller)
+Out-Row $kept 'round 5: the program file and the uninstaller are still there' $AppDir
+$root5 = @(Get-LocalCertificates 'Root').Count
+Out-Row ($root5 -eq 1) 'round 5: the local certificate is still in Root' ('Root ' + $root5)
+Invoke-Uninstall 'round5-uninstall'
 
 # --- Defender and Code Integrity since the start ---------------------------------------------------
 Out-Line ''
