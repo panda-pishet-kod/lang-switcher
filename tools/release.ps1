@@ -115,8 +115,9 @@
 #>
 [CmdletBinding()]
 param(
-    # SHA-1 thumbprint of the code signing certificate. TOOLCHAIN.md section 5.
-    [string]$Thumbprint = '8F038C7D00DACFCE34EC742EC97CCEBFD8465CAC',
+    # SHA-1 thumbprint of the code signing certificate CN=Panda Koder, issued 2026-10-06 by the
+    # owner (stage E91, step R1). TOOLCHAIN.md section 5.
+    [string]$Thumbprint = '44390E725506CDCBA1BE7E74BBF51A7FF2AE6F9A',
     # Build, verify and copy, but do not sign. For a dry run of everything before the signature.
     [switch]$SkipSign,
     # Where the shipping artifact goes. Empty means LangSwitcher.exe in the artifact folder --
