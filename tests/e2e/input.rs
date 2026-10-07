@@ -22,7 +22,8 @@
 //!
 //! * inside [`send_verified`] — the guarded send, and the only one that can carry text. The
 //!   function is private to this module and every public entry point that types anything
-//!   ([`type_text`], [`tap`], [`chord`]) ends in it, so no other module of the bench can reach
+//!   ([`type_text`], [`tap`], [`chord`], and since task T-93-3 [`hold_down`] and [`let_go`] —
+//!   a modifier held over a combination) ends in it, so no other module of the bench can reach
 //!   `SendInput` at all: the guard is not bypassed by a new call site because there is nowhere
 //!   else to put one.
 //! * inside [`emergency_combination`] — `Ctrl+Alt+Shift+F12` of FR-96, sent **without** a
@@ -341,6 +342,33 @@ pub fn chord(modifiers: &[u16], vk: u16, target: &Target) -> Result<(), SendErro
     for &modifier in modifiers.iter().rev() {
         events.push(key_event(modifier, 0, KEYEVENTF_KEYUP.0));
     }
+
+    send_verified(&events, target)
+}
+
+/// Presses `modifiers` down and **leaves them down** — task T-93-3, the hotkey held as a hand
+/// holds it.
+///
+/// The half of a combination [`chord`] cannot give: a hand that presses `Ctrl+F12` still has
+/// `Ctrl` down while the product replaces the text, and step 3 of FR-40 is what has to cope with
+/// that. The caller presses the key with [`tap`], waits for the result on a condition, and lets
+/// go with [`let_go`]. Guarded like every send.
+pub fn hold_down(modifiers: &[u16], target: &Target) -> Result<(), SendError> {
+    let events: Vec<INPUT> = modifiers
+        .iter()
+        .map(|&modifier| key_event(modifier, 0, 0))
+        .collect();
+
+    send_verified(&events, target)
+}
+
+/// Releases `modifiers` in reverse order — the other half of [`hold_down`], task T-93-3.
+pub fn let_go(modifiers: &[u16], target: &Target) -> Result<(), SendError> {
+    let events: Vec<INPUT> = modifiers
+        .iter()
+        .rev()
+        .map(|&modifier| key_event(modifier, 0, KEYEVENTF_KEYUP.0))
+        .collect();
 
     send_verified(&events, target)
 }

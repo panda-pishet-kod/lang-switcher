@@ -376,6 +376,12 @@ struct Scene<'a> {
     /// position 16 is: the seven steps of [`replacement`], unchanged, and one more press. Every
     /// other position passes `false` and takes byte for byte the path it took before.
     rollback: bool,
+    /// **The experiment of task T-93-3 only — the modifiers held through the replacement**
+    /// (посылка П6 of вопрос 157). `modifiers` go down, the hotkey's key is tapped, the bench
+    /// waits for `привет` with them still down — which is what a hand pressing `Ctrl+F12` does —
+    /// and lets go only then. Every position of the matrix passes `false` and takes byte for
+    /// byte the path it took before.
+    hold: bool,
 }
 
 /// The seven steps, for one already-launched application and its content element.
@@ -389,6 +395,7 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
         modifiers,
         clear_first,
         rollback,
+        hold,
     } = scene;
 
     // A setup failure has to be reported in the shape of the position it happened in: two rows
@@ -467,12 +474,19 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
         .unwrap_or_else(|| "канал не ответил".to_owned());
 
     // Step 6 — the hotkey. Position 22 supplies `Shift` here; everything else supplies nothing.
-    let pressed = if modifiers.is_empty() {
+    // The experiment of task T-93-3 holds the modifiers of a combination down through the
+    // replacement (`hold`) and lets them go after step 7.
+    let pressed = if hold {
+        input::hold_down(modifiers, &target).and_then(|()| input::tap(ctx.hotkey_vk, &target))
+    } else if modifiers.is_empty() {
         input::tap(ctx.hotkey_vk, &target)
     } else {
         input::chord(modifiers, ctx.hotkey_vk, &target)
     };
     if let Err(error) = pressed {
+        if hold {
+            let _ = input::let_go(modifiers, &target);
+        }
         return failed(&format!("горячая клавиша: {error}"));
     }
 
@@ -483,6 +497,16 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
             .map(|(raw, _)| normalise(&raw))
             .filter(|text| text.contains(EXPECTED))
     });
+
+    // Task T-93-3: the hand lets go only once the result is on the screen (or the wait gave up).
+    let let_go = if hold {
+        match input::let_go(modifiers, &target) {
+            Ok(()) => "; модификаторы удержаны до результата и отпущены после".to_owned(),
+            Err(error) => format!("; ⚠ отпускание модификаторов: {error}"),
+        }
+    } else {
+        String::new()
+    };
 
     let final_text = replaced
         .clone()
@@ -528,7 +552,7 @@ fn replacement(ctx: &Context, scene: Scene<'_>) -> Vec<Row> {
     )
     .with_note(format!(
         "прочитано через {}; исходная раскладка окна {}; продукт до горячей клавиши: {}; \
-         после: {}",
+         после: {}{let_go}",
         source.as_str(),
         layout::describe(source_layout),
         seen_by_product,
@@ -1139,6 +1163,8 @@ struct Plan<'a> {
     clear_first: bool,
     /// **Position 16 only** — see [`Scene::rollback`].
     rollback: bool,
+    /// **The experiment of task T-93-3 only** — see [`Scene::hold`].
+    hold: bool,
 }
 
 /// Runs a position end to end: launch, find the window, find the content, replace, restore.
@@ -1185,6 +1211,7 @@ fn run_position(
                     modifiers: plan.modifiers,
                     clear_first: plan.clear_first,
                     rollback: plan.rollback,
+                    hold: plan.hold,
                 },
             ),
         },
@@ -1569,6 +1596,28 @@ fn notepad_position(
             modifiers,
             clear_first: true,
             rollback,
+            hold: false,
+        },
+        launch_notepad,
+    )
+}
+
+/// Notepad with the modifiers of a combination **held through the replacement** — the
+/// experiment of task T-93-3 (посылка П6), and no position of the matrix.
+fn notepad_position_held(ctx: &Context, number: u8, name: &str, modifiers: &[u16]) -> Vec<Row> {
+    run_position(
+        ctx,
+        Plan {
+            number,
+            name,
+            window_is: &|element: &Element| element.class() == "Notepad",
+            content_in: &|automation: &Automation, window: &Element| {
+                automation.await_element(window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+            },
+            modifiers,
+            clear_first: true,
+            rollback: false,
+            hold: true,
         },
         launch_notepad,
     )
@@ -2129,6 +2178,13 @@ fn selection_failed(reason: &str) -> Vec<Row> {
 /// of 200 ms by section 7, so the bench waits for the clipboard to come back rather than
 /// asserting immediately — a condition again, with the timeout as its bound.
 pub fn position_15(ctx: &Context) -> Vec<Row> {
+    selection_position(ctx, &[])
+}
+
+/// The body of position 15, with the modifiers of a combination held through the conversion
+/// when `held` names any — the experiment of task T-93-3 (посылка П6, the selection path). The
+/// matrix passes none and takes byte for byte the path it took before.
+fn selection_position(ctx: &Context, held: &[u16]) -> Vec<Row> {
     // ⚠ **FR-65 before anything else — Н-Э13-34.** The user's configuration is the first gate
     // of the selection path, and a bench that ran the scenario over a switched-off path would
     // be measuring the setting while reporting about the product: no `Ctrl+C` is ever sent,
@@ -2192,7 +2248,7 @@ pub fn position_15(ctx: &Context) -> Vec<Row> {
                 (None, _) => selection_failed("у окна нет дескриптора"),
                 (_, None) => selection_failed("элемент ввода не найден в дереве UI Automation"),
                 (Some(hwnd), Some(content)) => {
-                    selection_body(ctx, app.pid, hwnd, &window, &content, clip_window.0)
+                    selection_body(ctx, app.pid, hwnd, &window, &content, clip_window.0, held)
                 }
             }
         }
@@ -2299,6 +2355,7 @@ fn selection_body(
     window_element: &Element,
     content: &Element,
     clip_window: HWND,
+    held: &[u16],
 ) -> Vec<Row> {
     // Step 1 — forward. Rake 3, and requirement B has already been satisfied by `adopt_window`.
     if let Err(error) = shell::activate_window(pid, Some(window)) {
@@ -2377,10 +2434,20 @@ fn selection_body(
             .unwrap_or_else(|| "?".to_owned())
     });
 
-    // Step 7 — the hotkey.
+    // Step 7 — the hotkey. The experiment of task T-93-3 holds the modifiers of a combination
+    // down from here to the end of step 9, as a hand does (`held`); the matrix holds none.
     let sequence_before = lang_switcher::selection::sequence_number();
 
-    if let Err(error) = input::tap(ctx.hotkey_vk, &target) {
+    let pressed = if held.is_empty() {
+        input::tap(ctx.hotkey_vk, &target)
+    } else {
+        input::hold_down(held, &target).and_then(|()| input::tap(ctx.hotkey_vk, &target))
+    };
+
+    if let Err(error) = pressed {
+        if !held.is_empty() {
+            let _ = input::let_go(held, &target);
+        }
         return selection_failed(&format!("горячая клавиша: {error}"));
     }
 
@@ -2406,6 +2473,9 @@ fn selection_body(
     let answered_in = pressed_at.elapsed();
 
     if !copied {
+        if !held.is_empty() {
+            let _ = input::let_go(held, &target);
+        }
         return selection_failed(NO_ANSWER_TO_CTRL_C);
     }
 
@@ -2417,6 +2487,16 @@ fn selection_body(
             .map(|(raw, _)| normalise(&raw))
             .filter(|text| text.contains(EXPECTED))
     });
+
+    // Task T-93-3: the hand lets go only once the result is on the screen (or the wait gave up).
+    let let_go = if held.is_empty() {
+        String::new()
+    } else {
+        match input::let_go(held, &target) {
+            Ok(()) => "; модификаторы удержаны до результата и отпущены после".to_owned(),
+            Err(error) => format!("; ⚠ отпускание модификаторов: {error}"),
+        }
+    };
 
     let shown = converted
         .clone()
@@ -2470,7 +2550,7 @@ fn selection_body(
             "выделение через Shift+Home (с префиксом E0, FR-05); буфер набора после выделения: \
              {buffer_after_select} — FR-10 «Home — полный сброс», поэтому конвертировать могла \
              только выделенная фраза; приложение ответило на Ctrl+C продукта за {} мс (шаг 3 \
-             FR-61 ждёт 300 мс, §7); исходная раскладка окна {}; {counters}",
+             FR-61 ждёт 300 мс, §7); исходная раскладка окна {}; {counters}{let_go}",
             answered_in.as_millis(),
             layout::describe(source_layout)
         )),
@@ -2977,6 +3057,7 @@ fn word_body(ctx: &Context, app: &mut App, log: &mut String) -> Vec<Row> {
             modifiers: &[],
             clear_first: false,
             rollback: false,
+            hold: false,
         },
     );
 
@@ -3078,6 +3159,7 @@ pub fn position_3(ctx: &Context) -> Vec<Row> {
             modifiers: &[],
             clear_first: true,
             rollback: false,
+            hold: false,
         },
         || launch_chrome("chrome3", &["about:blank"]),
     )
@@ -3106,6 +3188,7 @@ pub fn position_4(ctx: &Context) -> Vec<Row> {
             modifiers: &[],
             clear_first: true,
             rollback: false,
+            hold: false,
         },
         || launch_chrome("chrome4", &[PAGE]),
     )
@@ -3927,6 +4010,7 @@ pub fn position_11(ctx: &Context) -> Vec<Row> {
                         modifiers: &[],
                         clear_first: true,
                         rollback: false,
+                        hold: false,
                     },
                 ),
                 None => both_failed(11, "Диалог «Выполнить»", "поле ввода не найдено"),
@@ -12473,6 +12557,403 @@ fn belief_summary(
 }
 
 // ---------------------------------------------------------------------------------------
+// Task T-93-3, вопрос 157 — the combinations on the bench
+// ---------------------------------------------------------------------------------------
+
+/// Title of the witness window of task T-93-3 — the string it is adopted by.
+const WITNESS_TITLE: &str = "LangSw-Witness-93";
+
+/// `F12` — the key of every combination the experiment assigns.
+const VK_F12_CODE: u16 = 0x7B;
+
+/// The key the bench taps after every stimulus to know the witness has seen all of it — `F24`,
+/// which no keyboard of the matrix carries and no application binds.
+const VK_SENTINEL: u16 = 0x87;
+
+/// The unassigned virtual key the menu mask of AutoHotkey uses in this experiment — `0x07`,
+/// a code with no character in any layout.
+const VK_MASK: u16 = 0x07;
+
+/// What the witness has counted so far — task T-93-3.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Witnessed {
+    /// `WM_SYSCOMMAND` with `SC_KEYMENU` — the window was asked to enter its menu (посылка П5).
+    menu: u32,
+    /// `WM_KEYDOWN`/`WM_SYSKEYDOWN` of `F12` — the key reached the application.
+    f12: u32,
+    /// `WM_SYSKEYDOWN`/`WM_KEYDOWN` of [`VK_MASK`] — a menu mask passed by.
+    mask: u32,
+    /// [`VK_SENTINEL`] — everything sent before it has been seen.
+    end: u32,
+}
+
+/// Reads the counters out of the witness's title: `LangSw-Witness-93 menu=0 f12=0 mask=0 end=0`.
+fn witnessed(title: &str) -> Option<Witnessed> {
+    let rest = title.strip_prefix(WITNESS_TITLE)?;
+    let value = |name: &str| -> Option<u32> {
+        let at = rest.find(&format!(" {name}="))? + name.len() + 2;
+        rest[at..].split(' ').next()?.parse().ok()
+    };
+
+    Some(Witnessed {
+        menu: value("menu")?,
+        f12: value("f12")?,
+        mask: value("mask")?,
+        end: value("end")?,
+    })
+}
+
+/// ⛔ **The witness is a window of the bench's own** — the shape positions 14 and 15 use: a
+/// process this function starts, a form with no controls (so the form itself has the keyboard),
+/// and a window procedure that counts in its title what the experiment asks about.
+///
+/// `SC_KEYMENU` is counted and **not passed on**: the question is whether the system asked the
+/// window to enter its menu, and a window that then entered a modal menu loop would hold the
+/// keystrokes that follow. Everything else goes to the form's own procedure.
+fn launch_witness_window() -> Result<App, String> {
+    let scratch = scratch_dir("witness");
+    let script = scratch.join("witness-window.ps1");
+
+    let body = r#"Add-Type -AssemblyName System.Windows.Forms
+$code = @"
+using System;
+using System.Windows.Forms;
+public class WitnessForm : Form {
+    int menu, f12, mask, end;
+    public WitnessForm() { Publish(); }
+    void Publish() { Text = "@TITLE@ menu=" + menu + " f12=" + f12 + " mask=" + mask + " end=" + end; }
+    protected override void WndProc(ref Message m) {
+        long w = m.WParam.ToInt64();
+        if (m.Msg == 0x0112 && (w & 0xFFF0) == 0xF100) { menu++; Publish(); return; }
+        if (m.Msg == 0x0100 || m.Msg == 0x0104) {
+            if (w == 0x7B) { f12++; Publish(); }
+            else if (w == 0x07) { mask++; Publish(); }
+            else if (w == 0x87) { end++; Publish(); }
+        }
+        base.WndProc(ref m);
+    }
+}
+"@
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition $code
+$form = New-Object WitnessForm
+$form.Width = 520
+$form.Height = 200
+$form.StartPosition = 'CenterScreen'
+$form.TopMost = $true
+$form.Add_Shown({ $form.Activate() })
+[System.Windows.Forms.Application]::Run($form)
+"#
+    .replace("@TITLE@", WITNESS_TITLE);
+
+    std::fs::write(&script, body)
+        .map_err(|error| format!("не удалось записать {}: {error}", script.display()))?;
+
+    let child = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-STA",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script)
+        .spawn()
+        .map_err(|error| format!("запуск окна-свидетеля: {error}"))?;
+
+    Ok(launched(
+        "Окно-свидетель T-93-3",
+        child,
+        CloseWith::WmClose,
+        Some(scratch),
+    ))
+}
+
+/// One stimulus sent to the witness, and what it counted — task T-93-3.
+///
+/// Requirement 1 of §11.5: no clock. After the stimulus the bench taps [`VK_SENTINEL`] and waits
+/// for the witness to count it; messages are taken in order, so by then everything the stimulus
+/// produced — a `SC_KEYMENU` posted by the system included — has been counted.
+fn witness_round(
+    window: &Element,
+    target: &input::Target,
+    stimulus: &dyn Fn(&input::Target) -> Result<(), input::SendError>,
+) -> Result<(Witnessed, Witnessed), String> {
+    shell::activate_window(target.pid, Some(target.hwnd))
+        .map_err(|error| format!("вывод свидетеля вперёд: {error}"))?;
+
+    let before = witnessed(&window.name())
+        .ok_or_else(|| format!("заголовок свидетеля не читается: {:?}", window.name()))?;
+
+    stimulus(target).map_err(|error| format!("стимул: {error}"))?;
+    input::tap(VK_SENTINEL, target).map_err(|error| format!("метка конца: {error}"))?;
+
+    let after = wait::until(wait::TEXT_TIMEOUT, || {
+        witnessed(&window.name()).filter(|seen| seen.end > before.end)
+    })
+    .ok_or_else(|| format!("метка конца не дошла до свидетеля: {:?}", window.name()))?;
+
+    Ok((before, after))
+}
+
+/// The configuration of one round of the experiment: `F12` with `modifiers`, the letters quiet,
+/// the autostart off — task T-93-3.
+///
+/// ⚠ **`autostart = false` written out**, the rule of Э53а: a product started on
+/// `Config::default()` registers its own path in `Run`. And the letters of FR-101 are settled for
+/// today, so «Привет» does not open over the windows the experiment types into (the lesson of
+/// Э33).
+fn combination_config(path: &Path, modifiers: &[&str]) -> Result<crate::config::Borrowed, String> {
+    use lang_switcher::settings::{Config, Hotkey};
+
+    let today = lang_switcher::letters::today();
+    let mut config = Config {
+        hotkey: Hotkey {
+            key: "F12".to_owned(),
+            modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+        },
+        ..Config::default()
+    };
+    config.general.autostart = false;
+    config.letters.welcome_shown = true;
+    config.letters.feed = false;
+    config.letters.first_run = today;
+    config.letters.last_letter = today;
+    config.letters.last_seen_version = env!("CARGO_PKG_VERSION").to_owned();
+
+    let text = config
+        .to_toml_string()
+        .map_err(|error| format!("не удалось построить config.toml: {error}"))?;
+
+    crate::config::Borrowed::take(path, &text)
+}
+
+/// Prints one check of the experiment and answers whether it held.
+fn combination_check(what: &str, held: bool, detail: &str) -> bool {
+    println!(
+        "  [{}] {what} — {detail}",
+        if held { "pass" } else { "FAIL" }
+    );
+    held
+}
+
+/// **Task T-93-3, вопрос 157 — the combinations on the bench: посылки П5 and П6, and the bare key
+/// of a combination reaching the application.** Not a position of the matrix of §11.3 (that list
+/// is §11.3's), an experiment of the stage, run by hand with the person's word.
+///
+/// # What is measured
+///
+/// 1. **The witness's own controls, with no product at all** — a lone `Alt` makes the system ask
+///    the window into its menu (`SC_KEYMENU`), `Alt` with the mask key between its press and its
+///    release does not, and a bare `F12` reaches the window. Without these three the numbers
+///    below would mean nothing: they prove the instrument sees a menu when there is one.
+/// 2. For each of `Ctrl+F12`, `Shift+F12`, `Alt+F12` as the hotkey, a product started on that
+///    configuration and:
+///    * **Блокнот, the combination pressed as a chord** — `ghbdtn` becomes `привет` and the layout
+///      Russian;
+///    * **Блокнот, the modifier held through the replacement** (П6) — the same result, letter for
+///      letter, with the modifier still down while the product replaces;
+///    * **the selection path with the modifier held** (П6, the second path) — the window of
+///      position 15;
+///    * **the witness**: the bare `F12` reaches it, the combination does not, and — for `Alt+F12`
+///      — whether the system asked the window into its menu (П5).
+///
+/// Windows Terminal is the person's to check by hand: the bench's foreground guard and UI
+/// Automation do not read a terminal (the measurement of Э92, 156.13).
+pub fn experiment_combination(ctx: &Context) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-93-3: сочетания на стенде (вопрос 157, посылки П5 и П6) ---\n");
+
+    let Some(path) = lang_switcher::settings::default_config_path() else {
+        eprintln!("путь %APPDATA%\\Lang_Switcher\\config.toml не определён");
+        return std::process::ExitCode::from(1);
+    };
+    println!("конфигурация продукта: {}", path.display());
+
+    let mut held = true;
+
+    // The witness, for the whole run.
+    let mut witness = match launch_witness_window() {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("окно-свидетель: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    let witness_window = match adopt_window(ctx.automation, &mut witness, &|element: &Element| {
+        element.name().starts_with(WITNESS_TITLE)
+    }) {
+        Ok(window) => window,
+        Err(reason) => {
+            eprintln!("окно-свидетель не найдено: {reason}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+    let Some(witness_hwnd) = witness.window else {
+        eprintln!("у окна-свидетеля нет дескриптора");
+        return std::process::ExitCode::from(1);
+    };
+    let witness_target = input::Target {
+        pid: witness.pid,
+        hwnd: witness_hwnd,
+    };
+
+    // --- 1. the instrument's own controls, no product ---------------------------------------
+    println!("\n=== контроли прибора (продукт не запущен) ===");
+
+    let round = |stimulus: &dyn Fn(&input::Target) -> Result<(), input::SendError>| {
+        witness_round(&witness_window, &witness_target, stimulus)
+    };
+
+    match round(&|target| input::tap(VK_MENU.0, target)) {
+        Ok((before, after)) => {
+            held &= combination_check(
+                "одиночный Alt",
+                after.menu > before.menu,
+                &format!(
+                    "SC_KEYMENU {} → {} (прибор видит меню)",
+                    before.menu, after.menu
+                ),
+            );
+        }
+        Err(error) => held &= combination_check("одиночный Alt", false, &error),
+    }
+    match round(&|target| input::chord(&[VK_MENU.0], VK_MASK, target)) {
+        Ok((before, after)) => {
+            held &= combination_check(
+                "Alt с ключом-маской 0x07 между нажатием и отпусканием",
+                after.menu == before.menu && after.mask > before.mask,
+                &format!(
+                    "SC_KEYMENU {} → {}, маска {} → {}",
+                    before.menu, after.menu, before.mask, after.mask
+                ),
+            );
+        }
+        Err(error) => held &= combination_check("Alt с ключом-маской", false, &error),
+    }
+    match round(&|target| input::tap(VK_F12_CODE, target)) {
+        Ok((before, after)) => {
+            held &= combination_check(
+                "голая F12 без продукта",
+                after.f12 > before.f12,
+                &format!("F12 {} → {}", before.f12, after.f12),
+            );
+        }
+        Err(error) => held &= combination_check("голая F12 без продукта", false, &error),
+    }
+
+    // --- 2. the three combinations ------------------------------------------------------------
+    let ctx93 = Context {
+        automation: ctx.automation,
+        hotkey_vk: VK_F12_CODE,
+        ambient_before: ctx.ambient_before,
+    };
+
+    for (name, names, keys) in [
+        ("Ctrl+F12", &["Ctrl"][..], &[VK_CONTROL.0][..]),
+        ("Shift+F12", &["Shift"][..], &[VK_SHIFT.0][..]),
+        ("Alt+F12", &["Alt"][..], &[VK_MENU.0][..]),
+    ] {
+        println!("\n=== горячая клавиша {name} ===");
+
+        let mut borrowed = match combination_config(&path, names) {
+            Ok(borrowed) => borrowed,
+            Err(error) => {
+                held &= combination_check(name, false, &format!("конфигурация: {error}"));
+                continue;
+            }
+        };
+
+        match crate::sut::Sut::launch() {
+            Err(error) => held &= combination_check(name, false, &format!("продукт: {error}")),
+            Ok(mut product) => {
+                if product.await_ready(Duration::from_secs(30)).is_none() {
+                    held &= combination_check(name, false, "продукт не сообщил о готовности");
+                } else {
+                    let mut rows = notepad_position(
+                        &ctx93,
+                        93,
+                        &format!("{name} аккордом (Блокнот)"),
+                        keys,
+                        false,
+                    );
+                    rows.extend(notepad_position_held(
+                        &ctx93,
+                        93,
+                        &format!("{name} с удержанием (Блокнот)"),
+                        keys,
+                    ));
+                    rows.extend(selection_position(&ctx93, keys));
+
+                    for row in &rows {
+                        held &= combination_check(
+                            &format!("{} [{}]", row.application, row.assertion.as_str()),
+                            matches!(row.verdict, Verdict::Pass),
+                            &format!("{} (ожидалось {}); {}", row.actual, row.expected, row.note),
+                        );
+                    }
+
+                    match round(&|target| input::tap(VK_F12_CODE, target)) {
+                        Ok((before, after)) => {
+                            held &= combination_check(
+                                &format!("голая F12 при горячей клавише {name}"),
+                                after.f12 > before.f12,
+                                &format!("F12 дошла до окна: {} → {}", before.f12, after.f12),
+                            );
+                        }
+                        Err(error) => held &= combination_check("голая F12", false, &error),
+                    }
+
+                    match round(&|target| input::chord(keys, VK_F12_CODE, target)) {
+                        Ok((before, after)) => {
+                            held &= combination_check(
+                                &format!("{name} не доходит до окна"),
+                                after.f12 == before.f12,
+                                &format!("F12 {} → {}", before.f12, after.f12),
+                            );
+                            if keys.contains(&VK_MENU.0) {
+                                println!(
+                                    "  [замер П5] {name}: SC_KEYMENU {} → {} — меню окна {}; маска \
+                                     продукта {} → {}",
+                                    before.menu,
+                                    after.menu,
+                                    if after.menu > before.menu {
+                                        "АКТИВИРОВАНО"
+                                    } else {
+                                        "не активировано"
+                                    },
+                                    before.mask,
+                                    after.mask
+                                );
+                            }
+                        }
+                        Err(error) => held &= combination_check(name, false, &error),
+                    }
+                }
+
+                match product.stop() {
+                    Ok(code) => println!("  продукт остановлен, код {code}"),
+                    Err(error) => println!("  ⚠ {error}"),
+                }
+            }
+        }
+
+        println!("  {}", borrowed.give_back());
+        println!("  {}", restore_ambient(ctx));
+    }
+
+    println!("  {}", witness.close());
+
+    if held {
+        println!("\nВЕРДИКТ: все проверки опыта T-93-3 выполнены — ЗЕЛЁНЫЙ");
+        std::process::ExitCode::SUCCESS
+    } else {
+        println!("\nВЕРДИКТ: есть невыполненные проверки — \u{26D4} КРАСНЫЙ (подробности выше)");
+        std::process::ExitCode::from(1)
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Unit tests — logic only, no product and no application anywhere near them
 // ---------------------------------------------------------------------------------------
 
@@ -12481,6 +12962,33 @@ mod tests {
     use super::*;
 
     use crate::report::Report;
+
+    /// **Task T-93-3** — the witness's title reads back to its four counters, and a title that is
+    /// not the witness's, or is missing one of them, reads back as nothing rather than as zeros.
+    #[test]
+    fn the_title_of_the_witness_reads_back_to_its_four_counters() {
+        assert_eq!(
+            witnessed("LangSw-Witness-93 menu=2 f12=17 mask=1 end=40"),
+            Some(Witnessed {
+                menu: 2,
+                f12: 17,
+                mask: 1,
+                end: 40,
+            })
+        );
+        assert_eq!(
+            witnessed("LangSw-Witness-93 menu=0 f12=0 mask=0 end=0"),
+            Some(Witnessed::default())
+        );
+
+        // Controls: the reader must be able to say «no».
+        assert_eq!(witnessed("Блокнот menu=0 f12=0 mask=0 end=0"), None);
+        assert_eq!(witnessed("LangSw-Witness-93 menu=0 f12=0 end=0"), None);
+        assert_eq!(
+            witnessed("LangSw-Witness-93 menu=x f12=0 mask=0 end=0"),
+            None
+        );
+    }
 
     /// **Task Т-14-1, the remainder of Н-Э13-34.** A switched-off selection path is one
     /// `pending` row of position 15 — the third verdict of Р-30, owned by a person, with the

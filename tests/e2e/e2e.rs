@@ -142,6 +142,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--classify") => scenarios::classify(&|| uia::Automation::new().ok()),
         Some("--experiment-unicode") => experiment_unicode(),
         Some("--experiment-modes") => experiment_modes(),
+        Some("--experiment-combination") => experiment_combination(),
         Some("--experiment-explorer") => experiment_explorer(arguments),
         Some("--experiment-sequence") => experiment_sequence(arguments),
         Some("--experiment-stamp") => experiment_stamp(arguments),
@@ -419,6 +420,29 @@ fn experiment_modes() -> std::process::ExitCode {
     };
 
     scenarios::experiment_modes(&context)
+}
+
+/// **Task T-93-3, вопрос 157** — the combinations on the bench: посылки П5 (`Alt` and the menu)
+/// and П6 (the modifier held through the replacement), and the bare key of a combination reaching
+/// the application. See [`scenarios::experiment_combination`]; this arm only builds the context.
+/// The experiment writes its own configuration for each combination, so the hotkey the context
+/// carries is the one it assigns — `F12` — and not the person's.
+fn experiment_combination() -> std::process::ExitCode {
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: 0x7B,
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_combination(&context)
 }
 
 /// **Task T-10-9** — `Win+E` and what conversion does after it.
@@ -900,8 +924,21 @@ fn full_run(arguments: &[String]) -> std::process::ExitCode {
         return std::process::ExitCode::from(1);
     }
 
-    let hotkey = hotkey_vk();
-    println!("\nГорячая клавиша продукта: VK 0x{hotkey:02X}");
+    let (hotkey, modifiers) = hotkey_binding();
+    println!("\nГорячая клавиша продукта: VK 0x{hotkey:02X}, модификаторы {modifiers:#05b}");
+
+    // Task T-93-3, вопрос 157: the positions press one key, and a hotkey that is a combination
+    // would be pressed by half — every position would fail and none of them would be about the
+    // product. Refused with the reason, as a stray copy of the product is refused above.
+    if modifiers != 0 {
+        eprintln!(
+            "\n⚠ горячая клавиша в config.toml — сочетание (вопрос 157); позиции матрицы жмут одну \
+             клавишу — прогон остановлен: матрицу гонять на голой клавише, сочетания — опытом \
+             --experiment-combination"
+        );
+        return std::process::ExitCode::from(1);
+    }
+
     println!(
         "Продукт поднимается заново на каждую позицию, с LANGSW_DEBUG_TIMEOUT_SEC={}",
         sut::DEBUG_TIMEOUT_SECS
@@ -1192,13 +1229,25 @@ fn selected_positions(arguments: &[String]) -> Vec<u8> {
 
 /// The hotkey the running product answers to — read from its own configuration, not assumed.
 fn hotkey_vk() -> u16 {
-    let path = lang_switcher::settings::default_config_path();
+    hotkey_binding().0
+}
 
-    let name = path
-        .map(|path| lang_switcher::settings::read_or_default(&path).0.hotkey.key)
-        .unwrap_or_else(|| "Pause".to_owned());
-
-    lang_switcher::hook::vk_from_name(&name).unwrap_or(lang_switcher::hook::DEFAULT_HOTKEY_VK)
+/// The key of the hotkey and its modifier set, read the way the product reads them — task
+/// T-93-3 (вопрос 157): `Hotkey::binding`, so a name nobody knows, key or modifier, leaves the
+/// product on `Pause` and the bench with it.
+///
+/// ⚠ The positions of the matrix press **one key**. A configuration whose hotkey is a combination
+/// is refused by [`full_run`] rather than measured with half of the hotkey; the combinations have
+/// an experiment of their own, `--experiment-combination`.
+fn hotkey_binding() -> (u16, u16) {
+    lang_switcher::settings::default_config_path()
+        .and_then(|path| {
+            lang_switcher::settings::read_or_default(&path)
+                .0
+                .hotkey
+                .binding()
+        })
+        .unwrap_or((lang_switcher::hook::DEFAULT_HOTKEY_VK, 0))
 }
 
 /// Whether the user's configuration leaves the selection path of §4.7 switched on — read the
