@@ -13095,6 +13095,890 @@ pub fn experiment_combination(ctx: &Context) -> std::process::ExitCode {
 }
 
 // ---------------------------------------------------------------------------------------
+// Task T-96-1 — the classic console: the word must not disappear (вопрос 160)
+// ---------------------------------------------------------------------------------------
+
+/// The two shells the classic-console position hosts — task T-96-1.
+///
+/// Windows PowerShell 5.1 is the shell in which the typed word disappeared (decision 160.1, the
+/// owner's hand); `cmd` is the other default shell of the same window class, where the measurement
+/// of Э92 saw `KEYEVENTF_UNICODE` arrive. The product cannot tell the two apart — FR-42а decides
+/// by the class of the window — so the position measures both.
+const CLASSIC_SHELLS: [&str; 2] = ["powershell", "cmd"];
+
+/// The six keys of `ghbdtn` — set 1, main block — as a person presses them (FR-04, FR-05).
+const GHBDTN_SCANS: [u16; 6] = [0x22, 0x23, 0x30, 0x20, 0x14, 0x31];
+
+/// The pauses П2 tries between the switch and the packet, in this order — TZ Э96 §0б, П2: none
+/// first, and the next one only when the previous did not give every round.
+const SETTLE_PAUSES_MS: [u64; 5] = [0, 10, 20, 50, 100];
+
+/// How long one step of a console round is given to show its result on the line.
+///
+/// **A bound on a condition, not a delay** — requirement 1 of §11.5. The condition is «the line
+/// reads what this step should leave», which a replacement satisfies in tens of milliseconds; the
+/// bound is spent only when the step left something else, and then the line is read as it stands.
+const CONSOLE_STEP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long a freshly started console is given to show its prompt.
+const CONSOLE_PROMPT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The word a round types: all lower case, or the first letter under `Shift` (П3, the capitals).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConsoleWord {
+    Lower,
+    Capital,
+}
+
+impl ConsoleWord {
+    /// What the person types — in the English layout.
+    const fn typed(self) -> &'static str {
+        match self {
+            Self::Lower => TYPED,
+            Self::Capital => "Ghbdtn",
+        }
+    }
+
+    /// What the same keys read in Russian.
+    const fn converted(self) -> &'static str {
+        match self {
+            Self::Lower => EXPECTED,
+            Self::Capital => "Привет",
+        }
+    }
+
+    /// The six keys again, `Shift` over the first one of a capital — what the keystroke path of
+    /// decision 160.8 repeats.
+    fn keys(self) -> Vec<input::Key> {
+        GHBDTN_SCANS
+            .iter()
+            .enumerate()
+            .map(|(index, &scan)| input::Key {
+                scan,
+                extended: false,
+                shift: self == Self::Capital && index == 0,
+            })
+            .collect()
+    }
+}
+
+/// **The text after the prompt on the line the person is typing** — П7, the reading the whole
+/// position is decided on.
+///
+/// The screen as `TextPattern` gives it, cut into lines; the last line that is not blank is the
+/// one with the prompt (`PS C:\…> ` in PowerShell, `C:\…>` in `cmd`), and whatever follows the
+/// last `>` on it is the input. `None` when there is no such line — a screen that did not read,
+/// or a last line with no prompt on it — which is a failure of the **instrument** and never «the
+/// word is gone». `Some("")` is a prompt with nothing after it: exactly the line the word leaves
+/// behind when it disappears, and the reason the two answers must never be confused (TZ Э96,
+/// П7: «пустая строка ≠ ничего не напечатано»).
+fn console_input(screen: &str) -> Option<String> {
+    let line = screen
+        .lines()
+        .map(str::trim_end)
+        .rfind(|line| !line.trim().is_empty())?;
+
+    let prompt_end = line.rfind('>')?;
+
+    Some(line[prompt_end + 1..].trim().to_owned())
+}
+
+/// [`console_input`] of the console screen element, or `None` while it does not read.
+fn console_read(content: &Element) -> Option<String> {
+    content.text().and_then(|screen| console_input(&screen))
+}
+
+/// What one step of a console round left on the line, named against what it should have left.
+fn console_verdict(after: Option<&str>, expected: &str, unchanged: &str) -> &'static str {
+    match after {
+        None => "СТРОКА НЕ ЧИТАЕТСЯ",
+        Some(line) if line == expected => "верно",
+        Some("") => "⛔ СЛОВО ПРОПАЛО",
+        Some(line) if line == unchanged => "не изменилось",
+        Some(_) => "⛔ иное",
+    }
+}
+
+/// Clears the line with `Escape` and waits until it reads empty.
+///
+/// `Escape` is what both line editors clear with — PSReadLine's `RevertLine` and the cooked line
+/// of `cmd` — and it is a hard boundary of FR-10, so the product's buffer is emptied by the same
+/// key.
+fn console_clear(target: &input::Target, content: &Element) -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+
+    input::tap(VK_ESCAPE.0, target).map_err(|error| format!("Escape: {error}"))?;
+
+    wait::until(CONSOLE_STEP_TIMEOUT, || {
+        console_read(content).filter(String::is_empty)
+    })
+    .map(|_| ())
+    .ok_or_else(|| format!("строка не очистилась Escape: {:?}", console_read(content)))
+}
+
+/// Types `word` **by keys** — never `KEYEVENTF_UNICODE`, which the classic console does not take
+/// (Э92) — and answers what landed on the line: the word itself when the console was in English,
+/// its Russian reading when it was not.
+fn console_type(
+    word: ConsoleWord,
+    target: &input::Target,
+    content: &Element,
+) -> Result<String, String> {
+    let sent = match word {
+        ConsoleWord::Lower => input::type_text(TYPED, target),
+        ConsoleWord::Capital => input::chord(&[VK_SHIFT.0], u16::from(b'G'), target)
+            .and_then(|()| input::type_text("hbdtn", target)),
+    };
+    sent.map_err(|error| format!("набор {:?}: {error}", word.typed()))?;
+
+    wait::until(CONSOLE_STEP_TIMEOUT, || {
+        console_read(content).filter(|line| line == word.typed() || line == word.converted())
+    })
+    .ok_or_else(|| {
+        format!(
+            "набранное {:?} не легло на строку: {:?}",
+            word.typed(),
+            console_read(content)
+        )
+    })
+}
+
+/// Clears the line and types `word` until it lands **in English**, asking the console for English
+/// with the message of FR-50 when it came out Russian — the precondition of a round, restored
+/// before every round and never assumed. The bench stage only: with the product running, a switch
+/// the product did not make would leave its stamp behind (see [`console_realign`]).
+fn console_type_in_english(
+    word: ConsoleWord,
+    target: &input::Target,
+    content: &Element,
+) -> Result<(), String> {
+    for _ in 0..2 {
+        console_clear(target, content)?;
+
+        if console_type(word, target, content)? == word.typed() {
+            return Ok(());
+        }
+
+        layout::request(target.hwnd, layout::US)?;
+    }
+
+    Err("консоль не перешла в английскую раскладку за две просьбы".to_owned())
+}
+
+/// **One step of П2 and П3, by the bench alone:** the message of FR-50 for `language`, `pause`,
+/// then one packet of six backspaces and the six keys again — the order of decision 160.8 — and
+/// the line read when it shows `expected` or when [`CONSOLE_STEP_TIMEOUT`] runs out.
+///
+/// Answers the line and, when it shows `expected`, how many milliseconds after the packet.
+fn console_bench_step(
+    target: &input::Target,
+    content: &Element,
+    language: u32,
+    pause_ms: u64,
+    word: ConsoleWord,
+    expected: &str,
+) -> Result<(Option<String>, Option<u128>), String> {
+    layout::request(target.hwnd, language)?;
+    race_pause(pause_ms);
+
+    let sent = Instant::now();
+    input::erase_and_replay(GHBDTN_SCANS.len(), &word.keys(), target)
+        .map_err(|error| format!("пакет: {error}"))?;
+
+    let landed = wait::until(CONSOLE_STEP_TIMEOUT, || {
+        console_read(content).filter(|line| line == expected)
+    });
+
+    match landed {
+        Some(line) => Ok((Some(line), Some(sent.elapsed().as_millis()))),
+        None => Ok((console_read(content), None)),
+    }
+}
+
+/// **FR-52 of a console window as the product would take it** — premise П5.
+///
+/// The calls of `switch::read` for a window that is in front, made here for a window given by its
+/// handle: the thread `GetWindowThreadProcessId` names, `GetGUIThreadInfo` of it, the layout of the
+/// thread. A refusal of `GetGUIThreadInfo` is the addendum to FR-52 (Т-14-2): the switch is then
+/// posted and never verified — `Outcome::Sent` — which is what the keystroke path relies on.
+/// Answers the sentence for the protocol and whether the reading was blind.
+fn console_fr52(hwnd: HWND) -> (String, bool) {
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    let mut pid = 0u32;
+    // SAFETY: `hwnd` came from UI Automation a moment ago and may since have died, in which case
+    // the call returns zero — examined below (NFR-13). `pid` is a live local, the only thing written.
+    let thread = unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
+
+    if thread == 0 {
+        return ("окно уже не существует".to_owned(), false);
+    }
+
+    let focus = layout::focus_of_thread(thread);
+    let refused = matches!(focus, layout::Focus::Refused(_));
+    let reason = match &focus {
+        layout::Focus::Refused(why) => format!(" ({})", why.trim()),
+        _ => String::new(),
+    };
+
+    (
+        format!(
+            "поток {thread} процесса {pid} ({}): GetGUIThreadInfo — {}{reason}; раскладка потока {}",
+            crate::own::process_table_name(pid).unwrap_or_else(|| "<имя неизвестно>".into()),
+            focus.tag(),
+            layout::of_window(hwnd)
+                .map(layout::id_of)
+                .map_or("<не читается>".to_owned(), layout::describe)
+        ),
+        refused,
+    )
+}
+
+/// **П5 on a real classic console** — `conhost.exe <оболочка>`, the very window of decision 160.1.
+///
+/// Read and never driven: the window goes to the shell, a protected name not spawned by the bench
+/// directly, so requirement B refuses it as a target — and nothing is sent to it. What is read is
+/// the FR-52 of its thread, which is a question about the window and not an action on it. The
+/// console is put away through the `conhost.exe` the bench spawned (requirement D), and the shell
+/// goes with its console.
+fn console_real_reading(ctx: &Context, shell: &str) -> Result<(String, bool), String> {
+    let conhost = std::path::PathBuf::from(r"C:\Windows\System32\conhost.exe");
+    let parameters = match shell {
+        "powershell" => "powershell.exe -NoLogo -NoProfile",
+        _ => "cmd.exe /D",
+    };
+
+    let pid = crate::sut::shell_execute(&conhost, parameters)?;
+    crate::own::register_spawned(pid);
+
+    let found = wait::until(CONSOLE_PROMPT_TIMEOUT, || {
+        ctx.automation
+            .top_level_of_any(&|element: &Element| {
+                element.class() == CONSOLE_CLASS && element.pid() == Some(pid)
+            })
+            .into_iter()
+            .find(|window| {
+                window
+                    .text()
+                    .is_some_and(|screen| console_input(&screen).is_some())
+            })
+    });
+
+    let reading = match found.as_ref().and_then(Element::hwnd) {
+        Some(hwnd) => Ok(console_fr52(hwnd)),
+        None => Err(format!(
+            "окно conhost {parameters} (pid {pid}) с приглашением не появилось за {} с",
+            CONSOLE_PROMPT_TIMEOUT.as_secs()
+        )),
+    };
+
+    match shell::terminate(pid) {
+        Ok(()) => println!("  conhost {pid} ({parameters}): снят"),
+        Err(error) => println!("  ⚠ conhost {pid} ({parameters}) снять не удалось: {error}"),
+    }
+
+    reading
+}
+
+/// The console of the position: a real `conhost.exe` hosting this bench in the mode
+/// [`crate::console_shell`] — the shell in the same console. See that function for why.
+fn launch_console_shell(shell: &str) -> Result<App, String> {
+    let bench = std::env::current_exe()
+        .map_err(|error| format!("собственный путь стенда не читается: {error}"))?;
+
+    let conhost = std::path::PathBuf::from(r"C:\Windows\System32\conhost.exe");
+    let pid = crate::sut::shell_execute(
+        &conhost,
+        &format!("\"{}\" --console-shell {shell}", bench.display()),
+    )?;
+
+    // ⛔ Requirement A, at the instant of the launch — see `launch_console`.
+    crate::own::register_spawned(pid);
+
+    Ok(App {
+        name: format!("Консоль (conhost + langsw-e2e --console-shell {shell})"),
+        pid,
+        child: None,
+        window: None,
+        close: CloseWith::Terminate,
+        scratch: None,
+    })
+}
+
+/// Adopts the console of [`launch_console_shell`], waits for its prompt and reads what the shell
+/// printed of itself — the versions П1 asks to record and the shell's process id.
+fn adopt_console_shell(
+    ctx: &Context,
+    app: &mut App,
+) -> Result<(input::Target, Element, Option<u32>), String> {
+    let (target, content) = adopt_console(ctx, app)?;
+
+    let screen = wait::until(CONSOLE_PROMPT_TIMEOUT, || {
+        content
+            .text()
+            .filter(|screen| console_input(screen).is_some())
+    })
+    .ok_or_else(|| {
+        format!(
+            "приглашение оболочки не появилось за {} с",
+            CONSOLE_PROMPT_TIMEOUT.as_secs()
+        )
+    })?;
+
+    let mut shell_pid = None;
+    for line in screen
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if let Some(rest) = line.strip_prefix("langsw-e2e --console-shell: shell pid ") {
+            shell_pid = rest.trim().parse().ok();
+        }
+        if line.starts_with("PSReadLine ")
+            || line.starts_with("PowerShell ")
+            || line.starts_with("Microsoft Windows")
+        {
+            println!("  на экране оболочки: {line}");
+            protocol(&format!("T-96-1 на экране оболочки: {line}"));
+        }
+    }
+
+    Ok((target, content, shell_pid))
+}
+
+/// Puts the console of [`launch_console_shell`] away: the program it hosts, then `conhost.exe`
+/// itself — the one the bench spawned directly (requirement D) — and says whether the shell went
+/// with its console.
+fn close_console_shell(mut app: App, conhost_pid: u32, shell_pid: Option<u32>) {
+    println!("  {}", app.close());
+
+    if shell::process_is_alive(conhost_pid) {
+        match shell::terminate(conhost_pid) {
+            Ok(()) => println!("  conhost {conhost_pid}: снят"),
+            Err(error) => println!("  ⚠ conhost {conhost_pid} снять не удалось: {error}"),
+        }
+    }
+
+    if let Some(pid) = shell_pid {
+        let gone = wait::until_true(wait::CLOSE_TIMEOUT, || !shell::process_is_alive(pid));
+        println!(
+            "  оболочка pid {pid}: {}",
+            if gone {
+                "ушла вместе с консолью"
+            } else {
+                "⚠ ЖИВА после закрытия консоли"
+            }
+        );
+    }
+}
+
+/// The controls of П7 — the reader of the line must be able to say all three things it is used
+/// to say: an empty line, a typed word, and an empty line again after `Escape`.
+fn console_controls(target: &input::Target, content: &Element) -> Result<(), String> {
+    console_clear(target, content)?;
+    let empty = console_read(content);
+
+    let typed = console_type(ConsoleWord::Lower, target, content)?;
+
+    console_clear(target, content)?;
+    let cleared = console_read(content);
+
+    let line =
+        format!("П7: пустая строка → {empty:?}; набрано → {typed:?}; после Escape → {cleared:?}");
+    println!("  {line}");
+    protocol(&format!("T-96-1 {line}"));
+
+    if empty.as_deref() == Some("") && cleared.as_deref() == Some("") {
+        Ok(())
+    } else {
+        Err(format!("прибор строки не поднялся: {line}"))
+    }
+}
+
+/// **The bench stage — П2, П3, П5 and П7 for one shell, no product anywhere.**
+///
+/// П5 on the real console first, then the console of the position: the controls of the reader
+/// (П7), the sweep of the pause (П2: the switch, the pause, one packet — forward into Russian and
+/// back into English, `rounds` times per pause, the next pause only while the previous one did not
+/// give every round) and the capitals at the pause the sweep stopped at (П3). Answers whether a
+/// pause gave every round, which is the fork of §0 п. 5.
+fn console_premises(ctx: &Context, shell: &str, rounds: usize) -> Result<Option<u64>, String> {
+    println!("\n=== {shell}: П5 — FR-52 настоящей классической консоли (conhost {shell}) ===");
+    match console_real_reading(ctx, shell) {
+        Ok((line, blind)) => {
+            println!("  {line}");
+            println!(
+                "  → чтение {}",
+                if blind {
+                    "СЛЕПОЕ — FR-50 посылает и не проверяет (Outcome::Sent)"
+                } else {
+                    "НЕ слепое — FR-50 станет сверять раскладку потока, которую консоль не меняет"
+                }
+            );
+            protocol(&format!(
+                "T-96-1 П5 {shell} настоящая консоль: {line}; слепое: {blind}"
+            ));
+        }
+        Err(error) => println!("  ⚠ П5 не замерен: {error}"),
+    }
+
+    println!("\n=== {shell}: консоль позиции (conhost + langsw-e2e --console-shell {shell}) ===");
+    let mut app = launch_console_shell(shell)?;
+    let conhost_pid = app.pid;
+    let mut shell_pid = None;
+
+    let outcome = (|| -> Result<Option<u64>, String> {
+        let (target, content, pid) = adopt_console_shell(ctx, &mut app)?;
+        shell_pid = pid;
+
+        let (line, blind) = console_fr52(target.hwnd);
+        println!("  П5 консоли позиции: {line}; слепое: {blind}");
+        let reading = lang_switcher::switch::read();
+        println!(
+            "  П5 тем же switch::read, что у продукта (консоль впереди): окно {:#x}, раскладка {}, \
+             слепое: {}",
+            reading.window.raw(),
+            reading.layout,
+            reading.blind
+        );
+        protocol(&format!(
+            "T-96-1 П5 {shell} консоль позиции: {line}; switch::read: layout {} blind {}",
+            reading.layout, reading.blind
+        ));
+
+        console_controls(&target, &content)?;
+
+        let mut chosen = None;
+
+        for &pause in &SETTLE_PAUSES_MS {
+            let mut forward = 0usize;
+            let mut back = 0usize;
+            let mut notes: BTreeMap<String, usize> = BTreeMap::new();
+            let mut millis: Vec<u128> = Vec::new();
+
+            for round in 1..=rounds {
+                console_type_in_english(ConsoleWord::Lower, &target, &content)?;
+
+                let (after, ms) = console_bench_step(
+                    &target,
+                    &content,
+                    layout::RUSSIAN,
+                    pause,
+                    ConsoleWord::Lower,
+                    EXPECTED,
+                )?;
+                let verdict = console_verdict(after.as_deref(), EXPECTED, TYPED);
+                protocol(&format!(
+                    "T-96-1 П2 {shell} пауза {pause} круг {round} вперёд: {after:?} — {verdict}"
+                ));
+                millis.extend(ms);
+
+                if verdict != "верно" {
+                    *notes.entry(format!("вперёд: {verdict}")).or_insert(0) += 1;
+                    continue;
+                }
+                forward += 1;
+
+                let (after, _) = console_bench_step(
+                    &target,
+                    &content,
+                    layout::US,
+                    pause,
+                    ConsoleWord::Lower,
+                    TYPED,
+                )?;
+                let verdict = console_verdict(after.as_deref(), TYPED, EXPECTED);
+                protocol(&format!(
+                    "T-96-1 П2 {shell} пауза {pause} круг {round} назад: {after:?} — {verdict}"
+                ));
+
+                if verdict == "верно" {
+                    back += 1;
+                } else {
+                    *notes.entry(format!("назад: {verdict}")).or_insert(0) += 1;
+                }
+            }
+
+            let line = format!(
+                "П2 {shell}, пауза {pause} мс: вперёд {forward} из {rounds}, назад {back} из \
+                 {forward}; до строки, мс: {}; иное: {notes:?}",
+                spread(&millis)
+            );
+            println!("  {line}");
+            protocol(&format!("T-96-1 {line}"));
+
+            if forward == rounds && back == rounds {
+                chosen = Some(pause);
+                break;
+            }
+        }
+
+        // П3 — the capitals, at the pause the sweep stopped at, or at the longest one tried.
+        let capital_pause = chosen.unwrap_or(SETTLE_PAUSES_MS[SETTLE_PAUSES_MS.len() - 1]);
+        let mut forward = 0usize;
+        let mut back = 0usize;
+
+        for round in 1..=rounds {
+            console_type_in_english(ConsoleWord::Capital, &target, &content)?;
+
+            let word = ConsoleWord::Capital;
+            let (after, _) = console_bench_step(
+                &target,
+                &content,
+                layout::RUSSIAN,
+                capital_pause,
+                word,
+                word.converted(),
+            )?;
+            let verdict = console_verdict(after.as_deref(), word.converted(), word.typed());
+            protocol(&format!(
+                "T-96-1 П3 {shell} пауза {capital_pause} круг {round} вперёд: {after:?} — {verdict}"
+            ));
+            if verdict != "верно" {
+                continue;
+            }
+            forward += 1;
+
+            let (after, _) = console_bench_step(
+                &target,
+                &content,
+                layout::US,
+                capital_pause,
+                word,
+                word.typed(),
+            )?;
+            let verdict = console_verdict(after.as_deref(), word.typed(), word.converted());
+            protocol(&format!(
+                "T-96-1 П3 {shell} пауза {capital_pause} круг {round} назад: {after:?} — {verdict}"
+            ));
+            if verdict == "верно" {
+                back += 1;
+            }
+        }
+
+        let line = format!(
+            "П3 {shell}, заглавные, пауза {capital_pause} мс: «Ghbdtn» → «Привет» {forward} из \
+             {rounds}, назад {back} из {forward}"
+        );
+        println!("  {line}");
+        protocol(&format!("T-96-1 {line}"));
+
+        console_clear(&target, &content)?;
+        Ok(chosen)
+    })();
+
+    close_console_shell(app, conhost_pid, shell_pid);
+
+    outcome
+}
+
+/// The spread of a handful of milliseconds, for a line of the protocol: least, median, most.
+fn spread(values: &[u128]) -> String {
+    if values.is_empty() {
+        return "—".to_owned();
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+
+    format!(
+        "{}/{}/{}",
+        sorted[0],
+        sorted[sorted.len() / 2],
+        sorted[sorted.len() - 1]
+    )
+}
+
+/// Puts the product's stamp and the console back into English when a round found the console in
+/// Russian — **with the product running**, where a switch the product did not make itself must not
+/// be the only one: the stamp of FR-04 follows the product's own switches into a classic console
+/// and nothing else (FR-52's addendum), so it is the anchor — a window of the bench's own whose
+/// layout the product can read — that the product is shown first, and the console after it.
+fn console_realign(anchor: &layout::Ambient, target: &input::Target) -> Result<(), String> {
+    anchor.set(layout::US, Duration::from_secs(5))?;
+    shell::activate_window(target.pid, Some(target.hwnd))?;
+    layout::request(target.hwnd, layout::US)
+}
+
+/// **One round of the product stage:** clear, type `word`, then `presses` presses of the hotkey,
+/// each read when the line shows what FR-32 says it should — odd presses the Russian reading, even
+/// ones the word as typed — or when [`CONSOLE_STEP_TIMEOUT`] runs out. Answers the verdict of every
+/// press, in order.
+fn console_product_round(
+    ctx: &Context,
+    anchor: &layout::Ambient,
+    target: &input::Target,
+    content: &Element,
+    word: ConsoleWord,
+    presses: usize,
+    label: &str,
+) -> Result<Vec<&'static str>, String> {
+    console_clear(target, content)?;
+    if console_type(word, target, content)? != word.typed() {
+        println!("  ⚠ {label}: консоль оказалась в русской раскладке — выравниваю штамп и консоль");
+        console_realign(anchor, target)?;
+        console_clear(target, content)?;
+        let again = console_type(word, target, content)?;
+        if again != word.typed() {
+            return Err(format!(
+                "{label}: после выравнивания набранное легло как {again:?}"
+            ));
+        }
+    }
+
+    let mut verdicts = Vec::with_capacity(presses);
+    let mut before = word.typed().to_owned();
+
+    for press in 1..=presses {
+        let (expected, unchanged) = if press % 2 == 1 {
+            (word.converted(), word.typed())
+        } else {
+            (word.typed(), word.converted())
+        };
+
+        input::tap(ctx.hotkey_vk, target).map_err(|error| format!("горячая клавиша: {error}"))?;
+
+        let after = wait::until(CONSOLE_STEP_TIMEOUT, || {
+            console_read(content).filter(|line| line == expected)
+        })
+        .or_else(|| console_read(content));
+
+        let verdict = console_verdict(after.as_deref(), expected, unchanged);
+        protocol(&format!(
+            "T-96-1 {label} нажатие {press}: до={before:?} после={after:?} ожидалось={expected:?} — \
+             {verdict}; {}",
+            series_channel()
+        ));
+
+        before = after.unwrap_or_default();
+        verdicts.push(verdict);
+    }
+
+    Ok(verdicts)
+}
+
+/// **The product stage for one shell** — П1 on the base build, and the same rounds on the repaired
+/// one: the product's own presses in the console of the position.
+///
+/// The product is started while the anchor — a window of the bench's own, in English — is in front:
+/// the stamp of FR-04 is taken at start-up from the window in front, and the classic console is a
+/// window whose layout the product cannot read (FR-52's addendum), so it is the anchor that gives
+/// the stamp its first value and the console never moves it. Then `rounds` rounds of the word with
+/// two presses (convert, roll back), half as many of the capital, half as many of four presses
+/// (П4: the third press converts again, so the keys the product repeated did not enter its own
+/// buffer). Answers the count of the presses that left the right word, out of all.
+fn console_product(ctx: &Context, shell: &str, rounds: usize) -> Result<(usize, usize), String> {
+    /// The FR-97 deadline of the debug build here — the rounds of two consoles fit in it.
+    const DEADLINE_SECS: u32 = 600;
+
+    println!("\n=== {shell}: продукт в консоли позиции ===");
+    let mut app = launch_console_shell(shell)?;
+    let conhost_pid = app.pid;
+    let mut shell_pid = None;
+
+    let outcome = (|| -> Result<(usize, usize), String> {
+        let (target, content, pid) = adopt_console_shell(ctx, &mut app)?;
+        shell_pid = pid;
+
+        let (line, blind) = console_fr52(target.hwnd);
+        println!("  П5 консоли позиции: {line}; слепое: {blind}");
+
+        let anchor = layout::Ambient::open()?;
+        let set = anchor.set(layout::US, Duration::from_secs(5))?;
+        println!(
+            "  якорь стенда впереди в {} — продукт возьмёт штамп с него",
+            layout::describe(set)
+        );
+
+        let mut product = crate::sut::Sut::launch_with(DEADLINE_SECS)?;
+        let counted = (|| -> Result<(usize, usize), String> {
+            let ready = product
+                .await_ready(Duration::from_secs(30))
+                .ok_or_else(|| "продукт не сообщил о готовности за 30 с".to_owned())?;
+            println!(
+                "  продукт PID {}, hook_installed={}, active_layout={}",
+                product.pid,
+                ready.get("hook_installed").unwrap_or("?"),
+                ready.get("active_layout").unwrap_or("?")
+            );
+
+            shell::activate_window(target.pid, Some(target.hwnd))?;
+            layout::request(target.hwnd, layout::US)?;
+            console_controls(&target, &content)?;
+            println!(
+                "{}",
+                watched(&format!("T-96-1 {shell}: консоль впереди, продукт поднят"))
+            );
+
+            let mut good = 0usize;
+            let mut all = 0usize;
+            let plan = [
+                (ConsoleWord::Lower, 2usize, rounds, "слово"),
+                (ConsoleWord::Capital, 2, rounds.div_ceil(2), "заглавное"),
+                (ConsoleWord::Lower, 4, rounds.div_ceil(2), "четыре нажатия"),
+            ];
+
+            for (word, presses, count, name) in plan {
+                let mut by_press: Vec<BTreeMap<&'static str, usize>> =
+                    vec![BTreeMap::new(); presses];
+
+                for round in 1..=count {
+                    let label = format!("{shell}, {name}, круг {round}");
+                    let verdicts = console_product_round(
+                        ctx, &anchor, &target, &content, word, presses, &label,
+                    )?;
+                    for (press, verdict) in verdicts.into_iter().enumerate() {
+                        *by_press[press].entry(verdict).or_insert(0) += 1;
+                        all += 1;
+                        if verdict == "верно" {
+                            good += 1;
+                        }
+                    }
+                }
+
+                for (press, tally) in by_press.iter().enumerate() {
+                    let line = format!(
+                        "{shell}, {name} ({:?} → {:?}), нажатие {}: {tally:?} из {count}",
+                        word.typed(),
+                        if press % 2 == 0 {
+                            word.converted()
+                        } else {
+                            word.typed()
+                        },
+                        press + 1
+                    );
+                    println!("  {line}");
+                    protocol(&format!("T-96-1 ИТОГ {line}"));
+                }
+            }
+
+            console_clear(&target, &content)?;
+            println!("{}", watched(&format!("T-96-1 {shell}: круги окончены")));
+            Ok((good, all))
+        })();
+
+        match product.stop() {
+            Ok(code) => println!("  продукт остановлен по FR-96, код {code}"),
+            Err(error) => println!("  ⚠ остановка продукта: {error}"),
+        }
+        drop(anchor);
+
+        counted
+    })();
+
+    close_console_shell(app, conhost_pid, shell_pid);
+
+    outcome
+}
+
+/// **Task T-96-1 — the classic console, where the typed word disappeared** (вопрос 160).
+///
+/// Two stages, the same consoles:
+///
+/// * `premises` — the bench alone, **no product**: П5 on a real `conhost <оболочка>`, then in the
+///   console of the position П7 (the reader of the line, with its controls), П2 (does the switch
+///   of FR-50 take before keys sent right after it, or after which pause) and П3 (do the keys
+///   bring the replacement, capitals and the way back included). The pause the sweep stops at is
+///   the number of decision 160.8 — the fork of §0 п. 5 of the task;
+/// * `product` — the product's own presses: on the base build this is П1 (the word disappears in
+///   PowerShell, `привет` in `cmd`), on the repaired build the same rounds are the acceptance of
+///   the keystroke path.
+///
+/// Windows Terminal is not driven here: requirement C refuses `WindowsTerminal.exe`, as the matrix
+/// of §11.3 records for positions 6 and 7, and its path is not changed by the stage.
+pub fn experiment_console_keys(
+    ctx: &Context,
+    stage: &str,
+    rounds: usize,
+) -> std::process::ExitCode {
+    println!(
+        "--- ОПЫТ T-96-1: КЛАССИЧЕСКАЯ КОНСОЛЬ — слово не пропадает (вопрос 160): ступень {stage}, \
+         кругов {rounds} ---\n"
+    );
+    protocol(&format!(
+        "\n\n=========== T-96-1 {stage} {} ===========",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    ));
+    println!("Протокол: {}", protocol_path().display());
+
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!(
+            "⛔ продукт уже запущен: {already:?}. Его хук видел бы набор стенда, а FR-96 в конце \
+             сняла бы чужой экземпляр. Опыт не ставится."
+        );
+        return std::process::ExitCode::from(1);
+    }
+
+    let mut held = true;
+
+    match stage {
+        "premises" => {
+            let mut chosen = Vec::new();
+            for shell in CLASSIC_SHELLS {
+                match console_premises(ctx, shell, rounds) {
+                    Ok(pause) => chosen.push((shell, pause)),
+                    Err(error) => {
+                        println!("  ⛔ {shell}: ступень не доведена: {error}");
+                        held = false;
+                    }
+                }
+            }
+
+            println!("\n=== РАЗВИЛКА §0 п. 5 ===");
+            for (shell, pause) in &chosen {
+                match pause {
+                    Some(pause) => println!(
+                        "  {shell}: каждый круг — при паузе {pause} мс (пауза продукта — ×3, не \
+                         больше 100)"
+                    ),
+                    None => println!("  {shell}: ни при одной паузе ≤ 100 мс не каждый круг — C1"),
+                }
+            }
+            protocol(&format!("T-96-1 РАЗВИЛКА {chosen:?}"));
+        }
+        "product" => {
+            for shell in CLASSIC_SHELLS {
+                match console_product(ctx, shell, rounds) {
+                    Ok((good, all)) => {
+                        let line = format!("{shell}: верных нажатий {good} из {all}");
+                        println!("\n  ИТОГ {line}");
+                        protocol(&format!("T-96-1 ИТОГ {line}"));
+                    }
+                    Err(error) => {
+                        println!("  ⛔ {shell}: ступень не доведена: {error}");
+                        held = false;
+                    }
+                }
+            }
+        }
+        other => {
+            eprintln!("ступень {other:?} не знакома: premises | product");
+            return std::process::ExitCode::from(2);
+        }
+    }
+
+    let left = crate::sut::any_running();
+    println!(
+        "\nэкземпляров продукта после опыта: {}",
+        if left.is_empty() {
+            "ни одного".to_owned()
+        } else {
+            format!("⚠ {left:?}")
+        }
+    );
+    println!("{}", restore_ambient(ctx));
+
+    if held {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::from(1)
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Unit tests — logic only, no product and no application anywhere near them
 // ---------------------------------------------------------------------------------------
 
@@ -13103,6 +13987,77 @@ mod tests {
     use super::*;
 
     use crate::report::Report;
+
+    /// **Task T-96-1, П7** — the reader of the console line gives «empty», «this word» and «there
+    /// is no prompt here» as three different answers, so that a word that disappeared is never
+    /// mistaken for a screen that did not read.
+    #[test]
+    fn the_console_line_reads_empty_typed_and_unreadable_as_three_answers() {
+        // A word after the prompt of either shell, with the blank tail of the screen buffer.
+        assert_eq!(
+            console_input("PSReadLine 2.0.0\r\nPS C:\\Temp> ghbdtn\r\n          \r\n\r\n"),
+            Some("ghbdtn".to_owned())
+        );
+        assert_eq!(
+            console_input("Microsoft Windows\r\n\r\nC:\\Temp>привет\r\n   \r\n"),
+            Some("привет".to_owned())
+        );
+
+        // The prompt alone: the word is gone — an answer, and not a failure of the reader.
+        assert_eq!(
+            console_input("PS C:\\Temp> \r\n   \r\n"),
+            Some(String::new())
+        );
+        assert_eq!(console_input("C:\\Temp>"), Some(String::new()));
+
+        // Controls: a last line with no prompt on it, and a screen with nothing on it, are «не
+        // читается» — never an empty line.
+        assert_eq!(
+            console_input("Microsoft Windows [Version 10.0.26100.1]\r\n"),
+            None
+        );
+        assert_eq!(console_input(""), None);
+        assert_eq!(console_input("   \r\n  \r\n"), None);
+    }
+
+    /// **Task T-96-1** — a step of a console round is named against what it should have left, and
+    /// the four ways it can be wrong read as four different words.
+    #[test]
+    fn a_console_step_is_named_against_what_it_should_have_left() {
+        assert_eq!(console_verdict(Some("привет"), "привет", "ghbdtn"), "верно");
+        assert_eq!(
+            console_verdict(Some(""), "привет", "ghbdtn"),
+            "⛔ СЛОВО ПРОПАЛО"
+        );
+        assert_eq!(
+            console_verdict(Some("ghbdtn"), "привет", "ghbdtn"),
+            "не изменилось"
+        );
+        assert_eq!(
+            console_verdict(Some("пghbdtn"), "привет", "ghbdtn"),
+            "⛔ иное"
+        );
+        assert_eq!(
+            console_verdict(None, "привет", "ghbdtn"),
+            "СТРОКА НЕ ЧИТАЕТСЯ"
+        );
+    }
+
+    /// **Task T-96-1, П3** — the capital repeats `Shift` over its first key and over no other, and
+    /// both words repeat the six keys of `ghbdtn` in order.
+    #[test]
+    fn the_capital_repeats_shift_over_the_first_key_only() {
+        let capital = ConsoleWord::Capital.keys();
+
+        assert_eq!(
+            capital.iter().map(|key| key.scan).collect::<Vec<_>>(),
+            GHBDTN_SCANS
+        );
+        assert!(capital[0].shift);
+        assert!(capital[1..].iter().all(|key| !key.shift));
+        assert!(ConsoleWord::Lower.keys().iter().all(|key| !key.shift));
+        assert!(capital.iter().all(|key| !key.extended));
+    }
 
     /// **Task T-93-3** — the witness's title reads back to its four counters, and a title that is
     /// not the witness's, or is missing one of them, reads back as nothing rather than as zeros.

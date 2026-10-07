@@ -88,6 +88,17 @@ fn reports_dir() -> std::path::PathBuf {
 fn main() -> std::process::ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
 
+    // ⭐ **Task T-96-1 — before COM, and that order is part of the measurement.** The thread this
+    // program starts on is the one a console names as the owner of its window, and FR-52 reads
+    // exactly that thread: whether `GetGUIThreadInfo` answers for it — the blind console of the
+    // addendum to FR-52 is the case where it refuses (Т-14-2) — depends on whether the thread has
+    // become a thread with windows. A single-threaded apartment makes a hidden window on the thread
+    // that enters it, so a console hosted after `CoInitializeEx` would certainly differ from the
+    // console the owner types into; П5 reads both. See [`console_shell`].
+    if arguments.first().map(String::as_str) == Some("--console-shell") {
+        return console_shell(arguments.get(1).map(String::as_str));
+    }
+
     // SAFETY: `CoInitializeEx` initialises COM for this thread. A single-threaded apartment is
     // what UI Automation's client wants and what `probe-word.ps1` proved out. NFR-13: the
     // `HRESULT` is examined below — `S_FALSE` means "already initialised", which is a success.
@@ -153,6 +164,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-phase") => experiment_phase(arguments),
         Some("--experiment-threads") => experiment_threads(arguments),
         Some("--experiment-belief") => experiment_belief(arguments),
+        Some("--experiment-console-keys") => experiment_console_keys(arguments),
         Some("--measure-layout") => measure_layout(arguments.get(1).map(String::as_str)),
         _ => full_run(arguments),
     }
@@ -758,6 +770,38 @@ fn experiment_belief(arguments: &[String]) -> std::process::ExitCode {
     scenarios::experiment_belief(&context, reps)
 }
 
+/// ⭐ **Task T-96-1** — the classic console, where the typed word disappeared (вопрос 160).
+///
+/// `--experiment-console-keys <ступень> [кругов]`, the stage being `premises` (П2, П3 and П7 —
+/// the bench alone, no product: does the switch take before the keys, do the keys bring the
+/// replacement) or `product` (П1 on the base build, and the same rounds on the repaired one: the
+/// product's own presses in the two classic consoles). The same split as every mode of this
+/// file: the arm builds the context, the experiment lives in `scenarios.rs`. See
+/// [`scenarios::experiment_console_keys`].
+fn experiment_console_keys(arguments: &[String]) -> std::process::ExitCode {
+    let stage = arguments.get(1).map_or("premises", String::as_str);
+    let rounds = arguments
+        .get(2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(if stage == "product" { 10 } else { 20 });
+
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: hotkey_vk(),
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_console_keys(&context, stage, rounds)
+}
+
 /// ⭐ **The program the console item of the sequence hosts** — task T-10-11.
 ///
 /// # Why the bench hosts itself rather than a shell
@@ -818,6 +862,81 @@ fn console_park() -> std::process::ExitCode {
             // End of input — the console has gone, and so does this.
             Ok(0) | Err(_) => return std::process::ExitCode::SUCCESS,
             Ok(_) => {}
+        }
+    }
+}
+
+/// ⭐ **The program the classic-console position hosts** — task T-96-1, вопрос 160.
+///
+/// # Why a shell inside the bench's own console, and not `conhost.exe <оболочка>`
+///
+/// The defect lives in Windows PowerShell 5.1 with PSReadLine inside a classic console window
+/// (`ConsoleWindowClass`): `KEYEVENTF_UNICODE` does not reach its line, and the word the product
+/// erased is never typed back (decision 160.1, the owner's hand). Only `conhost.exe <оболочка>`
+/// gives that window on this machine — a shell started directly is handed to Windows Terminal
+/// (the table at `scenarios::launch_console`). But `conhost.exe powershell.exe` hands the window
+/// to `powershell.exe`, a name on the protected list of requirement C that was not spawned by the
+/// bench directly, and requirement C is not relaxed here, exactly as it was not for T-10-11.
+///
+/// So the window goes to **this binary** — conhost hosts it, conhost was spawned directly, and
+/// the console names the first program attached to it as the owner of its window while that
+/// program lives (checked by the adoption itself: a window named after the shell would be refused
+/// by requirement B, and the position would not run) — and this binary starts the shell **in the
+/// same console** and waits for it. The shell reads the console's input buffer; this program reads
+/// nothing, so every key the bench sends reaches the shell and only the shell.
+///
+/// # What is started
+///
+/// * `powershell` — Windows PowerShell 5.1, `-NoProfile` so that nobody's profile is run, and a
+///   first command that switches the history of PSReadLine off (nothing typed here reaches the
+///   person's history file) and prints the two versions П1 asks to record — the line the bench
+///   reads off the screen;
+/// * `cmd` — `cmd.exe /D`, the AutoRun commands of the registry not run.
+///
+/// The first line printed carries the shell's process id, so that the bench can say afterwards
+/// whether it went with its console. Nothing typed is read, parsed or acted on by this program.
+fn console_shell(shell: Option<&str>) -> std::process::ExitCode {
+    let mut command = match shell {
+        Some("powershell") => {
+            let mut command = std::process::Command::new("powershell.exe");
+            command.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NoExit",
+                "-Command",
+                "Set-PSReadLineOption -HistorySaveStyle SaveNothing; \
+                 'PSReadLine ' + (Get-Module PSReadLine).Version; \
+                 'PowerShell ' + $PSVersionTable.PSVersion",
+            ]);
+            command
+        }
+        Some("cmd") => {
+            let mut command = std::process::Command::new("cmd.exe");
+            command.arg("/D");
+            command
+        }
+        other => {
+            println!(
+                "langsw-e2e --console-shell: оболочка {other:?} не знакома (powershell | cmd)"
+            );
+            return std::process::ExitCode::from(2);
+        }
+    };
+
+    // A folder whose name carries no `>`: the bench reads the line after the prompt.
+    command.current_dir(std::env::temp_dir());
+
+    match command.spawn() {
+        Err(error) => {
+            println!("langsw-e2e --console-shell: оболочка не запустилась: {error}");
+            std::process::ExitCode::from(1)
+        }
+        Ok(mut child) => {
+            println!("langsw-e2e --console-shell: shell pid {}", child.id());
+            match child.wait() {
+                Ok(status) if status.success() => std::process::ExitCode::SUCCESS,
+                _ => std::process::ExitCode::from(1),
+            }
         }
     }
 }

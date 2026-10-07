@@ -490,6 +490,38 @@ pub fn ensure(hwnd: HWND, language: u32, timeout: std::time::Duration) -> Result
         )),
     }
 }
+/// The message of FR-50 and **nothing after it** — task T-96-1, the classic console.
+///
+/// [`ensure`] posts the same message and then waits until FR-52 reads the layout back, and that
+/// wait is what a classic console window can never end: the thread its handle names never shows
+/// the console's switch (FR-52's addendum, Т-14-2), so `ensure` spends its whole timeout and
+/// reports a refusal of a switch that did happen. For that window the request is all there is,
+/// and what it did is read off the screen — the keys typed after it come out in one alphabet or
+/// the other. This is the message the product's keystroke path sends before its packet, so that
+/// the premise П2 is measured on the very message the product sends.
+pub fn request(hwnd: HWND, language: u32) -> Result<(), String> {
+    let Some(wanted) = handle_for(language) else {
+        return Err(format!(
+            "раскладка {} не подключена в этом сеансе; стенд её не устанавливает",
+            describe(language)
+        ));
+    };
+
+    // SAFETY: `hwnd` is a live window handle from the caller and `wanted` a layout handle from
+    // the system's own list. `PostMessage` copies the message into the target queue and
+    // dereferences nothing of ours. NFR-13: the result is examined below.
+    let posted = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(hwnd),
+            WM_INPUTLANGCHANGEREQUEST,
+            windows::Win32::Foundation::WPARAM(0),
+            windows::Win32::Foundation::LPARAM(wanted.0 as isize),
+        )
+    };
+
+    posted.map_err(|error| format!("PostMessage(WM_INPUTLANGCHANGEREQUEST): {error}"))
+}
+
 /// The **second** link of the FR-50 chain, used as a precondition: `AttachThreadInput`,
 /// `ActivateKeyboardLayout`, `DetachThreadInput`.
 ///

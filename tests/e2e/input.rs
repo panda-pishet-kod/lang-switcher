@@ -22,8 +22,9 @@
 //!
 //! * inside [`send_verified`] — the guarded send, and the only one that can carry text. The
 //!   function is private to this module and every public entry point that types anything
-//!   ([`type_text`], [`tap`], [`chord`], and since task T-93-3 [`hold_down`] and [`let_go`] —
-//!   a modifier held over a combination) ends in it, so no other module of the bench can reach
+//!   ([`type_text`], [`tap`], [`chord`], since task T-93-3 [`hold_down`] and [`let_go`] —
+//!   a modifier held over a combination — and since task T-96-1 [`erase_and_replay`], the packet
+//!   of the classic console) ends in it, so no other module of the bench can reach
 //!   `SendInput` at all: the guard is not bypassed by a new call site because there is nowhere
 //!   else to put one.
 //! * inside [`emergency_combination`] — `Ctrl+Alt+Shift+F12` of FR-96, sent **without** a
@@ -358,6 +359,70 @@ pub fn hold_down(modifiers: &[u16], target: &Target) -> Result<(), SendError> {
         .iter()
         .map(|&modifier| key_event(modifier, 0, 0))
         .collect();
+
+    send_verified(&events, target)
+}
+
+/// One key of a replay — a physical key, as the product's buffer records it (FR-04, FR-05).
+///
+/// The scan code and the extended flag name the key; `shift` says whether `Shift` was held over it.
+#[derive(Debug, Clone, Copy)]
+pub struct Key {
+    pub scan: u16,
+    pub extended: bool,
+    pub shift: bool,
+}
+
+/// The scan code of the left `Shift` — set 1, main block.
+const SCAN_LEFT_SHIFT: u16 = 0x2A;
+
+/// **`erase` × `Backspace`, then `keys` again — in one `SendInput`**, task T-96-1.
+///
+/// The packet the product's keystroke path sends into a classic console (decision 160.8), built
+/// by the bench on its own so that the premises П2 and П3 are measured **before** the product has
+/// that path at all: the backspaces by virtual key, as FR-41 sends them; every key by its scan
+/// code (`KEYEVENTF_SCANCODE`, the extended flag where the key has one) and `Shift` around the
+/// keys that had it, so that the layout of the receiving window decides what each key is. Not a
+/// single `KEYEVENTF_UNICODE` — that is the event the console does not take.
+///
+/// Through [`send_verified`], like every send that reaches a document: the foreground check and
+/// requirement E first, then the one call.
+pub fn erase_and_replay(erase: usize, keys: &[Key], target: &Target) -> Result<(), SendError> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_SCANCODE, VK_BACK};
+
+    let mut events = Vec::with_capacity(erase * 2 + keys.len() * 4);
+
+    for _ in 0..erase {
+        events.push(key_event(VK_BACK.0, 0, 0));
+        events.push(key_event(VK_BACK.0, 0, KEYEVENTF_KEYUP.0));
+    }
+
+    for key in keys {
+        let extended = if key.extended {
+            KEYEVENTF_EXTENDEDKEY.0
+        } else {
+            0
+        };
+
+        if key.shift {
+            events.push(key_event(0, SCAN_LEFT_SHIFT, KEYEVENTF_SCANCODE.0));
+        }
+
+        events.push(key_event(0, key.scan, KEYEVENTF_SCANCODE.0 | extended));
+        events.push(key_event(
+            0,
+            key.scan,
+            KEYEVENTF_SCANCODE.0 | extended | KEYEVENTF_KEYUP.0,
+        ));
+
+        if key.shift {
+            events.push(key_event(
+                0,
+                SCAN_LEFT_SHIFT,
+                KEYEVENTF_SCANCODE.0 | KEYEVENTF_KEYUP.0,
+            ));
+        }
+    }
 
     send_verified(&events, target)
 }
