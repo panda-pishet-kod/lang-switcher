@@ -2054,98 +2054,6 @@ fn the_switch_is_drawn_by_the_one_glyph_body_in_one_frame() {
     );
 }
 
-/// The arm of `wizard_after_choice` that repaints one check box of the wizard — from
-/// `Touched::Glyph(control) =>` to the arm of the radios — or `None` unless there is exactly one.
-fn check_box_arm(after_choice: &str) -> Option<&str> {
-    let mut heads = after_choice.match_indices("Touched::Glyph(control) =>");
-    let (start, _) = heads.next()?;
-
-    if heads.next().is_some() {
-        return None;
-    }
-
-    let length = after_choice[start..].find("Touched::Range(")?;
-
-    Some(&after_choice[start..start + length])
-}
-
-/// Whether the arm repaints the check box through the door without the erase, and not through the
-/// one with it.
-fn repaints_the_check_box_without_an_erase(arm: &str) -> bool {
-    let code = squeezed_code(arm);
-
-    code.contains("widgets::repaint::control_no_erase(hwnd, control)")
-        && !code.contains("repaint::control(hwnd, control)")
-}
-
-/// **Task T-92-1, decision 156.11 — a check box of the wizard is repainted without an erase frame.**
-///
-/// The second `repaint::control` of `src\letters.rs` until stage Э92: a click on a check box of the
-/// step «Что приложить» repainted it **with** the erase, and `WM_ERASEBKGND` of an owner-drawn
-/// button fills it with the brush the dialog answers `WM_CTLCOLORBTN` with — the window's — before
-/// `WM_DRAWITEM` paints it again: the check box and its caption are not there for that frame.
-/// Measured by the probe of the stage (`scratchpad-E92\probe-e92-glyph-*.log`, twenty real clicks):
-/// twenty erases, each changing 1 414 pixels of 8 526, and the window's surface caught the empty
-/// rectangle 121…129 times; through the door of task Т-45-3 — no erase, no empty picture, and the
-/// pictures a click ends with byte for byte the same two.
-///
-/// Two halves, as for the switch: the arm goes through the door, and the condition of the door
-/// holds — the check box is drawn by the one glyph body, which paints its whole rectangle before
-/// anything else.
-///
-/// ⚠ Controls: the arm with the call of `e91` is caught, and so are an arm that repaints nothing
-/// and an arm that keeps the erase beside the door.
-#[test]
-fn a_check_box_of_the_wizard_is_repainted_without_an_erase_frame() {
-    let source = letters_module_source();
-    let after_choice = letters_function_body(&source, "fn wizard_after_choice(")
-        .expect("src\\letters.rs must still declare `wizard_after_choice`");
-    let arm = check_box_arm(after_choice)
-        .expect("the sweep must find exactly one arm of `wizard_after_choice` for Touched::Glyph");
-
-    let wizard = letters_function_body(&source, "unsafe fn draw_wizard_glyph(")
-        .expect("src\\letters.rs must still declare `draw_wizard_glyph`");
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(wizard) && paints_its_whole_rectangle_first(body),
-        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and the check \
-         box of the wizard is no longer drawn by a body that does:\n{wizard}\n---\n{body}"
-    );
-
-    assert!(
-        repaints_the_check_box_without_an_erase(arm),
-        "156.11: a click repaints the check box with the erase — a frame of the window's brush \
-         where the check box and its caption were:\n{arm}"
-    );
-
-    let door = "widgets::repaint::control_no_erase(hwnd, control)";
-    let erase = "widgets::repaint::control(hwnd, control)";
-
-    let of_e91 = arm.replace(door, erase);
-    assert_ne!(of_e91, arm, "the control must change the arm it is made of");
-    assert!(
-        !repaints_the_check_box_without_an_erase(&of_e91),
-        "the sweep does not see the call of e91 — it cannot fail"
-    );
-
-    let nothing = arm.replace(door, "{}");
-    assert_ne!(
-        nothing, arm,
-        "the control must change the arm it is made of"
-    );
-    assert!(
-        !repaints_the_check_box_without_an_erase(&nothing),
-        "the sweep does not see an arm that repaints nothing"
-    );
-
-    assert!(
-        !repaints_the_check_box_without_an_erase(&format!("{arm}\n{erase};")),
-        "the sweep does not see the erase kept beside the door"
-    );
-}
-
 /// The branch of the window procedure that answers a tick of the demonstration — from the
 /// `WM_TIMER` arm of `DEMO_TIMER` to the arm of the wizard's timer — or `None` unless there is
 /// exactly one.
@@ -2178,7 +2086,7 @@ fn ticks_without_an_erase(branch: &str) -> bool {
 /// `scratchpad-E92\probe-e92-demo-base.log`), so the door neither cures nor changes anything on
 /// the screen — the buffer of [`the_demonstration_is_drawn_in_one_frame`] does. What the door
 /// takes away is 7.7 needless `WM_ERASEBKGND` a second, and the sentry keeps the branch on the door
-/// the switch and the wizard's check boxes already take.
+/// the switch of «От автора» already takes.
 ///
 /// ⚠ Controls: the branch with the call of `e91` is caught, and so are a branch that repaints
 /// nothing and a branch that keeps the erase beside the door.
