@@ -13306,6 +13306,14 @@ fn console_clear(target: &input::Target, content: &Element) -> Result<(), String
 /// Types `word` **by keys** — never `KEYEVENTF_UNICODE`, which the classic console does not take
 /// (Э92) — and answers what landed on the line: the word itself when the console was in English,
 /// its Russian reading when it was not.
+///
+/// ⚠ **The capital goes by its scan code, `Shift` included — measured, the first entry of
+/// 2026-10-07.** [`input::chord`] presses a virtual key with no scan code, which is right for the
+/// chords it was written for and wrong for text: the product records a stroke by its scan code
+/// (FR-04), a `G` with scan code zero was not in its buffer (`buffer_len=5` against six keys), and
+/// the press erased `hbdtn` and left the `G`. A key with its scan code is what a keyboard sends,
+/// so the capital is the first key of [`ConsoleWord::keys`], sent the way the keystroke path sends
+/// it.
 fn console_type(
     word: ConsoleWord,
     target: &input::Target,
@@ -13313,7 +13321,7 @@ fn console_type(
 ) -> Result<String, String> {
     let sent = match word {
         ConsoleWord::Lower => input::type_text(TYPED, target),
-        ConsoleWord::Capital => input::chord(&[VK_SHIFT.0], u16::from(b'G'), target)
+        ConsoleWord::Capital => input::erase_and_replay(0, &word.keys()[..1], target)
             .and_then(|()| input::type_text("hbdtn", target)),
     };
     sent.map_err(|error| format!("набор {:?}: {error}", word.typed()))?;
@@ -13438,25 +13446,40 @@ fn console_real_reading(ctx: &Context, shell: &str) -> Result<(String, bool), St
     let pid = crate::sut::shell_execute(&conhost, parameters)?;
     crate::own::register_spawned(pid);
 
+    // ⚠ **The screen is a node under the window, not the window — measured, the first entry of
+    // 2026-10-07.** The first edition asked the window element itself for `TextPattern`, which
+    // it does not carry, and waited out its twenty seconds on both consoles: «окно с приглашением
+    // не появилось». The node is looked for the way [`adopt_console`] looks for it.
+    let screen_of = |window: &Element| {
+        ctx.automation
+            .find(window, &|element: &Element| element.text().is_some())
+            .and_then(|screen| screen.text())
+    };
+
     let found = wait::until(CONSOLE_PROMPT_TIMEOUT, || {
         ctx.automation
             .top_level_of_any(&|element: &Element| {
                 element.class() == CONSOLE_CLASS && element.pid() == Some(pid)
             })
             .into_iter()
-            .find(|window| {
-                window
-                    .text()
-                    .is_some_and(|screen| console_input(&screen).is_some())
-            })
+            .find(|window| screen_of(window).is_some_and(|screen| console_input(&screen).is_some()))
     });
 
     let reading = match found.as_ref().and_then(Element::hwnd) {
         Some(hwnd) => Ok(console_fr52(hwnd)),
-        None => Err(format!(
-            "окно conhost {parameters} (pid {pid}) с приглашением не появилось за {} с",
-            CONSOLE_PROMPT_TIMEOUT.as_secs()
-        )),
+        None => {
+            // What the tree did offer, so that a second refusal is diagnosable from the protocol.
+            for window in ctx
+                .automation
+                .top_level_of_any(&|element: &Element| element.class() == CONSOLE_CLASS)
+            {
+                println!("    видно окно консоли: {}", window.describe());
+            }
+            Err(format!(
+                "окно conhost {parameters} (pid {pid}) с приглашением не появилось за {} с",
+                CONSOLE_PROMPT_TIMEOUT.as_secs()
+            ))
+        }
     };
 
     match shell::terminate(pid) {
@@ -13590,24 +13613,7 @@ fn console_controls(target: &input::Target, content: &Element) -> Result<(), Str
 /// give every round) and the capitals at the pause the sweep stopped at (П3). Answers whether a
 /// pause gave every round, which is the fork of §0 п. 5.
 fn console_premises(ctx: &Context, shell: &str, rounds: usize) -> Result<Option<u64>, String> {
-    println!("\n=== {shell}: П5 — FR-52 настоящей классической консоли (conhost {shell}) ===");
-    match console_real_reading(ctx, shell) {
-        Ok((line, blind)) => {
-            println!("  {line}");
-            println!(
-                "  → чтение {}",
-                if blind {
-                    "СЛЕПОЕ — FR-50 посылает и не проверяет (Outcome::Sent)"
-                } else {
-                    "НЕ слепое — FR-50 станет сверять раскладку потока, которую консоль не меняет"
-                }
-            );
-            protocol(&format!(
-                "T-96-1 П5 {shell} настоящая консоль: {line}; слепое: {blind}"
-            ));
-        }
-        Err(error) => println!("  ⚠ П5 не замерен: {error}"),
-    }
+    console_report_real(ctx, shell);
 
     println!("\n=== {shell}: консоль позиции (conhost + langsw-e2e --console-shell {shell}) ===");
     let mut app = launch_console_shell(shell)?;
@@ -13783,8 +13789,64 @@ fn spread(values: &[u128]) -> String {
 /// layout the product can read — that the product is shown first, and the console after it.
 fn console_realign(anchor: &layout::Ambient, target: &input::Target) -> Result<(), String> {
     anchor.set(layout::US, Duration::from_secs(5))?;
-    shell::activate_window(target.pid, Some(target.hwnd))?;
+    console_activate_watched(target)?;
     layout::request(target.hwnd, layout::US)
+}
+
+/// Brings the console forward **with the product watching**, and waits until the product has
+/// noticed it and answered — the verdict of FR-71 on the field in front (`field_state` leaves
+/// `pending`) after its count of focus changes moved.
+///
+/// ⚠ **Measured, the first entry of 2026-10-07:** the rounds that followed a realignment found
+/// `buffer_len=0` at the press and «не изменилось» — the word had been typed while the verdict on
+/// the new window was still out, and a stroke typed then is not recorded (§10, row 10). A wait on
+/// the verdict, never on a clock — requirement 1 of §11.5.
+fn console_activate_watched(target: &input::Target) -> Result<(), String> {
+    let already = input::foreground().is_some_and(|(front, _)| front == target.pid);
+    let before = channel_number("focus_changes");
+
+    shell::activate_window(target.pid, Some(target.hwnd))?;
+
+    let settled = wait::until(Duration::from_secs(5), || {
+        let snapshot = crate::channel::read().ok()?;
+        let changes = snapshot
+            .get("focus_changes")
+            .and_then(|value| value.parse::<u64>().ok());
+        let noticed = already || matches!((changes, before), (Some(now), Some(then)) if now > then);
+        let state = snapshot.get("field_state")?;
+
+        (noticed && state != "pending").then(|| state.to_owned())
+    });
+
+    match settled {
+        Some(state) => {
+            println!("  консоль впереди, продукт ответил о поле: field_state={state}");
+            Ok(())
+        }
+        None => Err("продукт не ответил о поле консоли за 5 с".to_owned()),
+    }
+}
+
+/// П5 on the real console of `shell`, printed and written to the protocol — both stages ask it.
+fn console_report_real(ctx: &Context, shell: &str) {
+    println!("\n=== {shell}: П5 — FR-52 настоящей классической консоли (conhost {shell}) ===");
+    match console_real_reading(ctx, shell) {
+        Ok((line, blind)) => {
+            println!("  {line}");
+            println!(
+                "  → чтение {}",
+                if blind {
+                    "СЛЕПОЕ — FR-50 посылает и не проверяет (Outcome::Sent)"
+                } else {
+                    "НЕ слепое — FR-50 станет сверять раскладку потока, которую консоль не меняет"
+                }
+            );
+            protocol(&format!(
+                "T-96-1 П5 {shell} настоящая консоль: {line}; слепое: {blind}"
+            ));
+        }
+        Err(error) => println!("  ⚠ П5 не замерен: {error}"),
+    }
 }
 
 /// **One round of the product stage:** clear, type `word`, then `presses` presses of the hotkey,
@@ -13848,17 +13910,30 @@ fn console_product_round(
 /// one: the product's own presses in the console of the position.
 ///
 /// The product is started while the anchor — a window of the bench's own, in English — is in front:
-/// the stamp of FR-04 is taken at start-up from the window in front, and the classic console is a
-/// window whose layout the product cannot read (FR-52's addendum), so it is the anchor that gives
-/// the stamp its first value and the console never moves it. Then `rounds` rounds of the word with
-/// two presses (convert, roll back), half as many of the capital, half as many of four presses
-/// (П4: the third press converts again, so the keys the product repeated did not enter its own
-/// buffer). Answers the count of the presses that left the right word, out of all.
+/// the stamp of FR-04 is taken at start-up from the window in front. Then `rounds` rounds of the
+/// word with two presses (convert, roll back), half as many of the capital, half as many of four
+/// presses (П4: the third press converts again, so the keys the product repeated did not enter its
+/// own buffer). Answers the count of the presses that left the right word, out of all.
+///
+/// ⚠ **The session is put into English before the console is born — measured, the first entry of
+/// 2026-10-07.** The thread the console of the position names as the owner of its window is a
+/// thread with windows of its own (П5: `GetGUIThreadInfo` answers for it, the reading is not
+/// blind), and the layout FR-52 reads of it is the one it was born with and never changes. A
+/// console born while the session was Russian made the product stamp every stroke Russian while the
+/// console typed English. A real `conhost <оболочка>` is read by П5 of the same run, so the report
+/// can say how far the console of the position stands from it.
 fn console_product(ctx: &Context, shell: &str, rounds: usize) -> Result<(usize, usize), String> {
     /// The FR-97 deadline of the debug build here — the rounds of two consoles fit in it.
     const DEADLINE_SECS: u32 = 600;
 
+    console_report_real(ctx, shell);
+
     println!("\n=== {shell}: продукт в консоли позиции ===");
+    match stage_ambient(ctx, layout::US) {
+        Ok((mut window, said)) => println!("  {said}; {}", window.close()),
+        Err(error) => println!("  ⚠ окружающая раскладка не выставлена: {error}"),
+    }
+
     let mut app = launch_console_shell(shell)?;
     let conhost_pid = app.pid;
     let mut shell_pid = None;
@@ -13889,7 +13964,7 @@ fn console_product(ctx: &Context, shell: &str, rounds: usize) -> Result<(usize, 
                 ready.get("active_layout").unwrap_or("?")
             );
 
-            shell::activate_window(target.pid, Some(target.hwnd))?;
+            console_activate_watched(&target)?;
             layout::request(target.hwnd, layout::US)?;
             console_controls(&target, &content)?;
             println!(
