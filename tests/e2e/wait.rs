@@ -1,4 +1,4 @@
-//! The one place in the bench that sleeps **waiting for a result**, and the eight that sleep for
+//! The one place in the bench that sleeps **waiting for a result**, and the ten that sleep for
 //! reasons of their own.
 //!
 //! Requirement 1 of §11.5 of SPEC forbids deciding that a window is ready by waiting a fixed
@@ -14,10 +14,10 @@
 //!
 //! Every wait **for a result** in the bench is expressed as [`until`] over a condition, and the
 //! sleep on the single line inside it is the poll interval of that wait. It is not, however, the
-//! only `std::thread::sleep` in `tests\e2e\`: there are **nine** call sites, in three files. The
-//! other eight are intervals belonging to a scenario or to a measurement — an interval whose
+//! only `std::thread::sleep` in `tests\e2e\`: there are **eleven** call sites, in three files. The
+//! other ten are intervals belonging to a scenario or to a measurement — an interval whose
 //! elapsing *is* the stimulus, or *is* the quantity under study — and not one of them ends in a
-//! decision that something is ready. A grep for `sleep` therefore has nine hits, and this is
+//! decision that something is ready. A grep for `sleep` therefore has eleven hits, and this is
 //! what each of them is:
 //!
 //! * [`until`] (`wait.rs`) — **the poll interval**, and the only sleep a verdict ever waits
@@ -44,13 +44,20 @@
 //! * `race_pause` (`scenarios.rs`) — the pause `D` of the race experiment: it is the
 //!   **independent variable itself**, and waiting on a condition instead would destroy the
 //!   measurement rather than improve it.
+//! * `hand_pause` (`scenarios.rs`) — task T-95-3: the interval of a hand in the experiment of the
+//!   double press of `Shift` — between two taps, two `Alt+Shift`, `Shift`, a click and the release.
+//!   The rule of the pair is a rule of times (`hook::Taps`), so the interval is the **stimulus** —
+//!   120 ms is a pair, 650 ms is not — and no condition can stand in for it.
+//! * `quiet_round` (`scenarios.rs`) — task T-95-3: the 1.2 s after a round that must convert
+//!   **nothing** — as in `empty_press`, nothing changes on the screen, so there is no result a
+//!   condition could ask about, only the counters read afterwards.
 //!
 //! ⚠ **The list is checked, not asserted.** It used to read «exactly once», which had been
 //! false for eight of the nine, and a reader who believes such a sentence never goes to look —
 //! a false invariant in code is worse than no invariant at all. The test
-//! `the_bench_sleeps_only_in_the_nine_places_this_module_lists` at the foot of this file
+//! `the_bench_sleeps_only_in_the_eleven_places_this_module_lists` at the foot of this file
 //! re-derives the list from the source of `tests\e2e\` on every `cargo test --features testing`:
-//! a tenth call site, or one of these nine moving into another function, turns it red.
+//! a twelfth call site, or one of these eleven moving into another function, turns it red.
 
 use std::time::{Duration, Instant};
 
@@ -256,11 +263,12 @@ pub(crate) mod sweep {
 mod tests {
     use super::sweep;
 
-    /// The nine call sites of `std::thread::sleep`: the file, and the function each is inside.
+    /// The eleven call sites of `std::thread::sleep`: the file, and the function each is inside.
     ///
     /// One entry per bullet of the module comment, in the same order. Changing one of the two
-    /// without the other is exactly the drift this table exists to stop.
-    const SLEEPS: [(&str, &str); 9] = [
+    /// without the other is exactly the drift this table exists to stop. Nine until task T-95-3,
+    /// which brought the two intervals of the double press of `Shift`.
+    const SLEEPS: [(&str, &str); 11] = [
         ("wait.rs", "until"),
         ("e2e.rs", "console_park"),
         ("scenarios.rs", "idle_watch"),
@@ -270,14 +278,16 @@ mod tests {
         ("scenarios.rs", "experiment_explorer"),
         ("scenarios.rs", "run_sequence"),
         ("scenarios.rs", "race_pause"),
+        ("scenarios.rs", "hand_pause"),
+        ("scenarios.rs", "quiet_round"),
     ];
 
     /// **Requirement 1 of §11.5, as a test rather than as a sentence about a grep.**
     ///
-    /// The inventory in the module comment is re-derived from the source every run, so a tenth
-    /// call site or a ninth that moved makes the comment red instead of stale.
+    /// The inventory in the module comment is re-derived from the source every run, so a
+    /// twelfth call site or an eleventh that moved makes the comment red instead of stale.
     #[test]
-    fn the_bench_sleeps_only_in_the_nine_places_this_module_lists() {
+    fn the_bench_sleeps_only_in_the_eleven_places_this_module_lists() {
         let mut found: Vec<(String, String)> = Vec::new();
 
         for (name, text) in sweep::sources() {

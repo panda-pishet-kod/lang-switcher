@@ -790,6 +790,20 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // the **last** row moves no index above it, which is why the row was appended there in the
     // first place. A refusal of the foreground is still journalled — by the system's own answer,
     // under `SetForegroundWindow` above.
+    //
+    // ⭐ **Task T-95-6, решение 159.25** — the shortcut of the sticky keys of Windows, taken while
+    // the hotkey is the double press of `Shift` and given back on every way out (module `sticky`).
+    // A setting of the person's Windows the program changed, for the session only: a fact worth a
+    // line, the shape of «configuration read-only attribute cleared». The third row is the system's
+    // refusal, apart from the plain `SystemParametersInfoW` row above, which is FR-51's and
+    // `Kind::Layout`. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the flags before, not the flags after.
+    // `Kind::Process` — the group every configuration event of this program is in — and **no new
+    // `Kind`**, the rule every note above follows.
+    ("sticky keys shortcut turned off", Kind::Process),
+    ("sticky keys shortcut given back", Kind::Process),
+    ("SystemParametersInfoW (sticky keys)", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

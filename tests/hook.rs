@@ -48,18 +48,20 @@ fn armed() -> Mode {
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
         hotkey_modifiers: 0,
+        hotkey_double_tap: false,
         hotkey_yields: false,
     }
 }
 
-/// `hook::classify` with **no modifier held** — task T-93-1.
+/// `hook::classify` with **no modifier held and no mouse button pressed** — tasks T-93-1, T-95-1.
 ///
-/// The decision has taken the held modifiers as a fourth argument since вопрос 157, and every
-/// test of this file written before it is about a stroke made with nothing held: the hotkey of
-/// FR-02 and FR-08, the signature of FR-03, the states of FR-90 and FR-99, the probe of FR-21.
-/// The tests of the combinations call `hook::classify` themselves, with the set they hold.
+/// The decision has taken the held modifiers as a fourth argument since вопрос 157, and the count
+/// of mouse buttons as a fifth since вопрос 159; every test of this file written before them is
+/// about a stroke made with nothing held and no mouse: the hotkey of FR-02 and FR-08, the
+/// signature of FR-03, the states of FR-90 and FR-99, the probe of FR-21. The tests of the
+/// combinations and of the double press call `hook::classify` themselves, with what they hold.
 fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
-    hook::classify(mode, state, key, || 0)
+    hook::classify(mode, state, key, || 0, || 0)
 }
 
 /// The outcome every "not ours" path has to produce: hand it on, start nothing, ask nothing.
@@ -132,6 +134,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         fail_safe: false,
         hotkey_vk: hook::DEFAULT_HOTKEY_VK,
         hotkey_modifiers: 0,
+        hotkey_double_tap: false,
         hotkey_yields: false,
     };
 
@@ -2303,7 +2306,7 @@ fn armed_on_ctrl_f12() -> Mode {
 
 /// `hook::classify` with the set `held` written out — the tests of this section.
 fn classify_holding(mode: Mode, state: &mut HotkeyState, key: KeyEvent, held: u16) -> Outcome {
-    hook::classify(mode, state, key, || held)
+    hook::classify(mode, state, key, || held, || 0)
 }
 
 /// **(а) The combination pressed with its own set is the hotkey**: suppressed (FR-95) and the
@@ -2485,6 +2488,7 @@ fn holding_a_combination_fires_once_and_asks_for_the_set_once() {
                     asked.set(asked.get() + 1);
                     hook::MOD_CTRL
                 },
+                || 0,
             );
 
             assert_eq!(
@@ -2527,6 +2531,7 @@ fn neither_a_letter_nor_a_bare_hotkey_asks_for_the_modifiers() {
                 &mut state,
                 user_key(vk, edge),
                 counting,
+                || 0,
             );
         }
     }
@@ -2541,7 +2546,13 @@ fn neither_a_letter_nor_a_bare_hotkey_asks_for_the_modifiers() {
     let mut state = HotkeyState::default();
 
     for edge in [Edge::Down, Edge::Down, Edge::Up] {
-        hook::classify(armed(), &mut state, user_key(VK_PAUSE, edge), counting);
+        hook::classify(
+            armed(),
+            &mut state,
+            user_key(VK_PAUSE, edge),
+            counting,
+            || 0,
+        );
     }
 
     assert_eq!(
@@ -2867,5 +2878,677 @@ fn a_combination_hotkey_never_reaches_the_command_row_of_fr10() {
     assert_eq!(
         after, 0,
         "the contrast: a combination that is not the hotkey is an ordinary command of FR-10"
+    );
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-95-1, вопрос 159 — the double press of `Shift`
+// -------------------------------------------------------------------------------------
+//
+// The owner's word (157.16, 157.17): two taps of `Shift` in a row start what `Pause` starts; a
+// tap is a `Shift` down and up within `DOUBLE_TAP_MS` with nothing else pressed — no key, no
+// `Ctrl`/`Alt`/`Win` held at the press, no mouse button; the second tap begins within the window
+// of the first, and the conversion fires on the **release** of the second. Nothing is suppressed:
+// the programs see both taps. Every row below is a pure call of `classify` with the time, the set
+// held and the count of mouse buttons written out.
+
+/// The running state with the double press of `Shift` as the hotkey — what
+/// `app::publish_configuration` publishes for `trigger = "double_tap"`: `VK_SHIFT` with the flag.
+fn armed_on_double_shift() -> Mode {
+    Mode {
+        hotkey_vk: VK_SHIFT,
+        hotkey_modifiers: 0,
+        hotkey_double_tap: true,
+        ..armed()
+    }
+}
+
+/// One event of a sequence, at a time, with the set held and the mouse count the callback would
+/// read: `(code, edge, time in ms, set held, mouse buttons so far)`.
+type At = (u16, Edge, u32, u16, u32);
+
+/// Drives `events` through `classify` in `mode` and answers the index of every event that fired,
+/// with each outcome checked to be passed on — the double press suppresses nothing.
+fn fired_in(mode: Mode, events: &[At]) -> Vec<usize> {
+    let mut state = HotkeyState::default();
+
+    events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &(vk, edge, time, held, mouse))| {
+            let outcome = hook::classify(
+                mode,
+                &mut state,
+                KeyEvent {
+                    time,
+                    ..user_key(vk, edge)
+                },
+                || held,
+                || mouse,
+            );
+
+            assert_eq!(
+                outcome.decision,
+                Decision::Pass,
+                "event {index} ({vk:#04x} {edge:?} at {time}) must reach the application"
+            );
+
+            outcome.fire_hotkey.then_some(index)
+        })
+        .collect()
+}
+
+/// The events of the double press of `Shift` that fired.
+fn fired(events: &[At]) -> Vec<usize> {
+    fired_in(armed_on_double_shift(), events)
+}
+
+/// A tap of `key` from `down` to `up`, nothing held, no mouse.
+fn tap(key: u16, down: u32, up: u32) -> [At; 2] {
+    [(key, Edge::Down, down, 0, 0), (key, Edge::Up, up, 0, 0)]
+}
+
+/// Two taps of the left `Shift`, the second beginning at `second`.
+fn two_taps(second: u32) -> Vec<At> {
+    [
+        tap(VK_LSHIFT, 1_000, 1_080),
+        tap(VK_LSHIFT, second, second + 80),
+    ]
+    .concat()
+}
+
+/// **(а) Two taps within the window fire once, on the release of the second** — and every event
+/// is passed on. ⭐ The red «before» of task T-95-1: on the base nothing ever fires here.
+///
+/// The moment is part of the claim: a fire on the second *press* (the mutant of the TZ) would leave
+/// the person's finger on `Shift` while the conversion runs.
+#[test]
+fn two_taps_of_shift_fire_once_on_the_release_of_the_second() {
+    assert_eq!(
+        fired(&two_taps(1_200)),
+        [3],
+        "the second release, and only it"
+    );
+
+    // The window is the owner's 400 ms (157.16), to the millisecond: a second press 400 ms after
+    // the first is in it.
+    assert_eq!(
+        fired(&two_taps(1_000 + hook::DOUBLE_TAP_MS)),
+        [3],
+        "a second tap that begins exactly 400 ms after the first is the pair"
+    );
+}
+
+/// **(б) A slow pair is no pair**: the second tap begins 401 ms after the first.
+#[test]
+fn a_second_tap_beginning_after_the_window_is_no_pair() {
+    assert_eq!(fired(&two_taps(1_401)), [] as [usize; 0], "401 ms");
+    assert_eq!(
+        fired(&two_taps(1_000 + 3_999)),
+        [] as [usize; 0],
+        "four seconds"
+    );
+
+    // ⚠ And the slow second tap is not lost: it is the first of the next pair.
+    let mut events = two_taps(1_401);
+    events.extend(tap(VK_LSHIFT, 1_600, 1_650));
+    assert_eq!(
+        fired(&events),
+        [5],
+        "the tap that came too late begins the next pair"
+    );
+
+    // The owner's number, written here apart from the code (157.16) — last, so that a mutant of
+    // the window is caught by the behaviour above and not only by the number.
+    assert_eq!(hook::DOUBLE_TAP_MS, 400, "the owner's number, 157.16");
+}
+
+/// **(в) A hold longer than the window is no tap** — of the first `Shift` or of the second.
+#[test]
+fn a_shift_held_longer_than_the_window_is_no_tap() {
+    let long_first = [tap(VK_LSHIFT, 1_000, 1_401), tap(VK_LSHIFT, 1_402, 1_450)].concat();
+    let long_second = [tap(VK_LSHIFT, 1_000, 1_050), tap(VK_LSHIFT, 1_100, 1_501)].concat();
+    let exact = [tap(VK_LSHIFT, 1_000, 1_400), tap(VK_LSHIFT, 1_400, 1_800)].concat();
+
+    assert_eq!(
+        fired(&long_first),
+        [] as [usize; 0],
+        "the first held 401 ms"
+    );
+    assert_eq!(
+        fired(&long_second),
+        [] as [usize; 0],
+        "the second held 401 ms"
+    );
+    assert_eq!(fired(&exact), [3], "400 ms of hold is still a tap");
+}
+
+/// **(г) Another key between the press and the release is no tap** — `Shift` + a letter is a
+/// capital — and neither is a pair with a key between the taps: «подряд» (159.20).
+#[test]
+fn a_key_pressed_with_shift_or_between_the_taps_breaks_the_pair() {
+    let capital_first = [
+        (VK_LSHIFT, Edge::Down, 1_000, 0, 0),
+        (VK_A, Edge::Down, 1_020, hook::MOD_SHIFT, 0),
+        (VK_A, Edge::Up, 1_040, hook::MOD_SHIFT, 0),
+        (VK_LSHIFT, Edge::Up, 1_060, 0, 0),
+        (VK_LSHIFT, Edge::Down, 1_100, 0, 0),
+        (VK_LSHIFT, Edge::Up, 1_150, 0, 0),
+    ];
+    assert_eq!(
+        fired(&capital_first),
+        [] as [usize; 0],
+        "Shift+A, then a tap"
+    );
+
+    let capital_second = [
+        tap(VK_LSHIFT, 1_000, 1_050).to_vec(),
+        vec![
+            (VK_LSHIFT, Edge::Down, 1_100, 0, 0),
+            (VK_A, Edge::Down, 1_120, hook::MOD_SHIFT, 0),
+            (VK_LSHIFT, Edge::Up, 1_150, 0, 0),
+        ],
+    ]
+    .concat();
+    assert_eq!(
+        fired(&capital_second),
+        [] as [usize; 0],
+        "a tap, then Shift+A"
+    );
+
+    let between = [
+        tap(VK_LSHIFT, 1_000, 1_050).to_vec(),
+        tap(VK_A, 1_060, 1_070).to_vec(),
+        tap(VK_LSHIFT, 1_100, 1_150).to_vec(),
+    ]
+    .concat();
+    assert_eq!(
+        fired(&between),
+        [] as [usize; 0],
+        "a letter between the taps"
+    );
+
+    // A phrase with capitals typed fast — «Hello World» — fires nothing.
+    let mut phrase = Vec::new();
+    let mut at = 1_000;
+    for (vk, shifted) in [
+        (0x48, true),
+        (0x45, false),
+        (0x4C, false),
+        (0x4C, false),
+        (0x4F, false),
+        (0x20, false),
+        (0x57, true),
+        (0x4F, false),
+        (0x52, false),
+        (0x4C, false),
+        (0x44, false),
+    ] {
+        if shifted {
+            phrase.push((VK_LSHIFT, Edge::Down, at, 0, 0));
+        }
+        phrase.push((vk, Edge::Down, at + 10, 0, 0));
+        phrase.push((vk, Edge::Up, at + 30, 0, 0));
+        if shifted {
+            phrase.push((VK_LSHIFT, Edge::Up, at + 40, 0, 0));
+        }
+        at += 60;
+    }
+    assert_eq!(fired(&phrase), [] as [usize; 0], "«Hello World»");
+}
+
+/// **(д) A mouse button pressed during a tap, or between the taps, breaks the pair** — `Shift` and
+/// a click select text, and two of them must not convert the selection (FR-13's count).
+///
+/// ⚠ The negative control of this sentry is the mutant of the TZ that removes the comparison of the
+/// count (`scratchpad-E95`): it fires on every row here.
+#[test]
+fn a_mouse_button_pressed_in_the_pair_breaks_it() {
+    let click_in_the_first = [
+        (VK_LSHIFT, Edge::Down, 1_000, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_080, 0, 8),
+        (VK_LSHIFT, Edge::Down, 1_200, 0, 8),
+        (VK_LSHIFT, Edge::Up, 1_280, 0, 8),
+    ];
+    let click_in_the_second = [
+        (VK_LSHIFT, Edge::Down, 1_000, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_080, 0, 7),
+        (VK_LSHIFT, Edge::Down, 1_200, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_280, 0, 8),
+    ];
+    let click_between = [
+        (VK_LSHIFT, Edge::Down, 1_000, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_080, 0, 7),
+        (VK_LSHIFT, Edge::Down, 1_200, 0, 8),
+        (VK_LSHIFT, Edge::Up, 1_280, 0, 8),
+    ];
+    let still = [
+        (VK_LSHIFT, Edge::Down, 1_000, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_080, 0, 7),
+        (VK_LSHIFT, Edge::Down, 1_200, 0, 7),
+        (VK_LSHIFT, Edge::Up, 1_280, 0, 7),
+    ];
+
+    assert_eq!(
+        fired(&click_in_the_first),
+        [] as [usize; 0],
+        "a click in the first tap"
+    );
+    assert_eq!(
+        fired(&click_in_the_second),
+        [] as [usize; 0],
+        "a click in the second"
+    );
+    assert_eq!(
+        fired(&click_between),
+        [] as [usize; 0],
+        "a click between them"
+    );
+    assert_eq!(
+        fired(&still),
+        [3],
+        "the control: the same pair with the mouse still fires"
+    );
+}
+
+/// **(е) `Ctrl`, `Alt` or `Win` held at the press of `Shift` is no tap** — `Alt+Shift` twice
+/// switches the layout twice and must convert nothing.
+///
+/// ⚠ The negative control is the mutant that drops the question about the set held.
+#[test]
+fn shift_pressed_under_ctrl_alt_or_win_is_no_tap() {
+    for (held, what) in [
+        (hook::MOD_ALT, "Alt+Shift"),
+        (hook::MOD_CTRL, "Ctrl+Shift"),
+        (hook::MOD_WIN, "Win+Shift"),
+    ] {
+        let both = [
+            (VK_LSHIFT, Edge::Down, 1_000, held, 0),
+            (VK_LSHIFT, Edge::Up, 1_080, 0, 0),
+            (VK_LSHIFT, Edge::Down, 1_200, held, 0),
+            (VK_LSHIFT, Edge::Up, 1_280, 0, 0),
+        ];
+        let second = [
+            (VK_LSHIFT, Edge::Down, 1_000, 0, 0),
+            (VK_LSHIFT, Edge::Up, 1_080, 0, 0),
+            (VK_LSHIFT, Edge::Down, 1_200, held, 0),
+            (VK_LSHIFT, Edge::Up, 1_280, 0, 0),
+        ];
+
+        assert_eq!(fired(&both), [] as [usize; 0], "{what} twice");
+        assert_eq!(fired(&second), [] as [usize; 0], "a tap, then {what}");
+    }
+
+    // The control: `Shift` held by itself is in the set held (the press of `Shift` holds it), and
+    // it does not spoil the tap.
+    let shift_itself = [
+        (VK_LSHIFT, Edge::Down, 1_000, hook::MOD_SHIFT, 0),
+        (VK_LSHIFT, Edge::Up, 1_080, 0, 0),
+        (VK_LSHIFT, Edge::Down, 1_200, hook::MOD_SHIFT, 0),
+        (VK_LSHIFT, Edge::Up, 1_280, 0, 0),
+    ];
+    assert_eq!(fired(&shift_itself), [3]);
+}
+
+/// **(ж) The left and the right `Shift` are one key** — a pair of one of each fires — and the
+/// auto-repeat of a held `Shift` is no new press.
+#[test]
+fn left_and_right_shift_make_one_pair_and_a_repeat_is_no_new_press() {
+    let left_right = [tap(VK_LSHIFT, 1_000, 1_080), tap(VK_RSHIFT, 1_200, 1_280)].concat();
+    let right_left = [tap(VK_RSHIFT, 1_000, 1_080), tap(VK_LSHIFT, 1_200, 1_280)].concat();
+
+    assert_eq!(fired(&left_right), [3], "left, then right");
+    assert_eq!(fired(&right_left), [3], "right, then left");
+
+    // A held `Shift` repeats as presses with no release between them: still one tap, and the set
+    // is asked once for it.
+    let asked = std::cell::Cell::new(0_u32);
+    let mut state = HotkeyState::default();
+    let mut fires = Vec::new();
+
+    for (index, (edge, time)) in [
+        (Edge::Down, 1_000),
+        (Edge::Down, 1_030),
+        (Edge::Down, 1_060),
+        (Edge::Up, 1_090),
+        (Edge::Down, 1_200),
+        (Edge::Up, 1_250),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let outcome = hook::classify(
+            armed_on_double_shift(),
+            &mut state,
+            KeyEvent {
+                time,
+                ..user_key(VK_LSHIFT, edge)
+            },
+            || {
+                asked.set(asked.get() + 1);
+                0
+            },
+            || 0,
+        );
+
+        if outcome.fire_hotkey {
+            fires.push(index);
+        }
+    }
+
+    assert_eq!(fires, [5], "the repeats were one tap");
+    assert_eq!(
+        asked.get(),
+        2,
+        "the set is asked once per press, not per repeat"
+    );
+}
+
+/// **(з) The third and fourth taps are the second pair** — the return of the word, as a second
+/// `Pause` would be — and a third tap alone is no second fire.
+#[test]
+fn the_third_and_fourth_taps_are_the_next_pair() {
+    let three = [
+        tap(VK_LSHIFT, 1_000, 1_050),
+        tap(VK_LSHIFT, 1_150, 1_200),
+        tap(VK_LSHIFT, 1_300, 1_350),
+    ]
+    .concat();
+    let four = [
+        tap(VK_LSHIFT, 1_000, 1_050),
+        tap(VK_LSHIFT, 1_150, 1_200),
+        tap(VK_LSHIFT, 1_300, 1_350),
+        tap(VK_LSHIFT, 1_450, 1_500),
+    ]
+    .concat();
+
+    assert_eq!(fired(&three), [3], "the pair, and a third tap waiting");
+    assert_eq!(fired(&four), [3, 7], "two pairs, two fires");
+}
+
+/// **(и) Our own injected strokes are not seen** — посылка П2: the signature of FR-03 is answered
+/// before the hotkey, so a stroke of the replacement neither breaks a pair nor makes one.
+#[test]
+fn our_own_strokes_neither_break_a_pair_nor_make_one() {
+    let mut state = HotkeyState::default();
+    let mode = armed_on_double_shift();
+    let mut fires = Vec::new();
+
+    let user = |vk, edge, time| KeyEvent {
+        time,
+        ..user_key(vk, edge)
+    };
+    let ours = |vk, edge, time| KeyEvent {
+        extra_info: INJECTED_SIGNATURE,
+        time,
+        ..user_key(vk, edge)
+    };
+
+    for (index, key) in [
+        user(VK_LSHIFT, Edge::Down, 1_000),
+        user(VK_LSHIFT, Edge::Up, 1_050),
+        ours(VK_A, Edge::Down, 1_060),
+        ours(VK_A, Edge::Up, 1_061),
+        ours(VK_LSHIFT, Edge::Down, 1_070),
+        ours(VK_LSHIFT, Edge::Up, 1_071),
+        user(VK_LSHIFT, Edge::Down, 1_150),
+        user(VK_LSHIFT, Edge::Up, 1_200),
+        ours(VK_LSHIFT, Edge::Down, 1_300),
+        ours(VK_LSHIFT, Edge::Up, 1_301),
+        ours(VK_LSHIFT, Edge::Down, 1_302),
+        ours(VK_LSHIFT, Edge::Up, 1_303),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if hook::classify(mode, &mut state, key, || 0, || 0).fire_hotkey {
+            fires.push(index);
+        }
+    }
+
+    assert_eq!(
+        fires,
+        [7],
+        "the user's pair fires through our strokes, and our own taps fire nothing"
+    );
+}
+
+/// **(к) While the hotkey is pressed (`trigger = "press"`), taps of `Shift` do nothing** — stage 1
+/// is whole: no fire, and the state of the double press is not even touched.
+#[test]
+fn with_a_pressed_hotkey_taps_of_shift_do_nothing() {
+    for mode in [armed(), armed_on_ctrl_f12()] {
+        let mut state = HotkeyState::default();
+
+        for (vk, edge, time, held, _) in two_taps(1_200) {
+            let outcome = hook::classify(
+                mode,
+                &mut state,
+                KeyEvent {
+                    time,
+                    ..user_key(vk, edge)
+                },
+                || held,
+                || panic!("a pressed hotkey must never ask for the mouse"),
+            );
+
+            assert!(!outcome.fire_hotkey, "{mode:?}: a tap of Shift fired");
+        }
+
+        assert_eq!(
+            state,
+            HotkeyState::default(),
+            "{mode:?}: the state of the double press was touched"
+        );
+    }
+}
+
+/// **(л) With the double press as the hotkey, a bare `Pause` is an ordinary key** — passed on,
+/// converting nothing, asking nothing.
+#[test]
+fn with_the_double_press_pause_is_an_ordinary_key() {
+    let mut state = HotkeyState::default();
+
+    for edge in [Edge::Down, Edge::Down, Edge::Up] {
+        let outcome = hook::classify(
+            armed_on_double_shift(),
+            &mut state,
+            user_key(VK_PAUSE, edge),
+            || panic!("Pause asked for the modifiers"),
+            || panic!("Pause asked for the mouse"),
+        );
+
+        assert_eq!(outcome, passed_on(), "Pause {edge:?}");
+    }
+
+    // ⚠ And the neutral `VK_SHIFT` the word carries is no key of a hotkey either: a program that
+    // sends one is not swallowed.
+    let neutral = hook::classify(
+        armed_on_double_shift(),
+        &mut state,
+        user_key(VK_SHIFT, Edge::Down),
+        || 0,
+        || 0,
+    );
+    assert_eq!(
+        neutral.decision,
+        Decision::Pass,
+        "VK_SHIFT is not swallowed"
+    );
+}
+
+/// **FR-84 — in an excluded process the double press converts nothing**, as `Pause` does not
+/// there (task T-52-3): the keys are the application's.
+#[test]
+fn in_an_excluded_process_the_double_press_converts_nothing() {
+    let excluded = Mode {
+        hotkey_yields: true,
+        ..armed_on_double_shift()
+    };
+
+    assert_eq!(fired_in(excluded, &two_taps(1_200)), [] as [usize; 0]);
+}
+
+/// **NFR-01 — with the double press as the hotkey a letter asks for nothing**, and a release of
+/// `Shift` that cannot end a tap does not read the mouse.
+#[test]
+fn with_the_double_press_a_letter_asks_for_nothing() {
+    let asked = std::cell::Cell::new(0_u32);
+    let mut state = HotkeyState::default();
+
+    for vk in (0x30..=0x39).chain(0x41..=0x5A) {
+        for edge in [Edge::Down, Edge::Up] {
+            hook::classify(
+                armed_on_double_shift(),
+                &mut state,
+                user_key(vk, edge),
+                || {
+                    asked.set(asked.get() + 1);
+                    0
+                },
+                || {
+                    asked.set(asked.get() + 1);
+                    0
+                },
+            );
+        }
+    }
+
+    assert_eq!(asked.get(), 0, "a letter asked the system something");
+
+    // `Alt+Shift`: the press is no tap, so its release has no pair to check the mouse for.
+    let mouse = std::cell::Cell::new(0_u32);
+    let mut state = HotkeyState::default();
+
+    for (edge, held) in [(Edge::Down, hook::MOD_ALT), (Edge::Up, 0)] {
+        hook::classify(
+            armed_on_double_shift(),
+            &mut state,
+            user_key(VK_LSHIFT, edge),
+            || held,
+            || {
+                mouse.set(mouse.get() + 1);
+                0
+            },
+        );
+    }
+
+    assert_eq!(mouse.get(), 0, "a press that is no tap read the mouse");
+}
+
+/// **(м) Посылка П1 — the taps of the double press leave the word in the buffer**, so the pair
+/// converts the word typed before it, and the next pair — after the conversion has been noted —
+/// finds the session of the last row of FR-10 still open: the return, as a second `Pause`.
+#[test]
+fn the_double_press_leaves_the_word_and_the_session_for_the_next_pair() {
+    use lang_switcher::buffer::{self, Recorder};
+    use lang_switcher::layouts::LayoutId;
+
+    let mut recorder = Recorder::with_capacity(64);
+    recorder.set_cache(ghbdtn_cache());
+    recorder.set_active_layout(LayoutId::from_raw(0x0409_0409));
+    buffer::install_recorder(recorder);
+
+    let mode = armed_on_double_shift();
+    let mut state = HotkeyState::default();
+    let mut at = 1_000;
+
+    for (vk, scan) in [
+        (b'G', SCAN_G),
+        (b'H', SCAN_H),
+        (b'B', SCAN_B),
+        (b'D', SCAN_D),
+        (b'T', SCAN_T),
+        (b'N', SCAN_N),
+    ] {
+        for edge in [Edge::Down, Edge::Up] {
+            hook::classify(
+                mode,
+                &mut state,
+                KeyEvent {
+                    time: at,
+                    ..scanned(vk.into(), scan, edge)
+                },
+                || 0,
+                || 0,
+            );
+            at += 20;
+        }
+    }
+
+    let typed = buffer::len();
+    let mut pair = |start: u32| {
+        [
+            (Edge::Down, start),
+            (Edge::Up, start + 50),
+            (Edge::Down, start + 150),
+            (Edge::Up, start + 200),
+        ]
+        .into_iter()
+        .filter(|&(edge, time)| {
+            hook::classify(
+                mode,
+                &mut state,
+                KeyEvent {
+                    time,
+                    ..scanned(VK_LSHIFT, 0x2A, edge)
+                },
+                || 0,
+                || 0,
+            )
+            .fire_hotkey
+        })
+        .count()
+    };
+
+    let first = pair(at + 100);
+    let after_first = buffer::len();
+
+    // The input thread notes the conversion it ran on the fire.
+    assert!(buffer::note_conversion());
+
+    let second = pair(at + 1_000);
+    let after_second = buffer::len();
+    let session = buffer::with(|recorder| recorder.in_conversion());
+
+    buffer::uninstall();
+
+    assert_eq!(typed, 6, "the probe typed six strokes");
+    assert_eq!(first, 1, "the first pair fired");
+    assert_eq!(after_first, 6, "П1: the taps left the word to be converted");
+    assert_eq!(second, 1, "the second pair fired");
+    assert_eq!(after_second, 6, "and left it again");
+    assert_eq!(
+        session,
+        Some(true),
+        "the session of the last row of FR-10 is still open — the next fire returns the word"
+    );
+}
+
+/// **The rule of times, at `Taps` itself** — the body the capture of the settings window shares
+/// (task T-95-2): what the window waits for is what the hook answers to.
+#[test]
+fn the_rule_of_the_double_press_is_one_body() {
+    let mut taps = hook::Taps::default();
+
+    assert_eq!(taps, hook::Taps::NONE);
+    taps.press(1_000, true);
+    assert!(taps.pressing() && !taps.waiting());
+    assert!(!taps.release(1_080, true), "the first tap does not fire");
+    assert!(
+        !taps.pressing() && taps.waiting(),
+        "and is waiting for the second"
+    );
+    taps.press(1_200, true);
+    assert!(taps.release(1_280, true), "the second tap fires");
+    assert_eq!(taps, hook::Taps::NONE, "and the pair is over");
+
+    // A press stamped before the first one began — a clock out of order — is no second tap.
+    taps.press(5_000, true);
+    taps.release(5_050, true);
+    taps.press(4_990, true);
+    assert!(
+        !taps.release(5_060, true),
+        "an earlier stamp reads as far away"
     );
 }

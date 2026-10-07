@@ -209,8 +209,8 @@ fn raise_own_window(handle: windows::Win32::Foundation::HWND) {
 ///
 /// The script does not loop and does not sleep: the repetition belongs to `wait::until`, whose
 /// poll interval is the only sleep in the bench a verdict ever waits behind. It is not the only
-/// sleep in the bench — there are **nine**, listed one by one at the top of `wait` and re-derived
-/// from the source on every run by `the_bench_sleeps_only_in_the_nine_places_this_module_lists`.
+/// sleep in the bench — there are **eleven**, listed one by one at the top of `wait` and re-derived
+/// from the source on every run by `the_bench_sleeps_only_in_the_eleven_places_this_module_lists`.
 fn ask_and_check(pid: u32) -> bool {
     let asked = run_script(
         "word-activate.ps1",

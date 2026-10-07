@@ -2199,6 +2199,7 @@ fn armed() -> Mode {
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
         hotkey_modifiers: 0,
+        hotkey_double_tap: false,
         hotkey_yields: false,
     }
 }
@@ -2218,6 +2219,7 @@ fn through_the_hook(state: &mut HotkeyState, vk: u16, scan: u16, extra_info: usi
             flags: 0,
             time: SOME_TIME,
         },
+        || 0,
         || 0,
     )
     .decision
@@ -2297,6 +2299,7 @@ fn a_suspended_or_failed_program_buffers_nothing() {
                 flags: 0,
                 time: SOME_TIME,
             },
+            || 0,
             || 0,
         );
     }

@@ -119,24 +119,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC, DLGTEMPLATE, DM_SETDEFID, DWLP_MSGRESULT,
     DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN,
     EC_RIGHTMARGIN, EN_SETFOCUS, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
-    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND, IDCANCEL, IDOK,
-    IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT,
-    LB_GETTEXTLEN, LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW,
-    LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM,
-    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
-    SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES,
-    STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx,
-    SendDlgItemMessageW, SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR,
-    WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT,
-    WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-    WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_SETCURSOR, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
+    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetMessageTime,
+    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND,
+    IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR,
+    LR_DEFAULTSIZE, LoadCursorW, LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW,
+    RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION,
+    SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXVSCROLL,
+    SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    ScrollWindowEx, SendDlgItemMessageW, SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
+    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
+    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
+    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -207,7 +207,13 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// schema 6 file meant — and the number buys the other direction once more: a build that has
 /// never heard of the list meets a stamp it does not know, reads the file and leaves it alone,
 /// instead of dropping the list on its next write.
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+///
+/// Version 8 arrived with **вопрос 159** and task T-95-1: `[hotkey] trigger`, the double press of
+/// `Shift`. [`step_7_to_8`] is a bare stamp again — an absent trigger is `press`, which is what a
+/// schema 7 hotkey was — and the number is spent on `0.93.0` and the builds before it: they meet a
+/// stamp they do not know and leave the file alone instead of dropping the trigger (measured on the
+/// base — посылка П4 of stage Э95: `FromNewerSchema`, the hotkey `Pause`, the bytes untouched).
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -781,6 +787,16 @@ pub struct Hotkey {
     /// unknown key.
     #[serde(default)]
     pub modifiers: Vec<String>,
+    /// **How the key is pressed — task T-95-1, вопрос 159**: [`TRIGGER_PRESS`], the default and
+    /// what every file before schema 8 means, or [`TRIGGER_DOUBLE_TAP`] — two taps of `Shift` in a
+    /// row (157.17: the double press is `Shift`'s alone). Always written, as `modifiers = []` is.
+    ///
+    /// A string for the reason [`Self::key`] is one: a word nobody knows must not cost the whole
+    /// document. [`Self::binding`] answers `None` for it and the **whole** hotkey stays the default
+    /// `Pause` — the fate of an unknown key name; and `double_tap` is lawful with `key = "Shift"`
+    /// and no modifiers only, with anything else it is the same `None`.
+    #[serde(default = "default_hotkey_trigger")]
+    pub trigger: String,
 }
 
 impl Default for Hotkey {
@@ -788,6 +804,7 @@ impl Default for Hotkey {
         Self {
             key: default_hotkey_key(),
             modifiers: Vec::new(),
+            trigger: default_hotkey_trigger(),
         }
     }
 }
@@ -799,9 +816,28 @@ impl Hotkey {
     /// `None` is read by every caller as «the default of section 7 acts»: the start-up publication
     /// leaves `Pause` in place (`app::publish_configuration`), the help names `Pause`
     /// ([`effective_hotkey_name`]) and the settings window says why ([`hotkey_note`]).
+    ///
+    /// ⭐ **The double press of `Shift` — task T-95-1, вопрос 159**: `trigger = "double_tap"` with
+    /// `key = "Shift"` and no modifiers means `VK_SHIFT` with the flag `hook::DOUBLE_TAP` and
+    /// nothing else; the trigger with anything else, and a word outside its closed set, is `None`
+    /// like an unknown name — the whole hotkey stays `Pause`. A single `Shift` is no hotkey
+    /// (157.1): `hook::vk_from_name` knows no modifier, so `key = "Shift"` that is pressed is `None`
+    /// too. Names are read the way key names are, in any case and with the blanks around ignored.
     pub fn binding(&self) -> Option<(u16, u16)> {
-        let vk = crate::hook::vk_from_name(&self.key)?;
         let modifiers = crate::hook::modifiers_from_names(&self.modifiers)?;
+        let trigger = self.trigger.trim();
+
+        if trigger.eq_ignore_ascii_case(TRIGGER_DOUBLE_TAP) {
+            let lawful = modifiers == 0 && self.key.trim().eq_ignore_ascii_case(DOUBLE_TAP_KEY);
+
+            return lawful.then_some((VK_SHIFT.0, crate::hook::DOUBLE_TAP));
+        }
+
+        if !trigger.eq_ignore_ascii_case(TRIGGER_PRESS) {
+            return None;
+        }
+
+        let vk = crate::hook::vk_from_name(&self.key)?;
 
         Some((vk, modifiers))
     }
@@ -812,7 +848,16 @@ impl Hotkey {
     ///
     /// `None` for a key section 7 has no name for, and for a set with a bit no hotkey carries —
     /// `hook::MOD_WIN` is held, never written.
+    ///
+    /// The flag `hook::DOUBLE_TAP` reads back to [`Self::double_shift`] — with a `Shift` and
+    /// nothing else beside it (task T-95-1); with anything else it is `None`.
     pub fn from_binding(vk: u16, modifiers: u16) -> Option<Self> {
+        if modifiers & crate::hook::DOUBLE_TAP != 0 {
+            let shift = SHIFT_KEYS.contains(&vk);
+
+            return (shift && modifiers == crate::hook::DOUBLE_TAP).then(Self::double_shift);
+        }
+
         let known = crate::hook::HOTKEY_MODIFIERS
             .iter()
             .fold(0, |set, (_, bit)| set | bit);
@@ -828,9 +873,37 @@ impl Hotkey {
                 .filter(|(_, bit)| modifiers & bit != 0)
                 .map(|(name, _)| (*name).to_owned())
                 .collect(),
+            trigger: default_hotkey_trigger(),
         })
     }
+
+    /// Whether this hotkey is the double press of `Shift` — what [`Self::binding`] reads, so a
+    /// `double_tap` that is not lawful is not one (task T-95-2).
+    pub fn is_double_tap(&self) -> bool {
+        self.binding()
+            .is_some_and(|(_, set)| set & crate::hook::DOUBLE_TAP != 0)
+    }
+
+    /// The double press of `Shift` as section 7 stores it — `key = "Shift"`, `modifiers = []`,
+    /// `trigger = "double_tap"` (task T-95-1, вопрос 159): what a capture of two taps writes.
+    pub fn double_shift() -> Self {
+        Self {
+            key: DOUBLE_TAP_KEY.to_owned(),
+            modifiers: Vec::new(),
+            trigger: TRIGGER_DOUBLE_TAP.to_owned(),
+        }
+    }
 }
+
+/// `[hotkey] trigger` of a hotkey that is pressed — the default of section 7 (task T-95-1).
+pub const TRIGGER_PRESS: &str = "press";
+
+/// `[hotkey] trigger` of the double press of `Shift` — task T-95-1, вопрос 159.
+pub const TRIGGER_DOUBLE_TAP: &str = "double_tap";
+
+/// The one key a double press is assigned to — 157.17, «Только Shift»: the name section 7 stores
+/// for it, and each half of the name the windows show, «Shift, Shift» (task T-95-1).
+pub const DOUBLE_TAP_KEY: &str = "Shift";
 
 /// Section `[layouts]` of section 7, with the defaults confirmed by decision 19.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1313,6 +1386,12 @@ fn default_true() -> bool {
 /// Serde default for `hotkey.key`.
 fn default_hotkey_key() -> String {
     "Pause".to_owned()
+}
+
+/// Serde default for `hotkey.trigger` — [`TRIGGER_PRESS`]: a file before schema 8 has no such
+/// field, and its hotkey is pressed (task T-95-1).
+fn default_hotkey_trigger() -> String {
+    TRIGGER_PRESS.to_owned()
 }
 
 /// Serde default for `layouts.pair_source`, en-US (decision 19).
@@ -1871,6 +1950,9 @@ impl Config {
         if self.schema_version < 7 {
             step_6_to_7(self);
         }
+        if self.schema_version < 8 {
+            step_7_to_8(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -2034,6 +2116,21 @@ fn step_5_to_6(config: &mut Config) {
 /// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
 fn step_6_to_7(config: &mut Config) {
     config.schema_version = 7;
+}
+
+/// Raises a file from schema 7 to schema 8 — **вопрос 159**, task T-95-1: `[hotkey] trigger`.
+///
+/// **The stamp and nothing else**, as [`step_6_to_7`] one rung down: a schema 7 file carries no
+/// `trigger`, and its absence reads as `press` — the hotkey a schema 7 file meant. There is nothing
+/// to raise.
+///
+/// The number is spent in the other direction once more. `0.93.0` has no `deny_unknown_fields`
+/// either, so under an unchanged stamp it would read a file of the double press, find a key named
+/// `Shift` it does not know, answer to `Pause` — and drop the trigger the next time it writes the
+/// file. Under a stamp it has never seen, it reads the file and leaves it alone
+/// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
+fn step_7_to_8(config: &mut Config) {
+    config.schema_version = 8;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -2899,7 +2996,10 @@ pub const IDS_NOTE_UNKNOWN_KEY: u16 = 3038;
 /// otherwise sit looking editable, and split the «Esc — отмена» half off into
 /// [`IDS_CAPTURE_HINT`].
 pub const IDS_CAPTURE_PROMPT: u16 = 3039;
-/// [`Refusal::Modifier`].
+/// [`Refusal::Modifier`] — «Ctrl и Alt — только вместе с клавишей; дважды — только Shift.» since
+/// task T-95-2 (the moment 6 of the mock-up of 157.18): a `Shift` on its own is no refusal any more,
+/// and the line names the way left to the other two. «Модификатор сам по себе горячей клавишей быть
+/// не может.» before it.
 pub const IDS_CAPTURE_MODIFIER: u16 = 3040;
 // ⚠ 3041 is a hole since task T-93-2: `IDS_CAPTURE_COMBINATION` («Сочетания с модификаторами не
 // поддерживаются…») left with `Refusal::Combination` and all fourteen of its translations, when
@@ -3207,17 +3307,27 @@ pub const IDS_CAPTURE_TYPING: u16 = 3228;
 /// the free numbers are. The language it is read in is **Windows'**, not the configuration's —
 /// the second copy exits before it reads any file (`app::notify_already_running`).
 pub const IDS_ALREADY_RUNNING: u16 = 3229;
-/// The line under the hotkey field **at rest** — «Клавиша или сочетание с Ctrl, Alt, Shift.»;
-/// task T-93-2, вопрос 157, устройство А (157.6): there is no switch to choose a way, so the ways
-/// stand under the field where they are seen without reading the help. A warning of FR-92
-/// ([`hotkey_note`]) takes its place when there is one to give. 3230 is the next free number of
-/// the block of the state strings (3216…3231), as 3228 and 3229 were.
+/// The line under the hotkey field **at rest** — «Клавиша, сочетание с Ctrl, Alt, Shift или
+/// двойной Shift.» since task T-95-2 (the mock-up of 157.18), «Клавиша или сочетание с Ctrl, Alt,
+/// Shift.» before it; task T-93-2, вопрос 157, устройство А (157.6): there is no switch to choose a
+/// way, so the ways stand under the field where they are seen without reading the help. A warning
+/// of FR-92 ([`hotkey_note`]) takes its place when there is one to give. 3230 is the next free
+/// number of the block of the state strings (3216…3231), as 3228 and 3229 were.
 pub const IDS_HOTKEY_HINT: u16 = 3230;
 /// The line under the field **once**, after a combination is captured — «{0} без {1} остаётся
 /// программам.», `{0}` the key, `{1}` the modifiers as the field shows them (task T-93-2, the
 /// mock-up of 157.5). It stands until the window closes or the next capture is armed. 3231 is the
 /// last free number of the block.
 pub const IDS_CAPTURE_COMBO_NOTE: u16 = 3231;
+/// The line under the field while a capture waits for the second `Shift` — «Ещё раз Shift —
+/// двойное нажатие; клавиша с Shift — сочетание.» (task T-95-2, вопрос 159, the moments 3 and 4 of
+/// the mock-up of 157.18). It stays after the window of the pair has run out, until the next press:
+/// 400 ms is too short to read it in. 3232 opens the next block of sixteen — 3216…3231 is full.
+pub const IDS_CAPTURE_SHIFT_AGAIN: u16 = 3232;
+/// The line under the field **once**, after the double press is captured — «Два нажатия Shift
+/// подряд. Обычный набор с Shift не затронут.» (task T-95-2, the moment 5 of the mock-up of
+/// 157.18), as [`IDS_CAPTURE_COMBO_NOTE`] after a combination.
+pub const IDS_CAPTURE_DOUBLE_NOTE: u16 = 3233;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3427,7 +3537,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and eighteen since task T-93-2** — вопрос 157, 157.3: `IDS_CAPTURE_COMBINATION`
 /// (3041) left with the refusal it said, and [`IDS_HOTKEY_HINT`] and [`IDS_CAPTURE_COMBO_NOTE`]
 /// arrived — 217 − 1 + 2. 3041 is the third hole that is not walked.
-pub const INTERFACE_STRINGS: [u16; 218] = [
+///
+/// ⚠ **Two hundred and twenty since task T-95-2** — вопрос 159, 157.18: the double press of `Shift`
+/// brought [`IDS_CAPTURE_SHIFT_AGAIN`] and [`IDS_CAPTURE_DOUBLE_NOTE`], the first two numbers of a
+/// new block (3232…3247).
+pub const INTERFACE_STRINGS: [u16; 220] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3651,6 +3765,10 @@ pub const INTERFACE_STRINGS: [u16; 218] = [
     // combination is captured.
     IDS_HOTKEY_HINT,
     IDS_CAPTURE_COMBO_NOTE,
+    // Task T-95-2, вопрос 159 — the line while a capture waits for the second `Shift`, and the
+    // one after the double press is captured.
+    IDS_CAPTURE_SHIFT_AGAIN,
+    IDS_CAPTURE_DOUBLE_NOTE,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -3994,19 +4112,32 @@ pub enum Capture {
     /// since task T-93-2, the modifiers held with it in the canonical order — and
     /// [`Hotkey::binding`] reads it back to the very code and set it came from.
     Taken(Hotkey),
+    /// **A `Shift` on its own — the beginning of a double press**, task T-95-2, вопрос 159: not a
+    /// refusal any more (157.17 — the double press is `Shift`'s). What it becomes is decided by
+    /// what follows, and that is the memory of [`CapturePair`]: a second tap — the double press; a
+    /// key with the `Shift` held — a combination, as in stage 1; nothing — the invitation again.
+    Shift,
     /// The press cannot be the hotkey. The capture stays armed and the reason is shown.
     Refused(Refusal),
 }
 
 /// One thing that can happen to an armed capture — task Т-23-5, решение 82.6.
 ///
-/// The three events the window procedures of the dialog can see, named apart from the Win32
-/// messages that carry them so that the machine below can be exercised without a window.
+/// The events the window procedures of the dialog can see, named apart from the Win32 messages
+/// that carry them so that the machine below can be exercised without a window. Task T-95-2
+/// added two, for the double press of `Shift`: the release of a key and the end of the window of
+/// the pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureEvent {
     /// A key went down while the field held the focus — the virtual code and the modifiers
     /// held with it.
     KeyDown(u16, Modifiers),
+    /// **A key went up while the field held the focus** — task T-95-2: the release of `Shift`
+    /// ends a tap of the double press; the release of any other key changes nothing.
+    KeyUp(u16),
+    /// **The window of the double press ran out** — task T-95-2: the one-shot timer
+    /// [`CAPTURE_PAIR_TIMER`] of the dialog, armed by a press of `Shift`, has fired.
+    PairTimeout,
     /// The field lost the keyboard focus. The flag says whether it went to the capture button
     /// itself, which is the one window that may take it without ending the capture: that
     /// button is about to report a click, and ending here would turn the click into a fresh
@@ -4031,6 +4162,118 @@ pub enum CaptureStep {
     /// The press cannot be the hotkey. **The capture stays armed** — a refusal is «not that
     /// one», not an end to the question — and the note says which of the six reasons it was.
     Refuse(Refusal),
+    /// **A `Shift` went down on its own — the first tap of a double press or its second** (task
+    /// T-95-2, the moment 3 of the mock-up of 157.18): the field says «Shift…», the line under it
+    /// [`IDS_CAPTURE_SHIFT_AGAIN`], and the one-shot timer of the pair runs for
+    /// `hook::DOUBLE_TAP_MS`. The capture stays armed.
+    AwaitShift,
+    /// **The second `Shift` did not come in time, or a tap was held too long** — the moment 4: the
+    /// field says the invitation again, the line under it stays until the next press, and the timer
+    /// is dead. The capture stays armed.
+    ShiftLapsed,
+}
+
+/// **The double press of `Shift` as a capture waits for it** — task T-95-2, вопрос 159, the moments
+/// of the mock-up of 157.18.
+///
+/// The memory the capture gained: [`capture_step`] decides one press at a time and cannot tell a
+/// second tap from a first. The rule of times is the hook's own, [`crate::hook::Taps`] — one body
+/// for the window that assigns the double press and the callback that answers to it, so the field
+/// takes exactly the pair the hook will act on. What only a window can know is here: a `Shift` is
+/// down (its auto-repeat is no new press), and what the window shows while a pair is open.
+///
+/// The times are the times of the window messages (`GetMessageTime`), as the hook's are the times of
+/// its events; the modifiers held are the queue's (`GetKeyState`, [`Modifiers::held_now`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CapturePair {
+    /// A `Shift` is down, as the field saw it go down — what tells its auto-repeat from a new press.
+    held: bool,
+    /// The taps made so far, and the rule they are counted by.
+    taps: crate::hook::Taps,
+}
+
+impl CapturePair {
+    /// One event of an armed capture, with the memory of the pair — task T-95-2. `time` is the
+    /// time of the message the event came in.
+    ///
+    /// * A press of `Shift` on its own ([`capture_step`] answers [`CaptureStep::AwaitShift`]) is a
+    ///   tap begun — the first or the second — unless it is the auto-repeat of the `Shift` already
+    ///   down, which is nothing.
+    /// * The release of `Shift` ends the tap: the second tap within the window — the double press,
+    ///   taken; the first — the pair waits, nothing changes on the screen; a tap held too long —
+    ///   [`CaptureStep::ShiftLapsed`].
+    /// * The end of the window ([`CaptureEvent::PairTimeout`]) with a pair open —
+    ///   [`CaptureStep::ShiftLapsed`]; with none, a stale tick, nothing.
+    /// * Any other press ends the pair and is decided as [`capture_step`] decides it: a key with
+    ///   `Shift` held is a combination (stage 1), `Ctrl` or `Alt` on their own are refused, `Esc`
+    ///   cancels. A focus lost or a click beside cancel the capture, the pair with it.
+    pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
+        match event {
+            CaptureEvent::KeyDown(vk, _) if SHIFT_KEYS.contains(&vk) => {
+                let repeat = std::mem::replace(&mut self.held, true);
+
+                match capture_step(true, event) {
+                    CaptureStep::AwaitShift if repeat => CaptureStep::Ignore,
+                    CaptureStep::AwaitShift => {
+                        self.taps.press(time, true);
+                        CaptureStep::AwaitShift
+                    }
+                    // A `Shift` under `Ctrl` or `Alt`: refused, and no tap.
+                    other => {
+                        self.taps.interrupt();
+                        other
+                    }
+                }
+            }
+
+            CaptureEvent::KeyUp(vk) if SHIFT_KEYS.contains(&vk) => {
+                if !std::mem::replace(&mut self.held, false) {
+                    // The release of a `Shift` this capture never saw go down.
+                    return CaptureStep::Ignore;
+                }
+
+                let pressing = self.taps.pressing();
+
+                if self.taps.release(time, true) {
+                    return CaptureStep::Take(Hotkey::double_shift());
+                }
+
+                if pressing && !self.taps.waiting() {
+                    // The press was no tap — held longer than the window.
+                    return CaptureStep::ShiftLapsed;
+                }
+
+                CaptureStep::Ignore
+            }
+
+            CaptureEvent::KeyUp(_) => CaptureStep::Ignore,
+
+            CaptureEvent::PairTimeout => {
+                if !self.open() {
+                    return CaptureStep::Ignore;
+                }
+
+                self.taps.interrupt();
+                CaptureStep::ShiftLapsed
+            }
+
+            CaptureEvent::KeyDown(..)
+            | CaptureEvent::FocusLost { .. }
+            | CaptureEvent::ClickBeside => {
+                if matches!(event, CaptureEvent::KeyDown(..)) {
+                    self.taps.interrupt();
+                }
+
+                capture_step(true, event)
+            }
+        }
+    }
+
+    /// Whether a pair is open — a tap made, or a press that may be one: the field says «Shift…»
+    /// and the timer of the pair runs.
+    pub fn open(&self) -> bool {
+        self.taps.pressing() || self.taps.waiting()
+    }
 }
 
 /// The whole decision of the capture, as a function of the state and one event — task Т-23-5.
@@ -4054,8 +4297,15 @@ pub fn capture_step(armed: bool, event: CaptureEvent) -> CaptureStep {
 
         CaptureEvent::KeyDown(vk, modifiers) => match capture(vk, modifiers) {
             Capture::Taken(hotkey) => CaptureStep::Take(hotkey),
+            // Task T-95-2: one press at a time, a `Shift` on its own is the beginning of a pair —
+            // what it becomes, [`CapturePair::step`] decides.
+            Capture::Shift => CaptureStep::AwaitShift,
             Capture::Refused(refusal) => CaptureStep::Refuse(refusal),
         },
+
+        // Task T-95-2: a release, and the end of the window of a pair, mean something only to the
+        // memory of a pair ([`CapturePair::step`]); one press at a time, they are nothing.
+        CaptureEvent::KeyUp(_) | CaptureEvent::PairTimeout => CaptureStep::Ignore,
 
         CaptureEvent::FocusLost { to_capture_button } => {
             if to_capture_button {
@@ -4091,6 +4341,10 @@ const MODIFIER_KEYS: &[u16] = &[
     VK_RSHIFT.0,
 ];
 
+/// `Shift` in its three forms — the neutral code the queue reports for both keys and the two sided
+/// ones a keyboard can send. The key of the double press (task T-95-2): left and right are one.
+const SHIFT_KEYS: [u16; 3] = [VK_SHIFT.0, VK_LSHIFT.0, VK_RSHIFT.0];
+
 /// The whole capture decision, as a function of the key and of what was held with it.
 ///
 /// The order of the tests is not free:
@@ -4101,7 +4355,9 @@ const MODIFIER_KEYS: &[u16] = &[
 ///   the answer for the case where the hook is not installed at all;
 /// * then the `Windows` key — pressed, or held under another key — which is neither a modifier
 ///   of this program's vocabulary nor a key an application ever gets;
-/// * then a modifier on its own, which is a press the user has not finished making;
+/// * then a modifier on its own, which is a press the user has not finished making — except a
+///   `Shift` with nothing else held, which since task T-95-2 begins a double press
+///   ([`Capture::Shift`]);
 /// * then a key that would type a character with what is held ([`Refusal::Text`]) and a key
 ///   typing itself needs ([`Refusal::Editing`]);
 /// * and last the vocabulary of section 7, because a name that cannot be written to the file
@@ -4126,6 +4382,15 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
     }
 
     if MODIFIER_KEYS.contains(&vk) {
+        // ⭐ Task T-95-2, вопрос 159: a `Shift` with nothing but itself held is the beginning of
+        // a double press — 157.17 gives the double press to `Shift` alone. `Ctrl` and `Alt` on
+        // their own, and a `Shift` pressed under either (`Ctrl+Shift`, `Alt+Shift` — the switches
+        // of the layout), stay the refusal they were; its line names the way that is left
+        // («дважды — только Shift»).
+        if SHIFT_KEYS.contains(&vk) && !modifiers.ctrl && !modifiers.alt {
+            return Capture::Shift;
+        }
+
         return Capture::Refused(Refusal::Modifier);
     }
 
@@ -4270,6 +4535,9 @@ pub struct CaptureSession {
     /// `[hotkey]` as it stood when the capture was armed — what «отмена» puts back: the key and,
     /// since task T-93-1, the modifiers held with it.
     previous: Hotkey,
+    /// The double press this capture is waiting for, if it is — task T-95-2. Born empty with the
+    /// capture and gone with it, so a pair never outlives the capture it was begun in.
+    pair: CapturePair,
     /// The hotkey the callback was comparing against when the capture was armed — the code and
     /// its modifier set, which `hook` publishes as one word (task T-93-1).
     ///
@@ -4298,6 +4566,7 @@ impl CaptureSession {
 
         Self {
             previous,
+            pair: CapturePair::default(),
             published,
         }
     }
@@ -4305,6 +4574,18 @@ impl CaptureSession {
     /// The hotkey to go back to if the capture is cancelled — the key and its modifiers.
     pub fn previous(&self) -> &Hotkey {
         &self.previous
+    }
+
+    /// One event of this capture, decided with the memory of its pair — [`CapturePair::step`],
+    /// task T-95-2.
+    pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
+        self.pair.step(event, time)
+    }
+
+    /// Whether this capture has a pair open — the field says «Shift…» and the timer of the pair
+    /// runs (task T-95-2).
+    pub fn pair_open(&self) -> bool {
+        self.pair.open()
     }
 
     /// The hotkey the callback will be given back when this capture ends — the code and its
@@ -5750,10 +6031,18 @@ fn types_a_character(vk: u16, modifiers: u16) -> bool {
 /// hand-written `f12` or `Break` is shown as `F12` and `Pause`. This is the one function every
 /// window shows the hotkey through: the field of the settings window, the help of «О программе»,
 /// the letters and the chip of their demonstration (`letters.rs`).
+///
+/// ⭐ **The double press — task T-95-1, вопрос 159: «Shift, Shift»**, the key twice with
+/// [`DOUBLE_TAP_JOINER`] between, in every language alike (the names of keys are not translated):
+/// the field after a capture and at rest, «О программе» and the letters show this one string.
 pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
     let Some((vk, modifiers)) = hotkey.binding() else {
         return default_hotkey_key();
     };
+
+    if modifiers & crate::hook::DOUBLE_TAP != 0 {
+        return [DOUBLE_TAP_KEY, DOUBLE_TAP_KEY].join(DOUBLE_TAP_JOINER);
+    }
 
     let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
     let mut name = modifier_label(modifiers);
@@ -5768,6 +6057,10 @@ pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
 
 /// What stands between the parts of a hotkey's name — « + », task T-93-1 (the mock-up of 157.5).
 pub const HOTKEY_JOINER: &str = " + ";
+
+/// What stands between the two taps in the name of the double press — «, », task T-95-1 (the
+/// mock-up of 157.18: «Shift, Shift»).
+pub const DOUBLE_TAP_JOINER: &str = ", ";
 
 /// The modifiers of a set, by name, in the canonical order and joined — `Ctrl + Alt` — or empty
 /// for a bare key (task T-93-1). The head of [`effective_hotkey_name`].
@@ -6427,7 +6720,8 @@ struct DialogState<'a> {
     /// under the field says once which half stays with the programs ([`IDS_CAPTURE_COMBO_NOTE`])
     /// instead of the line at rest, until the window closes or the next capture is armed. A
     /// change of language on «Применить» says it again in the new language rather than dropping
-    /// it.
+    /// it. Since task T-95-2 the double press of `Shift` raises it too, and the line it says once
+    /// is [`IDS_CAPTURE_DOUBLE_NOTE`] (the mock-up of 157.18).
     combination_taken: bool,
     /// The palette every colour answer of this dialog is chosen from — FR-92а, task T-11-4.
     ///
@@ -6746,13 +7040,21 @@ unsafe extern "system" fn dialog_proc(
             unsafe { on_notify(hwnd, lparam) }
         }
 
-        // Task T-39-11, решение 122.5: the one timer of this window takes «Журнал сохранён» off
+        // Task T-39-11, решение 122.5: the first timer of this window takes «Журнал сохранён» off
         // the button. SEC-05: nothing is taken out of the message but the identifier, and a
         // forged `WM_TIMER` carrying it buys its sender the button's own caption put back — the
         // safe direction. Any other identifier is not this window's, and it is left alone.
+        //
+        // Task T-95-2: the second timer — the window of the double press ran out. A forged one
+        // buys its sender the invitation back in the field of an open pair: the safe direction
+        // too.
         WM_TIMER => {
             if wparam.0 == JOURNAL_SAVED_TIMER {
                 end_journal_saved(hwnd);
+            } else if wparam.0 == CAPTURE_PAIR_TIMER {
+                // SAFETY: called from this dialog's own procedure with its own `hwnd`, which is
+                // the contract of the callee.
+                unsafe { run_capture_step(hwnd, CaptureEvent::PairTimeout) };
             }
 
             0
@@ -14240,9 +14542,11 @@ fn show_hotkey(hwnd: HWND, hotkey: &Hotkey, combination_taken: bool) {
 ///    know, a key that types its character: what the person must not miss;
 /// 2. **once, after a combination is captured**, which half stays with the programs —
 ///    [`IDS_CAPTURE_COMBO_NOTE`], «F12 без Ctrl остаётся программам.», the key and the modifiers
-///    as the field shows them;
-/// 3. otherwise **the line at rest** — [`IDS_HOTKEY_HINT`], «Клавиша или сочетание с Ctrl, Alt,
-///    Shift.»: устройство А has no switch, so the ways stand where they are seen (157.6).
+///    as the field shows them; and since task T-95-2, **once after the double press** —
+///    [`IDS_CAPTURE_DOUBLE_NOTE`], «Два нажатия Shift подряд. Обычный набор с Shift не затронут.»;
+/// 3. otherwise **the line at rest** — [`IDS_HOTKEY_HINT`], «Клавиша, сочетание с Ctrl, Alt,
+///    Shift или двойной Shift.»: устройство А has no switch, so the ways stand where they are
+///    seen (157.6).
 ///
 /// Public so a test reads the very answer the window shows, in every language.
 pub fn hotkey_line(hotkey: &Hotkey, combination_taken: bool) -> String {
@@ -14251,6 +14555,10 @@ pub fn hotkey_line(hotkey: &Hotkey, combination_taken: bool) -> String {
     }
 
     match hotkey.binding() {
+        // Task T-95-2 — once after the double press is captured (the moment 5 of 157.18).
+        Some((_, set)) if combination_taken && set & crate::hook::DOUBLE_TAP != 0 => {
+            text(IDS_CAPTURE_DOUBLE_NOTE)
+        }
         Some((vk, modifiers)) if combination_taken && modifiers != 0 => {
             let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
 
@@ -14394,10 +14702,21 @@ unsafe extern "system" fn hotkey_field_proc(
                 return LRESULT(0);
             }
 
-            // Swallowed rather than forwarded: the release of a key whose press was taken must
-            // not reach the control, and `WM_CHAR` is the message that would put a *character*
-            // into a field this program promises never to show one in.
-            WM_KEYUP | WM_SYSKEYUP | WM_CHAR | WM_SYSCHAR => return LRESULT(0),
+            // ⭐ Task T-95-2: the release of a key is an event of the capture — the release of
+            // `Shift` ends a tap of the double press (посылка П6, measured: the modal loop hands
+            // both forms to this procedure). Swallowed still, rather than forwarded: the release
+            // of a key whose press was taken must not reach the control. **SEC-01:** the virtual
+            // code and nothing else, as for the press.
+            WM_KEYUP | WM_SYSKEYUP => {
+                // SAFETY: as above.
+                unsafe { run_capture_step(dialog, CaptureEvent::KeyUp(wparam.0 as u16)) };
+
+                return LRESULT(0);
+            }
+
+            // `WM_CHAR` is the message that would put a *character* into a field this program
+            // promises never to show one in.
+            WM_CHAR | WM_SYSCHAR => return LRESULT(0),
 
             // Clicking somewhere else abandons the capture, because a capture nobody can see is
             // a program with its conversion switched off for no visible reason. The window the
@@ -14551,6 +14870,69 @@ fn show_capture_note(hwnd: HWND, refusal: Option<Refusal>) {
     set_note(hwnd, &note);
 }
 
+/// The identifier of the one-shot timer of the double press — task T-95-2, вопрос 159.
+///
+/// The second timer of the settings window: [`JOURNAL_SAVED_TIMER`] is 1 and was the only one
+/// (посылка П8, measured by a grep of `SetTimer`), so 2 collides with nothing. Set on the dialog
+/// and not on the field, so that the `WM_TIMER` arrives at [`dialog_proc`], which runs the capture.
+pub const CAPTURE_PAIR_TIMER: usize = 2;
+
+/// What the field says while a pair is open — «Shift…», the name of the key and the ellipsis of the
+/// invitation (the moment 3 of the mock-up of 157.18). Not a string of the table: the names of keys
+/// are not translated, and the ellipsis is the invitation's own.
+pub fn pending_shift_name() -> String {
+    format!("{DOUBLE_TAP_KEY}…")
+}
+
+/// **The moment 3 — a `Shift` went down on its own** (task T-95-2): the field says «Shift…», the
+/// line under it [`IDS_CAPTURE_SHIFT_AGAIN`], and the one-shot timer of the pair is armed for
+/// `hook::DOUBLE_TAP_MS` — the window of the second press, and then of the hold of the second tap
+/// (`SetTimer` with an identifier the window already has replaces that timer).
+///
+/// ⚠ **NFR-10 — nothing ticks at rest.** The timer lives only while a pair is open: the release that
+/// completes the pair takes the hotkey and the capture ends ([`accept_capture`]), the end of the
+/// window and a refusal call [`end_pair_wait`], a cancellation [`cancel_capture`] — each kills it.
+///
+/// Public for `tests\settings.rs`, which stands a window of its own in for the dialog.
+pub fn await_second_shift(dialog: HWND) {
+    set_text(dialog, IDC_HOTKEY, &pending_shift_name());
+    set_note(dialog, &text(IDS_CAPTURE_SHIFT_AGAIN));
+
+    // SAFETY: `dialog` is the live window of the caller. No timer procedure is given, so the
+    // timer arrives as `WM_TIMER` at the window's own procedure, and the call keeps no pointer.
+    if unsafe {
+        SetTimer(
+            Some(dialog),
+            CAPTURE_PAIR_TIMER,
+            crate::hook::DOUBLE_TAP_MS,
+            None,
+        )
+    } == 0
+    {
+        // NFR-13: without the timer the field would say «Shift…» until the next press — the pair
+        // itself is decided by the times of the messages and still works — and the refusal is
+        // journaled.
+        crate::app::report_non_critical("SetTimer", &WinError::from_thread());
+    }
+}
+
+/// **The moment 4 — the pair is over without a double press** (task T-95-2): the timer is killed
+/// and the field says the invitation again. The line under the field is **not** touched: «Ещё раз
+/// Shift — …» stays until the next press, because 400 ms is too short to read it in (157.18).
+///
+/// Public for `tests\settings.rs`, as [`await_second_shift`] is.
+pub fn end_pair_wait(dialog: HWND) {
+    kill_pair_timer(dialog);
+    set_text(dialog, IDC_HOTKEY, &text(IDS_CAPTURE_PROMPT));
+}
+
+/// Kills the timer of the pair — task T-95-2. A refusal of `KillTimer` means there was no timer to
+/// kill, the ordinary case when no pair was open, and is not a fault.
+fn kill_pair_timer(dialog: HWND) {
+    // SAFETY: `dialog` is the live window of the caller; the call touches no memory of ours.
+    let _ = unsafe { KillTimer(Some(dialog), CAPTURE_PAIR_TIMER) };
+}
+
 /// Abandons the capture and puts back the key that stood there before it was armed.
 ///
 /// Dropping the session is what restores the callback's `general.enabled`; the assignment below
@@ -14561,6 +14943,9 @@ fn cancel_capture(hwnd: HWND, state: &mut DialogState<'_>) {
     let Some(session) = state.capture.take() else {
         return;
     };
+
+    // Task T-95-2: a pair open when the capture is cancelled goes with it — nothing ticks at rest.
+    kill_pair_timer(hwnd);
 
     let previous = session.previous().clone();
 
@@ -14586,7 +14971,12 @@ fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, hotkey: Hotkey) {
     // Ends the capture and publishes the callback's previous `general.enabled` back.
     state.capture = None;
 
-    state.combination_taken = !hotkey.modifiers.is_empty();
+    // Task T-95-2: the double press is taken on the release that completes it, with its timer
+    // still armed for the hold of that tap — and a combination may be taken out of an open pair.
+    kill_pair_timer(hwnd);
+
+    // The line said once — after a combination, and since task T-95-2 after the double press.
+    state.combination_taken = !hotkey.modifiers.is_empty() || hotkey.is_double_tap();
     state.working.hotkey = hotkey;
 
     show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
@@ -14632,18 +15022,37 @@ pub fn note_capture_refused() {
 
 /// Carries out what [`capture_step`] decides about one event — task Т-23-5.
 ///
-/// The decision is taken **before** the borrow and the borrow only performs it: the machine is
-/// a pure function of the armed flag and the event, and everything Win32 about it lives here.
+/// The decision is taken in a borrow of its own and the second borrow only performs it: the
+/// machine is a pure function of the capture's memory and the event — [`CapturePair::step`] since
+/// task T-95-2, which keeps the double press of `Shift` between two events — and everything Win32
+/// about it lives here. The time of the event is the time of the message being handled
+/// (`GetMessageTime`): this runs inside the handling of the key message or of the timer.
 ///
 /// # Safety
 ///
 /// Called from [`hotkey_field_proc`] and [`dialog_proc`] only, with the `hwnd` of the dialog
 /// the field belongs to.
 unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
-    // SAFETY: see the caller.
-    let armed = unsafe { with_state(dialog, |state| state.capture.is_some()) }.unwrap_or(false);
+    // SAFETY: takes no arguments and reads a value the system keeps for the message this thread
+    // is dispatching; it cannot fail. The cast is the documented reading of a tick count.
+    let time = (unsafe { GetMessageTime() }) as u32;
 
-    let step = capture_step(armed, event);
+    // SAFETY: see the caller. The pair is asked **before** the step: whether the field said
+    // «Shift…» when this event came is what a refusal has to undo.
+    let decided = unsafe {
+        with_state(dialog, |state| match state.capture.as_mut() {
+            Some(session) => {
+                let pair_was_open = session.pair_open();
+
+                (session.step(event, time), pair_was_open)
+            }
+            None => (capture_step(false, event), false),
+        })
+    };
+
+    let Some((step, pair_was_open)) = decided else {
+        return;
+    };
 
     // The frame of the field is part of the window's cached background, so the two steps that
     // end a capture have to make the picture again — see `toggle_capture`.
@@ -14659,11 +15068,19 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
             // The capture stays armed: a refusal is a "not that one", not an end to the
             // question. The note says which reason it was, in place of the hint — and first,
             // since task T-71-3 (Э36-Б-3), the refusal is counted and journaled: here, where it is
-            // carried out, and not in `capture_step`, which only decides.
+            // carried out, and not in `capture_step`, which only decides. Task T-95-2: a refusal
+            // ends an open pair, so the field says the invitation again.
             CaptureStep::Refuse(refusal) => {
                 note_capture_refused();
+                if pair_was_open {
+                    end_pair_wait(dialog);
+                }
                 show_capture_note(dialog, Some(refusal));
             }
+
+            // Task T-95-2 — the moments 3 and 4 of the mock-up of 157.18.
+            CaptureStep::AwaitShift => await_second_shift(dialog),
+            CaptureStep::ShiftLapsed => end_pair_wait(dialog),
         })
     };
 
