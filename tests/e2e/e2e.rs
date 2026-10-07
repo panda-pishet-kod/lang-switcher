@@ -143,6 +143,7 @@ fn run(arguments: &[String]) -> std::process::ExitCode {
         Some("--experiment-unicode") => experiment_unicode(),
         Some("--experiment-modes") => experiment_modes(),
         Some("--experiment-combination") => experiment_combination(),
+        Some("--experiment-double-shift") => experiment_double_shift(),
         Some("--experiment-explorer") => experiment_explorer(arguments),
         Some("--experiment-sequence") => experiment_sequence(arguments),
         Some("--experiment-stamp") => experiment_stamp(arguments),
@@ -445,6 +446,29 @@ fn experiment_combination() -> std::process::ExitCode {
     scenarios::experiment_combination(&context)
 }
 
+/// **Task T-95-3, вопрос 159** — the double press of `Shift` on the bench: a pair converts and the
+/// next returns, the left and the right `Shift` are one, and a slow pair, capitals, `Alt+Shift` and
+/// `Shift` with a click do nothing. See [`scenarios::experiment_double_shift`]; this arm only builds
+/// the context. The experiment writes its own configuration (`trigger = "double_tap"`), so the
+/// hotkey of the context is not pressed by it.
+fn experiment_double_shift() -> std::process::ExitCode {
+    let automation = match uia::Automation::new() {
+        Ok(automation) => automation,
+        Err(error) => {
+            eprintln!("UI Automation недоступна: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let context = scenarios::Context {
+        automation: &automation,
+        hotkey_vk: 0x10,
+        ambient_before: layout::ambient(),
+    };
+
+    scenarios::experiment_double_shift(&context)
+}
+
 /// **Task T-10-9** — `Win+E` and what conversion does after it.
 ///
 /// The arm is here and the experiment is in `scenarios.rs`, the split every mode of this file
@@ -702,14 +726,21 @@ fn experiment_threads(arguments: &[String]) -> std::process::ExitCode {
 
 /// ⭐ **Task T-10-14** — the callback percentiles under a volley that exercises the repair.
 ///
-/// `--experiment-latency [нажатий] [--words]`. See [`scenarios::experiment_latency`] for why
-/// this is position 23's measurement on a window of the bench's own and what `--words` changes.
+/// `--experiment-latency [нажатий] [--words] [--shift] [--trigger press|double_tap]`. See
+/// [`scenarios::experiment_latency`] for why this is position 23's measurement on a window of the
+/// bench's own, what `--words` changes, and the two flags of task T-95-3.
 fn experiment_latency(arguments: &[String]) -> std::process::ExitCode {
     let presses = arguments
         .get(1)
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(10_200);
     let words = arguments.iter().any(|value| value == "--words");
+    let shift = arguments.iter().any(|value| value == "--shift");
+    let trigger = arguments
+        .iter()
+        .position(|value| value == "--trigger")
+        .and_then(|at| arguments.get(at + 1))
+        .map(String::as_str);
 
     let automation = match uia::Automation::new() {
         Ok(automation) => automation,
@@ -725,7 +756,7 @@ fn experiment_latency(arguments: &[String]) -> std::process::ExitCode {
         ambient_before: layout::ambient(),
     };
 
-    scenarios::experiment_latency(&context, presses, words)
+    scenarios::experiment_latency(&context, presses, words, shift, trigger)
 }
 
 /// ⭐ **Task T-10-20** — the detector of defect E, on the mechanism itself.

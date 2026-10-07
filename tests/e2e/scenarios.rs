@@ -41,8 +41,8 @@ use windows::Win32::UI::Accessibility::{
     UIA_ButtonControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_A, VK_BACK, VK_CONTROL, VK_DELETE, VK_E, VK_HOME, VK_LWIN, VK_MENU, VK_SHIFT, VK_SPACE,
-    VK_TAB,
+    VK_A, VK_BACK, VK_CONTROL, VK_DELETE, VK_E, VK_G, VK_H, VK_HOME, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_RSHIFT, VK_SHIFT, VK_SPACE, VK_TAB, VK_W,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, HWND_MESSAGE, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND,
@@ -7912,7 +7912,23 @@ pub fn experiment_stamp(ctx: &Context, rounds: usize) -> std::process::ExitCode 
 ///
 /// The histogram of `hook::profile` is global and is never reset, so one run measures one
 /// shape. The mode is meant to be run twice, once each way, against a fresh product.
-pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::process::ExitCode {
+///
+/// # Task T-95-3 — the double press of `Shift`, NFR-01
+///
+/// `--shift` makes the volley `Shift` tapped before every letter (`Shift`, `g`, `Shift`, `g`, …):
+/// with the double press as the hotkey every new press of `Shift` asks the held modifiers and
+/// reads the count of mouse buttons, which is the dearest path the double press put into the
+/// callback — and the letter between breaks every pair, so nothing fires. `--trigger press` or
+/// `--trigger double_tap` writes the configuration of the run ([`bench_config`]) before the product
+/// starts, so the two ways of the hotkey are measured on one build; without it the run reads
+/// whatever configuration stands, as before.
+pub fn experiment_latency(
+    ctx: &Context,
+    presses: usize,
+    words: bool,
+    shift: bool,
+    trigger: Option<&str>,
+) -> std::process::ExitCode {
     /// Presses spent before the first reading, so one-time costs are paid outside it.
     const WARMUP: usize = 300;
     /// Presses per `SendInput` call — position 23's number, and for its reason.
@@ -7925,14 +7941,20 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
     };
 
     println!("--- ОПЫТ T-10-14: задержка callback (критерий 12) ---\n");
-    println!(
-        "Форма залпа: {chunk_text:?} — {}\n",
-        if words {
-            "с границей слова, ветка починки работает на каждом седьмом нажатии"
-        } else {
-            "без границ слова, как в позиции 23: ветка починки срабатывает один раз за залп"
-        }
-    );
+    if shift {
+        println!(
+            "Форма залпа (T-95-3): Shift и буква g попеременно — каждый Shift — новое нажатие\n"
+        );
+    } else {
+        println!(
+            "Форма залпа: {chunk_text:?} — {}\n",
+            if words {
+                "с границей слова, ветка починки работает на каждом седьмом нажатии"
+            } else {
+                "без границ слова, как в позиции 23: ветка починки срабатывает один раз за залп"
+            }
+        );
+    }
 
     let already = crate::sut::any_running();
     if !already.is_empty() {
@@ -7941,6 +7963,31 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
     }
 
     let _clipboard = clip::Guard::capture();
+
+    // Task T-95-3: the configuration of the run, when one is asked for. Given back at the end.
+    let mut borrowed = None;
+    if let Some(trigger) = trigger {
+        let hotkey = match trigger {
+            "double_tap" => lang_switcher::settings::Hotkey::double_shift(),
+            "press" => lang_switcher::settings::Hotkey::default(),
+            other => {
+                eprintln!("--trigger знает press и double_tap, не {other:?}");
+                return std::process::ExitCode::from(1);
+            }
+        };
+        let Some(path) = lang_switcher::settings::default_config_path() else {
+            eprintln!("путь %APPDATA%\\Lang_Switcher\\config.toml не определён");
+            return std::process::ExitCode::from(1);
+        };
+        match bench_config(&path, hotkey) {
+            Ok(config) => borrowed = Some(config),
+            Err(error) => {
+                eprintln!("конфигурация: {error}");
+                return std::process::ExitCode::from(1);
+            }
+        }
+        println!("Конфигурация прогона: trigger = {trigger:?}\n");
+    }
 
     let mut product = match crate::sut::Sut::launch_with(600) {
         Ok(product) => product,
@@ -7968,10 +8015,28 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
     let outcome = (|| -> Result<(), String> {
         let (target, _content) = adopt_stamp_window(ctx, &mut field)?;
 
-        let warm = chunk_text.repeat(WARMUP / chunk_text.chars().count());
+        // Task T-95-3: a volley of `count` presses — the characters of the shape typed, or `Shift`
+        // and `g` tapped by turns. Answers how many presses went: each is two calls of the
+        // callback, its press and its release.
+        let send = |count: usize, what: &str| -> Result<usize, String> {
+            if shift {
+                let keys: Vec<u16> = [VK_LSHIFT.0, VK_G.0]
+                    .into_iter()
+                    .cycle()
+                    .take(count)
+                    .collect();
+                input::taps(&keys, &target).map_err(|error| format!("{what}: {error}"))?;
+                Ok(keys.len())
+            } else {
+                let text = chunk_text.repeat(count / chunk_text.chars().count());
+                input::type_text(&text, &target).map_err(|error| format!("{what}: {error}"))?;
+                Ok(text.chars().count())
+            }
+        };
+
         let (before_warmup, ..) = callback_reading()?;
-        input::type_text(&warm, &target).map_err(|error| format!("разминка: {error}"))?;
-        let warm_target = before_warmup + 2 * warm.chars().count() as u64;
+        let warmed = send(WARMUP, "разминка")?;
+        let warm_target = before_warmup + 2 * warmed as u64;
         if wait::until(Duration::from_secs(20), || {
             callback_reading()
                 .ok()
@@ -7988,12 +8053,15 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
              максимум {max_before} нс"
         );
 
-        let batch = chunk_text.repeat(BATCH / chunk_text.chars().count());
-        let batch_len = batch.chars().count();
+        let batch_len = if shift {
+            BATCH
+        } else {
+            chunk_text.chars().count() * (BATCH / chunk_text.chars().count())
+        };
         let batches = presses.div_ceil(batch_len);
         let started = Instant::now();
         for _ in 0..batches {
-            input::type_text(&batch, &target).map_err(|error| format!("залп: {error}"))?;
+            send(BATCH, "залп")?;
         }
         let injection = started.elapsed();
 
@@ -8035,6 +8103,9 @@ pub fn experiment_latency(ctx: &Context, presses: usize, words: bool) -> std::pr
     match product.stop() {
         Ok(code) => println!("продукт остановлен, код {code}"),
         Err(error) => println!("⚠ {error}"),
+    }
+    if let Some(mut config) = borrowed {
+        println!("{}", config.give_back());
     }
 
     match outcome {
@@ -12828,15 +12899,30 @@ fn witness_round(
 /// today, so «Привет» does not open over the windows the experiment types into (the lesson of
 /// Э33).
 fn combination_config(path: &Path, modifiers: &[&str]) -> Result<crate::config::Borrowed, String> {
-    use lang_switcher::settings::{Config, Hotkey};
+    use lang_switcher::settings::Hotkey;
 
-    let today = lang_switcher::letters::today();
-    let mut config = Config {
-        hotkey: Hotkey {
+    bench_config(
+        path,
+        Hotkey {
             key: "F12".to_owned(),
             modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
             ..Hotkey::default()
         },
+    )
+}
+
+/// The configuration of an experiment of the bench with `hotkey` for its hotkey — the body
+/// [`combination_config`] (task T-93-3) and the experiments of the double press of `Shift` (task
+/// T-95-3) share: autostart off, the letters settled for today, the feed off.
+fn bench_config(
+    path: &Path,
+    hotkey: lang_switcher::settings::Hotkey,
+) -> Result<crate::config::Borrowed, String> {
+    use lang_switcher::settings::Config;
+
+    let today = lang_switcher::letters::today();
+    let mut config = Config {
+        hotkey,
         ..Config::default()
     };
     config.general.autostart = false;
@@ -13096,6 +13182,364 @@ pub fn experiment_combination(ctx: &Context) -> std::process::ExitCode {
 }
 
 // ---------------------------------------------------------------------------------------
+// Опыт T-95-3 — двойное нажатие Shift на стенде (вопрос 159)
+// ---------------------------------------------------------------------------------------
+
+/// The gap between two taps of a pair the bench makes — well inside the 400 ms of 157.16.
+const PAIR_GAP: Duration = Duration::from_millis(120);
+
+/// The gap of a slow pair — the TZ's «≥ 600 мс», well outside the window.
+const SLOW_GAP: Duration = Duration::from_millis(650);
+
+/// How long a check that expects **nothing** waits before it reads — a conversion that is going
+/// to happen has happened well inside it (the replacements of the matrix take tens of ms).
+const QUIET: Duration = Duration::from_millis(1_200);
+
+/// The count of hotkey presses the product acted on, through the channel of SEC-04a.
+fn handoffs_now() -> Option<u64> {
+    crate::channel::read()
+        .ok()?
+        .get("hotkey_handoffs")?
+        .parse()
+        .ok()
+}
+
+/// The count of mouse buttons the product's Raw Input saw — the number the pair is checked against
+/// (FR-13, `watchdog::mouse_flushes`).
+fn mouse_flushes_now() -> Option<u64> {
+    crate::channel::read()
+        .ok()?
+        .get("mouse_flushes")?
+        .parse()
+        .ok()
+}
+
+/// Whether one round of the experiment held: the field says what it must, and the product acted
+/// on exactly `fires` presses of the hotkey between the two readings. A count that could not be
+/// read holds nothing — a silent channel is no evidence of a silent product.
+fn pair_round_held(text_ok: bool, before: Option<u64>, after: Option<u64>, fires: u64) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => text_ok && after.checked_sub(before) == Some(fires),
+        _ => false,
+    }
+}
+
+/// **The interval of a hand** — task T-95-3: the gap between two taps of a pair, between two
+/// `Alt+Shift`, between `Shift`, a click and the release. The rule of the double press is a rule of
+/// times (`hook::Taps`), so the interval is the **stimulus** and no condition can stand in for it.
+/// The one sleep of the experiment's gestures (the inventory of `wait.rs`).
+fn hand_pause(gap: Duration) {
+    std::thread::sleep(gap);
+}
+
+/// **The quiet after a round that must convert nothing** — task T-95-3: as in `empty_press`, the
+/// screen does not change, so there is no result a condition could ask about; the counters are
+/// read once this has passed. A conversion that is going to happen has happened well inside it.
+fn quiet_round() {
+    std::thread::sleep(QUIET);
+}
+
+/// Two taps of `Shift` the way a hand makes them — `first`, a pause of `gap`, `second` — each tap a
+/// press and a release together.
+fn two_taps(first: u16, second: u16, gap: Duration, target: &input::Target) -> Result<(), String> {
+    input::tap(first, target).map_err(|error| format!("первое касание: {error}"))?;
+    hand_pause(gap);
+    input::tap(second, target).map_err(|error| format!("второе касание: {error}"))
+}
+
+/// `Shift` held over a press of the mouse button, the way a hand selects with it — the half of
+/// FR-13 the double press must not mistake for a tap. The three steps apart, 60 ms each: a click
+/// and a release sent in one burst would reach the product in an order no hand makes (посылка П3).
+fn shift_click(target: &input::Target) -> Result<(), String> {
+    input::hold_down(&[VK_LSHIFT.0], target).map_err(|error| format!("Shift вниз: {error}"))?;
+    hand_pause(Duration::from_millis(60));
+    let clicked = input::click(target).map_err(|error| format!("щелчок: {error}"));
+    hand_pause(Duration::from_millis(60));
+    let released =
+        input::let_go(&[VK_LSHIFT.0], target).map_err(|error| format!("Shift вверх: {error}"));
+
+    clicked.and(released)
+}
+
+/// **Task T-95-3, вопрос 159 — the double press of `Shift` on the bench**, in a Notepad the bench
+/// starts, with a product started on `trigger = "double_tap"`. Not a position of the matrix of
+/// §11.3 — an experiment of the stage, run by hand with the person's word.
+///
+/// 1. `ghbdtn`, two taps of the left `Shift` → `привет`; two more → `ghbdtn` (FR-33): one fire each.
+/// 2. The left `Shift`, then the right → `привет`: the two keys are one.
+/// 3. A slow pair (650 ms) → nothing.
+/// 4. «Hello World» typed fast, the capitals with `Shift` → nothing.
+/// 5. `Alt+Shift` twice → nothing.
+/// 6. `Shift` + a click, twice (`Home` first, so the clicks select `ghbdtn`) → nothing — and the
+///    count of mouse buttons the product saw moves by two, the positive control that the clicks
+///    reached it at all (посылка П3, развилка C2).
+///
+/// Windows Terminal is the person's to check by hand, as in the experiment of T-93-3: the bench's
+/// foreground guard and UI Automation do not read a terminal.
+pub fn experiment_double_shift(ctx: &Context) -> std::process::ExitCode {
+    println!("--- ОПЫТ T-95-3: двойное нажатие Shift на стенде (вопрос 159) ---\n");
+
+    let Some(path) = lang_switcher::settings::default_config_path() else {
+        eprintln!("путь %APPDATA%\\Lang_Switcher\\config.toml не определён");
+        return std::process::ExitCode::from(1);
+    };
+    println!("конфигурация продукта: {}", path.display());
+
+    let already = crate::sut::any_running();
+    if !already.is_empty() {
+        eprintln!("⛔ продукт уже запущен: {already:?}. Опыт не ставится.");
+        return std::process::ExitCode::from(1);
+    }
+
+    let _clipboard = clip::Guard::capture();
+
+    let mut borrowed = match bench_config(&path, lang_switcher::settings::Hotkey::double_shift()) {
+        Ok(borrowed) => borrowed,
+        Err(error) => {
+            eprintln!("конфигурация: {error}");
+            return std::process::ExitCode::from(1);
+        }
+    };
+
+    let mut product = match crate::sut::Sut::launch() {
+        Ok(product) => product,
+        Err(error) => {
+            eprintln!("продукт не запустился: {error}");
+            println!("  {}", borrowed.give_back());
+            return std::process::ExitCode::from(1);
+        }
+    };
+    if product.await_ready(Duration::from_secs(30)).is_none() {
+        eprintln!("продукт не сообщил о готовности за 30 с");
+        let _ = product.stop();
+        println!("  {}", borrowed.give_back());
+        return std::process::ExitCode::from(1);
+    }
+    println!("Продукт PID {}\n", product.pid);
+
+    let mut held = true;
+
+    match launch_notepad() {
+        Err(error) => held &= combination_check("Блокнот", false, &format!("запуск: {error}")),
+        Ok(mut app) => {
+            let outcome = (|| -> Result<bool, String> {
+                let window = adopt_window(ctx.automation, &mut app, &|element: &Element| {
+                    element.class() == "Notepad"
+                })?;
+                let hwnd = app
+                    .window
+                    .ok_or_else(|| "у окна нет дескриптора".to_owned())?;
+                let content = ctx
+                    .automation
+                    .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+                    .ok_or_else(|| "элемент ввода не найден в дереве UI Automation".to_owned())?;
+
+                shell::activate_window(app.pid, Some(hwnd))
+                    .map_err(|error| format!("вывод окна вперёд: {error}"))?;
+                let target = input::Target { pid: app.pid, hwnd };
+
+                // Each round begins on an empty field in the English layout: Notepad of Windows 11
+                // opens with the text of its last session (Э93-Б-3), and every conversion
+                // switches the window's layout (FR-52).
+                let fresh = |text: &str| -> Result<(), String> {
+                    layout::ensure(hwnd, layout::US, Duration::from_secs(5))
+                        .map_err(|error| format!("исходная раскладка: {error}"))?;
+                    input::chord(&[VK_CONTROL.0], VK_A.0, &target)
+                        .map_err(|error| format!("Ctrl+A: {error}"))?;
+                    input::tap(VK_DELETE.0, &target).map_err(|error| format!("Delete: {error}"))?;
+                    wait::until(wait::TEXT_TIMEOUT, || {
+                        read_field(&content).filter(String::is_empty)
+                    })
+                    .ok_or_else(|| format!("поле не очистилось: {:?}", read_field(&content)))?;
+                    if !text.is_empty() {
+                        input::type_text(text, &target)
+                            .map_err(|error| format!("ввод {text:?}: {error}"))?;
+                        wait::until(wait::TEXT_TIMEOUT, || {
+                            read_field(&content).filter(|shown| shown == text)
+                        })
+                        .ok_or_else(|| {
+                            format!("введённое не дошло до поля: {:?}", read_field(&content))
+                        })?;
+                    }
+                    Ok(())
+                };
+                let shown = || read_field(&content).unwrap_or_else(|| "<не читается>".to_owned());
+                let mut all = true;
+
+                // --- 1. a pair converts, the next pair returns ------------------------------
+                fresh(TYPED)?;
+                let before = handoffs_now();
+                two_taps(VK_LSHIFT.0, VK_LSHIFT.0, PAIR_GAP, &target)?;
+                let converted = wait::until(wait::TEXT_TIMEOUT, || {
+                    read_field(&content).filter(|text| text == EXPECTED)
+                })
+                .is_some();
+                let middle = handoffs_now();
+                two_taps(VK_LSHIFT.0, VK_LSHIFT.0, PAIR_GAP, &target)?;
+                let returned = wait::until(wait::TEXT_TIMEOUT, || {
+                    read_field(&content).filter(|text| text == TYPED)
+                })
+                .is_some();
+                let after = handoffs_now();
+                all &= combination_check(
+                    "два касания Shift → «привет»",
+                    pair_round_held(converted, before, middle, 1),
+                    &format!(
+                        "поле после пары {EXPECTED:?}: {converted}; hotkey_handoffs {before:?} → {middle:?}"
+                    ),
+                );
+                all &= combination_check(
+                    "ещё два касания → обратно",
+                    pair_round_held(returned, middle, after, 1),
+                    &format!("поле {:?}; hotkey_handoffs {middle:?} → {after:?}", shown()),
+                );
+
+                // --- 2. left, then right ---------------------------------------------------
+                fresh(TYPED)?;
+                let before = handoffs_now();
+                two_taps(VK_LSHIFT.0, VK_RSHIFT.0, PAIR_GAP, &target)?;
+                let converted = wait::until(wait::TEXT_TIMEOUT, || {
+                    read_field(&content).filter(|text| text == EXPECTED)
+                })
+                .is_some();
+                let after = handoffs_now();
+                all &= combination_check(
+                    "левый, затем правый Shift → «привет»",
+                    pair_round_held(converted, before, after, 1),
+                    &format!("поле {:?}; hotkey_handoffs {before:?} → {after:?}", shown()),
+                );
+
+                // --- 3. a slow pair -----------------------------------------------------------
+                fresh(TYPED)?;
+                let before = handoffs_now();
+                two_taps(VK_LSHIFT.0, VK_LSHIFT.0, SLOW_GAP, &target)?;
+                quiet_round();
+                let after = handoffs_now();
+                all &= combination_check(
+                    &format!("медленные касания ({} мс) — ничего", SLOW_GAP.as_millis()),
+                    pair_round_held(
+                        read_field(&content).as_deref() == Some(TYPED),
+                        before,
+                        after,
+                        0,
+                    ),
+                    &format!("поле {:?}; hotkey_handoffs {before:?} → {after:?}", shown()),
+                );
+
+                // --- 4. a phrase with capitals, fast ------------------------------------------
+                fresh("")?;
+                let before = handoffs_now();
+                input::chord(&[VK_LSHIFT.0], VK_H.0, &target)
+                    .map_err(|error| format!("H: {error}"))?;
+                input::type_text("ello ", &target).map_err(|error| format!("ello: {error}"))?;
+                input::chord(&[VK_LSHIFT.0], VK_W.0, &target)
+                    .map_err(|error| format!("W: {error}"))?;
+                input::type_text("orld", &target).map_err(|error| format!("orld: {error}"))?;
+                let phrase = "Hello World";
+                let typed = wait::until(wait::TEXT_TIMEOUT, || {
+                    read_field(&content).filter(|text| text == phrase)
+                })
+                .is_some();
+                quiet_round();
+                let after = handoffs_now();
+                all &= combination_check(
+                    "фраза с заглавными быстро — ничего лишнего",
+                    pair_round_held(
+                        typed && read_field(&content).as_deref() == Some(phrase),
+                        before,
+                        after,
+                        0,
+                    ),
+                    &format!("поле {:?}; hotkey_handoffs {before:?} → {after:?}", shown()),
+                );
+
+                // --- 5. Alt+Shift twice ---------------------------------------------------------
+                fresh(TYPED)?;
+                let before = handoffs_now();
+                input::chord(&[VK_LMENU.0], VK_LSHIFT.0, &target)
+                    .map_err(|error| format!("Alt+Shift: {error}"))?;
+                hand_pause(PAIR_GAP);
+                input::chord(&[VK_LMENU.0], VK_LSHIFT.0, &target)
+                    .map_err(|error| format!("Alt+Shift: {error}"))?;
+                quiet_round();
+                let after = handoffs_now();
+                all &= combination_check(
+                    "Alt+Shift дважды — ничего",
+                    pair_round_held(
+                        read_field(&content).as_deref() == Some(TYPED),
+                        before,
+                        after,
+                        0,
+                    ),
+                    &format!("поле {:?}; hotkey_handoffs {before:?} → {after:?}", shown()),
+                );
+
+                // --- 6. Shift + a click, twice ----------------------------------------------------
+                fresh(TYPED)?;
+                input::tap(VK_HOME.0, &target).map_err(|error| format!("Home: {error}"))?;
+                let mut rect = windows::Win32::Foundation::RECT::default();
+                // SAFETY: a live window of the bench's own Notepad and a local to write into.
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }
+                    .map_err(|error| format!("прямоугольник окна: {error}"))?;
+                if !input::pointer_to((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2) {
+                    return Err("указатель не поставлен в окно".to_owned());
+                }
+                let before = handoffs_now();
+                let buttons_before = mouse_flushes_now();
+                shift_click(&target)?;
+                hand_pause(PAIR_GAP);
+                shift_click(&target)?;
+                quiet_round();
+                let after = handoffs_now();
+                let buttons_after = mouse_flushes_now();
+                let reached = match (buttons_before, buttons_after) {
+                    (Some(before), Some(after)) => after.checked_sub(before) == Some(2),
+                    _ => false,
+                };
+                all &= combination_check(
+                    "контроль прибора: два щелчка дошли до продукта",
+                    reached,
+                    &format!("mouse_flushes {buttons_before:?} → {buttons_after:?}"),
+                );
+                all &= combination_check(
+                    "Shift + щелчок дважды — ничего",
+                    pair_round_held(
+                        read_field(&content).as_deref() == Some(TYPED),
+                        before,
+                        after,
+                        0,
+                    ),
+                    &format!("поле {:?}; hotkey_handoffs {before:?} → {after:?}", shown()),
+                );
+
+                Ok(all)
+            })();
+
+            match outcome {
+                Ok(all) => held &= all,
+                Err(error) => held &= combination_check("опыт в Блокноте", false, &error),
+            }
+            println!("  {}", app.close());
+        }
+    }
+
+    match product.stop() {
+        Ok(code) => println!("  продукт остановлен, код {code}"),
+        Err(error) => println!("  ⚠ {error}"),
+    }
+    println!("  {}", borrowed.give_back());
+    println!("  {}", restore_ambient(ctx));
+
+    if held {
+        println!("\nВЕРДИКТ: все проверки опыта T-95-3 выполнены — ЗЕЛЁНЫЙ");
+        std::process::ExitCode::SUCCESS
+    } else {
+        println!("\nВЕРДИКТ: есть невыполненные проверки — \u{26D4} КРАСНЫЙ (подробности выше)");
+        std::process::ExitCode::from(1)
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Unit tests — logic only, no product and no application anywhere near them
 // ---------------------------------------------------------------------------------------
 
@@ -13144,6 +13588,41 @@ mod tests {
         assert!(repeat_reading(false, Some(1), Some(2)).starts_with("иное"));
         assert!(repeat_reading(true, None, Some(2)).starts_with("иное"));
         assert!(repeat_reading(false, Some(1), None).starts_with("иное"));
+    }
+
+    /// **Task T-95-3** — a round of the double press holds only when the field says what it must
+    /// **and** the product acted on exactly the presses the round expects; a count the channel did
+    /// not give holds nothing.
+    #[test]
+    fn a_round_of_the_double_press_holds_only_on_the_field_and_the_exact_count() {
+        assert!(
+            pair_round_held(true, Some(4), Some(5), 1),
+            "a pair: one fire"
+        );
+        assert!(
+            pair_round_held(true, Some(4), Some(4), 0),
+            "nothing: no fire"
+        );
+
+        // Controls: every way of not holding.
+        assert!(
+            !pair_round_held(false, Some(4), Some(5), 1),
+            "the field did not change"
+        );
+        assert!(
+            !pair_round_held(true, Some(4), Some(6), 1),
+            "two fires for one pair"
+        );
+        assert!(
+            !pair_round_held(true, Some(4), Some(5), 0),
+            "a fire where none may be"
+        );
+        assert!(!pair_round_held(true, None, Some(5), 1), "no count before");
+        assert!(!pair_round_held(true, Some(4), None, 0), "no count after");
+        assert!(
+            !pair_round_held(true, Some(5), Some(4), 0),
+            "a count that went back"
+        );
     }
 
     /// **Task Т-14-1, the remainder of Н-Э13-34.** A switched-off selection path is one

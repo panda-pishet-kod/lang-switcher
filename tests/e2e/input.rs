@@ -23,9 +23,10 @@
 //! * inside [`send_verified`] — the guarded send, and the only one that can carry text. The
 //!   function is private to this module and every public entry point that types anything
 //!   ([`type_text`], [`tap`], [`chord`], and since task T-93-3 [`hold_down`] and [`let_go`] —
-//!   a modifier held over a combination) ends in it, so no other module of the bench can reach
-//!   `SendInput` at all: the guard is not bypassed by a new call site because there is nowhere
-//!   else to put one.
+//!   a modifier held over a combination — and since task T-95-3 [`taps`] and [`click`] — a run
+//!   of keys with `Shift` among them, and a press of the mouse button) ends in it, so no other
+//!   module of the bench can reach `SendInput` at all: the guard is not bypassed by a new call
+//!   site because there is nowhere else to put one.
 //! * inside [`emergency_combination`] — `Ctrl+Alt+Shift+F12` of FR-96, sent **without** a
 //!   foreground check on purpose, for the reason set out at that function. It is safe not
 //!   because it is guarded but because of what it carries: four modifier-and-function keys with
@@ -42,10 +43,14 @@ use std::fmt;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_F12, VK_LWIN, VK_MENU, VK_SHIFT,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_F12, VK_LWIN, VK_MENU,
+    VK_SHIFT,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetWindowThreadProcessId, SetCursorPos,
+};
 
 /// `dwExtraInfo` every event this bench sends carries.
 ///
@@ -371,6 +376,65 @@ pub fn let_go(modifiers: &[u16], target: &Target) -> Result<(), SendError> {
         .collect();
 
     send_verified(&events, target)
+}
+
+/// Taps every key of `keys` in turn — a press and a release apiece — in **one** send: task
+/// T-95-3, the volley of the latency experiment with `Shift` in it (`Shift` tapped, a letter,
+/// `Shift` tapped, …), which [`type_text`] cannot say, because it types characters. Guarded like
+/// every send.
+pub fn taps(keys: &[u16], target: &Target) -> Result<(), SendError> {
+    let mut events = Vec::with_capacity(keys.len() * 2);
+
+    for &vk in keys {
+        let extended = if is_extended(vk) {
+            KEYEVENTF_EXTENDEDKEY.0
+        } else {
+            0
+        };
+
+        events.push(key_event(vk, 0, extended));
+        events.push(key_event(vk, 0, extended | KEYEVENTF_KEYUP.0));
+    }
+
+    send_verified(&events, target)
+}
+
+/// A press and a release of the left mouse button where the pointer stands — task T-95-3:
+/// `Shift` and a click select text, and the double press of `Shift` must not take two of those for
+/// a pair. Guarded like every send: the foreground window must be the scenario's own. The events
+/// carry [`BENCH_SIGNATURE`] like the keys; the product counts a button by Raw Input, which reads
+/// no signature at all — a click of the bench is a click.
+pub fn click(target: &Target) -> Result<(), SendError> {
+    let events = [
+        mouse_event(MOUSEEVENTF_LEFTDOWN),
+        mouse_event(MOUSEEVENTF_LEFTUP),
+    ];
+
+    send_verified(&events, target)
+}
+
+/// Puts the pointer at `(x, y)` of the screen — task T-95-3, before a [`click`]. Not a send: the
+/// pointer moves and nothing is typed into anybody's window. `false` when the system refused.
+pub fn pointer_to(x: i32, y: i32) -> bool {
+    // SAFETY: two integers by value; the call touches no memory of ours.
+    unsafe { SetCursorPos(x, y) }.is_ok()
+}
+
+/// One mouse event at the pointer, signed with [`BENCH_SIGNATURE`].
+fn mouse_event(flags: MOUSE_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: BENCH_SIGNATURE,
+            },
+        },
+    }
 }
 
 /// The emergency combination of FR-96 — `Ctrl+Alt+Shift+F12`.
