@@ -5808,7 +5808,11 @@ fn hide_focus_cue(hwnd: HWND) {
 
     // SAFETY: `hwnd` is the live window this thread has just made; the message carries two plain
     // numbers and no pointer, and the out-parameter is `None`, so nothing of ours is dereferenced.
-    let sent = unsafe {
+    // NFR-13: a refused ban leaves the cues as Windows decided them, which is the state before the
+    // call — and, as in [`wizard_refresh`], nothing goes to the journal: the journal names every
+    // operation it carries (`tests\diag.rs`), and a ban that cannot fail on this thread has no
+    // name there.
+    let _ = unsafe {
         SendMessageTimeoutW(
             hwnd,
             WM_CHANGEUISTATE,
@@ -5819,10 +5823,6 @@ fn hide_focus_cue(hwnd: HWND) {
             None,
         )
     };
-
-    if sent.0 == 0 {
-        crate::app::report_non_critical("SendMessageTimeoutW", &WinError::from_thread());
-    }
 }
 
 /// Builds one of these windows, or raises the one that is already up.
