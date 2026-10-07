@@ -2465,6 +2465,629 @@ mod the_demonstration_on_a_desktop_of_its_own {
     }
 }
 
+/// **Task T-94-1, решение 158.3 — a letter that opens by itself shows no focus cue until the first
+/// Tab, and the focus stays where Windows put it.**
+///
+/// Находка 158 (чистая машина, 0.92.0): the Welcome letter came up with the dotted focus frame on
+/// «Открыть настройки», as if the button had been chosen in advance. The dialog manager gives the
+/// focus to the first tab stop, and Windows shows the keyboard cues when the last input came from
+/// the keyboard — the person was typing in another program (158.2). The repair hides the focus
+/// cue of a window that opens **without the activation**, between its creation and its showing.
+///
+/// Every letter here is opened by the product's own `letters::show_letter` through a door of
+/// `letters::testing`, **on a desktop of its own** (the road of stages Э85 and Э92: nothing reaches
+/// the screen of the person at the machine). A hook of the thread writes down every
+/// `WM_CHANGEUISTATE` the letter is sent and every `WM_DRAWITEM` of its push buttons; a subclass of
+/// the test, put on the letter the moment the hook meets its `WM_INITDIALOG`, swallows the
+/// `WM_COMMAND` of the buttons (no action of the letter runs) and answers the system's
+/// `UIS_INITIALIZE` the way Windows answers it after a key — `UIS_CLEAR` of both cues. That is the
+/// owner's case of 158, and the one a machine nobody types on never shows by itself. Keys are
+/// `WM_KEYDOWN` / `WM_KEYUP` posted to the control holding the focus and pumped through the
+/// product's own `letters::filter_message` — the probe of 158.2 (`scratchpad-Q158`), made
+/// sentries.
+///
+/// ⛔ The red «before» is the **order** of the messages, not the state they leave behind: on a
+/// machine with no keyboard input Windows hides the cues by itself, on the base as well.
+#[cfg(feature = "testing")]
+mod the_focus_cue_of_a_letter_on_a_desktop_of_its_own {
+    use super::{PRODUCT, with_product_strings};
+    use lang_switcher::letters::{self, Letter};
+    use std::cell::RefCell;
+    use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_FOCUS, ODS_NOFOCUSRECT, ODT_BUTTON};
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CWPSTRUCT, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GetDlgCtrlID,
+        MSG, PM_REMOVE, PeekMessageW, PostMessageW, SPI_GETKEYBOARDCUES,
+        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetWindowsHookExW,
+        SystemParametersInfoW, TranslateMessage, UIS_CLEAR, UIS_INITIALIZE, UIS_SET,
+        UISF_HIDEACCEL, UISF_HIDEFOCUS, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_CHANGEUISTATE,
+        WM_COMMAND, WM_DRAWITEM, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_QUERYUISTATE,
+        WS_EX_TOOLWINDOW, WS_POPUP,
+    };
+    use windows::core::{PCWSTR, w};
+
+    #[link(name = "user32", kind = "raw-dylib")]
+    unsafe extern "system" {
+        fn CreateDesktopW(
+            name: *const u16,
+            device: *const u16,
+            devmode: *const core::ffi::c_void,
+            flags: u32,
+            access: u32,
+            attributes: *const core::ffi::c_void,
+        ) -> isize;
+        fn SetThreadDesktop(desktop: isize) -> i32;
+    }
+
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    /// `IDC_LETTER_PANEL_BTN_1` … `IDC_LETTER_ACCENT` of `app.rc` and `src\letters.rs` — every
+    /// push button of a letter.
+    const BUTTONS: [i32; 5] = [1218, 1219, 1220, 1221, 1222];
+    /// `IDC_LETTER_LEFT` — «Открыть настройки» in the Welcome letter, its first tab stop.
+    const LEFT: i32 = 1220;
+    /// `IDC_LETTER_ACCENT` — «Понятно», the default button (`DM_SETDEFID`).
+    const ACCENT: i32 = 1222;
+    /// `IDOK` and `IDCANCEL` — what the dialog manager makes of Enter and Esc when no button is
+    /// the default one.
+    const IDOK: i32 = 1;
+    const IDCANCEL: i32 = 2;
+    /// The identifier of the test's subclass on the letter.
+    const STAND_IN: usize = 0x0941;
+    /// Virtual keys and their scan codes, as a keyboard sends them.
+    const TAB: (usize, usize) = (0x09, 0x0F);
+    const ENTER: (usize, usize) = (0x0D, 0x1C);
+    const SPACE: (usize, usize) = (0x20, 0x39);
+
+    /// What the hook and the subclass of this thread saw. One letter per thread, one thread per
+    /// test, so nothing here is shared between the tests running side by side.
+    #[derive(Clone, Debug, Default)]
+    struct Seen {
+        /// The letter, as the hook met it on `WM_INITDIALOG` — the one dialog this thread makes.
+        dialog: isize,
+        /// Whether the subclass was put on the letter in its `WM_INITDIALOG`.
+        subclassed: bool,
+        /// How many of the system's `UIS_INITIALIZE` the subclass answered as after a key.
+        answered: u32,
+        /// The `wParam` of every `WM_CHANGEUISTATE` the letter was sent, in order.
+        changes: Vec<usize>,
+        /// (control, `itemState`) of every `WM_DRAWITEM` of a push button of the letter, in order.
+        draws: Vec<(i32, u32)>,
+        /// The control of every `WM_COMMAND` of a button the subclass swallowed, in order.
+        commands: Vec<i32>,
+    }
+
+    thread_local! {
+        static SEEN: RefCell<Seen> = RefCell::new(Seen::default());
+    }
+
+    /// One look at the letter: what was seen since the last [`forget`], and the state now.
+    #[derive(Clone, Debug)]
+    struct Look {
+        seen: Seen,
+        /// The answer of `WM_QUERYUISTATE`.
+        cues: usize,
+        /// The control holding the focus of this thread, or 0.
+        focus: i32,
+    }
+
+    fn make_wparam(low: u32, high: u32) -> usize {
+        (low as usize) | ((high as usize) << 16)
+    }
+
+    /// The product's own predicate of the frame — `focused` in `src\letters.rs`, the argument
+    /// `settings::paint_push_button` draws the dotted `DrawFocusRect` by.
+    fn frame(state: u32) -> bool {
+        state & ODS_FOCUS.0 != 0 && state & ODS_NOFOCUSRECT.0 == 0
+    }
+
+    fn hides_the_focus_cue(change: usize) -> bool {
+        change & 0xFFFF == UIS_SET as usize && (change >> 16) & UISF_HIDEFOCUS as usize != 0
+    }
+
+    fn shows_the_focus_cue(change: usize) -> bool {
+        change & 0xFFFF == UIS_CLEAR as usize && (change >> 16) & UISF_HIDEFOCUS as usize != 0
+    }
+
+    fn is_the_systems_decision(change: usize) -> bool {
+        change & 0xFFFF == UIS_INITIALIZE as usize
+    }
+
+    unsafe extern "system" fn watch(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            // SAFETY: the documented payload of the hook, read only.
+            let m = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+            let hwnd = m.hwnd.0 as isize;
+
+            if m.message == WM_INITDIALOG {
+                SEEN.with_borrow_mut(|seen| seen.dialog = hwnd);
+
+                // SAFETY: the letter of this thread, in its `WM_INITDIALOG`; the procedure lives
+                // for the whole program, and the pair is removed before the letter is destroyed.
+                let subclassed =
+                    unsafe { SetWindowSubclass(m.hwnd, Some(stand_in), STAND_IN, 0) }.as_bool();
+
+                SEEN.with_borrow_mut(|seen| seen.subclassed = subclassed);
+            } else if hwnd != 0 && hwnd == SEEN.with_borrow(|seen| seen.dialog) {
+                if m.message == WM_CHANGEUISTATE {
+                    SEEN.with_borrow_mut(|seen| seen.changes.push(m.wParam.0));
+                } else if m.message == WM_DRAWITEM && m.lParam.0 != 0 {
+                    // SAFETY: the sender owns the struct for the length of the send; read only.
+                    let item = unsafe { &*(m.lParam.0 as *const DRAWITEMSTRUCT) };
+                    let control = item.CtlID as i32;
+
+                    if item.CtlType == ODT_BUTTON && BUTTONS.contains(&control) {
+                        SEEN.with_borrow_mut(|seen| seen.draws.push((control, item.itemState.0)));
+                    }
+                }
+            }
+        }
+
+        // SAFETY: forwards the call unchanged.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+
+    /// The test's subclass on the letter: the keyboard's answer to the system's decision, and the
+    /// commands of the buttons swallowed.
+    unsafe extern "system" fn stand_in(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _id: usize,
+        _data: usize,
+    ) -> LRESULT {
+        if message == WM_CHANGEUISTATE && is_the_systems_decision(wparam.0) {
+            SEEN.with_borrow_mut(|seen| seen.answered += 1);
+
+            // 158.2: after a key Windows answers `UIS_INITIALIZE` by clearing both cues.
+            //
+            // SAFETY: forwards a message of this window carrying two plain integers.
+            return unsafe {
+                DefSubclassProc(
+                    hwnd,
+                    message,
+                    WPARAM(make_wparam(UIS_CLEAR, UISF_HIDEFOCUS | UISF_HIDEACCEL)),
+                    lparam,
+                )
+            };
+        }
+
+        if message == WM_COMMAND {
+            let control = (wparam.0 & 0xFFFF) as i32;
+
+            if BUTTONS.contains(&control) || control == IDOK || control == IDCANCEL {
+                SEEN.with_borrow_mut(|seen| seen.commands.push(control));
+
+                return LRESULT(0);
+            }
+        }
+
+        // SAFETY: forwards the four arguments unchanged.
+        unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+    }
+
+    /// Serves every message of this thread that is waiting, the paints included — the product's
+    /// pump: the letters' filter first, then the dispatch.
+    fn pump() {
+        let mut msg = MSG::default();
+
+        // SAFETY: the ordinary pump of this thread, over its own messages.
+        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            // SAFETY: the live message just taken.
+            if unsafe { letters::filter_message(&msg) } {
+                continue;
+            }
+
+            // SAFETY: as above.
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    /// One key, down and up, posted to the control holding the focus (or to the letter), and
+    /// pumped.
+    fn press(dialog: HWND, (key, scan): (usize, usize)) {
+        // SAFETY: the focus of this thread's queue — the letter lives on this thread.
+        let focus = unsafe { GetFocus() };
+        let target = if focus.is_invalid() { dialog } else { focus };
+        let down = LPARAM((1 | (scan << 16)) as isize);
+        let up = LPARAM((1 | (scan << 16) | (1 << 30) | (1 << 31)) as isize);
+
+        // SAFETY: posted messages carrying plain values, to a window of this thread.
+        unsafe {
+            let _ = PostMessageW(Some(target), WM_KEYDOWN, WPARAM(key), down);
+            let _ = PostMessageW(Some(target), WM_KEYUP, WPARAM(key), up);
+        }
+
+        pump();
+    }
+
+    /// Starts a new chapter of the record: the messages, the drawings and the commands seen so far
+    /// are dropped.
+    fn forget() {
+        SEEN.with_borrow_mut(|seen| {
+            seen.changes.clear();
+            seen.draws.clear();
+            seen.commands.clear();
+        });
+    }
+
+    fn look(dialog: HWND) -> Look {
+        // SAFETY: a live window of this thread; the query carries no pointer.
+        let cues = unsafe { SendMessageW(dialog, WM_QUERYUISTATE, None, None) }.0 as usize;
+        // SAFETY: the focus of this thread's queue, and a plain query of a window field.
+        let focus = unsafe { GetDlgCtrlID(GetFocus()) };
+
+        Look {
+            seen: SEEN.with_borrow(Seen::clone),
+            cues,
+            focus,
+        }
+    }
+
+    /// Opens one letter by `open` on a desktop of its own, runs `steps` on it, and releases
+    /// everything on every path.
+    fn on_a_desktop_of_its_own<T: Send + 'static>(
+        tag: &'static str,
+        open: fn(HWND, HMODULE) -> Option<HWND>,
+        steps: fn(HWND) -> T,
+    ) -> T {
+        with_product_strings();
+
+        // §0 п. 5 of TZ-E94: under «always underline access keys» Windows keeps every cue shown
+        // whatever a window asks, and nothing here could be measured.
+        let mut always: i32 = 0;
+
+        // SAFETY: a read of one system parameter into a live local; nothing is written.
+        unsafe {
+            SystemParametersInfoW(
+                SPI_GETKEYBOARDCUES,
+                0,
+                Some(std::ptr::from_mut(&mut always).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .expect("SPI_GETKEYBOARDCUES must be readable");
+        assert_eq!(
+            always, 0,
+            "«always underline access keys» is on at this machine: Windows keeps the cues shown \
+             whatever a window asks, and these sentries cannot measure the hiding here"
+        );
+
+        let module = *PRODUCT
+            .get()
+            .expect("with_product_strings maps the product image");
+
+        std::thread::spawn(move || run(tag, module, open, steps))
+            .join()
+            .expect("the measuring thread must not panic")
+            .unwrap_or_else(|why| panic!("{why}"))
+    }
+
+    fn run<T>(
+        tag: &str,
+        module: usize,
+        open: fn(HWND, HMODULE) -> Option<HWND>,
+        steps: fn(HWND) -> T,
+    ) -> Result<T, String> {
+        let name: Vec<u16> = format!("LangSwT941{tag}{}\0", std::process::id())
+            .encode_utf16()
+            .collect();
+
+        // SAFETY: plain values and a NUL-terminated name alive for the call.
+        let desktop = unsafe {
+            CreateDesktopW(
+                name.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                GENERIC_ALL,
+                std::ptr::null(),
+            )
+        };
+
+        if desktop == 0 {
+            return Err(
+                "CreateDesktopW refused — the sentry cannot keep the letter off the screen, so \
+                 it does not open it"
+                    .to_owned(),
+            );
+        }
+
+        // SAFETY: this fresh thread owns no window and no hook yet.
+        if unsafe { SetThreadDesktop(desktop) } == 0 {
+            return Err("SetThreadDesktop refused".to_owned());
+        }
+
+        // SAFETY: a hook of this thread, removed below on every path that follows.
+        let hook =
+            unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(watch), None, GetCurrentThreadId()) }
+                .map_err(|e| format!("the hook of the thread: {e}"))?;
+
+        // SAFETY: a system class, no parent; destroyed below.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .map_err(|e| format!("a hidden owner: {e}"))?;
+
+        let module = HMODULE(std::ptr::without_provenance_mut(module));
+        let outcome = (|| {
+            let dialog = open(owner, module).ok_or("the letter did not open")?;
+            let answer = steps(dialog);
+
+            // SAFETY: the pair the hook put on the letter, and the letter itself — a window of
+            // this thread, destroyed once.
+            unsafe {
+                let _ = RemoveWindowSubclass(dialog, Some(stand_in), STAND_IN);
+                let _ = DestroyWindow(dialog);
+            }
+
+            pump();
+
+            Ok::<_, String>(answer)
+        })();
+
+        // SAFETY: made above on this thread, each released once.
+        unsafe {
+            let _ = UnhookWindowsHookEx(hook);
+            let _ = DestroyWindow(owner);
+        }
+
+        outcome
+    }
+
+    /// The letter FR-101 opens by itself — the Welcome, without the activation.
+    fn by_itself(owner: HWND, module: HMODULE) -> Option<HWND> {
+        letters::testing::show_letter_from(owner, module, Letter::Welcome)
+    }
+
+    /// The letter the person asked for — the Welcome, with the activation, kept hidden.
+    fn asked_for(owner: HWND, module: HMODULE) -> Option<HWND> {
+        letters::testing::open_letter_activated_hidden(owner, module, Letter::Welcome)
+    }
+
+    /// The sentry (а) — the red «before» of T-94-1.
+    #[test]
+    fn a_letter_opening_by_itself_hides_the_focus_cue_after_windows_has_decided() {
+        let (opened, control) = on_a_desktop_of_its_own("A", by_itself, |dialog| {
+            // The first paint: the letter is shown by now and has not been touched.
+            pump();
+            let opened = look(dialog);
+
+            // The control: the cue shown by hand must bring the frame, or «no frame» below would
+            // be the hook's blindness and not the letter's answer.
+            forget();
+            // SAFETY: a live window of this thread; two plain integers.
+            unsafe {
+                SendMessageW(
+                    dialog,
+                    WM_CHANGEUISTATE,
+                    Some(WPARAM(make_wparam(UIS_CLEAR, UISF_HIDEFOCUS))),
+                    None,
+                )
+            };
+            pump();
+
+            (opened, look(dialog))
+        });
+
+        println!("opened: {opened:x?}");
+        println!("control: {control:x?}");
+
+        assert!(
+            opened.seen.subclassed && opened.seen.answered == 1,
+            "the stand-in must stand on the letter before the system decides the cues: \
+             subclassed {}, decisions answered as after a key {}",
+            opened.seen.subclassed,
+            opened.seen.answered
+        );
+
+        let changes = &opened.seen.changes;
+        let decided = changes
+            .iter()
+            .rposition(|&change| is_the_systems_decision(change));
+        let hidden = decided.and_then(|at| {
+            changes[at + 1..]
+                .iter()
+                .position(|&change| hides_the_focus_cue(change))
+        });
+
+        assert!(
+            decided.is_some() && hidden.is_some(),
+            "158.3: after Windows decides the cues (UIS_INITIALIZE) the letter that opened by \
+             itself is sent UIS_SET with UISF_HIDEFOCUS — the WM_CHANGEUISTATE it was sent: \
+             {changes:x?}"
+        );
+        assert_ne!(
+            opened.cues & UISF_HIDEFOCUS as usize,
+            0,
+            "158.3: the focus cue of the letter is hidden after it opened (WM_QUERYUISTATE {:#x})",
+            opened.cues
+        );
+        assert!(
+            opened
+                .seen
+                .draws
+                .iter()
+                .any(|&(control, state)| control == LEFT && state & ODS_FOCUS.0 != 0),
+            "the first paint must draw «Открыть настройки» holding the focus — drawings {:x?}",
+            opened.seen.draws
+        );
+        assert!(
+            !opened.seen.draws.iter().any(|&(_, state)| frame(state)),
+            "158: no button of a letter that opened by itself is drawn with the focus frame \
+             before the first Tab — drawings (control, itemState) {:x?}",
+            opened.seen.draws
+        );
+        assert_eq!(
+            opened.focus, LEFT,
+            "158.3: the focus stays where Windows put it, on «Открыть настройки»"
+        );
+        assert!(
+            control
+                .seen
+                .draws
+                .iter()
+                .any(|&(control, state)| control == LEFT && frame(state)),
+            "the control: the cue shown by hand must draw the frame on «Открыть настройки» — \
+             drawings {:x?}",
+            control.seen.draws
+        );
+    }
+
+    /// The sentry (б): the first Tab lifts the ban — the dialog manager does it — and the frame
+    /// moves with the focus as it does in a window opened by the mouse.
+    #[test]
+    fn the_first_tab_brings_the_focus_cue_back_and_moves_it_to_the_default_button() {
+        let (first, second) = on_a_desktop_of_its_own("B", by_itself, |dialog| {
+            pump();
+            forget();
+            press(dialog, TAB);
+            let first = look(dialog);
+
+            forget();
+            press(dialog, TAB);
+
+            (first, look(dialog))
+        });
+
+        println!("after the first Tab: {first:x?}");
+        println!("after the second Tab: {second:x?}");
+
+        assert!(
+            first
+                .seen
+                .changes
+                .iter()
+                .any(|&change| shows_the_focus_cue(change)),
+            "158.3: the first Tab lifts the ban — UIS_CLEAR with UISF_HIDEFOCUS from the dialog \
+             manager; the WM_CHANGEUISTATE the letter was sent: {:x?}",
+            first.seen.changes
+        );
+        assert_eq!(
+            first.cues & UISF_HIDEFOCUS as usize,
+            0,
+            "the focus cue is shown after the first Tab (WM_QUERYUISTATE {:#x})",
+            first.cues
+        );
+        assert_eq!(
+            first.focus, ACCENT,
+            "the first Tab moves the focus to «Понятно»"
+        );
+        assert!(
+            first
+                .seen
+                .draws
+                .iter()
+                .any(|&(control, state)| control == ACCENT && frame(state)),
+            "158.3: «Понятно» is drawn with the frame after the first Tab — drawings {:x?}",
+            first.seen.draws
+        );
+        assert_eq!(
+            second.focus, LEFT,
+            "the second Tab brings the focus back to «Открыть настройки»"
+        );
+        assert!(
+            second
+                .seen
+                .draws
+                .iter()
+                .any(|&(control, state)| control == LEFT && frame(state)),
+            "the frame goes on moving with the focus — drawings {:x?}",
+            second.seen.draws
+        );
+    }
+
+    /// The sentry (в): the keys do what they did — Enter presses the default button, Space the
+    /// one holding the focus (158.3: the focus stays on «Открыть настройки»).
+    #[test]
+    fn enter_presses_the_default_button_and_space_the_one_holding_the_focus() {
+        let (enter, space) = on_a_desktop_of_its_own("C", by_itself, |dialog| {
+            pump();
+            forget();
+            press(dialog, ENTER);
+            let enter = look(dialog);
+
+            forget();
+            press(dialog, SPACE);
+
+            (enter, look(dialog))
+        });
+
+        println!("after Enter: {enter:x?}");
+        println!("after Space: {space:x?}");
+
+        assert_eq!(
+            enter.seen.commands,
+            [ACCENT],
+            "Enter presses «Понятно», the default button, as it did"
+        );
+        assert_eq!(
+            space.seen.commands,
+            [LEFT],
+            "158.3: Space presses the button holding the focus — «Открыть настройки»"
+        );
+        assert_eq!(
+            enter.focus, LEFT,
+            "158.3: the focus stays on «Открыть настройки»"
+        );
+    }
+
+    /// The sentry (г), the negative control of the condition: a letter the person asked for — the
+    /// activation — is not sent the ban, and the cues are what Windows chose by the last input.
+    #[test]
+    fn a_letter_opened_with_the_activation_keeps_the_cues_windows_chose() {
+        let opened = on_a_desktop_of_its_own("D", asked_for, |dialog| {
+            pump();
+            look(dialog)
+        });
+
+        println!("opened with the activation: {opened:x?}");
+
+        assert!(
+            opened.seen.subclassed && opened.seen.answered == 1,
+            "the system decides the cues of this letter too, and the stand-in answers as after a \
+             key: subclassed {}, decisions answered {}",
+            opened.seen.subclassed,
+            opened.seen.answered
+        );
+        assert!(
+            !opened
+                .seen
+                .changes
+                .iter()
+                .any(|&change| hides_the_focus_cue(change)),
+            "158.3: a window opened with the activation is not sent UIS_SET with UISF_HIDEFOCUS — \
+             the WM_CHANGEUISTATE it was sent: {:x?}",
+            opened.seen.changes
+        );
+        assert_eq!(
+            opened.cues & UISF_HIDEFOCUS as usize,
+            0,
+            "as today: after a key the cues stay shown (WM_QUERYUISTATE {:#x})",
+            opened.cues
+        );
+    }
+}
+
 /// The version line of «От автора» says what is installed, and what is available when the feed
 /// names something newer.
 #[test]
