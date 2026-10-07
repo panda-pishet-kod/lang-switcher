@@ -5770,6 +5770,61 @@ fn raise(hwnd: HWND, activate: bool) {
     }
 }
 
+/// **Hides the focus cue of a window that opens by itself** — FR-101, задача T-94-1, решение
+/// 158.3.
+///
+/// Находка 158: the Welcome letter came up on a clean machine with the dotted focus frame on
+/// «Открыть настройки», as if the button had been chosen in advance. Nothing had chosen it: the
+/// dialog manager gives the focus to the first tab stop of every dialog, and whether that focus is
+/// *drawn* is up to the keyboard cues, which Windows decides by the last input — and the last input
+/// of a person typing in another program is a key. A window the person did not ask for has no
+/// business pointing at a button, so its focus cue stays hidden until the person presses Tab in
+/// it: the dialog manager lifts the ban itself on the first Tab, and from then on the frame moves
+/// with the focus as in a window opened by the mouse. The focus stays where the manager put it
+/// (решение 158.3: not on «Понятно»), so Enter still presses the default button and Space the
+/// focused one.
+///
+/// ⛔ **Not in `WM_INITDIALOG`.** Windows decides the cues of a dialog — `WM_CHANGEUISTATE` with
+/// `UIS_INITIALIZE` — *after* `WM_INITDIALOG` and before the window is shown (замер 158.2, eight
+/// openings of eight), and that decision would undo a ban set any earlier. The moment after the
+/// dialog manager has returned the window and before [`raise`] shows it is the one that comes both
+/// after the decision and before the first paint.
+///
+/// `SendMessageTimeoutW` and not a bare send, for the reason [`wizard_refresh`] gives (FR-72, the
+/// sweep of `tests\guard.rs`, урок Т-33а-0): the window lives on this very thread, so the call goes
+/// straight to its procedure and the timeout is never spent. A refused ban leaves the cues as
+/// Windows decided them — the state before this function (NFR-13).
+fn hide_focus_cue(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SMTO_ABORTIFHUNG, SendMessageTimeoutW, UIS_SET, UISF_HIDEFOCUS, WM_CHANGEUISTATE,
+    };
+
+    /// How long to wait for the answer — nominal, as in [`wizard_refresh`]: the window is of this
+    /// thread, and its procedure is called inside the call.
+    const CUE_TIMEOUT_MS: u32 = 50;
+
+    // MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS): the action in the low word, the cue in the high one.
+    let change = (UIS_SET | (UISF_HIDEFOCUS << 16)) as usize;
+
+    // SAFETY: `hwnd` is the live window this thread has just made; the message carries two plain
+    // numbers and no pointer, and the out-parameter is `None`, so nothing of ours is dereferenced.
+    // NFR-13: a refused ban leaves the cues as Windows decided them, which is the state before the
+    // call — and, as in [`wizard_refresh`], nothing goes to the journal: the journal names every
+    // operation it carries (`tests\diag.rs`), and a ban that cannot fail on this thread has no
+    // name there.
+    let _ = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_CHANGEUISTATE,
+            WPARAM(change),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            CUE_TIMEOUT_MS,
+            None,
+        )
+    };
+}
+
 /// Builds one of these windows, or raises the one that is already up.
 ///
 /// `activate` is FR-101's whole rule about focus: a letter that opens **by itself** is shown
@@ -5832,6 +5887,14 @@ fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> 
         drop(unsafe { Box::from_raw(boxed) });
         return None;
     };
+
+    // Решение 158.3: a window that opens by itself comes up without the focus cue. Here — after
+    // the creation, where Windows has already decided the cues, and before the window is shown.
+    // A window raised again above keeps the cues it has: they belong to the person, who may have
+    // pressed Tab in it already.
+    if !activate {
+        hide_focus_cue(hwnd);
+    }
 
     raise(hwnd, activate);
 
@@ -6007,6 +6070,32 @@ pub mod testing {
 
         let shown = show_letter(owner, letter, None, false);
 
+        TEMPLATES.with(|templates| templates.set(0));
+
+        shown.then(|| window_of(Kind::Letter)).flatten()
+    }
+
+    /// **The door of task T-94-1** — opens `letter` on `owner` out of the templates of `module`
+    /// by the product's own [`show_letter`] **with the activation**, the road of a window the
+    /// person asked for (the balloon, the menu), and keeps it **hidden**.
+    ///
+    /// What it is for is the one decision [`open_window`] takes between the creation and
+    /// [`super::raise`] — whether the focus cue is hidden (решение 158.3) — and that decision is
+    /// taken before the window would be shown. Hidden, because a shown window opened with the
+    /// activation calls `SetForegroundWindow`, which no test may call.
+    ///
+    /// The window answered is the caller's to destroy.
+    pub fn open_letter_activated_hidden(
+        owner: HWND,
+        module: HMODULE,
+        letter: Letter,
+    ) -> Option<HWND> {
+        HIDDEN.with(|hidden| hidden.set(true));
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let shown = show_letter(owner, letter, None, true);
+
+        HIDDEN.with(|hidden| hidden.set(false));
         TEMPLATES.with(|templates| templates.set(0));
 
         shown.then(|| window_of(Kind::Letter)).flatten()
