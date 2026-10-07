@@ -6630,6 +6630,8 @@ struct Tally {
     presses: usize,
     selection: usize,
     backspace: usize,
+    /// ⭐ Stage Э96: the keystroke path of the classic console, a word of its own on the channel.
+    keystrokes: usize,
     none: usize,
 }
 
@@ -6644,6 +6646,7 @@ impl Tally {
         {
             Some("selection") => self.selection += 1,
             Some("backspace") => self.backspace += 1,
+            Some("keystrokes") => self.keystrokes += 1,
             _ => self.none += 1,
         }
     }
@@ -6651,8 +6654,8 @@ impl Tally {
     fn describe(&self) -> String {
         format!(
             "нажатий {}, из них последняя замена читалась как selection {}, backspace {}, \
-             none/не прочитано {}",
-            self.presses, self.selection, self.backspace, self.none
+             keystrokes {}, none/не прочитано {}",
+            self.presses, self.selection, self.backspace, self.keystrokes, self.none
         )
     }
 }

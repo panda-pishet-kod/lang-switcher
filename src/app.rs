@@ -861,6 +861,26 @@ fn buffer_path_outcome(
     press_outcome(buffered, refuses, replaced)
 }
 
+/// ⭐ **The press the classic console refused is a refusal** — stage Э96, decision 160.8.
+///
+/// Under `auto`, a window of class `ConsoleWindowClass` gets its replacement typed by the user's
+/// own keys again (`inject::Delivery::Keystrokes`), and a run whose keys would not repeat the
+/// conversion is refused before a single event — nothing erased, no layout switched. To
+/// [`buffer_path_outcome`] that press is a press over a buffer that replaced nothing, which is
+/// the idle click. It is not idle: this program **would not act here**, which is what
+/// [`Press::Refused`] means, and the owner chose exactly that answer for the classic console —
+/// «запасной — не стирать» and the tone of a refusal. `refused` is
+/// `inject::take_classic_console_refusal`, read once, right after the press.
+///
+/// Only the idle click turns into the knock: a press that replaced something cannot have been
+/// refused, and a press with no outcome stays without one.
+pub const fn refusal_of_the_classic_console(press: Press, refused: bool) -> Press {
+    match press {
+        Press::Idle if refused => Press::Refused,
+        other => other,
+    }
+}
+
 /// Which tone an outcome earns, or `None` when `[feedback] sound` is off — the whole of FR-100.
 ///
 /// A pure function of an outcome and a setting, so the rule can be read in one line. The
@@ -3544,6 +3564,14 @@ unsafe extern "system" fn window_proc(
                         || crate::inject::on_hotkey().is_some(),
                     )
                 {
+                    // ⭐ Stage Э96: a press the classic console refused — its keys would not
+                    // repeat the conversion, so nothing was sent — is the knock of a refusal and
+                    // not the idle click (decision 160.8). See `refusal_of_the_classic_console`.
+                    let press = refusal_of_the_classic_console(
+                        press,
+                        crate::inject::take_classic_console_refusal(),
+                    );
+
                     // Task T-37-1: dropped — a refused post costs one click of FR-100 that
                     // is not heard, and nothing of the press itself, which is already done.
                     let _ = post_to(Role::Ui, sound_message_for(press));
@@ -4720,6 +4748,34 @@ mod tests {
         assert_eq!(
             run(false, false, true, true, false),
             (0, Some(Press::Refused))
+        );
+    }
+
+    /// ⭐ **Stage Э96, decision 160.8 — the press the classic console refused is the knock of a
+    /// refusal**, and only that press: the idle click turns into the knock when the keystroke path
+    /// refused, a replacement stays a replacement, a refusal stays a refusal, and nothing turns
+    /// anything into the knock when the classic console refused nothing.
+    #[test]
+    fn the_press_the_classic_console_refused_is_answered_as_a_refusal() {
+        assert_eq!(
+            refusal_of_the_classic_console(Press::Idle, true),
+            Press::Refused
+        );
+        assert_eq!(
+            refusal_of_the_classic_console(Press::Idle, false),
+            Press::Idle
+        );
+        assert_eq!(
+            refusal_of_the_classic_console(Press::Replaced, true),
+            Press::Replaced
+        );
+        assert_eq!(
+            refusal_of_the_classic_console(Press::Replaced, false),
+            Press::Replaced
+        );
+        assert_eq!(
+            refusal_of_the_classic_console(Press::Refused, false),
+            Press::Refused
         );
     }
 

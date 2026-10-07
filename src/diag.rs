@@ -804,6 +804,16 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("sticky keys shortcut turned off", Kind::Process),
     ("sticky keys shortcut given back", Kind::Process),
     ("SystemParametersInfoW (sticky keys)", Kind::Process),
+    // ⭐ **Stage Э96, task T-96-2, decision 160.8** — a press in a classic console window
+    // (`ConsoleWindowClass`, under `[replacement] method = "auto"`) refused before any event: the
+    // keys of the run would not repeat the conversion in the new layout (a dead key, `AltGr`, a key
+    // the target layout gives nothing for — `inject::keys_repeat_the_conversion`), so nothing was
+    // erased and no layout switched, and the press was answered with the tone of a refusal.
+    // Recorded by `inject::on_hotkey_answer`. Appended at the end so that no index above it moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the keys, not which of the reasons, not the
+    // window. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
+    ("classic console replacement refused", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

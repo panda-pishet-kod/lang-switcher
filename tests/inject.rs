@@ -45,9 +45,9 @@ use lang_switcher::inject::{
 use lang_switcher::layouts::{KeyMapping, LayoutId, LayoutMap, LayoutMapBuilder, Mods};
 use lang_switcher::settings::{self, ReplacementMethod};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK,
-    VK_DELETE, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU,
-    VK_RSHIFT, VK_RWIN,
+    INPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE,
+    VIRTUAL_KEY, VK_BACK, VK_DELETE, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -166,6 +166,8 @@ enum Step {
     Pause(u32),
     /// FR-40 step 5 — the connection point of task T-05-1, FR-43.
     Switch,
+    /// ⭐ Stage Э96 — the keystroke path's way back, after a packet that did not reach the screen.
+    SwitchBack,
 }
 
 /// An [`Environment`] that sends nothing and writes down everything.
@@ -306,6 +308,10 @@ impl Environment for Bench {
 
     fn switch_layout(&mut self) {
         self.log.push(Step::Switch);
+    }
+
+    fn switch_back(&mut self) {
+        self.log.push(Step::SwitchBack);
     }
 }
 
@@ -2590,8 +2596,15 @@ fn the_default_of_section_7_is_auto_and_replace_in_still_runs_the_backspace_pack
 // half asks no window anything, and the live half asks a message-only window by handle.
 // ---------------------------------------------------------------------------------------
 
+/// **The canon of FR-42а as stage Э96 moved it** (TZ Э96 §0 п. 9) — it read
+/// `both_console_classes_resolve_auto_to_backspace` until then.
+///
+/// Both console hosts still erase with `Backspace` and are still the closed list of T-10-7; what
+/// moved is the packet of the classic console: under `auto` a window of `ConsoleWindowClass` gets
+/// the keystroke path (decision 160.8 — the classic console with Windows PowerShell 5.1 does not
+/// take `KEYEVENTF_UNICODE`, the word disappeared), Windows Terminal keeps the `Backspace` path.
 #[test]
-fn both_console_classes_resolve_auto_to_backspace() {
+fn the_classic_console_resolves_auto_to_keystrokes_and_the_terminal_to_backspace() {
     // The closed list itself, exactly as the module publishes it — both entries, and the
     // measurement of T-10-7 behind them: consoles are where `selection` was measured to
     // break (COOKED input does not select on Shift+Left) and `backspace` to hold.
@@ -2599,25 +2612,35 @@ fn both_console_classes_resolve_auto_to_backspace() {
         inject::CONSOLE_WINDOW_CLASSES,
         ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"]
     );
+    assert_eq!(inject::CLASSIC_CONSOLE_CLASS, CLASSIC_CONSOLE);
 
-    for class in inject::CONSOLE_WINDOW_CLASSES {
-        assert_eq!(
-            inject::resolve_auto(Some(class)),
-            ReplacementMethod::Backspace,
-            "{class} is a console host and gets the Backspace path"
-        );
-    }
+    assert_eq!(
+        inject::resolve_auto(Some(CLASSIC_CONSOLE)),
+        inject::Delivery::Keystrokes,
+        "the classic console gets its replacement typed by keys — decision 160.8"
+    );
+    assert_eq!(
+        inject::resolve_auto(Some(TERMINAL)),
+        inject::Delivery::Backspace,
+        "Windows Terminal takes KEYEVENTF_UNICODE and keeps the Backspace path"
+    );
 
     // Case-insensitively, because Windows compares class names case-insensitively — the
     // spelling belongs to whoever registered the class, not to this program.
     assert_eq!(
         inject::resolve_auto(Some("consolewindowclass")),
-        ReplacementMethod::Backspace
+        inject::Delivery::Keystrokes
     );
     assert_eq!(
         inject::resolve_auto(Some("cascadia_hosting_window_class")),
-        ReplacementMethod::Backspace
+        inject::Delivery::Backspace
     );
+
+    // And the keystroke path is no method of section 7: it equals neither configured packet, so
+    // nothing that compares a resolution with a configured value can mistake it for one.
+    assert_ne!(inject::Delivery::Keystrokes, ReplacementMethod::Backspace);
+    assert_ne!(inject::Delivery::Keystrokes, ReplacementMethod::Selection);
+    assert_ne!(inject::Delivery::Keystrokes, ReplacementMethod::Auto);
 }
 
 #[test]
@@ -2697,6 +2720,514 @@ fn the_packet_functions_stay_total_over_auto_and_answer_the_refusal_direction() 
         reduce(&from_auto[..auto_len]),
         reduce(&from_selection[..selection_len])
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Stage Э96, task T-96-2 — the classic console: the switch first, then the user's own keys
+// (decision 160.8). The window class decides, as FR-42а always did; the two console hosts no
+// longer get the same path.
+// ---------------------------------------------------------------------------------------
+
+/// The window class of the classic console — written out here and not borrowed from the module,
+/// so that a test cannot follow the module into a wrong spelling.
+const CLASSIC_CONSOLE: &str = "ConsoleWindowClass";
+
+/// The window class of Windows Terminal.
+const TERMINAL: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
+
+/// One press of `ghbdtn` into Russian, the way `on_hotkey` runs it for a window of `class` under
+/// `auto` — the resolution of FR-42а and the replacement it chose, through this file's bench.
+fn press_in_a_window_of(class: &str, bench: &mut Bench) -> Replaced {
+    let strokes = ghbdtn();
+
+    inject::replace_in_with(
+        bench,
+        &strokes,
+        &russian(),
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        inject::resolve_auto(Some(class)),
+    )
+    .expect("the packet is sized from the lengths it uses")
+}
+
+/// **⭐ The red «до» of stage Э96 — decision 160.1, the owner's hand.** In a window of class
+/// `ConsoleWindowClass` the packet carries **no** `KEYEVENTF_UNICODE` event: the classic console
+/// with Windows PowerShell 5.1 does not take that event, the backspaces before it do reach the line,
+/// and the word the user typed disappeared (measured on the product: 10 of 10, stand
+/// `--experiment-console-keys product`, entry of 2026-10-07).
+///
+/// The packet is not empty — it erases six characters and types six keys — so «no Unicode event»
+/// cannot be met by sending nothing.
+#[test]
+fn the_classic_console_packet_carries_no_unicode_event() {
+    let mut bench = Bench::new();
+    let outcome = press_in_a_window_of(CLASSIC_CONSOLE, &mut bench);
+
+    let stream = bench.stream();
+
+    assert!(
+        outcome.reached_the_screen(),
+        "the premise: a replacement was sent and taken whole"
+    );
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|event| event.is_backspace(false))
+            .count(),
+        6,
+        "the six characters on the screen are erased, as FR-41 erases them"
+    );
+    assert!(
+        !stream.iter().any(|event| event.is_unicode()),
+        "decision 160.8: not one KEYEVENTF_UNICODE event goes into a classic console — {stream:?}"
+    );
+}
+
+/// **⭐ The order of decision 160.8 in a classic console:** the modifiers the user holds are
+/// released (FR-40 step 3), the layout is switched, and only then does the one packet go out —
+/// the switch has to come first, because the keys the packet repeats mean what the layout of the
+/// window makes of them.
+#[test]
+fn the_classic_console_releases_switches_and_then_sends_one_packet() {
+    let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT]);
+    press_in_a_window_of(CLASSIC_CONSOLE, &mut bench);
+
+    let switch = bench
+        .position(|step| matches!(step, Step::Switch))
+        .expect("the layout is switched exactly once");
+    let sends: Vec<usize> = bench
+        .log
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| matches!(step, Step::Send(_)).then_some(index))
+        .collect();
+
+    assert!(
+        matches!(bench.log[0], Step::Held(_)),
+        "step 3 asks first — {:?}",
+        bench.log
+    );
+    assert_eq!(
+        sends.len(),
+        2,
+        "two calls: the release of step 3, then the packet in one call (FR-41) — {:?}",
+        bench.log
+    );
+    assert!(
+        sends[0] < switch && switch < sends[1],
+        "decision 160.8: release, switch, packet — {:?}",
+        bench.log
+    );
+}
+
+/// The keystroke packet itself: the six backspaces of FR-41, then the six keys of the run **by
+/// their scan codes** — `KEYEVENTF_SCANCODE`, `wVk` zero, the extended flag as recorded (none, for
+/// the main block), down and up — no `Shift` for a word typed without one, and the signature of
+/// FR-03 on every event, so that the keys coming back through the hook are the program's own and
+/// the next press still converts what the user typed (FR-32; the third press of П4).
+#[test]
+fn the_classic_console_packet_is_the_backspaces_then_the_users_keys_by_scan_code() {
+    let mut bench = Bench::new();
+    press_in_a_window_of(CLASSIC_CONSOLE, &mut bench);
+
+    let sent = bench.sent();
+    assert_eq!(
+        sent.len(),
+        1,
+        "nothing held, nothing released: the packet is the one call — FR-41"
+    );
+
+    let packet = &sent[0];
+    assert_eq!(packet.len(), 6 * 2 + 6 * 2);
+
+    for (index, event) in packet[..12].iter().enumerate() {
+        assert!(
+            event.is_backspace(index % 2 == 1),
+            "event {index} erases — {event:?}"
+        );
+    }
+
+    for (key, (&scan, pair)) in GHBDTN.iter().zip(packet[12..].chunks(2)).enumerate() {
+        for (edge, event) in pair.iter().enumerate() {
+            assert_eq!(
+                event.vk, 0,
+                "key {key}: named by its scan code, not a virtual key"
+            );
+            assert_eq!(event.scan, scan, "key {key}: the key the user pressed");
+            assert_ne!(
+                event.flags & KEYEVENTF_SCANCODE.0,
+                0,
+                "key {key}: KEYEVENTF_SCANCODE"
+            );
+            assert_eq!(
+                event.flags & KEYEVENTF_EXTENDEDKEY.0,
+                0,
+                "key {key}: a key of the main block carries no extended flag"
+            );
+            assert_eq!(
+                event.flags & KEYEVENTF_KEYUP.0 != 0,
+                edge == 1,
+                "key {key}: down, then up"
+            );
+        }
+    }
+
+    assert!(
+        packet.iter().all(|event| event.extra == INJECTED_SIGNATURE),
+        "FR-03: every event of the keystroke packet carries the signature"
+    );
+}
+
+/// A capital: **our** `Shift` goes down before the key the user typed with `Shift` and up right
+/// after it — around that key and no other — and the user's own `Shift`, held over the hotkey, was
+/// released by step 3 before anything. Both `Shift` events carry the signature of FR-03.
+#[test]
+fn a_capital_repeats_its_shift_around_its_own_key_and_nowhere_else() {
+    let source = us();
+    let strokes: Vec<Keystroke> = GHBDTN
+        .iter()
+        .enumerate()
+        .map(|(index, &scan)| {
+            let mods = if index == 0 { Mods::SHIFT } else { Mods::NONE };
+            Keystroke::recorded_in(&source, scan, false, mods)
+        })
+        .collect();
+
+    let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT]);
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &russian(),
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        inject::resolve_auto(Some(CLASSIC_CONSOLE)),
+    )
+    .expect("a capital repeats — the target layout has a character for Shift+G");
+
+    let sent = bench.sent();
+    assert_eq!(sent.len(), 2, "the release of step 3, then the packet");
+    assert!(
+        sent[0][0].is_shift(true),
+        "step 3 released the user's Shift — {:?}",
+        sent[0]
+    );
+
+    let keys = &sent[1][12..];
+    let shift = |event: &Event, up: bool| {
+        event.scan == 0x2A
+            && event.flags & KEYEVENTF_SCANCODE.0 != 0
+            && (event.flags & KEYEVENTF_KEYUP.0 != 0) == up
+    };
+
+    assert_eq!(
+        keys.len(),
+        6 * 2 + 2,
+        "two events of Shift beside the six keys"
+    );
+    assert!(shift(&keys[0], false), "Shift down before G — {keys:?}");
+    assert_eq!(keys[1].scan, GHBDTN[0]);
+    assert_eq!(keys[2].scan, GHBDTN[0]);
+    assert!(shift(&keys[3], true), "Shift up right after G — {keys:?}");
+    assert_eq!(
+        keys[4..].iter().filter(|event| event.scan == 0x2A).count(),
+        0,
+        "no Shift around the keys typed without it"
+    );
+    assert!(
+        sent[1]
+            .iter()
+            .all(|event| event.extra == INJECTED_SIGNATURE)
+    );
+}
+
+/// **Windows Terminal and every other window keep their packet and their order** — the stage
+/// changed one window class. The terminal: the `Backspace` packet of FR-41 with
+/// `KEYEVENTF_UNICODE`, the switch last (FR-43), the very log an explicit `backspace` produces.
+/// Any other window: the compatibility packet of FR-42, the switch last.
+#[test]
+fn the_terminal_and_every_other_window_keep_their_packet_and_their_order() {
+    let mut terminal = Bench::new();
+    press_in_a_window_of(TERMINAL, &mut terminal);
+
+    let stream = terminal.stream();
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|event| event.is_unicode_edge(false))
+            .count(),
+        6,
+        "Windows Terminal takes the replacement as characters"
+    );
+    assert!(
+        stream
+            .iter()
+            .all(|event| event.flags & KEYEVENTF_SCANCODE.0 == 0),
+        "and no key is repeated by its scan code there"
+    );
+    assert!(
+        matches!(terminal.log.last(), Some(Step::Switch)),
+        "FR-43: the switch is the last thing — {:?}",
+        terminal.log
+    );
+
+    let mut explicit = Bench::new();
+    inject::replace_in_with(
+        &mut explicit,
+        &ghbdtn(),
+        &russian(),
+        inject::OnScreen::as_typed(&ghbdtn()),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("sized");
+    assert_eq!(
+        terminal.log, explicit.log,
+        "the path of Windows Terminal did not move"
+    );
+
+    let mut notepad = Bench::new();
+    press_in_a_window_of("Notepad", &mut notepad);
+    assert!(notepad.stream().iter().any(|event| event.is_left(false)));
+    assert!(
+        matches!(notepad.log.last(), Some(Step::Switch)),
+        "{:?}",
+        notepad.log
+    );
+}
+
+/// **Н12 on the keystroke path, decision 127.3.** The switch was made before the packet, so a
+/// packet the system did not take whole — none of it, or all but one event — switches the layout
+/// **back**, after the packet; a packet taken whole does not.
+#[test]
+fn a_classic_console_packet_not_taken_whole_switches_the_layout_back() {
+    let _short_sends = short_sends_are_mine();
+
+    for (refuse, label) in [
+        (24, "the system took none of the packet"),
+        (1, "the system took all but one event"),
+    ] {
+        let mut bench = Bench::refusing(refuse);
+        let outcome = press_in_a_window_of(CLASSIC_CONSOLE, &mut bench);
+
+        assert!(!outcome.reached_the_screen(), "the premise: {label}");
+
+        let switch = bench
+            .position(|step| matches!(step, Step::Switch))
+            .expect("the switch ahead of the packet");
+        let packet = bench
+            .position(|step| matches!(step, Step::Send(events) if events.len() == 24))
+            .expect("the packet");
+        let back = bench
+            .position(|step| matches!(step, Step::SwitchBack))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Н12: {label}, and the layout must go back — {:?}",
+                    bench.log
+                )
+            });
+
+        assert!(
+            switch < packet && packet < back,
+            "{label}: switch, packet, back — {:?}",
+            bench.log
+        );
+    }
+
+    // Control: the whole packet taken, and nothing goes back.
+    let mut bench = Bench::refusing(0);
+    let outcome = press_in_a_window_of(CLASSIC_CONSOLE, &mut bench);
+
+    assert!(outcome.reached_the_screen());
+    assert!(
+        !bench
+            .log
+            .iter()
+            .any(|step| matches!(step, Step::SwitchBack)),
+        "a packet taken whole stays in the layout it was typed for — {:?}",
+        bench.log
+    );
+}
+
+/// **The second press — the rollback of FR-32 — takes the same path back** (TZ Э96 §0 п. 3): the
+/// switch to the layout the run was typed in, then six backspaces for the six characters the first
+/// press put on the screen, then the same six keys again.
+#[test]
+fn the_second_press_in_the_classic_console_takes_the_same_path_back() {
+    let strokes = ghbdtn();
+    let mut bench = Bench::new();
+
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us(),
+        inject::OnScreen::as_injected(&strokes, &russian()),
+        0,
+        inject::resolve_auto(Some(CLASSIC_CONSOLE)),
+    )
+    .expect("sized");
+
+    assert!(
+        matches!(bench.log[..], [Step::Held(_), Step::Switch, Step::Send(_)]),
+        "release (nothing held), switch, packet — {:?}",
+        bench.log
+    );
+
+    let packet = &bench.sent()[0];
+    assert_eq!(
+        packet
+            .iter()
+            .filter(|event| event.is_backspace(false))
+            .count(),
+        6
+    );
+    assert_eq!(
+        packet[12..]
+            .iter()
+            .filter(|event| event.flags & KEYEVENTF_KEYUP.0 == 0)
+            .map(|event| event.scan)
+            .collect::<Vec<_>>(),
+        GHBDTN
+    );
+    assert!(!packet.iter().any(|event| event.is_unicode()));
+}
+
+/// **What the keys cannot repeat is refused before any event** — decision 160.8, «запасной — не
+/// стирать». `café` under US-International carries a dead key: the conversion carries it over
+/// (FR-24), while the key pressed again would start a composition in the console. Nothing is
+/// asked, sent or switched — the word stays as typed — and the same run in Windows Terminal is
+/// sent as it always was.
+#[test]
+fn a_run_its_keys_cannot_repeat_is_refused_before_any_event() {
+    let strokes = cafe_under_us_international();
+    let mut bench = Bench::holding(&[Modifiers::LEFT_SHIFT]);
+
+    let refused = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &russian_for_cafe(),
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        inject::resolve_auto(Some(CLASSIC_CONSOLE)),
+    );
+
+    assert_eq!(refused, Err(InjectError::KeysCannotRepeat));
+    assert!(
+        bench.log.is_empty(),
+        "nothing asked, nothing sent, nothing switched — {:?}",
+        bench.log
+    );
+
+    // Control: the same strokes in Windows Terminal go out on the path that takes characters.
+    let mut terminal = Bench::new();
+    let sent = inject::replace_in_with(
+        &mut terminal,
+        &strokes,
+        &russian_for_cafe(),
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        inject::resolve_auto(Some(TERMINAL)),
+    );
+
+    assert!(sent.is_ok(), "{sent:?}");
+    assert!(!terminal.log.is_empty());
+}
+
+/// ⭐ **The refusal of the classic console is a line of the journal and a refusal for `app`** —
+/// stage Э96, decision 160.8. Read off the source of `on_hotkey`, because the refusal is reachable
+/// only with a classic console window in front, which no test may conjure: the name is a row of
+/// the vocabulary of `diag` (SEC-07 — a fact and no value), `on_hotkey` records it and raises the
+/// cell `app` reads right after the press, and a thread that refused nothing hands nothing over.
+#[test]
+fn the_refusal_of_the_classic_console_is_named_in_the_journal_and_handed_to_app() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let name = "classic console replacement refused";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» would reach the journal as a code with no name"
+    );
+    assert_eq!(operation.name(), name);
+    assert_eq!(operation.kind(), Kind::Process);
+
+    let source = source_of("inject.rs");
+    assert!(
+        source.contains(&format!(
+            "const CLASSIC_CONSOLE_REPLACEMENT_REFUSED: &str = \"{name}\";"
+        )),
+        "the module records exactly the name of the vocabulary"
+    );
+
+    let remainder = source
+        .split("pub fn on_hotkey()")
+        .nth(1)
+        .expect("on_hotkey is in the module");
+    let end = remainder
+        .find("\n}\n")
+        .expect("the body of on_hotkey is bounded by a brace in the first column");
+    let body = &remainder[..end];
+
+    for needle in [
+        "Err(InjectError::KeysCannotRepeat)",
+        "CLASSIC_CONSOLE_REFUSED.set(true)",
+        "Operation::from_name(CLASSIC_CONSOLE_REPLACEMENT_REFUSED)",
+    ] {
+        assert!(
+            body.contains(needle),
+            "on_hotkey must carry `{needle}` — the refusal would be silent"
+        );
+    }
+
+    assert!(
+        source_of("app.rs").contains("crate::inject::take_classic_console_refusal()"),
+        "app asks for the refusal right after the press"
+    );
+    assert!(
+        !inject::take_classic_console_refusal(),
+        "a thread that refused nothing hands nothing over"
+    );
+}
+
+/// The condition of the keystroke path, case by case — `inject::keys_repeat_the_conversion`: plain
+/// keys repeat; a dead key of the run, a key under `AltGr`, a key the target gives nothing for and
+/// a key that is dead in the target do not.
+#[test]
+fn only_keys_that_mean_their_conversion_may_be_repeated() {
+    let us = us();
+    let russian = russian();
+
+    assert!(inject::keys_repeat_the_conversion(&ghbdtn(), &russian));
+    assert!(inject::keys_repeat_the_conversion(&ghbdtn(), &us));
+
+    // A dead key of the run itself.
+    assert!(!inject::keys_repeat_the_conversion(
+        &cafe_under_us_international(),
+        &russian_for_cafe()
+    ));
+
+    // A key under AltGr.
+    let altgr = Keystroke::recorded_in(&us, GHBDTN[0], false, Mods::ALTGR);
+    assert!(!inject::keys_repeat_the_conversion(&[altgr], &russian));
+
+    // A key the target layout gives nothing for.
+    let nothing = layout_with(
+        LayoutId::from_raw(0x0419_0419),
+        GHBDTN[1],
+        KeyMapping::EMPTY,
+    );
+    let plain = Keystroke::recorded_in(&us, GHBDTN[0], false, Mods::NONE);
+    assert!(!inject::keys_repeat_the_conversion(&[plain], &nothing));
+
+    // A key that is dead in the target layout.
+    let dead = layout_with(
+        LayoutId::from_raw(0x0419_0419),
+        GHBDTN[0],
+        KeyMapping::dead('\u{0301}'),
+    );
+    assert!(!inject::keys_repeat_the_conversion(&[plain], &dead));
 }
 
 /// The live half of the resolver check: a real window of this file's own registered class.

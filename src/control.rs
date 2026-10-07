@@ -1095,10 +1095,14 @@ const REPLACEMENT_FIELD_BITS: u32 = 16;
 /// never [`crate::settings::ReplacementMethod::Auto`], which cannot be the outcome of a
 /// resolution.
 ///
-/// **SEC-01, SEC-07.** One of three words about the program's own behaviour. Not a window
+/// **SEC-01, SEC-07.** One of four words about the program's own behaviour. Not a window
 /// class, not a window, and certainly not a stroke: the class the decision was made from is
 /// deliberately *not* published — it is somebody else's window title material, and the method
 /// is the whole of what the bench needs.
+///
+/// ⭐ **Stage Э96: a third packet, and so a fourth word** — `keystrokes`, the keystroke path of the
+/// classic console ([`crate::inject::Delivery::Keystrokes`]). The bench of the classic console
+/// tells it apart from the `backspace` of Windows Terminal by this word and by nothing else.
 static LAST_REPLACEMENT_METHOD: AtomicU8 = AtomicU8::new(METHOD_NONE);
 
 /// [`LAST_REPLACEMENT_METHOD`] before the first replacement: nothing has run yet.
@@ -1109,6 +1113,40 @@ const METHOD_BACKSPACE: u8 = 1;
 
 /// The last replacement ran the `Selection` packet of FR-42.
 const METHOD_SELECTION: u8 = 2;
+
+/// ⭐ The last replacement ran the keystroke packet of the classic console — stage Э96.
+const METHOD_KEYSTROKES: u8 = 3;
+
+/// **What [`note_replacement_method`] takes** — the code a method or a delivery is published as.
+///
+/// Two kinds of value reach that function and both must keep their own honest answer: a resolved
+/// [`crate::inject::Delivery`] — what `inject::on_hotkey` publishes since stage Э96 — and a
+/// configured [`ReplacementMethod`], which is what the channel's own test publishes and which
+/// answers `none` for `auto`, a rule and never an outcome.
+pub trait PublishedMethod {
+    /// The code [`LAST_REPLACEMENT_METHOD`] holds for this value.
+    fn code(self) -> u8;
+}
+
+impl PublishedMethod for ReplacementMethod {
+    fn code(self) -> u8 {
+        match self {
+            Self::Backspace => METHOD_BACKSPACE,
+            Self::Selection => METHOD_SELECTION,
+            Self::Auto => METHOD_NONE,
+        }
+    }
+}
+
+impl PublishedMethod for crate::inject::Delivery {
+    fn code(self) -> u8 {
+        match self {
+            Self::Backspace => METHOD_BACKSPACE,
+            Self::Selection => METHOD_SELECTION,
+            Self::Keystrokes => METHOD_KEYSTROKES,
+        }
+    }
+}
 
 /// ⭐ Whether the last replacement packet **inserted something other than what it took off the
 /// screen** — task **T-10-17**.
@@ -1413,11 +1451,12 @@ pub fn note_replacement(erase: usize, units: usize, distinct: usize) {
 /// `inject::on_hotkey` from the one place FR-42а resolves `auto`, and by nothing else.
 /// Task **T-10-8**.
 ///
-/// `method` is the *resolved* method: one of the two packets, never
-/// [`ReplacementMethod::Auto`]. `Auto` cannot be the outcome of a resolution, and if a defect
-/// ever delivered it here anyway it is recorded as [`METHOD_NONE`] — "nothing decidable ran" —
-/// rather than silently renamed to either real method, so the defect stays visible on the
-/// channel instead of masquerading as a decision.
+/// `method` is the *resolved* method: one of the three packets since stage Э96 — a
+/// [`crate::inject::Delivery`] — and never [`ReplacementMethod::Auto`]. `Auto` cannot be the
+/// outcome of a resolution, and if a defect ever delivered it here anyway it is recorded as
+/// [`METHOD_NONE`] — "nothing decidable ran" — rather than silently renamed to a real method, so
+/// the defect stays visible on the channel instead of masquerading as a decision. See
+/// [`PublishedMethod`] for the two kinds of value this takes.
 ///
 /// # NFR-01 to NFR-05
 ///
@@ -1429,14 +1468,8 @@ pub fn note_replacement(erase: usize, units: usize, distinct: usize) {
 ///
 /// A word about the program's own choice. See [`LAST_REPLACEMENT_METHOD`].
 #[inline]
-pub fn note_replacement_method(method: ReplacementMethod) {
-    let code = match method {
-        ReplacementMethod::Backspace => METHOD_BACKSPACE,
-        ReplacementMethod::Selection => METHOD_SELECTION,
-        ReplacementMethod::Auto => METHOD_NONE,
-    };
-
-    LAST_REPLACEMENT_METHOD.store(code, Ordering::Relaxed);
+pub fn note_replacement_method(method: impl PublishedMethod) {
+    LAST_REPLACEMENT_METHOD.store(method.code(), Ordering::Relaxed);
 }
 
 /// ⭐ Publishes the two facts task **T-10-17** adds about the replacement being built: whether
@@ -1490,6 +1523,7 @@ fn last_replacement_method() -> &'static str {
     match LAST_REPLACEMENT_METHOD.load(Ordering::Relaxed) {
         METHOD_BACKSPACE => "backspace",
         METHOD_SELECTION => "selection",
+        METHOD_KEYSTROKES => "keystrokes",
         // `METHOD_NONE`, and — total match over a `u8` — every code nothing ever stores.
         _ => "none",
     }
@@ -1749,7 +1783,8 @@ pub struct Snapshot {
     /// collapsed one. Task **T-10-6**; see [`LAST_REPLACEMENT`].
     pub replacement_distinct: u16,
     /// The method the last replacement really ran — `"none"` before the first one, then
-    /// `"backspace"` or `"selection"`. Task **T-10-8**, FR-42а: [`Snapshot::replacement_method`]
+    /// `"backspace"`, `"selection"` or, since stage Э96, `"keystrokes"` (the classic console).
+    /// Task **T-10-8**, FR-42а: [`Snapshot::replacement_method`]
     /// is the *configured* value and may read `auto`, which is a rule and not a method; this is
     /// what the rule decided for the most recent press. See [`LAST_REPLACEMENT_METHOD`].
     pub last_replacement_method: &'static str,

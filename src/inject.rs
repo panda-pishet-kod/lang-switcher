@@ -116,8 +116,9 @@ use std::time::Duration;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_BACK,
-    VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, SendInput,
+    VIRTUAL_KEY, VK_BACK, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL,
+    VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
 
@@ -168,6 +169,18 @@ pub enum InjectError {
     /// Refused **before** steps 3 to 5 run, so an idle press releases no modifier and switches no
     /// layout. Carries nothing at all — there is no count to report.
     EmptyPacket,
+
+    /// ⭐ **The keys of this run cannot be repeated — stage Э96, task T-96-2.**
+    ///
+    /// The keystroke path of the classic console ([`Delivery::Keystrokes`]) types the replacement by
+    /// pressing the user's keys again in the new layout, and that is the replacement only where the
+    /// keys mean in the new layout exactly what the conversion of FR-22 renders: a dead key, a key
+    /// under `AltGr`, a key the new layout gives nothing for or a dead key of the new layout would
+    /// put something else on the line (see [`keys_repeat_the_conversion`]). Such a run is refused
+    /// **before any event** — nothing is erased and no layout is switched, the word stays as typed
+    /// and the press is answered with the tone of a refusal: the fallback the owner chose for the
+    /// classic console (decision 160.8, «запасной — не стирать»). Carries nothing.
+    KeysCannotRepeat,
 }
 
 impl fmt::Display for InjectError {
@@ -181,6 +194,7 @@ impl fmt::Display for InjectError {
                 write!(f, "the replacement needs {needed} UTF-16 code units")
             }
             Self::EmptyPacket => write!(f, "the replacement packet is empty"),
+            Self::KeysCannotRepeat => write!(f, "the keys of the run cannot be repeated"),
         }
     }
 }
@@ -969,6 +983,123 @@ pub fn build_packet(
 }
 
 // ---------------------------------------------------------------------------------------
+// Stage Э96 — the keystroke path of the classic console (decision 160.8)
+// ---------------------------------------------------------------------------------------
+
+/// The scan code of the left `Shift` — set 1, main block — the `Shift` the keystroke path presses
+/// around a key the user typed with `Shift`.
+///
+/// Left for the reason [`SELECTION_SHIFT`] is left: a key had to be chosen. Which one it is does not
+/// matter; that it is **ours** and balanced inside the packet does — see [`build_keystrokes`].
+const SCAN_LEFT_SHIFT: u16 = 0x2A;
+
+/// How many `INPUT` structures the keystroke packet of `strokes` after `erase` backspaces takes.
+///
+/// `erase * 2` for the backspaces, as FR-41 counts them; two for every key (down, up), and two more
+/// for a key typed with `Shift` — ours goes down before it and up after it.
+pub fn keystroke_events(erase: usize, strokes: &[Keystroke]) -> usize {
+    erase * 2
+        + strokes
+            .iter()
+            .map(|stroke| if stroke.mods().shift() { 4 } else { 2 })
+            .sum::<usize>()
+}
+
+/// **Whether the user's keys, pressed again under `target`, put on the line exactly what the
+/// conversion of FR-22 renders** — the condition of the keystroke path (stage Э96).
+///
+/// The conversion asks the target layout what each physical key gives (FR-22), and so does a key
+/// pressed again in a window switched to that layout — as long as the key really is one key and
+/// one character. Where the conversion does anything else, the keys would not repeat it:
+///
+/// * **a dead key of the run** — the conversion carries it over unchanged (FR-24), while the key
+///   pressed again would start a composition in the console;
+/// * **a key the target layout gives nothing for, or a dead key there** — the conversion keeps the
+///   stroke's own characters (FR-23), the key pressed again would give nothing, or a composition;
+/// * **a key under `AltGr`** — the keystroke path presses `Shift` and nothing else around a key;
+///   `AltGr` is `Ctrl` with the right `Alt`, a chord the classic console was never measured with
+///   (the two layouts of the measuring machine give no letter under it).
+///
+/// `CapsLock` is not a reason: it is a lock, not a held key, and the console applies its state to
+/// the repeated keys exactly as it did to the typed ones.
+///
+/// A run that fails this is refused whole — [`InjectError::KeysCannotRepeat`] — and the word stays
+/// as typed: the fallback the owner chose for the classic console (decision 160.8).
+pub fn keys_repeat_the_conversion(strokes: &[Keystroke], target: &LayoutMap) -> bool {
+    strokes.iter().all(|&stroke| {
+        let candidate = target.lookup(stroke.scan(), stroke.extended(), stroke.mods());
+
+        !stroke.is_dead() && !stroke.mods().altgr() && !candidate.is_empty() && !candidate.is_dead()
+    })
+}
+
+/// ⭐ **The keystroke packet of the classic console — stage Э96, decision 160.8.** Builds into
+/// `out`: `erase` × `Backspace`, then every stroke of the run **again, by its scan code**.
+///
+/// Returns how many events were written, which is always [`keystroke_events`]. `out` shorter than
+/// that is [`InjectError::OutputTooSmall`] and nothing is written — [`build_replacement`]'s rule.
+///
+/// ```text
+/// Backspace down, Backspace up       × N — the characters on the screen, OnScreen, as FR-41
+/// [Shift down]                        ours, only before a key the user typed with Shift
+/// key down, key up                    KEYEVENTF_SCANCODE, the extended flag of FR-05
+/// [Shift up]                          ours, at once — before the next key
+/// ```
+///
+/// **Not one `KEYEVENTF_UNICODE` event.** The layout of the console decides what each key gives,
+/// and the switch of FR-50 has already been made when this packet goes out — that order is
+/// [`run_steps_ahead`]'s, and it is the whole of the path: the keys the user typed in one layout,
+/// pressed in the other, are the replacement. `Backspace` does not depend on the layout, so the
+/// erasure and the keys travel in one call (FR-41) after the switch.
+///
+/// The `Shift` here is **ours**, balanced inside the packet the way the compatibility packet's own
+/// `Shift` is ([`build_selection`]): the user's `Shift` was released by step 3 before anything, and
+/// a `Shift` of ours left down would stay down on a machine whose owner holds nothing.
+///
+/// Every structure carries the signature of FR-03 ([`scan_event`], [`key_event`]): the keys this
+/// packet repeats come back through the hook as the program's own, not as the user's, and the next
+/// press still converts the run the user typed (FR-32, the third press of П4).
+pub fn build_keystrokes(
+    erase: usize,
+    strokes: &[Keystroke],
+    out: &mut [INPUT],
+) -> Result<usize, InjectError> {
+    let needed = keystroke_events(erase, strokes);
+
+    if out.len() < needed {
+        return Err(InjectError::OutputTooSmall { needed });
+    }
+
+    let mut written = 0;
+
+    for _ in 0..erase {
+        out[written] = key_event(BACKSPACE, false, false);
+        out[written + 1] = key_event(BACKSPACE, false, true);
+        written += 2;
+    }
+
+    for stroke in strokes {
+        let shift = stroke.mods().shift();
+
+        if shift {
+            out[written] = scan_event(SCAN_LEFT_SHIFT, false, false);
+            written += 1;
+        }
+
+        out[written] = scan_event(stroke.scan(), stroke.extended(), false);
+        out[written + 1] = scan_event(stroke.scan(), stroke.extended(), true);
+        written += 2;
+
+        if shift {
+            out[written] = scan_event(SCAN_LEFT_SHIFT, false, true);
+            written += 1;
+        }
+    }
+
+    Ok(written)
+}
+
+// ---------------------------------------------------------------------------------------
 // FR-42а — `auto`: the method resolved by the class of the foreground window
 // ---------------------------------------------------------------------------------------
 
@@ -994,11 +1125,80 @@ pub fn build_packet(
 /// PowerShell (PSReadLine) and cmd live behind the same `CASCADIA_HOSTING_WINDOW_CLASS` in
 /// Windows Terminal, and PowerShell was measured to work under **both** methods — which is what
 /// makes the class, rather than the shell, the right thing to dispatch on (review of T-10-7).
+///
+/// ⭐ **Since stage Э96 the two no longer get one and the same packet** — see
+/// [`CLASSIC_CONSOLE_CLASS`]. The list stays what it is for every other reader of it: the two
+/// classes in which the erasure is `Backspace` and the selection path of FR-60 does not apply
+/// (the note to §4.7, П-3).
 pub const CONSOLE_WINDOW_CLASSES: [&str; 2] =
     ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"];
 
-/// **FR-42а: the pure half of the choice.** The method a window of class `class` gets under
-/// `method = "auto"`.
+/// ⭐ **The classic console — the one class whose replacement under `auto` is typed by keys**,
+/// stage Э96, decision 160.8.
+///
+/// `ConsoleWindowClass` with Windows PowerShell 5.1 does not take `KEYEVENTF_UNICODE` (Э92, 4 of
+/// 4; the product's own press, 10 of 10 — stand `--experiment-console-keys product`, 2026-10-07):
+/// the backspaces of FR-41 reach the line, the characters after them do not, and the word the user
+/// typed is gone. What the console does take are keys: the bench measured «the switch of FR-50,
+/// then six backspaces and the six keys again, in one call» at 20 of 20 in both shells, the way
+/// back as well, capitals included, **with no pause** between the switch and the packet (premises
+/// П2 and П3 of the stage). So under `auto` this class gets [`Delivery::Keystrokes`]; Windows
+/// Terminal, which takes `KEYEVENTF_UNICODE`, keeps [`Delivery::Backspace`].
+///
+/// One of the two entries of [`CONSOLE_WINDOW_CLASSES`], named apart so that the one rule that
+/// separates them reads as a name and not as an index.
+pub const CLASSIC_CONSOLE_CLASS: &str = CONSOLE_WINDOW_CLASSES[0];
+
+/// **What a press really runs** — the method of FR-42 and FR-42а resolved, and the one path the
+/// configuration does not name: the keys of the classic console (stage Э96, decision 160.8).
+///
+/// ⚠ **Not a value of section 7, and that is a decision, not an omission.** `[replacement] method`
+/// is a closed set (`backspace`, `selection`, `auto`), and a new word in it would make an older
+/// build send the whole file to quarantine (`closed-enum-downgrade-cost`, the price paid by schema
+/// 4). The keystroke path is what `auto` chooses for one window class; nobody writes it in a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    /// FR-41: `N` × `Backspace`, the replacement as `KEYEVENTF_UNICODE`, the switch after (FR-43).
+    /// `backspace`, and `auto` in Windows Terminal.
+    Backspace,
+    /// FR-42: `N` × `Shift+Left`, the insertion, the switch after. `selection`, and `auto`
+    /// everywhere but the consoles.
+    Selection,
+    /// ⭐ Stage Э96: the switch of FR-50 **first**, then one packet — `N` × `Backspace` and the keys
+    /// the user pressed, again, by their scan codes. `auto` in a window of
+    /// [`CLASSIC_CONSOLE_CLASS`] only. See [`build_keystrokes`].
+    Keystrokes,
+}
+
+impl From<ReplacementMethod> for Delivery {
+    /// The packet a configured method names — the two explicit ones are themselves, and `auto`,
+    /// which never reaches a packet unresolved through [`on_hotkey`], answers the refusal direction
+    /// of FR-42а exactly as [`build_packet`] does: the `Selection` packet.
+    fn from(method: ReplacementMethod) -> Self {
+        match method {
+            ReplacementMethod::Backspace => Self::Backspace,
+            ReplacementMethod::Selection | ReplacementMethod::Auto => Self::Selection,
+        }
+    }
+}
+
+impl PartialEq<ReplacementMethod> for Delivery {
+    /// A delivery **is** a configured method when it is that method's packet: `Backspace` and
+    /// `Selection` are, `Keystrokes` is no method of section 7, and nothing is `auto` — `auto` is a
+    /// question, never an answer.
+    fn eq(&self, method: &ReplacementMethod) -> bool {
+        matches!(
+            (self, method),
+            (Self::Backspace, ReplacementMethod::Backspace)
+                | (Self::Selection, ReplacementMethod::Selection)
+        )
+    }
+}
+
+/// **FR-42а: the pure half of the choice.** The delivery a window of class `class` gets under
+/// `method = "auto"` — since stage Э96 three answers, not two: the classic console
+/// ([`CLASSIC_CONSOLE_CLASS`]) gets [`Delivery::Keystrokes`], Windows Terminal
+/// [`Delivery::Backspace`], every other window [`Delivery::Selection`].
 ///
 /// `None` means the class could not be read at all — no foreground window, or a
 /// `GetClassNameW` refusal ([`foreground_window_class`] documents both) — and an empty string
@@ -1017,16 +1217,17 @@ pub const CONSOLE_WINDOW_CLASSES: [&str; 2] =
 ///
 /// Case-insensitively, because window class names are case-insensitive to Windows itself —
 /// the same rule `guard::class_is_edit` states for its own comparison.
-pub fn resolve_auto(class: Option<&str>) -> ReplacementMethod {
+pub fn resolve_auto(class: Option<&str>) -> Delivery {
     match class {
+        Some(class) if class.eq_ignore_ascii_case(CLASSIC_CONSOLE_CLASS) => Delivery::Keystrokes,
         Some(class)
             if CONSOLE_WINDOW_CLASSES
                 .iter()
                 .any(|console| class.eq_ignore_ascii_case(console)) =>
         {
-            ReplacementMethod::Backspace
+            Delivery::Backspace
         }
-        _ => ReplacementMethod::Selection,
+        _ => Delivery::Selection,
     }
 }
 
@@ -1078,7 +1279,11 @@ pub fn window_class(window: HWND) -> Option<String> {
 /// The window asked is the foreground window *at the moment of the replacement* — the same
 /// window the packet is about to land in, which is the whole point of resolving late rather
 /// than at configuration time.
-pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
+///
+/// Answers a [`Delivery`] since stage Э96: the keystroke path of the classic console is one of the
+/// answers of `auto`, and of `auto` only — an explicit `backspace` in a classic console is still
+/// the manual override it always was, `KEYEVENTF_UNICODE` included.
+pub fn effective_method(configured: ReplacementMethod) -> Delivery {
     match configured {
         ReplacementMethod::Auto => {
             // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and
@@ -1096,7 +1301,7 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 
             resolve_auto(class.as_deref())
         }
-        explicit => explicit,
+        explicit => Delivery::from(explicit),
     }
 }
 
@@ -1111,12 +1316,13 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 /// user's own typing, `hook::classify` would let it into the buffer, and the next hotkey press
 /// would convert the program's own output — for ever.
 ///
-/// # The three builders of this program
+/// # The four builders of this program
 ///
 /// This comment used to say that the two functions of this module were the only places an
 /// `INPUT` is built and that there was deliberately no third. That stopped being true at task
 /// T-07-2 and stayed on the page, which is the worst state an inventory can be in: the next
-/// reader greps by it and stops one place short. The list, in full:
+/// reader greps by it and stops one place short. Stage Э96 added the fourth, and the heading moved
+/// with it in the same commit. The list, in full:
 ///
 /// 1. [`key_event`] — this function. Every virtual key the program sends: the `Backspace` pairs
 ///    of FR-41, the `Shift+Left` selection of FR-42 and the modifier packets of FR-40 steps 3
@@ -1127,6 +1333,8 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 ///    rather than as a call of this one because `src\inject.rs` was closed to task T-07-2 and
 ///    both builders here are private.** That reason is recorded at the duplicate itself and is
 ///    not an invitation to merge the two: doing so is a refactor of its own, with its own task.
+/// 4. [`scan_event`] — stage Э96: every key of the keystroke path of the classic console, the
+///    user's keys again by their scan codes and the `Shift` around a key that had it.
 ///
 /// # What actually holds the invariant
 ///
@@ -1141,7 +1349,9 @@ pub fn effective_method(configured: ReplacementMethod) -> ReplacementMethod {
 ///   release packet and the modifier press of [`build_restore`], including modifiers a plain
 ///   replacement never produces;
 /// * `tests\selection.rs::the_two_chords_carry_the_signature_of_fr03_and_go_out_through_inject`
-///   — every field of every event of the third builder, on both chords.
+///   — every field of every event of the third builder, on both chords;
+/// * `tests\inject.rs::every_event_of_the_keystroke_path_carries_the_signature_of_fr03` — the
+///   fourth builder, keys and `Shift`, beside the backspaces of the same packet.
 ///
 /// What none of them can see is a **fourth** builder whose events never reach one of those
 /// paths. That is why the inventory above is spelled out by name rather than as a count: a
@@ -1189,7 +1399,7 @@ fn key_event(vk: VIRTUAL_KEY, extended: bool, up: bool) -> INPUT {
 /// unreleased unicode keydown as the latched character, so a run of downs alone comes out as
 /// the first character repeated.
 ///
-/// See [`key_event`] for `dwExtraInfo`, `time` and for the inventory of the three `INPUT`
+/// See [`key_event`] for `dwExtraInfo`, `time` and for the inventory of the four `INPUT`
 /// builders of this program — this is the second of them. In particular the signature of FR-03
 /// is on **both** edges: an up without it would come back through the hook as the user's own
 /// keystroke.
@@ -1206,6 +1416,44 @@ fn unicode_event(unit: u16, up: bool) -> INPUT {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(0),
                 wScan: unit,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: INJECTED_SIGNATURE,
+            },
+        },
+    }
+}
+
+/// One keyboard `INPUT` naming a **physical key by its scan code** — the keystroke path of the
+/// classic console, stage Э96, the fourth builder of [`key_event`]'s inventory.
+///
+/// `KEYEVENTF_SCANCODE`: `wScan` names the key, `wVk` is ignored by the system and left at zero,
+/// and the extended flag of FR-05 says which of two keys with one scan code it is. The system
+/// turns the key into a virtual key and a character by the layout of the window that receives it —
+/// which is the whole point: the keys the user pressed in one layout, pressed again after the
+/// switch, are the replacement in the other (decision 160.8). Not a `KEYEVENTF_UNICODE` event,
+/// which the classic console with Windows PowerShell 5.1 does not take (Э92).
+///
+/// See [`key_event`] for `dwExtraInfo` and `time`: the signature of FR-03 is on **every** event,
+/// both edges, the `Shift` around a capital included — an event without it would come back
+/// through the hook as the user's own stroke and be converted next time.
+fn scan_event(scan: u16, extended: bool, up: bool) -> INPUT {
+    let mut flags = KEYEVENTF_SCANCODE;
+
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: scan,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: INJECTED_SIGNATURE,
@@ -1445,7 +1693,21 @@ pub trait Environment {
     /// It is a member of this trait rather than a comment in the body so that the position of
     /// the switch is something a test can *see*: FR-43 is a statement about order, and an order
     /// nobody can observe is an order nobody can check.
+    ///
+    /// ⭐ **Stage Э96: the keystroke path of the classic console calls it *before* its packet**
+    /// ([`run_steps_ahead`], decision 160.8) — the one exception to FR-43, and the reason the
+    /// position of this call is something the tests read rather than assume.
     fn switch_layout(&mut self) {}
+
+    /// ⭐ **The layout back where it was — the keystroke path only, stage Э96.**
+    ///
+    /// Called after a packet of the keystroke path that did **not** reach the screen whole
+    /// ([`Replaced::reached_the_screen`]): the switch was made before the packet, so a blocked
+    /// injection would otherwise leave the text as typed under a layout the user did not choose,
+    /// and the next word would come out in the other language — finding Н12, decision 127.3,
+    /// which the paths that switch *after* the packet keep by not switching at all. The default
+    /// does nothing, for the reason [`switch_layout`](Self::switch_layout)'s does.
+    fn switch_back(&mut self) {}
 }
 
 /// The real machine — the [`Environment`] the program runs on.
@@ -1463,6 +1725,12 @@ pub struct System {
     /// [`Default`] gives — means "do not switch", which is what [`dispatch`] wants: it sends a
     /// packet and performs no step 5 at all.
     target: Option<LayoutId>,
+
+    /// ⭐ **The classic console — stage Э96.** `Some` with the layout the window was in before the
+    /// press, for the keystroke path: its switch is made without a verdict
+    /// ([`switch_classic_in`]) and [`Environment::switch_back`] returns to this layout. `None` for
+    /// every other path, which switches through the chain of §4.6 and never back.
+    back: Option<LayoutId>,
 }
 
 impl System {
@@ -1470,6 +1738,17 @@ impl System {
     pub const fn for_target(target: LayoutId) -> Self {
         Self {
             target: Some(target),
+            back: None,
+        }
+    }
+
+    /// ⭐ The real machine for the keystroke path of the classic console — stage Э96: the switch
+    /// to `target` ahead of the packet, and `back` to return to when the packet did not reach the
+    /// screen.
+    pub const fn for_classic_console(target: LayoutId, back: LayoutId) -> Self {
+        Self {
+            target: Some(target),
+            back: Some(back),
         }
     }
 }
@@ -1545,13 +1824,58 @@ impl Environment for System {
     /// middle of a conversion session.
     ///
     /// SEC-01, SEC-07: what crosses this line is a layout handle and a boolean, never a stroke.
+    ///
+    /// ⭐ **Stage Э96: the classic console switches without a verdict** — [`switch_classic_in`],
+    /// whenever [`System::back`] is set, which only [`System::for_classic_console`] does.
     fn switch_layout(&mut self) {
         let Some(target) = self.target else {
             return;
         };
 
-        switch_layout_in(&mut crate::switch::System, target);
+        if self.back.is_some() {
+            switch_classic_in(&mut crate::switch::System, target);
+        } else {
+            switch_layout_in(&mut crate::switch::System, target);
+        }
     }
+
+    /// The keystroke path's way back — stage Э96. The same switch without a verdict, to the layout
+    /// the window was in before the press.
+    fn switch_back(&mut self) {
+        if let Some(back) = self.back {
+            switch_classic_in(&mut crate::switch::System, back);
+        }
+    }
+}
+
+/// ⭐ **The switch of the keystroke path — FR-50 to a classic console window, and no verdict at
+/// all** (stage Э96). Answers whether the stamp of FR-04 was published.
+///
+/// [`switch_layout_in`] asks the chain of §4.6, and the chain asks FR-52 first: a reading that
+/// says the window is already on the target is answered by not posting at all, and a reading that
+/// does not move after the post is answered with a refusal. In a classic console window neither
+/// answer is about the console — **measured by the premise П5 of stage Э96**: the thread the
+/// window's handle names is the thread of the program the console hosts, `GetGUIThreadInfo`
+/// answered for it (the console of the stand, both shells) and the layout read of it was the one
+/// that thread was born with, while the console switched under it 20 times out of 20. On the
+/// stand the base build left the console Russian after every other round of `cmd` — by the code of
+/// `to_in`, the rollback found the frozen reading already English and posted nothing (the channel
+/// carries no counter of it). The keystroke path cannot afford that — its
+/// keys mean what the layout of the console makes of them — so it posts the message of FR-50
+/// every time, through [`crate::switch::to_classic_console_in`], and believes it, as FR-52's
+/// addendum has believed the blind console since Т-14-6: the stamp follows ([`stamp_follows`]
+/// answers `true` for [`crate::switch::Outcome::Sent`]).
+///
+/// [`stamp_follows`]: crate::switch::stamp_follows
+pub fn switch_classic_in(machine: &mut impl crate::switch::Machine, target: LayoutId) -> bool {
+    let follows =
+        crate::switch::stamp_follows(crate::switch::to_classic_console_in(machine, target));
+
+    if follows {
+        crate::app::note_layout_switched(target);
+    }
+
+    follows
 }
 
 /// **FR-40 step 5 against any [`crate::switch::Machine`]** — the body of
@@ -1907,33 +2231,44 @@ pub fn replace_in(
 /// of FR-41, the signature of FR-03 and the position FR-43 fixes are shared, and deliberately:
 /// a mode that could quietly do without the modifier hygiene of FR-40 would be a second
 /// requirement, not a second packet.
+///
+/// ⭐ **Stage Э96, decision 160.8 — the one exception to «only the packet».** The keystroke path
+/// of the classic console ([`Delivery::Keystrokes`]) also moves step 5 in front of step 4, and
+/// switches back when its packet did not reach the screen — see [`run_steps_ahead`]. `back` is the
+/// layout the window was in before this press (what [`take_press`] reads off the screen's state);
+/// the other paths never use it.
 pub fn replace_with(
     strokes: &[Keystroke],
     target: &LayoutMap,
     on_screen: OnScreen,
+    back: LayoutId,
     delay_ms: u32,
-    method: ReplacementMethod,
+    delivery: Delivery,
 ) -> Result<Replaced, InjectError> {
     // FR-40 step 5, task T-05-1 — see `replace` for why the target is `target.layout()`.
-    replace_in_with(
-        &mut System::for_target(target.layout()),
-        strokes,
-        target,
-        on_screen,
-        delay_ms,
-        method,
-    )
+    let mut system = if matches!(delivery, Delivery::Keystrokes) {
+        System::for_classic_console(target.layout(), back)
+    } else {
+        System::for_target(target.layout())
+    };
+
+    replace_in_with(&mut system, strokes, target, on_screen, delay_ms, delivery)
 }
 
 /// [`replace_with`] against any [`Environment`].
+///
+/// `delivery` takes a configured [`ReplacementMethod`] as well — the seam task T-04-1 left took a
+/// method, and an explicit method is the packet it names ([`Delivery::from`]).
 pub fn replace_in_with(
     env: &mut impl Environment,
     strokes: &[Keystroke],
     target: &LayoutMap,
     on_screen: OnScreen,
     delay_ms: u32,
-    method: ReplacementMethod,
+    delivery: impl Into<Delivery>,
 ) -> Result<Replaced, InjectError> {
+    let delivery = delivery.into();
+
     // FR-41 and FR-42: `N` is the number of characters **on the screen**, not the number of
     // keys pressed, and it is the same `N` in both modes.
     //
@@ -1952,8 +2287,34 @@ pub fn replace_in_with(
     let typed = convert::convert_strokes(strokes, target, &mut text)
         .map_err(|ConvertError::BufferTooSmall { needed }| InjectError::TextTooLong { needed })?;
 
-    let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
-    let built = build_packet(method, erased, &text[..typed], &mut events);
+    // ⭐ **Stage Э96 — the keystroke path builds its own packet, out of the strokes and not out of
+    // the text.** The text is still formed — FR-43's «formed before» holds, and the counts the
+    // channel publishes below are of it — but what goes out is the user's keys again
+    // ([`build_keystrokes`]). A run whose keys would not repeat the conversion is refused here,
+    // before steps 3 to 5 and before a single event: nothing is erased, no layout is switched
+    // (decision 160.8, «запасной — не стирать»). An empty run stays what it always was, the idle
+    // press of finding Н18, and is told apart from the refusal first.
+    let (mut events, built) = match delivery {
+        Delivery::Keystrokes if erased == 0 && typed == 0 => (Vec::new(), Ok(0)),
+        Delivery::Keystrokes if !keys_repeat_the_conversion(strokes, target) => {
+            (Vec::new(), Err(InjectError::KeysCannotRepeat))
+        }
+        Delivery::Keystrokes => {
+            let mut events = vec![INPUT::default(); keystroke_events(erased, strokes)];
+            let built = build_keystrokes(erased, strokes, &mut events);
+            (events, built)
+        }
+        Delivery::Backspace | Delivery::Selection => {
+            let method = if matches!(delivery, Delivery::Backspace) {
+                ReplacementMethod::Backspace
+            } else {
+                ReplacementMethod::Selection
+            };
+            let mut events = vec![INPUT::default(); packet_events(method, erased, typed)];
+            let built = build_packet(method, erased, &text[..typed], &mut events);
+            (events, built)
+        }
+    };
 
     // ⭐ **Task T-40-1, finding Н18 — an empty packet is refused here, before steps 3 to 5.**
     //
@@ -2013,7 +2374,13 @@ pub fn replace_in_with(
     // Since task T-40-4 `distinct_units` makes no copy, and `tests\inject_zeroing.rs` watches every
     // block this path frees for the text — so the sentence holds in a `testing` build as well, and
     // it is that check, not this comment, that says so.
-    let outcome = built.map(|len| run_steps(env, &events[..len], erased, typed, delay_ms));
+    let outcome = built.map(|len| {
+        if matches!(delivery, Delivery::Keystrokes) {
+            run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+        } else {
+            run_steps(env, &events[..len], erased, typed, delay_ms)
+        }
+    });
 
     // The write is `crate::buffer::zero_slice` and not `fill`, because a `fill` immediately in
     // front of the deallocation these two vectors are about to have is a dead store the
@@ -2034,16 +2401,8 @@ fn run_steps(
     typed: usize,
     delay_ms: u32,
 ) -> Replaced {
-    let mut modifier_events = [INPUT::default(); MODIFIER_COUNT];
-
     // ---- step 3 -----------------------------------------------------------------------
-    let released = env.held();
-    let release = match build_release(released, &mut modifier_events) {
-        // The array is `MODIFIER_COUNT` long and `released.count()` can never exceed it, so
-        // the error is unreachable; it is answered by sending nothing rather than by a panic.
-        Err(_) => Dispatched::default(),
-        Ok(len) => dispatch_in(env, &modifier_events[..len], delay_ms),
-    };
+    let (released, release) = release_held(env, delay_ms);
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
     let replacement = dispatch_in(env, packet, delay_ms);
@@ -2098,6 +2457,77 @@ fn run_steps(
     }
 }
 
+/// **FR-40 step 3** — the modifiers the user is holding, asked once and released in one call.
+/// Shared by both orders of the steps, so that the hygiene of step 3 cannot differ between them.
+fn release_held(env: &mut impl Environment, delay_ms: u32) -> (Modifiers, Dispatched) {
+    let mut modifier_events = [INPUT::default(); MODIFIER_COUNT];
+
+    let released = env.held();
+    let release = match build_release(released, &mut modifier_events) {
+        // The array is `MODIFIER_COUNT` long and `released.count()` can never exceed it, so
+        // the error is unreachable; it is answered by sending nothing rather than by a panic.
+        Err(_) => Dispatched::default(),
+        Ok(len) => dispatch_in(env, &modifier_events[..len], delay_ms),
+    };
+
+    (released, release)
+}
+
+/// ⭐ **The steps of the keystroke path — stage Э96, decision 160.8: step 3, step 5, step 4.**
+///
+/// The classic console (`ConsoleWindowClass`) does not take `KEYEVENTF_UNICODE`, so its
+/// replacement is the user's keys again ([`build_keystrokes`]), and keys mean what the layout of
+/// the window makes of them — the layout has to be the target **before** they go out. So, and only
+/// on this path:
+///
+/// 1. **step 3** — the modifiers the user holds are released, exactly as on every path;
+/// 2. **step 5, ahead** — the switch of FR-50, without a verdict ([`switch_classic_in`]);
+/// 3. **no pause** — the premise П2 of the stage measured the switch taken before the very next
+///    keys, 20 times of 20 in Windows PowerShell 5.1 and in `cmd`, there and back, at a pause of
+///    zero; the waits 10/20/50/100 ms were never needed, and NFR-09's thirty milliseconds stand;
+/// 4. **step 4** — the packet, in one call (FR-41): the backspaces first — `Backspace` does not
+///    depend on the layout — and the keys after them;
+/// 5. **back, when the packet did not reach the screen** ([`Replaced::reached_the_screen`]) — the
+///    switch was already made, so the text as typed would stay under a layout the user did not
+///    choose and the next word would come out in the other language: finding Н12, decision 127.3,
+///    kept here by switching back rather than by not switching.
+///
+/// FR-43 — «замена выполняется до переключения раскладки» — is suspended here and here only; its
+/// reason, that `KEYEVENTF_UNICODE` cannot race the layout, does not apply to a packet that has no
+/// such event. If the switch did not take in time, the keys put back the word as it was typed:
+/// the text does not change, and nothing is lost.
+fn run_steps_ahead(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    erased: usize,
+    typed: usize,
+    delay_ms: u32,
+) -> Replaced {
+    // ---- step 3 -----------------------------------------------------------------------
+    let (released, release) = release_held(env, delay_ms);
+
+    // ---- step 5, ahead of the packet — decision 160.8 ---------------------------------
+    env.switch_layout();
+
+    // ---- step 4, FR-41 ----------------------------------------------------------------
+    let replacement = dispatch_in(env, packet, delay_ms);
+
+    // ---- back, if the packet did not reach the screen — Н12, decision 127.3 -----------
+    let replaced = Replaced {
+        erased,
+        typed,
+        released,
+        release,
+        replacement,
+    };
+
+    if !replaced.reached_the_screen() {
+        env.switch_back();
+    }
+
+    replaced
+}
+
 // ---------------------------------------------------------------------------------------
 // The far end of the FR-02 handoff — what `app::window_proc` calls
 // ---------------------------------------------------------------------------------------
@@ -2141,27 +2571,52 @@ fn run_steps(
 ///   from the marked point inside [`replace_in_with`]; its target is `target.layout()`, the
 ///   layout the strokes were rendered into.
 pub fn on_hotkey() -> Option<Replaced> {
+    // Stage Э96: the answer of the previous press is not this press's answer.
+    CLASSIC_CONSOLE_REFUSED.set(false);
+
     let Press {
         mut strokes,
         target,
         on_screen,
+        back,
         cycle_len,
     } = take_press()?;
 
     // **FR-42а.** The configured method is read once per press, and `auto` is resolved against
     // the foreground window here — the input thread's message loop, after the handoff, never
     // the hook callback — so that everything below this line is a pure function of its
-    // arguments, exactly as `delay_ms` already is. `method` is one of the two real packets by
+    // arguments, exactly as `delay_ms` already is. `delivery` is one of the three real packets by
     // construction; `Auto` does not travel further.
-    let method = effective_method(replacement_method());
+    let delivery = effective_method(replacement_method());
 
-    // The method this very replacement runs, published for the bench of §11.5: without it the
+    // The path this very replacement runs, published for the bench of §11.5: without it the
     // choice FR-42а makes is invisible from outside the process, and a rule nobody can observe
     // is a rule nobody can check. A count-free word, same discipline as `note_replacement`.
     #[cfg(feature = "testing")]
-    crate::control::note_replacement_method(method);
+    crate::control::note_replacement_method(delivery);
 
-    let outcome = replace_with(&strokes, &target, on_screen, inter_event_delay_ms(), method).ok();
+    let result = replace_with(
+        &strokes,
+        &target,
+        on_screen,
+        back,
+        inter_event_delay_ms(),
+        delivery,
+    );
+
+    // ⭐ **Stage Э96 — the refusal of the classic console is a fact worth a line and a tone.** Its
+    // keys would not repeat the conversion, so nothing was sent at all; the journal gets the name
+    // and nothing beside it (SEC-07), and `app` answers the press with the tone of a refusal
+    // through [`take_classic_console_refusal`] — decision 160.8, «запасной — не стирать».
+    if result == Err(InjectError::KeysCannotRepeat) {
+        CLASSIC_CONSOLE_REFUSED.set(true);
+        crate::diag::record(
+            crate::diag::Operation::from_name(CLASSIC_CONSOLE_REPLACEMENT_REFUSED),
+            crate::diag::OsCode::NONE,
+        );
+    }
+
+    let outcome = result.ok();
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02, with
     // the volatile write of `crate::buffer::zero_slice` so that the store in front of the `drop`
@@ -2172,6 +2627,29 @@ pub fn on_hotkey() -> Option<Replaced> {
     note_press(outcome.as_ref(), cycle_len);
 
     outcome
+}
+
+/// The name the journal records a refusal of the classic console under — a row of the vocabulary
+/// of module `diag`, stage Э96. A fact and no value (SEC-01, SEC-07).
+const CLASSIC_CONSOLE_REPLACEMENT_REFUSED: &str = "classic console replacement refused";
+
+thread_local! {
+    /// ⭐ **Whether the last press on this thread was refused by the keystroke path** — stage Э96.
+    ///
+    /// Set by [`on_hotkey`] when the classic console's run could not be repeated by its keys
+    /// ([`InjectError::KeysCannotRepeat`]), cleared at the start of every press and by the one
+    /// reader, [`take_classic_console_refusal`]. A cell of the input thread rather than a value of
+    /// [`on_hotkey`], because that function's answer — `None` for a press that sent nothing — is
+    /// read in more places than this one, and every one of them is right to read a refusal as
+    /// «nothing was sent»; only the tone of FR-100 tells the two apart.
+    static CLASSIC_CONSOLE_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// **Whether the press [`on_hotkey`] just answered was refused by the classic console**, and the
+/// answer taken — stage Э96. Read by `app` on the input thread right after the press, to answer it
+/// with the tone of a refusal instead of the idle click (FR-100, decision 160.8).
+pub fn take_classic_console_refusal() -> bool {
+    CLASSIC_CONSOLE_REFUSED.replace(false)
 }
 
 /// **What one press leaves behind in the typing buffer** — the last row of FR-10 and the position
@@ -2229,6 +2707,11 @@ struct Press {
     /// How many characters of this run stand on the screen — the `N` of FR-41, chosen by
     /// [`take_press`] from the position counter of FR-32.
     on_screen: OnScreen,
+    /// ⭐ **The layout the text on the screen is in** — stage Э96: the layout of the previous
+    /// press's injection from the second press on ([`showing`]), the layout the run was typed in on
+    /// the first. The keystroke path switches back to it when its packet did not reach the screen
+    /// (Н12, decision 127.3); the other paths never read it.
+    back: LayoutId,
     /// How many layouts the cycle walks, so that the counter can be advanced by the same number
     /// the target was chosen with.
     cycle_len: usize,
@@ -2322,7 +2805,8 @@ fn take_press() -> Option<Press> {
         // system between two presses) falls back to the typed count rather than refusing the
         // press: that is the behaviour of every build before this one, and a hotkey that goes
         // quiet is worse than a count that is one out on a run nobody is in the middle of.
-        let on_screen = showing(&cycle, origin, position, recorder.in_conversion())
+        let previous = showing(&cycle, origin, position, recorder.in_conversion());
+        let on_screen = previous
             .and_then(|previous| cache.get(previous))
             .map_or_else(
                 || OnScreen::as_typed(&strokes),
@@ -2333,6 +2817,8 @@ fn take_press() -> Option<Press> {
             strokes,
             target: cache.get(target)?.clone(),
             on_screen,
+            // Stage Э96: the layout the text on the screen is in — see `Press::back`.
+            back: previous.unwrap_or(origin),
             cycle_len: cycle.len(),
         })
     })

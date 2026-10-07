@@ -476,6 +476,102 @@ fn a_blind_reading_sends_the_switch_and_waits_for_nothing() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// Stage Э96 — FR-50 for the classic console, by its class: the message every time, no verdict
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **П5 of stage Э96.** In the console of the stand the reading was **not** blind and read a
+/// layout frozen at the birth of a thread that is not the console's; a reading that already says
+/// the target makes the chain of `to_in` post nothing (`AlreadyActive`). The keystroke path cannot
+/// afford that — its keys mean what the console's layout makes of them — so
+/// `to_classic_console_in` posts the message all the same, waits for nothing and answers `Sent`.
+/// The chain on the same reading is the control.
+#[test]
+fn the_classic_console_switch_posts_even_when_the_reading_says_already_there() {
+    let _guard = counters();
+
+    let mut console = Fake::on(RU);
+    let outcome = switch::to_classic_console_in(&mut console, RU);
+
+    assert_eq!(outcome, Ok(Outcome::Sent));
+    assert_eq!(
+        console.posts, 1,
+        "the message went out whatever the reading said"
+    );
+    assert_eq!(console.targets, vec![RU]);
+    assert_eq!(console.posted_to, vec![IN_FRONT]);
+    assert_eq!(console.waits, 0, "and nothing was waited for");
+    assert!(
+        switch::stamp_follows(outcome),
+        "the stamp of FR-04 follows it, as it follows the blind console since Т-14-6"
+    );
+
+    // Control: the chain, on the same reading, posts nothing.
+    let mut chain = Fake::on(RU);
+    assert_eq!(switch::to_in(&mut chain, RU), Ok(Outcome::AlreadyActive));
+    assert_eq!(chain.posts, 0);
+}
+
+/// A reading that never moves after the message is not a failed switch here, and is not waited
+/// out: the layout read is not the console's. The chain on the same machine spends its budget and
+/// calls the switch failed — the control.
+#[test]
+fn the_classic_console_switch_waits_for_no_reading_and_is_counted_as_sent() {
+    let _guard = counters();
+
+    let mut console = Fake::on(US);
+    assert_eq!(
+        switch::to_classic_console_in(&mut console, RU),
+        Ok(Outcome::Sent)
+    );
+    assert_eq!(console.posts, 1);
+    assert_eq!(console.waits, 0);
+    assert_eq!(
+        console.reads, 1,
+        "one reading: the window the message goes to"
+    );
+
+    let counted = switch::failures();
+    assert_eq!(
+        counted.sent_unconfirmed, 1,
+        "counted where the blind send is"
+    );
+    assert_eq!(counted.post_message, 0, "and not as a failed switch");
+
+    let mut chain = Fake::on(US);
+    assert_eq!(switch::to_in(&mut chain, RU), Err(SwitchError::NotSwitched));
+    assert!(
+        chain.waits > 0,
+        "the chain waited for a reading that could not move"
+    );
+}
+
+/// The refusals that need no reading stay what they are on this path — the zero handle and a
+/// text-service target (FR-35) — and a moment with no foreground window posts nothing.
+#[test]
+fn the_classic_console_switch_keeps_the_refusals_of_the_chain() {
+    let _guard = counters();
+
+    let mut console = Fake::on(US);
+    assert_eq!(
+        switch::to_classic_console_in(&mut console, LayoutId::default()),
+        Err(SwitchError::NoTarget)
+    );
+    assert_eq!(
+        switch::to_classic_console_in(&mut console, PINYIN),
+        Err(SwitchError::ImeTarget)
+    );
+    assert_eq!(console.posts, 0);
+
+    let mut nobody = Fake::on(US);
+    nobody.window = Window::default();
+    assert_eq!(
+        switch::to_classic_console_in(&mut nobody, RU),
+        Err(SwitchError::NoForeground)
+    );
+    assert_eq!(nobody.posts, 0);
+}
+
 /// The blind case has a counter of its own, and it is not one of the failure counters.
 ///
 /// ⚠ The point of a separate counter is that «отправлено без подтверждения» must never be

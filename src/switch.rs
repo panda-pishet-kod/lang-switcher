@@ -838,6 +838,53 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
     Err(SwitchError::NotSwitched)
 }
 
+/// ⭐ **FR-50 for a classic console window — stage Э96, the keystroke path of decision 160.8.**
+/// The message, to the window in front, and **no verdict at all**: [`Outcome::Sent`] every time.
+///
+/// The blind branch of [`to_in`], taken by the class of the window rather than by the refusal of
+/// `GetGUIThreadInfo` — because the premise behind that branch is not the premise of every classic
+/// console. **Measured, П5 of stage Э96:** in the console of the stand the thread a classic console
+/// window's handle names is a thread with windows of its own, `GetGUIThreadInfo` answered for it,
+/// and the layout read of it was the one it was born with — while the console switched 20 times out
+/// of 20. The chain of [`to_in`] then reads that frozen layout as a verdict: it posts nothing when
+/// the frozen value equals the target ([`Outcome::AlreadyActive`]) and calls the switch failed when
+/// it does not move ([`SwitchError::NotSwitched`], after [`VERIFY_BUDGET_MS`] of waiting). The
+/// keystroke path's keys mean what the layout of the console makes of them, so it may not skip the
+/// message on a reading that is not about the console: this posts it always, and waits for nothing.
+///
+/// Refuses what [`to_in`] refuses before it reads anything — the zero handle and an IME target —
+/// and a moment with no foreground window at all; the counters are the ones [`to_in`] keeps
+/// ([`Failures::sent_unconfirmed`] counts every message sent here, as it counts the blind branch).
+pub fn to_classic_console_in(
+    machine: &mut impl Machine,
+    target: LayoutId,
+) -> Result<Outcome, SwitchError> {
+    if target == LayoutId::default() {
+        NO_TARGET.fetch_add(1, Ordering::Relaxed);
+        return Err(SwitchError::NoTarget);
+    }
+
+    if target.is_ime() {
+        IME_TARGET.fetch_add(1, Ordering::Relaxed);
+        return Err(SwitchError::ImeTarget);
+    }
+
+    let before = machine.read();
+
+    if before.window.is_none() {
+        NO_FOREGROUND.fetch_add(1, Ordering::Relaxed);
+        return Err(SwitchError::NoForeground);
+    }
+
+    if !machine.post_request(before.window, target) {
+        // NFR-13: examined and counted, as in `to_in`.
+        POST_REJECTED.fetch_add(1, Ordering::Relaxed);
+    }
+
+    SENT_UNCONFIRMED.fetch_add(1, Ordering::Relaxed);
+    Ok(Outcome::Sent)
+}
+
 /// **Does this outcome mean the foreground window is now verifiably on the layout it was asked
 /// for?** — task **T-10-5**.
 ///

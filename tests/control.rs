@@ -2208,6 +2208,33 @@ fn the_last_replacement_method_key_mirrors_what_was_published_into_it() {
     assert_eq!(control::snapshot().last_replacement_method, "none");
 }
 
+/// ⭐ **Stage Э96 — the keystroke path of the classic console has a word of its own on the
+/// channel**, `keystrokes`, and the two packets the stage did not touch keep theirs when they
+/// arrive as a resolved [`inject::Delivery`] — which is what `inject::on_hotkey` publishes now.
+#[test]
+fn the_keystroke_path_of_the_classic_console_is_published_as_a_word_of_its_own() {
+    let _serialised = MIRROR.lock().unwrap_or_else(PoisonError::into_inner);
+
+    for (delivery, word) in [
+        (inject::Delivery::Keystrokes, "keystrokes"),
+        (inject::Delivery::Backspace, "backspace"),
+        (inject::Delivery::Selection, "selection"),
+    ] {
+        control::note_replacement_method(delivery);
+
+        let state = control::snapshot();
+        assert_eq!(state.last_replacement_method, word);
+        assert!(
+            control::render(&state).contains(&format!("last_replacement_method={word}\n")),
+            "and renders it as that word"
+        );
+    }
+
+    // The delivery the resolver gives a classic console is the one published as `keystrokes`.
+    control::note_replacement_method(inject::resolve_auto(Some("ConsoleWindowClass")));
+    assert_eq!(control::snapshot().last_replacement_method, "keystrokes");
+}
+
 // -------------------------------------------------------------------------------------
 // Task T-10-15 — the five outcomes of the repair of defect E, which were one reading
 // -------------------------------------------------------------------------------------
