@@ -9407,6 +9407,12 @@ fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
 /// All seven reasons are checked, not just the new one: the six were never measured here before,
 /// and a sentence that grew anywhere in the family would be the same defect.
 ///
+/// ⚠ **Task T-93-2 (вопрос 157) — six reasons and two more lines.** `Refusal::Combination` left
+/// with the combinations it refused, and the note gained the line at rest (`IDS_HOTKEY_HINT`) and
+/// the line said once after a combination (`IDS_CAPTURE_COMBO_NOTE`), measured with the longest
+/// names it can carry — `PrintScreen` without `Ctrl + Alt + Shift`. Развилка C6 of the task: a
+/// line that does not fit is shortened, the window does not grow.
+///
 /// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
 #[test]
 fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
@@ -9460,31 +9466,46 @@ fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
         for language in Language::ALL {
             settings::set_ui_language(language);
 
-            for refusal in [
+            let mut lines: Vec<(String, String)> = [
                 settings::Refusal::Modifier,
-                settings::Refusal::Combination,
                 settings::Refusal::Emergency,
                 settings::Refusal::Reserved,
                 settings::Refusal::Editing,
                 settings::Refusal::Text,
                 settings::Refusal::Nameless,
-            ] {
-                let sentence = settings::text(refusal.string_id());
+            ]
+            .into_iter()
+            .map(|refusal| (format!("{refusal:?}"), settings::text(refusal.string_id())))
+            .collect();
 
+            // Task T-93-2 — the line at rest, and the line after a combination at its longest.
+            lines.push((
+                "IDS_HOTKEY_HINT".to_owned(),
+                settings::text(settings::IDS_HOTKEY_HINT),
+            ));
+            lines.push((
+                "IDS_CAPTURE_COMBO_NOTE".to_owned(),
+                settings::format_text(
+                    settings::IDS_CAPTURE_COMBO_NOTE,
+                    &["PrintScreen", "Ctrl + Alt + Shift"],
+                ),
+            ));
+
+            for (what, sentence) in lines {
                 assert!(
                     !sentence.trim().is_empty(),
-                    "{language:?}: {refusal:?} did not load — the instrument would measure nothing"
+                    "{language:?}: {what} did not load — the instrument would measure nothing"
                 );
 
                 let height = wrapped_height(&sheet, &face, &sentence, slot);
 
                 if height > tallest.0 {
-                    tallest = (height, format!("{language:?} {refusal:?} «{sentence}»"));
+                    tallest = (height, format!("{language:?} {what} «{sentence}»"));
                 }
 
                 if height > ceiling {
                     clips.push(format!(
-                        "{pixels} px, {language:?}: {refusal:?} «{sentence}» wraps to {height} px \
+                        "{pixels} px, {language:?}: {what} «{sentence}» wraps to {height} px \
                          and the note holds {ceiling} px ({SLOT_LINES} lines of {line} px, \
                          {SLOT_UNITS} units wide at a base unit of {base})"
                     ));
@@ -9504,6 +9525,91 @@ fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
         clips.is_empty(),
         "развилка C3 — the third line would be outside the control and the tail of the sentence \
          would be gone: {clips:#?}"
+    );
+}
+
+/// **Task T-93-2, вопрос 157 — the invitation of a capture fits its field in all fourteen
+/// languages.** The invitation stands **in** the field (решение 82.6), and it grew with the
+/// combinations: «Нажмите клавишу…» became «Нажмите клавишу или сочетание…». The field is
+/// `IDC_HOTKEY`, 104 units wide, one line (`ES_AUTOHSCROLL` — what does not fit is simply not
+/// shown), with [`settings::FIELD_TEXT_INSET_DLU`] of air on each side (`EM_SETMARGINS`). The
+/// window and the field do not move (157.3): a translation that does not fit is shortened.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn the_invitation_of_a_capture_fits_its_field_in_all_fourteen_languages() {
+    const FIELD_UNITS: i32 = 104;
+
+    let _guard = with_product_strings();
+
+    let (font, sheet) = template_font_and_sheet();
+
+    // Контроль прибора: текст, которому поля заведомо мало, обязан быть увиден.
+    let control = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
+    let letters = extent_of(
+        &sheet,
+        &control,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    )
+    .cx;
+    let base = (letters / 26 + 1) / 2;
+    let slot = ((FIELD_UNITS - 2 * settings::FIELD_TEXT_INSET_DLU) * base + 2) / 4;
+    let overflowing = extent_of(&sheet, &control, &"слово ".repeat(10)).cx;
+    println!("base unit {base}: the text of the field {slot} px; ten words {overflowing} px");
+    assert!(
+        overflowing > slot,
+        "the instrument cannot see an overflow at all: {overflowing} px against {slot} px"
+    );
+
+    let mut clips = Vec::new();
+
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = ((FIELD_UNITS - 2 * settings::FIELD_TEXT_INSET_DLU) * base + 2) / 4;
+        let mut widest = (0, String::new());
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            let invitation = settings::text(settings::IDS_CAPTURE_PROMPT);
+
+            assert!(
+                !invitation.trim().is_empty(),
+                "{language:?}: the invitation did not load — the instrument would measure nothing"
+            );
+
+            let width = extent_of(&sheet, &face, &invitation).cx;
+
+            if width > widest.0 {
+                widest = (width, format!("{language:?} «{invitation}»"));
+            }
+
+            if width > slot {
+                clips.push(format!(
+                    "{pixels} px, {language:?}: «{invitation}» is {width} px and the field shows \
+                     {slot} px ({FIELD_UNITS} units less the insets, base unit {base})"
+                ));
+            }
+        }
+
+        println!(
+            "{pixels} px: the widest invitation {} px of {slot} — {}",
+            widest.0, widest.1
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        clips.is_empty(),
+        "развилка C6 — the tail of the invitation would be outside the field: {clips:#?}"
     );
 }
 
@@ -16021,7 +16127,11 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// in «От авторе» and the owner asked for it to leave; the head of that window is the head of
 /// «О программе» now, version line included, so the string had no second reader and went with
 /// all fourteen of its translations.
-const FR_94_STRINGS: [(u16, &str, &str); 217] = [
+///
+/// ⚠ **218 since task T-93-2** — вопрос 157: `IDS_CAPTURE_COMBINATION` left with the refusal it
+/// said, and the two lines under the hotkey field arrived (the one at rest and the one after a
+/// combination) — 217 − 1 + 2, row for row with `settings::INTERFACE_STRINGS`.
+const FR_94_STRINGS: [(u16, &str, &str); 218] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -16120,20 +16230,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 217] = [
     ),
     (
         // ⚠ Task Т-23-5: the invitation moved into the **field** and lost its second half.
-        // «Esc — отмена» became a line of its own under the field — `IDS_CAPTURE_HINT`.
+        // «Esc — отмена» became a line of its own under the field — `IDS_CAPTURE_HINT`. Task
+        // T-93-2 (вопрос 157): it invites a combination as well — in the words that fit the
+        // field (157.13: «Нажмите клавишу или сочетание…» of the mock-up is 207 px of 172).
         settings::IDS_CAPTURE_PROMPT,
-        "Нажмите клавишу…",
-        "Press a key…",
+        "Клавиша или сочетание…",
+        "A key or a combination…",
     ),
     (
         settings::IDS_CAPTURE_MODIFIER,
         "Модификатор сам по себе горячей клавишей быть не может.",
         "A modifier on its own cannot be a hotkey.",
-    ),
-    (
-        settings::IDS_CAPTURE_COMBINATION,
-        "Сочетания с модификаторами не поддерживаются: в файле настроек хранится одна клавиша.",
-        "Combinations with modifiers are not supported: the settings file holds a single key.",
     ),
     (
         settings::IDS_CAPTURE_EMERGENCY,
@@ -16978,6 +17085,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 217] = [
         "Lang Switcher уже работает в этом сеансе.",
         "Lang Switcher is already running in this session.",
     ),
+    // Task T-93-2, вопрос 157 — the two lines under the hotkey field.
+    (
+        settings::IDS_HOTKEY_HINT,
+        "Клавиша или сочетание с Ctrl, Alt, Shift.",
+        "A key, or a combination with Ctrl, Alt, Shift.",
+    ),
+    (
+        settings::IDS_CAPTURE_COMBO_NOTE,
+        "{0} без {1} остаётся программам.",
+        "{0} without {1} stays with your programs.",
+    ),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -17430,6 +17548,37 @@ fn a_captured_key_is_named_the_way_section_7_reads_it_back() {
         named >= 62,
         "36 characters, 24 function keys and the named ones"
     );
+
+    // ⭐ Task T-93-2 — **and the modifiers**: every one of the eight sets of `Ctrl`, `Alt` and
+    // `Shift`, written the way a capture writes it (`Hotkey::from_binding`) and read the way the
+    // start-up reads it (`Hotkey::binding`), is the set that was pressed, with the key it was
+    // pressed with.
+    let mut sets = 0;
+
+    for ctrl in [false, true] {
+        for alt in [false, true] {
+            for shift in [false, true] {
+                let set = (if ctrl { hook::MOD_CTRL } else { 0 })
+                    | (if alt { hook::MOD_ALT } else { 0 })
+                    | (if shift { hook::MOD_SHIFT } else { 0 });
+
+                for vk in [0x77_u16, 0x13, 0x4B] {
+                    let written = settings::Hotkey::from_binding(vk, set)
+                        .expect("a named key with a set of the three is written");
+
+                    assert_eq!(
+                        written.binding(),
+                        Some((vk, set)),
+                        "{written:?} reads back as something else than 0x{vk:02X} with {set:#05b}"
+                    );
+                }
+
+                sets += 1;
+            }
+        }
+    }
+
+    assert_eq!(sets, 8, "the eight sets of three modifiers");
 }
 
 #[test]
@@ -17439,11 +17588,11 @@ fn a_press_with_nothing_held_becomes_the_hotkey() {
     // is produced and no keyboard layout is consulted (SEC-01).
     assert_eq!(
         settings::capture(0x77, BARE),
-        settings::Capture::Taken("F8".to_owned())
+        settings::Capture::Taken(bare("F8"))
     );
     assert_eq!(
         settings::capture(0x13, BARE),
-        settings::Capture::Taken("Pause".to_owned())
+        settings::Capture::Taken(bare("Pause"))
     );
 
     // ⭐ **A text key is refused since task Т-23-5, решение 82.6** — and it used to be *taken*
@@ -17477,29 +17626,57 @@ fn a_press_with_nothing_held_becomes_the_hotkey() {
 #[test]
 fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
     // **Criterion 16.** Six refusals since task Т-23-5, each with a sentence of its own in both
-    // locales — five until решение 82.6 made a text key a refusal instead of an assignment.
+    // locales — five until решение 82.6 made a text key a refusal instead of an assignment. Task
+    // T-93-2 (вопрос 157) took the combination out of the list — it is taken now, see
+    // `the_capture_takes_a_combination_as_the_key_and_its_set` — and it is six again.
     let product = ProductImage::shared();
+
+    let ctrl = settings::Modifiers { ctrl: true, ..BARE };
+    let shift = settings::Modifiers {
+        shift: true,
+        ..BARE
+    };
+    let altgr = settings::Modifiers {
+        ctrl: true,
+        alt: true,
+        ..BARE
+    };
+    let win = settings::Modifiers { win: true, ..BARE };
 
     let cases = [
         // A modifier on its own — the user has not finished pressing anything.
         (0x11u16, BARE, settings::Refusal::Modifier, "Ctrl"),
         (0x10, BARE, settings::Refusal::Modifier, "Shift"),
         (0x12, BARE, settings::Refusal::Modifier, "Alt"),
-        // The `Windows` key: the shell acts on it whatever anybody else does.
-        (0x5B, BARE, settings::Refusal::Reserved, "Win"),
-        // Anything with a modifier held: section 7 stores one key name and the callback
-        // compares one code, so `Ctrl+K` could only be written down as `K`.
         (
-            0x4B,
-            settings::Modifiers { ctrl: true, ..BARE },
-            settings::Refusal::Combination,
-            "Ctrl+K",
+            0x10,
+            ctrl,
+            settings::Refusal::Modifier,
+            "Shift при зажатом Ctrl",
         ),
+        // The `Windows` key: the shell acts on it whatever anybody else does — and since task
+        // T-93-2 any press with it held: `Win` is not a modifier a hotkey may carry (вопрос 157).
+        (0x5B, BARE, settings::Refusal::Reserved, "Win"),
+        (0x7B, win, settings::Refusal::Reserved, "Win+F12"),
         (
-            0x77,
-            settings::Modifiers { alt: true, ..BARE },
-            settings::Refusal::Combination,
-            "Alt+F8",
+            0x7B,
+            settings::Modifiers { win: true, ..ctrl },
+            settings::Refusal::Reserved,
+            "Win+Ctrl+F12",
+        ),
+        // ⭐ Task T-93-2, 157.10 (вариант 1 до слова владельца): a text key with a set that types
+        // a character — `Shift` gives a capital, `Ctrl+Alt` is `AltGr`.
+        (0x4B, shift, settings::Refusal::Text, "Shift+K"),
+        (0x31, shift, settings::Refusal::Text, "Shift+1"),
+        (0x41, altgr, settings::Refusal::Text, "AltGr+A"),
+        (
+            0x41,
+            settings::Modifiers {
+                shift: true,
+                ..altgr
+            },
+            settings::Refusal::Text,
+            "AltGr+Shift+A",
         ),
         // A key section 7 has no name for: it could not be written to the file.
         (0x08, BARE, settings::Refusal::Nameless, "Backspace"),
@@ -17526,6 +17703,14 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         (0x26, BARE, settings::Refusal::Editing, "Up"),
         (0x27, BARE, settings::Refusal::Editing, "Right"),
         (0x28, BARE, settings::Refusal::Editing, "Down"),
+        // ⭐ Task T-93-2, 157.12: and with modifiers — `Shift` + an arrow selects text, `Ctrl` + an
+        // arrow walks a word, `Ctrl+Home` goes to the top. The key decides, not the set.
+        (0x25, shift, settings::Refusal::Editing, "Shift+Left"),
+        (0x27, ctrl, settings::Refusal::Editing, "Ctrl+Right"),
+        (0x24, ctrl, settings::Refusal::Editing, "Ctrl+Home"),
+        (0x2E, ctrl, settings::Refusal::Editing, "Ctrl+Delete"),
+        // And a key with no name has none with a modifier either.
+        (0x0D, ctrl, settings::Refusal::Nameless, "Ctrl+Enter"),
     ];
 
     for (vk, modifiers, expected, what) in cases {
@@ -17546,7 +17731,6 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
     // Every refusal has something to say, in both languages, and none of them is empty.
     for refusal in [
         settings::Refusal::Modifier,
-        settings::Refusal::Combination,
         settings::Refusal::Emergency,
         settings::Refusal::Reserved,
         settings::Refusal::Editing,
@@ -17563,6 +17747,166 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
             );
         }
     }
+}
+
+/// **Task T-93-2, вопрос 157, устройство А — the capture takes a combination as the key and its
+/// set.** `Ctrl`, `Alt` and `Shift` held with a key make the hotkey `Ctrl + F12`: no switch to
+/// choose the way first, the field understands what was pressed (157.6). The set is written in the
+/// canonical order whatever order the modifiers went down in, and the capture ends on it.
+///
+/// ⭐ **The red «before» of the task**: on the base `61b23eb` the capture answered
+/// `Refused(Combination)` to `Ctrl+F12` (`scratchpad-E93\t93-2-red-before-base.log`).
+///
+/// ⚠ **A letter with `Ctrl` or `Alt` is taken** — the controller's decision in the TZ, accepted by
+/// the owner: `Ctrl+K` types nothing, so taking it costs the typing nothing, and the bare `K`
+/// stays with the programs (157.10 holds the sets that *do* type — `Shift`, `AltGr`).
+#[test]
+fn the_capture_takes_a_combination_as_the_key_and_its_set() {
+    let ctrl = settings::Modifiers { ctrl: true, ..BARE };
+    let alt = settings::Modifiers { alt: true, ..BARE };
+    let shift = settings::Modifiers {
+        shift: true,
+        ..BARE
+    };
+
+    for (vk, held, expected, what) in [
+        (0x7B_u16, ctrl, combination(&["Ctrl"], "F12"), "Ctrl+F12"),
+        (0x77, alt, combination(&["Alt"], "F8"), "Alt+F8"),
+        (0x7B, shift, combination(&["Shift"], "F12"), "Shift+F12"),
+        (
+            0x13,
+            ctrl,
+            combination(&["Ctrl"], "Pause"),
+            "Ctrl+Pause (the code a test can give)",
+        ),
+        (
+            0x4B,
+            ctrl,
+            combination(&["Ctrl"], "K"),
+            "Ctrl+K — a letter with Ctrl",
+        ),
+        (
+            0x4B,
+            settings::Modifiers {
+                shift: true,
+                ..ctrl
+            },
+            combination(&["Ctrl", "Shift"], "K"),
+            "Ctrl+Shift+K",
+        ),
+        (
+            0x31,
+            settings::Modifiers { shift: true, ..alt },
+            combination(&["Alt", "Shift"], "1"),
+            "Alt+Shift+1",
+        ),
+        (
+            0x7A,
+            settings::Modifiers {
+                ctrl: true,
+                alt: true,
+                ..BARE
+            },
+            combination(&["Ctrl", "Alt"], "F11"),
+            "Ctrl+Alt+F11",
+        ),
+        (
+            0x7A,
+            settings::Modifiers {
+                ctrl: true,
+                alt: true,
+                shift: true,
+                win: false,
+            },
+            combination(&["Ctrl", "Alt", "Shift"], "F11"),
+            "Ctrl+Alt+Shift+F11 — all three, and not the emergency key",
+        ),
+    ] {
+        let taken = settings::capture(vk, held);
+        let step = settings::capture_step(true, settings::CaptureEvent::KeyDown(vk, held));
+
+        println!("{what}: {taken:?}");
+
+        assert_eq!(
+            taken,
+            settings::Capture::Taken(expected.clone()),
+            "{what} must be taken as the key and its set"
+        );
+        assert_eq!(
+            step,
+            settings::CaptureStep::Take(expected),
+            "{what}: and the capture ends on it"
+        );
+    }
+
+    assert_eq!(
+        settings::effective_hotkey_name(&combination(&["Ctrl", "Shift"], "K")),
+        "Ctrl + Shift + K",
+        "the field shows what was taken in the canonical order"
+    );
+}
+
+/// **Task T-93-2 — the line under the field at rest, after a combination, and when there is a
+/// warning** ([`settings::hotkey_line`]), read in Russian and English out of the built binary.
+///
+/// 1. At rest the line says what the field takes — «Клавиша или сочетание с Ctrl, Alt, Shift.»
+///    (устройство А: the ways stand where they are seen, 157.6).
+/// 2. Once after a combination is captured, which half stays with the programs — «F12 без Ctrl
+///    остаётся программам.», with the key and the modifiers as the field shows them.
+/// 3. A warning of FR-92 wins over both: a name nobody knows is said, not hidden by the hint.
+#[test]
+fn the_line_under_the_field_says_the_ways_at_rest_and_the_bare_key_after_a_combination() {
+    let _guard = with_product_strings();
+
+    for (language, rest, after, after_three) in [
+        (
+            Language::Ru,
+            "Клавиша или сочетание с Ctrl, Alt, Shift.",
+            "F12 без Ctrl остаётся программам.",
+            "F11 без Ctrl + Alt + Shift остаётся программам.",
+        ),
+        (
+            Language::En,
+            "A key, or a combination with Ctrl, Alt, Shift.",
+            "F12 without Ctrl stays with your programs.",
+            "F11 without Ctrl + Alt + Shift stays with your programs.",
+        ),
+    ] {
+        settings::set_ui_language(language);
+
+        assert_eq!(
+            settings::hotkey_line(&bare("Pause"), false),
+            rest,
+            "{language:?}"
+        );
+        assert_eq!(
+            settings::hotkey_line(&combination(&["Ctrl"], "F12"), false),
+            rest,
+            "{language:?}: a combination that was not just captured shows the line at rest"
+        );
+        assert_eq!(
+            settings::hotkey_line(&combination(&["Ctrl"], "F12"), true),
+            after,
+            "{language:?}"
+        );
+        assert_eq!(
+            settings::hotkey_line(&combination(&["Shift", "Alt", "Ctrl"], "F11"), true),
+            after_three,
+            "{language:?}: the modifiers in the canonical order"
+        );
+        assert_eq!(
+            settings::hotkey_line(&bare("F12"), true),
+            rest,
+            "{language:?}: a bare key has no half to give back"
+        );
+        assert_eq!(
+            settings::hotkey_line(&combination(&["Win"], "F12"), true),
+            settings::text(settings::IDS_NOTE_UNKNOWN_KEY),
+            "{language:?}: the warning of FR-92 wins"
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
 }
 
 // -----------------------------------------------------------------------------------------
@@ -17619,12 +17963,12 @@ fn an_armed_capture_takes_a_key_and_stays_armed_through_a_refusal() {
     // `settings::capture` gives, carried through unchanged.
     assert_eq!(
         settings::capture_step(true, settings::CaptureEvent::KeyDown(0x13, NOTHING_HELD)),
-        settings::CaptureStep::Take("Pause".to_owned()),
+        settings::CaptureStep::Take(bare("Pause")),
         "a named key is taken"
     );
     assert_eq!(
         settings::capture_step(true, settings::CaptureEvent::KeyDown(0x77, NOTHING_HELD)),
-        settings::CaptureStep::Take("F8".to_owned()),
+        settings::CaptureStep::Take(bare("F8")),
         "so is a function key"
     );
 
@@ -17648,16 +17992,19 @@ fn an_armed_capture_takes_a_key_and_stays_armed_through_a_refusal() {
             settings::Refusal::Reserved,
             "клавиша Win",
         ),
+        // ⚠ Task T-93-2: «Ctrl+Pause» stood here as `Combination` — a combination is taken now
+        // (`the_capture_takes_a_combination_as_the_key_and_its_set`); a capital is refused in its
+        // place (157.10, вариант 1).
         (
-            0x13,
+            0x4B,
             settings::Modifiers {
-                ctrl: true,
+                ctrl: false,
                 alt: false,
-                shift: false,
+                shift: true,
                 win: false,
             },
-            settings::Refusal::Combination,
-            "Ctrl+Pause",
+            settings::Refusal::Text,
+            "Shift+K",
         ),
         // ⭐ Task T-36-5, finding Н9, решение 123.3. `Delete` and `Home` were **taken** here
         // until this task — the capture ended, the file got the name, and the person lost that
@@ -18019,8 +18366,45 @@ fn the_emergency_combination_of_fr_96_is_never_captured() {
     // not about the key.
     assert_eq!(
         settings::capture(hook::EMERGENCY_VK, BARE),
-        settings::Capture::Taken("F12".to_owned())
+        settings::Capture::Taken(bare("F12"))
     );
+
+    // ⭐ Task T-93-2: and since combinations are taken, every set **short of** all three is a
+    // lawful hotkey on the same key — only the exact emergency set is refused.
+    for (held, expected) in [
+        (
+            settings::Modifiers {
+                ctrl: true,
+                alt: true,
+                shift: false,
+                win: false,
+            },
+            combination(&["Ctrl", "Alt"], "F12"),
+        ),
+        (
+            settings::Modifiers {
+                ctrl: true,
+                alt: false,
+                shift: true,
+                win: false,
+            },
+            combination(&["Ctrl", "Shift"], "F12"),
+        ),
+        (
+            settings::Modifiers {
+                ctrl: false,
+                alt: true,
+                shift: true,
+                win: false,
+            },
+            combination(&["Alt", "Shift"], "F12"),
+        ),
+    ] {
+        assert_eq!(
+            settings::capture(hook::EMERGENCY_VK, held),
+            settings::Capture::Taken(expected)
+        );
+    }
 }
 
 #[test]
@@ -18168,26 +18552,44 @@ fn the_captured_key_reaches_the_hook_through_publish_configuration() {
 
     let mut config = Config::default();
 
-    let settings::Capture::Taken(name) = settings::capture(0x77, BARE) else {
+    let settings::Capture::Taken(captured) = settings::capture(0x77, BARE) else {
         panic!("F8 with nothing held must be capturable");
     };
 
-    config.hotkey.key = name.clone();
+    config.hotkey = captured.clone();
     app::publish_configuration(&config);
 
     println!(
-        "captured «{name}» -> hook::hotkey_vk() = 0x{:02X}",
-        hook::hotkey_vk()
+        "captured {captured:?} -> hook::hotkey() = {:?}",
+        hook::hotkey()
     );
 
-    assert_eq!(name, "F8");
-    assert_eq!(hook::hotkey_vk(), 0x77);
+    assert_eq!(captured, bare("F8"));
+    assert_eq!(hook::hotkey(), (0x77, 0));
+
+    // ⭐ Task T-93-2 — a combination travels the same road, the set with the key in one
+    // publication.
+    let settings::Capture::Taken(captured) =
+        settings::capture(0x77, settings::Modifiers { ctrl: true, ..BARE })
+    else {
+        panic!("Ctrl+F8 must be capturable");
+    };
+
+    config.hotkey = captured.clone();
+    app::publish_configuration(&config);
+
+    println!(
+        "captured {captured:?} -> hook::hotkey() = {:?}",
+        hook::hotkey()
+    );
+
+    assert_eq!(hook::hotkey(), (0x77, hook::MOD_CTRL));
 
     // And back to the default of section 7, so that this test cannot leave the process with a
     // hotkey another test did not ask for.
-    config.hotkey.key = "Pause".to_owned();
+    config.hotkey = bare("Pause");
     app::publish_configuration(&config);
-    assert_eq!(hook::hotkey_vk(), hook::DEFAULT_HOTKEY_VK);
+    assert_eq!(hook::hotkey(), (hook::DEFAULT_HOTKEY_VK, 0));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -22810,10 +23212,19 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         !settings::INTERFACE_STRINGS.contains(&3111),
         "3111 left the vocabulary with task T-81-3 and must not come back into it"
     );
+    // ⚠ **3041 is the third hole since task T-93-2** — вопрос 157: `IDS_CAPTURE_COMBINATION`
+    // («Сочетания с модификаторами не поддерживаются…») left with the refusal it said when a
+    // combination became a hotkey. Held by the same three checks.
+    assert!(
+        !settings::INTERFACE_STRINGS.contains(&3041),
+        "3041 left the vocabulary with task T-93-2 and must not come back into it"
+    );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        217,
-        "two hundred and SEVENTEEN identifiers in use — two hundred and eighteen until task \
+        218,
+        "two hundred and EIGHTEEN identifiers in use since task T-93-2 (вопрос 157): the refusal \
+         of combinations (3041) left and the two lines under the hotkey field arrived (3230, \
+         3231). Two hundred and seventeen before it; two hundred and eighteen until task \
          T-81-3 (решение 142.2 п. 5) took `IDS_AUTHOR_VERSION` away, which is the first time \
          this canon has moved downwards. Before that: the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
@@ -22843,7 +23254,7 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         // has to be gone from the resource and not only from the crate's list, and its block has
         // to read across it. 3111 sits in the block 3104..3119, so 3110 and 3112 are its
         // neighbours and 3119 is the last row of that block.
-        for retired_id in [RETIRED, 3111] {
+        for retired_id in [RETIRED, 3111, 3041] {
             let retired = product.string_of_langid(langid, retired_id);
 
             if !retired.trim().is_empty() {
@@ -22853,8 +23264,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
             }
         }
 
-        // The two neighbours of each hole and the last row of each sixteen-string block.
-        for id in [3003_u16, 3005, 3015, 3110, 3112, 3119] {
+        // The two neighbours of each hole and the last row of each sixteen-string block — 3041
+        // (task T-93-2) sits in the block 3040..3055.
+        for id in [3003_u16, 3005, 3015, 3110, 3112, 3119, 3040, 3042, 3055] {
             let string = product.string_of_langid(langid, id);
             read += 1;
 
@@ -22878,9 +23290,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        ALL_LOCALES.len() * 6,
-        "six rows in each of the fourteen locales — three round each of the two holes; «no \
-         holes» out of no readings is the cheapest lie such a sweep tells"
+        ALL_LOCALES.len() * 9,
+        "nine rows in each of the fourteen locales — three round each of the three holes (the \
+         third, 3041, since task T-93-2); «no holes» out of no readings is the cheapest lie such \
+         a sweep tells"
     );
 }
 

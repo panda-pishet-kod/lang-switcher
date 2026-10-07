@@ -2891,7 +2891,8 @@ pub const IDS_APPLY: u16 = 3036;
 pub const IDS_NOTE_TEXT_KEY: u16 = 3037;
 /// The warning for a key name this build does not know.
 pub const IDS_NOTE_UNKNOWN_KEY: u16 = 3038;
-/// What the **field** says while a capture is armed — «Нажмите клавишу…».
+/// What the **field** says while a capture is armed — «Нажмите клавишу или сочетание…» since
+/// task T-93-2 (вопрос 157, the mock-up of 157.5), «Нажмите клавишу…» before it.
 ///
 /// It stood in the note under the field until task Т-23-5 and read «Нажмите клавишу. Esc —
 /// отмена.» Решение 82.6 moved the invitation into the field itself, where the key name would
@@ -2900,8 +2901,9 @@ pub const IDS_NOTE_UNKNOWN_KEY: u16 = 3038;
 pub const IDS_CAPTURE_PROMPT: u16 = 3039;
 /// [`Refusal::Modifier`].
 pub const IDS_CAPTURE_MODIFIER: u16 = 3040;
-/// [`Refusal::Combination`].
-pub const IDS_CAPTURE_COMBINATION: u16 = 3041;
+// ⚠ 3041 is a hole since task T-93-2: `IDS_CAPTURE_COMBINATION` («Сочетания с модификаторами не
+// поддерживаются…») left with `Refusal::Combination` and all fourteen of its translations, when
+// вопрос 157 made a combination a hotkey. Identifiers are never renumbered — see [`INTERFACE_STRINGS`].
 /// [`Refusal::Emergency`].
 pub const IDS_CAPTURE_EMERGENCY: u16 = 3042;
 /// [`Refusal::Nameless`].
@@ -3205,6 +3207,17 @@ pub const IDS_CAPTURE_TYPING: u16 = 3228;
 /// the free numbers are. The language it is read in is **Windows'**, not the configuration's —
 /// the second copy exits before it reads any file (`app::notify_already_running`).
 pub const IDS_ALREADY_RUNNING: u16 = 3229;
+/// The line under the hotkey field **at rest** — «Клавиша или сочетание с Ctrl, Alt, Shift.»;
+/// task T-93-2, вопрос 157, устройство А (157.6): there is no switch to choose a way, so the ways
+/// stand under the field where they are seen without reading the help. A warning of FR-92
+/// ([`hotkey_note`]) takes its place when there is one to give. 3230 is the next free number of
+/// the block of the state strings (3216…3231), as 3228 and 3229 were.
+pub const IDS_HOTKEY_HINT: u16 = 3230;
+/// The line under the field **once**, after a combination is captured — «{0} без {1} остаётся
+/// программам.», `{0}` the key, `{1}` the modifiers as the field shows them (task T-93-2, the
+/// mock-up of 157.5). It stands until the window closes or the next capture is armed. 3231 is the
+/// last free number of the block.
+pub const IDS_CAPTURE_COMBO_NOTE: u16 = 3231;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3410,7 +3423,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// of that head now share one version line, [`IDS_ABOUT_VERSION`]. A canon that only ever grows
 /// is a canon nobody may tidy; this one moves by a decision, in either direction, and 3111 joins
 /// 3004 as a hole that is not walked.
-pub const INTERFACE_STRINGS: [u16; 217] = [
+///
+/// ⚠ **Two hundred and eighteen since task T-93-2** — вопрос 157, 157.3: `IDS_CAPTURE_COMBINATION`
+/// (3041) left with the refusal it said, and [`IDS_HOTKEY_HINT`] and [`IDS_CAPTURE_COMBO_NOTE`]
+/// arrived — 217 − 1 + 2. 3041 is the third hole that is not walked.
+pub const INTERFACE_STRINGS: [u16; 218] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3447,7 +3464,6 @@ pub const INTERFACE_STRINGS: [u16; 217] = [
     IDS_NOTE_UNKNOWN_KEY,
     IDS_CAPTURE_PROMPT,
     IDS_CAPTURE_MODIFIER,
-    IDS_CAPTURE_COMBINATION,
     IDS_CAPTURE_EMERGENCY,
     IDS_CAPTURE_NAMELESS,
     IDS_CAPTURE_RESERVED,
@@ -3631,6 +3647,10 @@ pub const INTERFACE_STRINGS: [u16; 217] = [
     IDS_THANKYOU_IDEA_TEXT,
     // Task T-43-9, finding Н23 — the notification of FR-82, in the language of Windows.
     IDS_ALREADY_RUNNING,
+    // Task T-93-2, вопрос 157 — the line under the hotkey field at rest, and the one after a
+    // combination is captured.
+    IDS_HOTKEY_HINT,
+    IDS_CAPTURE_COMBO_NOTE,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -3843,6 +3863,17 @@ impl Modifiers {
         self.ctrl && self.alt && self.shift
     }
 
+    /// The same press as the set `hook` compares — `hook::MOD_CTRL`, `MOD_ALT`, `MOD_SHIFT`, and
+    /// `MOD_WIN` for a `Windows` key (task T-93-2, вопрос 157).
+    pub const fn set(self) -> u16 {
+        use crate::hook::{MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_WIN};
+
+        (if self.ctrl { MOD_CTRL } else { 0 })
+            | (if self.alt { MOD_ALT } else { 0 })
+            | (if self.shift { MOD_SHIFT } else { 0 })
+            | (if self.win { MOD_WIN } else { 0 })
+    }
+
     /// What is held right now, from the message queue.
     ///
     /// `GetKeyState` and not `GetAsyncKeyState`: the answer wanted is the state as of the
@@ -3873,16 +3904,20 @@ pub(crate) fn key_is_down(key: VIRTUAL_KEY) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
     /// A modifier on its own. `Ctrl` is not a hotkey, it is half of one.
+    ///
+    /// ⚠ **`Combination` stood after this until task T-93-2** — a key with a modifier held was
+    /// refused, because section 7 stored one key name and the callback compared one code. Вопрос
+    /// 157 widened both (`[hotkey] modifiers`, schema 7; the set compared in `hook::classify`), so
+    /// a combination of `Ctrl`, `Alt` and `Shift` is now taken, and the refusal went with its
+    /// fourteen sentences. A modifier on its own is still refused — the single tap is rejected by
+    /// 157.1, and the double one is stage 2.
     Modifier,
-    /// A key with a modifier held. **Section 7 stores one key name and the callback compares
-    /// one code** (`hook::classify`, `key.vk != mode.hotkey_vk`), so `Ctrl+K` could only be
-    /// written down as `K` — and would then fire on a bare `K`. Refused rather than stored as
-    /// something else than what the user pressed. Widening it needs both a schema field and a
-    /// change to the callback, and this task is allowed neither.
-    Combination,
     /// `Ctrl+Alt+Shift+F12`, the emergency exit of FR-96. Never assignable, in either build.
     Emergency,
-    /// A key the system owns and an application never gets as a plain key.
+    /// A key the system owns and an application never gets as a plain key — and, since task
+    /// T-93-2, **any press with a `Windows` key held**: `Win` is not one of the modifiers a
+    /// hotkey may carry (вопрос 157), and the shell acts on its release whatever anybody else
+    /// does with the press.
     Reserved,
     /// ⭐ **A key typing itself needs** — task T-36-5, finding Н9, решение 123.3.
     ///
@@ -3903,6 +3938,10 @@ pub enum Refusal {
     /// ⚠ **The file is not touched by this.** `[hotkey] key = "Delete"` written by hand is still
     /// read, published and acted on: refusing it there would silently return the hotkey to
     /// `Pause`, which is substituting this program's choice for the person's own.
+    ///
+    /// ⚠ **With modifiers too — 157.12, task T-93-2.** `Shift` + an arrow selects text, `Ctrl` + an
+    /// arrow walks a word, `Ctrl+Home` goes to the top: the combinations of these keys are the
+    /// editing typing needs just as much, so the key decides and the set does not.
     Editing,
     /// ⭐ **A key that types a character** — task Т-23-5, решение 82.6.
     ///
@@ -3920,6 +3959,11 @@ pub enum Refusal {
     /// It says the FR-92 warning and not a sentence of its own ([`IDS_NOTE_TEXT_KEY`]): the
     /// warning already says the true and useful thing — while the program is active that key
     /// stops typing its character.
+    ///
+    /// ⚠ **The set decides since task T-93-2 — 157.10, вариант 1 until the owner's word.** A text
+    /// key with `Ctrl` or `Alt` types nothing and is taken (`Ctrl+K`); with nothing held, with
+    /// `Shift` (a capital, a symbol) or with `Ctrl` and `Alt` together (`AltGr`) it does type, and
+    /// is refused — see `types_a_character`.
     Text,
     /// A key section 7 has no name for, so it could not be written to the file and read back.
     Nameless,
@@ -3930,7 +3974,6 @@ impl Refusal {
     pub const fn string_id(self) -> u16 {
         match self {
             Self::Modifier => IDS_CAPTURE_MODIFIER,
-            Self::Combination => IDS_CAPTURE_COMBINATION,
             Self::Emergency => IDS_CAPTURE_EMERGENCY,
             Self::Reserved => IDS_CAPTURE_RESERVED,
             // Task T-36-5: a sentence of its own — the key is not the system's, it is the
@@ -3947,9 +3990,10 @@ impl Refusal {
 /// What one press during a capture amounts to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Capture {
-    /// The press is the hotkey. The value is the name section 7 stores, and
-    /// `hook::vk_from_name` reads it back to the same code it came from.
-    Taken(String),
+    /// The press is the hotkey. The value is the `[hotkey]` section 7 stores — the key's name and,
+    /// since task T-93-2, the modifiers held with it in the canonical order — and
+    /// [`Hotkey::binding`] reads it back to the very code and set it came from.
+    Taken(Hotkey),
     /// The press cannot be the hotkey. The capture stays armed and the reason is shown.
     Refused(Refusal),
 }
@@ -3981,10 +4025,11 @@ pub enum CaptureStep {
     Ignore,
     /// The capture ends and the name that stood in the field before it comes back.
     Cancel,
-    /// The press is the hotkey; the value is the name section 7 stores.
-    Take(String),
+    /// The press is the hotkey; the value is the `[hotkey]` section 7 stores — the key and,
+    /// since task T-93-2, its modifiers.
+    Take(Hotkey),
     /// The press cannot be the hotkey. **The capture stays armed** — a refusal is «not that
-    /// one», not an end to the question — and the note says which of the five reasons it was.
+    /// one», not an end to the question — and the note says which of the six reasons it was.
     Refuse(Refusal),
 }
 
@@ -4008,7 +4053,7 @@ pub fn capture_step(armed: bool, event: CaptureEvent) -> CaptureStep {
         CaptureEvent::KeyDown(vk, _) if vk == VK_ESCAPE.0 => CaptureStep::Cancel,
 
         CaptureEvent::KeyDown(vk, modifiers) => match capture(vk, modifiers) {
-            Capture::Taken(name) => CaptureStep::Take(name),
+            Capture::Taken(hotkey) => CaptureStep::Take(hotkey),
             Capture::Refused(refusal) => CaptureStep::Refuse(refusal),
         },
 
@@ -4054,24 +4099,29 @@ const MODIFIER_KEYS: &[u16] = &[
 ///   reason: the emergency combination is not a candidate hotkey under any circumstance. In
 ///   practice the callback has already ended the process by the time this could run — this is
 ///   the answer for the case where the hook is not installed at all;
-/// * then the `Windows` key, which is neither a modifier of this program's vocabulary nor a
-///   key an application ever gets;
+/// * then the `Windows` key — pressed, or held under another key — which is neither a modifier
+///   of this program's vocabulary nor a key an application ever gets;
 /// * then a modifier on its own, which is a press the user has not finished making;
-/// * then anything held with a modifier, for the reason [`Refusal::Combination`] gives;
+/// * then a key that would type a character with what is held ([`Refusal::Text`]) and a key
+///   typing itself needs ([`Refusal::Editing`]);
 /// * and last the vocabulary of section 7, because a name that cannot be written to the file
 ///   is a hotkey that would not survive a restart.
 ///
-/// **SEC-01, SEC-07.** The value that comes out is a *name of a key* — `F8`, `Pause`, `A` —
-/// built from the virtual-key code and from nothing else. No character is produced, nothing is
-/// translated through a keyboard layout, and nothing here reaches the journal: the caller shows
-/// the name in the field and writes it to `[hotkey] key`, which is where section 7 keeps it
-/// anyway.
+/// ⭐ **A combination is taken since task T-93-2 — вопрос 157, устройство А.** `Ctrl`, `Alt` and
+/// `Shift` held with a key make a hotkey of the key *and* the set (`Ctrl + F12`): the capture
+/// understands what was pressed, with no switch to choose a way first (157.6).
+///
+/// **SEC-01, SEC-07.** The value that comes out is a *name of a key* — `F8`, `Pause`, `A` — and
+/// the names of the modifiers held with it, built from the virtual-key code and the set and from
+/// nothing else. No character is produced, nothing is translated through a keyboard layout, and
+/// nothing here reaches the journal: the caller shows the name in the field and writes it to
+/// `[hotkey]`, which is where section 7 keeps it anyway.
 pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
     if vk == crate::hook::EMERGENCY_VK && modifiers.emergency() {
         return Capture::Refused(Refusal::Emergency);
     }
 
-    if SYSTEM_RESERVED.contains(&vk) {
+    if SYSTEM_RESERVED.contains(&vk) || modifiers.win {
         return Capture::Refused(Refusal::Reserved);
     }
 
@@ -4079,16 +4129,16 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
         return Capture::Refused(Refusal::Modifier);
     }
 
-    if modifiers.any() {
-        return Capture::Refused(Refusal::Combination);
-    }
+    let set = modifiers.set();
 
     // ⭐ Task Т-23-5, решение 82.6. Before this line a letter, a digit or an OEM key was taken
     // and the warning of FR-95 followed the assignment; the user asked for the warning to come
     // *instead* of it, so that a stray press cannot quietly become the hotkey. See
     // [`Refusal::Text`] for what did **not** change: a text key written into the file by hand
-    // is still a hotkey, and FR-95 still suppresses it.
-    if is_text_key(vk) {
+    // is still a hotkey, and FR-95 still suppresses it. Since task T-93-2 the set decides with
+    // the key — `Ctrl+K` types nothing and is taken, `Shift+K` types a capital and is not
+    // (157.10, вариант 1 until the owner's word).
+    if types_a_character(vk, set) {
         return Capture::Refused(Refusal::Text);
     }
 
@@ -4105,8 +4155,10 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
         return Capture::Refused(Refusal::Editing);
     }
 
-    match key_name(vk) {
-        Some(name) => Capture::Taken(name),
+    // The key under its name, and the set in the canonical order whatever order it was pressed
+    // in — task T-93-2. No `Win` reaches this line, so the set always has a name.
+    match Hotkey::from_binding(vk, set) {
+        Some(hotkey) => Capture::Taken(hotkey),
         None => Capture::Refused(Refusal::Nameless),
     }
 }
@@ -5838,6 +5890,7 @@ pub fn show_dialog(
             session,
             apply,
             capture: None,
+            combination_taken: false,
             palette,
             // `None` — some `CreateSolidBrush` refused — is survived, not escalated: the dialog
             // opens and works with the system colours, because not painting is better than not
@@ -6370,6 +6423,12 @@ struct DialogState<'a> {
     /// The capture of FR-94, while one is armed. `Some` is the whole of "armed": the value
     /// suspends the conversion path for as long as it lives and restores it when it is dropped.
     capture: Option<CaptureSession>,
+    /// **A combination has just been captured** — task T-93-2, the mock-up of 157.5: the line
+    /// under the field says once which half stays with the programs ([`IDS_CAPTURE_COMBO_NOTE`])
+    /// instead of the line at rest, until the window closes or the next capture is armed. A
+    /// change of language on «Применить» says it again in the new language rather than dropping
+    /// it.
+    combination_taken: bool,
     /// The palette every colour answer of this dialog is chosen from — FR-92а, task T-11-4.
     ///
     /// Resolved once when the dialog is created — the setting from the configuration, the
@@ -12946,7 +13005,7 @@ fn relabel_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // The key name is not a string of the interface; the note under it is — FR-94, and it is
     // also what a capture writes into. A capture cannot be armed here: `apply_now` cancels one
     // before it publishes, and on `WM_INITDIALOG` there is nothing to cancel.
-    show_hotkey(hwnd, &state.working.hotkey);
+    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
 
     show_layout_note(hwnd, state);
     show_log_dir(hwnd);
@@ -14163,13 +14222,42 @@ thread_local! {
     static HOTKEY_FIELD_PROC: Cell<WNDPROC> = const { Cell::new(None) };
 }
 
-/// Puts the hotkey's name and the note that belongs to it into the two controls of the section.
+/// Puts the hotkey's name and the line that belongs under it into the two controls of the section.
 ///
 /// The name is [`effective_hotkey_name`] since task T-93-1 — `Ctrl + F12` for a combination, and
 /// the default that really acts for a name this build does not know, with the note saying so.
-fn show_hotkey(hwnd: HWND, hotkey: &Hotkey) {
+/// The line is [`hotkey_line`].
+fn show_hotkey(hwnd: HWND, hotkey: &Hotkey, combination_taken: bool) {
     set_text(hwnd, IDC_HOTKEY, &effective_hotkey_name(hotkey));
-    set_note(hwnd, &hotkey_note(hotkey).map_or_else(String::new, text));
+    set_note(hwnd, &hotkey_line(hotkey, combination_taken));
+}
+
+/// The line under the hotkey field when no capture is armed — task T-93-2, вопрос 157.
+///
+/// In order of precedence:
+///
+/// 1. **the warning of FR-92**, when there is one ([`hotkey_note`]) — a name this build does not
+///    know, a key that types its character: what the person must not miss;
+/// 2. **once, after a combination is captured**, which half stays with the programs —
+///    [`IDS_CAPTURE_COMBO_NOTE`], «F12 без Ctrl остаётся программам.», the key and the modifiers
+///    as the field shows them;
+/// 3. otherwise **the line at rest** — [`IDS_HOTKEY_HINT`], «Клавиша или сочетание с Ctrl, Alt,
+///    Shift.»: устройство А has no switch, so the ways stand where they are seen (157.6).
+///
+/// Public so a test reads the very answer the window shows, in every language.
+pub fn hotkey_line(hotkey: &Hotkey, combination_taken: bool) -> String {
+    if let Some(warning) = hotkey_note(hotkey) {
+        return text(warning);
+    }
+
+    match hotkey.binding() {
+        Some((vk, modifiers)) if combination_taken && modifiers != 0 => {
+            let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
+
+            format_text(IDS_CAPTURE_COMBO_NOTE, &[&key, &modifier_label(modifiers)])
+        }
+        _ => text(IDS_HOTKEY_HINT),
+    }
 }
 
 /// Puts one line into the note under the hotkey field **and makes it appear**.
@@ -14432,6 +14520,8 @@ unsafe fn toggle_capture(hwnd: HWND) {
 /// see the ⚠ there.
 fn arm_capture(hwnd: HWND, state: &mut DialogState<'_>) {
     state.capture = Some(CaptureSession::arm(state.working.hotkey.clone()));
+    // Task T-93-2: the line said once after a combination lasts until the next capture.
+    state.combination_taken = false;
 
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));
     // Решение 82.6: the invitation stands **in the field**, where the key name was — the field
@@ -14478,28 +14568,28 @@ fn cancel_capture(hwnd: HWND, state: &mut DialogState<'_>) {
 
     state.working.hotkey = previous;
 
-    show_hotkey(hwnd, &state.working.hotkey);
+    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
-/// Takes the captured key: the field shows its name and the configuration carries it.
+/// Takes the captured hotkey: the field shows its name and the configuration carries it — the key
+/// and, since task T-93-2, the modifiers held with it, which replace whatever the file had.
+///
+/// A combination says once which half stays with the programs (the mock-up of 157.5): «F12 без
+/// Ctrl остаётся программам.» stands under the field until the window closes or the next capture
+/// is armed ([`hotkey_line`]).
 ///
 /// Nothing is published to the hook from here. The dialog edits a copy and publishes on
 /// «Применить» like every other field — through `app::publish_configuration`, which is the one
-/// caller of `hook::set_hotkey_vk` there has ever been.
-fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, name: String) {
+/// caller of `hook::set_hotkey` there has ever been.
+fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, hotkey: Hotkey) {
     // Ends the capture and publishes the callback's previous `general.enabled` back.
     state.capture = None;
 
-    // Task T-93-1: a captured key is a bare key until the capture learns combinations (task
-    // T-93-2), so modifiers a hand-written file carried do not survive it — `F8` taken over a
-    // file's `Ctrl` must not become `Ctrl+F8`.
-    state.working.hotkey = Hotkey {
-        key: name,
-        modifiers: Vec::new(),
-    };
+    state.combination_taken = !hotkey.modifiers.is_empty();
+    state.working.hotkey = hotkey;
 
-    show_hotkey(hwnd, &state.working.hotkey);
+    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
@@ -14564,7 +14654,7 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
         with_state(dialog, |state| match step {
             CaptureStep::Ignore => {}
             CaptureStep::Cancel => cancel_capture(dialog, state),
-            CaptureStep::Take(name) => accept_capture(dialog, state, name),
+            CaptureStep::Take(hotkey) => accept_capture(dialog, state, hotkey),
 
             // The capture stays armed: a refusal is a "not that one", not an end to the
             // question. The note says which reason it was, in place of the hint — and first,
