@@ -9496,6 +9496,19 @@ fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
                 ),
             ));
 
+            // Task T-95-2 (вопрос 159, the mock-up of 157.18) — the line while a capture waits for
+            // the second `Shift`, and the line after the double press. `IDS_HOTKEY_HINT` and the
+            // refusal `Modifier` above carry their new words already. Развилка C5: a line that
+            // does not fit is shortened, the window does not grow.
+            lines.push((
+                "IDS_CAPTURE_SHIFT_AGAIN".to_owned(),
+                settings::text(settings::IDS_CAPTURE_SHIFT_AGAIN),
+            ));
+            lines.push((
+                "IDS_CAPTURE_DOUBLE_NOTE".to_owned(),
+                settings::text(settings::IDS_CAPTURE_DOUBLE_NOTE),
+            ));
+
             for (what, sentence) in lines {
                 assert!(
                     !sentence.trim().is_empty(),
@@ -9590,17 +9603,21 @@ fn the_invitation_of_a_capture_fits_its_field_in_all_fourteen_languages() {
                 "{language:?}: the invitation did not load — the instrument would measure nothing"
             );
 
-            let width = extent_of(&sheet, &face, &invitation).cx;
+            // Task T-95-2: and what the field says while a pair is open — «Shift…», the same in
+            // every language (the names of keys are not translated).
+            for invitation in [invitation, settings::pending_shift_name()] {
+                let width = extent_of(&sheet, &face, &invitation).cx;
 
-            if width > widest.0 {
-                widest = (width, format!("{language:?} «{invitation}»"));
-            }
+                if width > widest.0 {
+                    widest = (width, format!("{language:?} «{invitation}»"));
+                }
 
-            if width > slot {
-                clips.push(format!(
-                    "{pixels} px, {language:?}: «{invitation}» is {width} px and the field shows \
-                     {slot} px ({FIELD_UNITS} units less the insets, base unit {base})"
-                ));
+                if width > slot {
+                    clips.push(format!(
+                        "{pixels} px, {language:?}: «{invitation}» is {width} px and the field \
+                         shows {slot} px ({FIELD_UNITS} units less the insets, base unit {base})"
+                    ));
+                }
             }
         }
 
@@ -16403,7 +16420,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// ⚠ **218 since task T-93-2** — вопрос 157: `IDS_CAPTURE_COMBINATION` left with the refusal it
 /// said, and the two lines under the hotkey field arrived (the one at rest and the one after a
 /// combination) — 217 − 1 + 2, row for row with `settings::INTERFACE_STRINGS`.
-const FR_94_STRINGS: [(u16, &str, &str); 218] = [
+///
+/// ⚠ **220 since task T-95-2** — вопрос 159: the line while the capture waits for the second
+/// `Shift` and the line after the double press — 218 + 2, row for row.
+const FR_94_STRINGS: [(u16, &str, &str); 220] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -16510,9 +16530,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 218] = [
         "A key or a combination…",
     ),
     (
+        // Task T-95-2, вопрос 159 (the mock-up of 157.18): a `Shift` on its own is no refusal any
+        // more, and the line names the way left — «Модификатор сам по себе горячей клавишей быть
+        // не может.» before it.
         settings::IDS_CAPTURE_MODIFIER,
-        "Модификатор сам по себе горячей клавишей быть не может.",
-        "A modifier on its own cannot be a hotkey.",
+        "Ctrl и Alt — только вместе с клавишей; дважды — только Shift.",
+        "Ctrl and Alt go only with a key; only Shift can be pressed twice.",
     ),
     (
         settings::IDS_CAPTURE_EMERGENCY,
@@ -17357,16 +17380,29 @@ const FR_94_STRINGS: [(u16, &str, &str); 218] = [
         "Lang Switcher уже работает в этом сеансе.",
         "Lang Switcher is already running in this session.",
     ),
-    // Task T-93-2, вопрос 157 — the two lines under the hotkey field.
+    // Task T-93-2, вопрос 157 — the two lines under the hotkey field. Task T-95-2 (вопрос 159, the
+    // mock-up of 157.18): the line at rest names the double press too.
     (
         settings::IDS_HOTKEY_HINT,
-        "Клавиша или сочетание с Ctrl, Alt, Shift.",
-        "A key, or a combination with Ctrl, Alt, Shift.",
+        "Клавиша, сочетание с Ctrl, Alt, Shift или двойной Shift.",
+        "A key, a combination with Ctrl, Alt, Shift, or a double Shift.",
     ),
     (
         settings::IDS_CAPTURE_COMBO_NOTE,
         "{0} без {1} остаётся программам.",
         "{0} without {1} stays with your programs.",
+    ),
+    // Task T-95-2, вопрос 159 — the line while the capture waits for the second `Shift`, and the
+    // one after the double press is captured.
+    (
+        settings::IDS_CAPTURE_SHIFT_AGAIN,
+        "Ещё раз Shift — двойное нажатие; клавиша с Shift — сочетание.",
+        "Shift again for a double press; a key with Shift for a combination.",
+    ),
+    (
+        settings::IDS_CAPTURE_DOUBLE_NOTE,
+        "Два нажатия Shift подряд. Обычный набор с Shift не затронут.",
+        "Two presses of Shift in a row. Ordinary typing with Shift is not affected.",
     ),
 ];
 
@@ -17915,16 +17951,37 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
     };
     let win = settings::Modifiers { win: true, ..BARE };
 
+    // ⭐ Task T-95-2, вопрос 159 (157.17): `Shift` on its own is no refusal any more but the
+    // beginning of a double press — on its own and with itself held, as the queue reports its own
+    // press. `Ctrl` and `Alt` on their own, and `Shift` pressed under either, stay refused.
+    for (vk, held, what) in [
+        (0x10_u16, BARE, "Shift"),
+        (0x10, shift, "Shift, held by itself"),
+        (0xA0, shift, "left Shift"),
+        (0xA1, shift, "right Shift"),
+    ] {
+        assert_eq!(
+            settings::capture(vk, held),
+            settings::Capture::Shift,
+            "{what} begins a double press"
+        );
+    }
+
     let cases = [
         // A modifier on its own — the user has not finished pressing anything.
         (0x11u16, BARE, settings::Refusal::Modifier, "Ctrl"),
-        (0x10, BARE, settings::Refusal::Modifier, "Shift"),
         (0x12, BARE, settings::Refusal::Modifier, "Alt"),
         (
             0x10,
             ctrl,
             settings::Refusal::Modifier,
             "Shift при зажатом Ctrl",
+        ),
+        (
+            0x10,
+            settings::Modifiers { alt: true, ..shift },
+            settings::Refusal::Modifier,
+            "Shift при зажатом Alt",
         ),
         // The `Windows` key: the shell acts on it whatever anybody else does — and since task
         // T-93-2 any press with it held: `Win` is not a modifier a hotkey may carry (вопрос 157).
@@ -18126,22 +18183,28 @@ fn the_capture_takes_a_combination_as_the_key_and_its_set() {
 /// 2. Once after a combination is captured, which half stays with the programs — «F12 без Ctrl
 ///    остаётся программам.», with the key and the modifiers as the field shows them.
 /// 3. A warning of FR-92 wins over both: a name nobody knows is said, not hidden by the hint.
+///
+/// ⚠ **Task T-95-2 (вопрос 159, the mock-up of 157.18)**: the line at rest names the double press
+/// too — «Клавиша, сочетание с Ctrl, Alt, Shift или двойной Shift.» — and after the double press
+/// is captured the line says once «Два нажатия Shift подряд. Обычный набор с Shift не затронут.».
 #[test]
 fn the_line_under_the_field_says_the_ways_at_rest_and_the_bare_key_after_a_combination() {
     let _guard = with_product_strings();
 
-    for (language, rest, after, after_three) in [
+    for (language, rest, after, after_three, after_double) in [
         (
             Language::Ru,
-            "Клавиша или сочетание с Ctrl, Alt, Shift.",
+            "Клавиша, сочетание с Ctrl, Alt, Shift или двойной Shift.",
             "F12 без Ctrl остаётся программам.",
             "F11 без Ctrl + Alt + Shift остаётся программам.",
+            "Два нажатия Shift подряд. Обычный набор с Shift не затронут.",
         ),
         (
             Language::En,
-            "A key, or a combination with Ctrl, Alt, Shift.",
+            "A key, a combination with Ctrl, Alt, Shift, or a double Shift.",
             "F12 without Ctrl stays with your programs.",
             "F11 without Ctrl + Alt + Shift stays with your programs.",
+            "Two presses of Shift in a row. Ordinary typing with Shift is not affected.",
         ),
     ] {
         settings::set_ui_language(language);
@@ -18176,9 +18239,63 @@ fn the_line_under_the_field_says_the_ways_at_rest_and_the_bare_key_after_a_combi
             settings::text(settings::IDS_NOTE_UNKNOWN_KEY),
             "{language:?}: the warning of FR-92 wins"
         );
+        assert_eq!(
+            settings::hotkey_line(&settings::Hotkey::double_shift(), true),
+            after_double,
+            "{language:?}: once after the double press is captured"
+        );
+        assert_eq!(
+            settings::hotkey_line(&settings::Hotkey::double_shift(), false),
+            rest,
+            "{language:?}: and the line at rest after it"
+        );
     }
 
     settings::set_ui_language(Language::Ru);
+}
+
+/// **Task T-95-2 — the four lines of the mock-up of 157.18, word for word, in Russian and English,
+/// out of the built binary**: the line at rest, the line while the capture waits for the second
+/// `Shift`, the line after the double press, and the refusal of `Ctrl` or `Alt` on its own; and
+/// «Shift…» in the field, «Shift, Shift» once the pair is taken.
+#[test]
+fn the_lines_of_the_double_press_are_the_words_of_the_mock_up() {
+    let _guard = with_product_strings();
+
+    for (language, hint, again, note, modifier) in [
+        (
+            Language::Ru,
+            "Клавиша, сочетание с Ctrl, Alt, Shift или двойной Shift.",
+            "Ещё раз Shift — двойное нажатие; клавиша с Shift — сочетание.",
+            "Два нажатия Shift подряд. Обычный набор с Shift не затронут.",
+            "Ctrl и Alt — только вместе с клавишей; дважды — только Shift.",
+        ),
+        (
+            Language::En,
+            "A key, a combination with Ctrl, Alt, Shift, or a double Shift.",
+            "Shift again for a double press; a key with Shift for a combination.",
+            "Two presses of Shift in a row. Ordinary typing with Shift is not affected.",
+            "Ctrl and Alt go only with a key; only Shift can be pressed twice.",
+        ),
+    ] {
+        settings::set_ui_language(language);
+
+        assert_eq!(settings::text(settings::IDS_HOTKEY_HINT), hint);
+        assert_eq!(settings::text(settings::IDS_CAPTURE_SHIFT_AGAIN), again);
+        assert_eq!(settings::text(settings::IDS_CAPTURE_DOUBLE_NOTE), note);
+        assert_eq!(
+            settings::text(settings::Refusal::Modifier.string_id()),
+            modifier
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert_eq!(settings::pending_shift_name(), "Shift…");
+    assert_eq!(
+        settings::effective_hotkey_name(&settings::Hotkey::double_shift()),
+        "Shift, Shift"
+    );
 }
 
 // -----------------------------------------------------------------------------------------
@@ -18220,6 +18337,10 @@ fn a_capture_that_is_not_armed_answers_nothing_to_any_event() {
             to_capture_button: true,
         },
         settings::CaptureEvent::ClickBeside,
+        // Task T-95-2: the release of `Shift` and the end of the window of a pair as well.
+        settings::CaptureEvent::KeyDown(0x10, NOTHING_HELD),
+        settings::CaptureEvent::KeyUp(0x10),
+        settings::CaptureEvent::PairTimeout,
     ] {
         assert_eq!(
             settings::capture_step(false, event),
@@ -18430,6 +18551,586 @@ fn an_armed_capture_is_cancelled_by_escape_by_a_click_beside_and_by_a_lost_focus
         settings::CaptureStep::Ignore,
         "the capture button may take the focus without ending the capture"
     );
+}
+
+// -----------------------------------------------------------------------------------------
+// Task T-95-2, вопрос 159 — the capture of the double press of `Shift` (the mock-up of 157.18)
+// -----------------------------------------------------------------------------------------
+//
+// The moments of one field, in order: a `Shift` on its own → «Shift…» and «Ещё раз Shift — …»;
+// a second within the window → «Shift, Shift», assigned; no second for 400 ms → the invitation
+// again, the line staying; a key with `Shift` held → a combination, as in stage 1; `Ctrl` or
+// `Alt` on its own → refused with the new line, the capture armed. The machine is
+// `settings::CapturePair::step` — pure, with the time of each message written out.
+
+/// The press of `Shift` itself, as the queue reports it: `Shift` held — by itself.
+const SHIFT_ITSELF: settings::Modifiers = settings::Modifiers {
+    ctrl: false,
+    alt: false,
+    shift: true,
+    win: false,
+};
+
+/// `VK_SHIFT`, the code a window message carries for either `Shift`.
+const VK_SHIFT_KEY: u16 = 0x10;
+
+/// Drives one armed capture through `events` and answers every step.
+fn capture_steps(events: &[(settings::CaptureEvent, u32)]) -> Vec<settings::CaptureStep> {
+    let mut pair = settings::CapturePair::default();
+
+    events
+        .iter()
+        .map(|&(event, time)| pair.step(event, time))
+        .collect()
+}
+
+/// **The red «before» of task T-95-2 — two taps of `Shift` in a capture assign the double press**:
+/// «Shift…» on the first press, the pair waiting after the first release, «Shift…» again on the
+/// second press, and «Shift, Shift» taken on the second release. On the base the first press was
+/// refused as a modifier on its own.
+#[test]
+fn two_taps_of_shift_in_a_capture_assign_the_double_press() {
+    use settings::CaptureEvent::{KeyDown, KeyUp};
+    use settings::CaptureStep::{AwaitShift, Ignore, Take};
+
+    let steps = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (KeyUp(VK_SHIFT_KEY), 1_080),
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_200),
+        (KeyUp(VK_SHIFT_KEY), 1_280),
+    ]);
+
+    assert_eq!(
+        steps,
+        [
+            AwaitShift,
+            Ignore,
+            AwaitShift,
+            Take(settings::Hotkey::double_shift())
+        ],
+        "«Shift…», waiting, «Shift…», «Shift, Shift»"
+    );
+
+    // The window is the hook's own, to the millisecond: a second press 400 ms after the first.
+    let edge = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (KeyUp(VK_SHIFT_KEY), 1_050),
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_400),
+        (KeyUp(VK_SHIFT_KEY), 1_450),
+    ]);
+    assert_eq!(edge[3], Take(settings::Hotkey::double_shift()));
+
+    // And what is taken is what the file stores, `trigger = "double_tap"`.
+    assert_eq!(
+        settings::Hotkey::double_shift().binding(),
+        Some((0x10, hook::DOUBLE_TAP))
+    );
+}
+
+/// **The moment 4 — no second `Shift` in time: the invitation again, the line staying, the capture
+/// armed** — by the timer of the pair, by the time of a late press, and for a tap held too long.
+#[test]
+fn a_second_shift_that_does_not_come_in_time_lapses_and_the_capture_stays_armed() {
+    use settings::CaptureEvent::{KeyDown, KeyUp, PairTimeout};
+    use settings::CaptureStep::{AwaitShift, Ignore, ShiftLapsed, Take};
+
+    // The timer of the pair fires: the field goes back to the invitation.
+    let mut pair = settings::CapturePair::default();
+    assert_eq!(
+        pair.step(KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        AwaitShift
+    );
+    assert_eq!(pair.step(KeyUp(VK_SHIFT_KEY), 1_080), Ignore);
+    assert!(pair.open(), "the pair waits for its second tap");
+    assert_eq!(pair.step(PairTimeout, 1_400), ShiftLapsed);
+    assert!(!pair.open(), "and is over");
+    assert_eq!(
+        pair.step(PairTimeout, 1_800),
+        Ignore,
+        "a stale tick finds nothing"
+    );
+
+    // The capture is armed: the next taps are a pair of their own.
+    assert_eq!(
+        pair.step(KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 2_000),
+        AwaitShift
+    );
+    assert_eq!(pair.step(KeyUp(VK_SHIFT_KEY), 2_050), Ignore);
+    assert_eq!(
+        pair.step(KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 2_150),
+        AwaitShift
+    );
+    assert_eq!(
+        pair.step(KeyUp(VK_SHIFT_KEY), 2_200),
+        Take(settings::Hotkey::double_shift())
+    );
+
+    // A second press later than the window, before the tick has come: the first of a new pair.
+    let late = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (KeyUp(VK_SHIFT_KEY), 1_050),
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_401),
+        (KeyUp(VK_SHIFT_KEY), 1_450),
+    ]);
+    assert_eq!(
+        late,
+        [AwaitShift, Ignore, AwaitShift, Ignore],
+        "401 ms: no pair"
+    );
+
+    // A tap held too long — the tick while it is still held, or the release past the window.
+    let held = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (PairTimeout, 1_400),
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_430),
+        (KeyUp(VK_SHIFT_KEY), 1_500),
+    ]);
+    assert_eq!(
+        held,
+        [AwaitShift, ShiftLapsed, Ignore, Ignore],
+        "held past the window: the invitation again, the repeat and the release are nothing"
+    );
+
+    let slow_release = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (KeyUp(VK_SHIFT_KEY), 1_401),
+    ]);
+    assert_eq!(slow_release, [AwaitShift, ShiftLapsed]);
+}
+
+/// **A key with `Shift` held is a combination, as in stage 1** — the pair gives way to it: `Shift +
+/// F12` is taken, `Shift + K` (a capital) is refused as before, and the pair is over either way.
+#[test]
+fn a_key_with_shift_held_is_a_combination_as_in_stage_one() {
+    use settings::CaptureEvent::{KeyDown, KeyUp};
+    use settings::CaptureStep::{AwaitShift, Ignore, Refuse, Take};
+
+    assert_eq!(
+        capture_steps(&[
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+            (KeyDown(0x7B, SHIFT_ITSELF), 1_100),
+        ]),
+        [AwaitShift, Take(combination(&["Shift"], "F12"))]
+    );
+
+    let mut pair = settings::CapturePair::default();
+    assert_eq!(
+        pair.step(KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        AwaitShift
+    );
+    assert_eq!(
+        pair.step(KeyDown(0x4B, SHIFT_ITSELF), 1_050),
+        Refuse(settings::Refusal::Text)
+    );
+    assert!(!pair.open(), "a refused key ends the pair");
+    assert_eq!(pair.step(KeyUp(VK_SHIFT_KEY), 1_100), Ignore);
+    assert_eq!(
+        pair.step(KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_200),
+        AwaitShift,
+        "the next Shift begins a pair of its own"
+    );
+}
+
+/// **The moment 6 — `Ctrl` or `Alt` on its own is refused, and the capture stays armed**; so is a
+/// `Shift` pressed under them (`Ctrl+Shift`, `Alt+Shift` switch layouts), and a `Ctrl` in the
+/// middle of an open pair ends the pair.
+#[test]
+fn ctrl_or_alt_on_its_own_is_refused_and_a_pair_under_them_is_none() {
+    use settings::CaptureEvent::{KeyDown, KeyUp};
+    use settings::CaptureStep::{AwaitShift, Ignore, Refuse};
+
+    let ctrl = settings::Modifiers {
+        ctrl: true,
+        ..NOTHING_HELD
+    };
+    let alt = settings::Modifiers {
+        alt: true,
+        ..NOTHING_HELD
+    };
+
+    for (vk, held, what) in [
+        (0x11_u16, ctrl, "Ctrl"),
+        (0xA2, ctrl, "left Ctrl"),
+        (0x12, alt, "Alt"),
+        (0xA5, alt, "right Alt"),
+        (
+            VK_SHIFT_KEY,
+            settings::Modifiers {
+                shift: true,
+                ..ctrl
+            },
+            "Shift under Ctrl",
+        ),
+        (
+            VK_SHIFT_KEY,
+            settings::Modifiers { shift: true, ..alt },
+            "Shift under Alt",
+        ),
+    ] {
+        assert_eq!(
+            capture_steps(&[(KeyDown(vk, held), 1_000)]),
+            [Refuse(settings::Refusal::Modifier)],
+            "{what}"
+        );
+    }
+
+    let ctrl_in_the_middle = capture_steps(&[
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+        (KeyUp(VK_SHIFT_KEY), 1_050),
+        (KeyDown(0x11, ctrl), 1_100),
+        (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_200),
+        (KeyUp(VK_SHIFT_KEY), 1_250),
+    ]);
+    assert_eq!(
+        ctrl_in_the_middle,
+        [
+            AwaitShift,
+            Ignore,
+            Refuse(settings::Refusal::Modifier),
+            AwaitShift,
+            Ignore
+        ],
+        "a Ctrl between the taps: refused, and the next Shift is a first tap"
+    );
+}
+
+/// **The auto-repeat of a held `Shift` is no second tap** — the queue repeats a held key as a run
+/// of presses — and the left and the right `Shift` are one key (the queue names both `VK_SHIFT`).
+#[test]
+fn the_auto_repeat_of_a_held_shift_is_no_second_tap() {
+    use settings::CaptureEvent::{KeyDown, KeyUp};
+    use settings::CaptureStep::{AwaitShift, Ignore, Take};
+
+    assert_eq!(
+        capture_steps(&[
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_030),
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_060),
+            (KeyUp(VK_SHIFT_KEY), 1_090),
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_200),
+            (KeyUp(VK_SHIFT_KEY), 1_250),
+        ]),
+        [
+            AwaitShift,
+            Ignore,
+            Ignore,
+            Ignore,
+            AwaitShift,
+            Take(settings::Hotkey::double_shift())
+        ]
+    );
+
+    // A release of another key changes nothing; a release of `Shift` never seen going down either.
+    assert_eq!(
+        capture_steps(&[
+            (KeyUp(0x41), 1_000),
+            (KeyUp(VK_SHIFT_KEY), 1_010),
+            (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_100),
+            (KeyUp(0x41), 1_120),
+            (KeyUp(VK_SHIFT_KEY), 1_150),
+        ]),
+        [Ignore, Ignore, AwaitShift, Ignore, Ignore]
+    );
+}
+
+/// **Escape, a click beside and a lost focus end an open pair with the capture** — the way out is
+/// the way out whatever the field says.
+#[test]
+fn escape_a_click_and_a_lost_focus_end_an_open_pair_with_the_capture() {
+    use settings::CaptureEvent::{ClickBeside, FocusLost, KeyDown, KeyUp};
+    use settings::CaptureStep::{AwaitShift, Cancel, Ignore};
+
+    for way_out in [
+        KeyDown(0x1B, NOTHING_HELD),
+        ClickBeside,
+        FocusLost {
+            to_capture_button: false,
+        },
+    ] {
+        assert_eq!(
+            capture_steps(&[
+                (KeyDown(VK_SHIFT_KEY, SHIFT_ITSELF), 1_000),
+                (KeyUp(VK_SHIFT_KEY), 1_050),
+                (way_out, 1_100),
+            ]),
+            [AwaitShift, Ignore, Cancel],
+            "{way_out:?}"
+        );
+    }
+}
+
+/// **Task T-95-2 — the timer of the pair runs while a pair is open and is killed when it ends**
+/// (NFR-10: nothing ticks at rest), and the field and the line under it say the moments 3 and 4.
+///
+/// A hidden popup of the test's own stands in for the dialog, with the two controls the functions
+/// find by identifier — the field `IDC_HOTKEY` (1010) and the line `IDC_HOTKEY_NOTE` (1011). That
+/// the timer was armed is proven by `KillTimer` answering for its identifier, the way the timer of
+/// «Журнал сохранён» is proven (task T-39-11).
+#[test]
+fn the_timer_of_the_pair_runs_while_a_pair_is_open_and_is_killed_when_it_ends() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, HMENU, KillTimer, WINDOW_EX_STYLE, WS_CHILD, WS_POPUP,
+    };
+    use windows::core::w;
+
+    /// The popup, destroyed on the way out with its children — panic or no panic.
+    struct Popup(HWND);
+
+    impl Drop for Popup {
+        fn drop(&mut self) {
+            // SAFETY: the window was created on this thread by this test and is destroyed once.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    const IDC_HOTKEY: i32 = 1010;
+    const IDC_HOTKEY_NOTE: i32 = 1011;
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::Ru);
+
+    // SAFETY: a system class, no parent and no creation data; the handle is owned by `Popup`.
+    let popup = Popup(
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                400,
+                80,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("the popup must be creatable"),
+    );
+
+    for (id, height) in [(IDC_HOTKEY, 24), (IDC_HOTKEY_NOTE, 40)] {
+        // SAFETY: as above; a child's identifier travels in the menu slot, and the popup stays its
+        // parent for the whole of the test.
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_CHILD,
+                0,
+                0,
+                380,
+                height,
+                Some(popup.0),
+                Some(HMENU(std::ptr::without_provenance_mut(id as usize))),
+                None,
+                None,
+            )
+        }
+        .expect("the child must be creatable");
+    }
+
+    let again = settings::text(settings::IDS_CAPTURE_SHIFT_AGAIN);
+
+    // The moment 3: «Shift…», the line, and the timer armed.
+    settings::await_second_shift(popup.0);
+
+    assert_eq!(settings::text_of(popup.0, IDC_HOTKEY), "Shift…");
+    assert_eq!(settings::text_of(popup.0, IDC_HOTKEY_NOTE), again);
+
+    // SAFETY: the popup is alive; the call asks the system about a timer of this window only.
+    let armed = unsafe { KillTimer(Some(popup.0), settings::CAPTURE_PAIR_TIMER) };
+    assert!(
+        armed.is_ok(),
+        "no timer {} on the dialog — the field would say «Shift…» until the next press",
+        settings::CAPTURE_PAIR_TIMER
+    );
+
+    // The moment 4: the invitation again, the line staying, the timer dead.
+    settings::await_second_shift(popup.0);
+    settings::end_pair_wait(popup.0);
+
+    assert_eq!(
+        settings::text_of(popup.0, IDC_HOTKEY),
+        settings::text(settings::IDS_CAPTURE_PROMPT)
+    );
+    assert_eq!(
+        settings::text_of(popup.0, IDC_HOTKEY_NOTE),
+        again,
+        "the line stays until the next press — 400 ms is too short to read it in"
+    );
+
+    // SAFETY: as above.
+    let left = unsafe { KillTimer(Some(popup.0), settings::CAPTURE_PAIR_TIMER) };
+    assert!(left.is_err(), "the end of the pair must kill its timer");
+
+    assert_ne!(
+        settings::CAPTURE_PAIR_TIMER,
+        settings::JOURNAL_SAVED_TIMER,
+        "the two timers of the window are two"
+    );
+}
+
+/// **Task T-95-2 — where the dialog runs the pair**: the field hands the release of a key to the
+/// capture (посылка П6), the timer arm of the dialog hands it the end of the window, the two steps
+/// of the pair are carried out, and the two ends of a capture — a cancellation and a hotkey taken —
+/// kill the timer. The test before this one proves what the functions do; this one that the dialog
+/// calls them.
+///
+/// ⚠ The controls: a body with the call taken out, and one with the call turned into a comment, are
+/// not seen by the sweep. The second is the mutant M6 of task T-95-2, which the first draft of this
+/// sweep let through — it read the comment lines too (`scratchpad-E95\t95-2-mutant-M6-*.log`).
+#[test]
+fn the_dialog_runs_the_pair_where_it_must() {
+    let source = settings_module_source();
+
+    // The code of a body with its comment lines dropped: a call written in a comment is no call.
+    let code = |body: &str| -> String {
+        body.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let field = function_body(&source, "unsafe extern \"system\" fn hotkey_field_proc(");
+    let field = code(field);
+    let (armed, _) = field
+        .split_once("} else {")
+        .expect("the field procedure has its two branches");
+    assert!(
+        armed.contains("WM_KEYUP | WM_SYSKEYUP =>") && armed.contains("CaptureEvent::KeyUp("),
+        "the armed field must hand the release of a key to the capture"
+    );
+
+    let procedure = code(function_body(
+        &source,
+        "unsafe extern \"system\" fn dialog_proc(",
+    ));
+    let (_, timer) = procedure
+        .split_once("WM_TIMER =>")
+        .expect("the dialog procedure must answer its timers");
+    assert!(
+        timer.contains("CAPTURE_PAIR_TIMER") && timer.contains("CaptureEvent::PairTimeout"),
+        "the timer arm must hand the end of the window of a pair to the capture"
+    );
+
+    let run = code(function_body(&source, "unsafe fn run_capture_step("));
+    for step in [
+        "CaptureStep::AwaitShift => await_second_shift(dialog)",
+        "CaptureStep::ShiftLapsed => end_pair_wait(dialog)",
+    ] {
+        assert!(
+            run.contains(step),
+            "run_capture_step must carry out `{step}`"
+        );
+    }
+
+    for name in ["fn cancel_capture(", "fn accept_capture("] {
+        let body = function_body(&source, name);
+
+        assert!(
+            code(body).contains("kill_pair_timer(hwnd);"),
+            "`{name}` must kill the timer of the pair — nothing ticks at rest"
+        );
+
+        let without = body.replace("kill_pair_timer(hwnd);", "");
+        let commented = body.replace("kill_pair_timer(hwnd);", "// kill_pair_timer(hwnd);");
+        assert_ne!(
+            without, body,
+            "the control must change the body it is made of"
+        );
+        assert!(
+            !code(&without).contains("kill_pair_timer(hwnd);"),
+            "the control: the sweep does not see a body without the call"
+        );
+        assert!(
+            !code(&commented).contains("kill_pair_timer(hwnd);"),
+            "the control: the sweep does not see a call turned into a comment"
+        );
+    }
+}
+
+/// **Task T-95-2, посылка П9 — a capture takes the double press off the hook with the key.** While
+/// a capture is armed the word of the hotkey is the code no keyboard makes, and the flag of the
+/// double press went down with it: two taps of `Shift` made while choosing a hotkey convert
+/// nothing. Dropping the session puts the whole word back.
+#[test]
+fn a_capture_takes_the_double_press_off_the_hook_and_gives_it_back() {
+    let _guard = with_product_strings();
+
+    let taps = |mode: hook::Mode| {
+        let mut state = hook::HotkeyState::default();
+
+        [
+            (0xA0_u16, hook::Edge::Down, 1_000_u32),
+            (0xA0, hook::Edge::Up, 1_080),
+            (0xA0, hook::Edge::Down, 1_200),
+            (0xA0, hook::Edge::Up, 1_280),
+        ]
+        .into_iter()
+        .filter(|&(vk, edge, time)| {
+            hook::classify(
+                mode,
+                &mut state,
+                hook::KeyEvent {
+                    vk,
+                    edge,
+                    extra_info: 0,
+                    scan: 0,
+                    flags: 0,
+                    time,
+                },
+                || 0,
+                || 0,
+            )
+            .fire_hotkey
+        })
+        .count()
+    };
+
+    let before_word = hook::hotkey();
+    hook::set_hotkey(0x10, hook::DOUBLE_TAP);
+    hook::set_active(true);
+
+    let published = hook::current_mode();
+    assert!(published.hotkey_double_tap);
+    assert_eq!(
+        taps(published),
+        1,
+        "the control: the published double press fires"
+    );
+
+    let session = settings::CaptureSession::arm(settings::Hotkey::double_shift());
+    let during = hook::current_mode();
+
+    assert_eq!(
+        hook::hotkey(),
+        (0, 0),
+        "the whole word is the code no keyboard makes"
+    );
+    assert!(!during.hotkey_double_tap, "the flag went down with the key");
+    assert_eq!(
+        taps(hook::Mode {
+            active: true,
+            ..during
+        }),
+        0,
+        "two taps made while choosing a hotkey convert nothing"
+    );
+
+    drop(session);
+
+    assert_eq!(
+        hook::hotkey(),
+        (0x10, hook::DOUBLE_TAP),
+        "the whole word comes back"
+    );
+    assert!(hook::current_mode().hotkey_double_tap);
+
+    hook::set_hotkey(before_word.0, before_word.1);
 }
 
 /// **Т-33а-3, решение 104.3** — вне захвата поле клавиши тоже не притворяется полем ввода.
@@ -23497,8 +24198,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        218,
-        "two hundred and EIGHTEEN identifiers in use since task T-93-2 (вопрос 157): the refusal \
+        220,
+        "two hundred and TWENTY identifiers in use since task T-95-2 (вопрос 159): the line \
+         while a capture waits for the second Shift and the line after the double press arrived \
+         (3232, 3233). Two hundred and eighteen since task T-93-2 (вопрос 157): the refusal \
          of combinations (3041) left and the two lines under the hotkey field arrived (3230, \
          3231). Two hundred and seventeen before it; two hundred and eighteen until task \
          T-81-3 (решение 142.2 п. 5) took `IDS_AUTHOR_VERSION` away, which is the first time \
