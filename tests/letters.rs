@@ -2146,6 +2146,417 @@ fn a_check_box_of_the_wizard_is_repainted_without_an_erase_frame() {
     );
 }
 
+/// The branch of the window procedure that answers a tick of the demonstration — from the
+/// `WM_TIMER` arm of `DEMO_TIMER` to the arm of the wizard's timer — or `None` unless there is
+/// exactly one.
+fn demo_tick_branch(source: &str) -> Option<&str> {
+    let mut heads = source.match_indices("WM_TIMER if wparam.0 == DEMO_TIMER =>");
+    let (start, _) = heads.next()?;
+
+    if heads.next().is_some() {
+        return None;
+    }
+
+    let length = source[start..].find("WM_TIMER if wparam.0 == CAPTURE_TIMER =>")?;
+
+    Some(&source[start..start + length])
+}
+
+/// Whether the tick repaints the demonstration through the door without the erase, and not
+/// through the one with it.
+fn ticks_without_an_erase(branch: &str) -> bool {
+    let code = squeezed_code(branch);
+
+    code.contains("widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO)")
+        && !code.contains("repaint::control(hwnd, IDC_LETTER_DEMO)")
+}
+
+/// **Task T-92-1, decision 156.10 — a tick of the demonstration repaints it without the erase.**
+///
+/// The half of the repair the stage's premise expected to be the whole of it, and the measurement
+/// said otherwise: the erase of this `SS_OWNERDRAW` static paints not a pixel (46 of 46,
+/// `scratchpad-E92\probe-e92-demo-base.log`), so the door neither cures nor changes anything on
+/// the screen — the buffer of [`the_demonstration_is_drawn_in_one_frame`] does. What the door
+/// takes away is 7.7 needless `WM_ERASEBKGND` a second, and the sentry keeps the branch on the door
+/// the switch and the wizard's check boxes already take.
+///
+/// ⚠ Controls: the branch with the call of `e91` is caught, and so are a branch that repaints
+/// nothing and a branch that keeps the erase beside the door.
+#[test]
+fn a_tick_of_the_demonstration_repaints_it_without_an_erase() {
+    let source = letters_module_source();
+    let branch = demo_tick_branch(&source)
+        .expect("the sweep must find exactly one arm of the window procedure for DEMO_TIMER");
+
+    assert!(
+        ticks_without_an_erase(branch),
+        "156.10: a tick of the demonstration repaints it with the erase:\n{branch}"
+    );
+
+    let door = "widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO)";
+    let erase = "widgets::repaint::control(hwnd, IDC_LETTER_DEMO)";
+
+    let of_e91 = branch.replace(door, erase);
+    assert_ne!(
+        of_e91, branch,
+        "the control must change the branch it is made of"
+    );
+    assert!(
+        !ticks_without_an_erase(&of_e91),
+        "the sweep does not see the call of e91 — it cannot fail"
+    );
+
+    let nothing = branch.replace(door, "{}");
+    assert!(
+        !ticks_without_an_erase(&nothing),
+        "the sweep does not see a branch that repaints nothing"
+    );
+
+    assert!(
+        !ticks_without_an_erase(&format!("{branch}\n{erase};")),
+        "the sweep does not see the erase kept beside the door"
+    );
+}
+
+/// Whether the body of the demonstration draws in one frame: grounded first, every paint call
+/// into the buffer of `theme::PaintBuffer` and none into the DC of the message, one blit at the
+/// end — the glyph body's rule of [`draws_in_one_frame`] plus the chip row, which only this body
+/// draws.
+fn the_demonstration_draws_in_one_frame(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    let Some(ground) = code.find("FillRect(target, &rect, brushes.window_bg())") else {
+        return false;
+    };
+
+    let grounded_first = PAINT_CALLS
+        .iter()
+        .chain(["paint_chip_row("].iter())
+        .filter(|call| **call != "BitBlt(")
+        .filter_map(|call| code.find(call))
+        .all(|at| at >= ground);
+
+    draws_in_one_frame(body) && grounded_first && !code.contains("paint_chip_row(dc,")
+}
+
+/// **Task T-92-1, decision 156.10 — the demonstration of «Привет» is drawn in one frame.**
+///
+/// The owner's finding Д2 on a clean machine: «в приветственном окне после установки мигает текст».
+/// `draw_demo` laid its fill, its field and its row with the chip **straight into the DC of the
+/// message**, call by call, for 2.3…8.2 ms a frame, 7.7 frames a second, and the compositor
+/// sampled the window in between: on the owner's screen 63 transient frames of 780 over two turns,
+/// 19 of them a field without a single letter; through the buffer — none
+/// (`scratchpad-E92\probe-e92-screen-*.log`). The cure the wizard's cards got in task Т-33-5 and the
+/// switch in T-71-5, by the owner's word «пусть будет буфер… типовой механизм» (156.10).
+///
+/// ⚠ Controls: a body that paints into the DC of the message, a body without the buffer, a chip row
+/// aimed at the message, and a body whose ground comes after the figure are caught.
+#[test]
+fn the_demonstration_is_drawn_in_one_frame() {
+    let source = letters_module_source();
+    let body = letters_function_body(&source, "unsafe fn draw_demo(")
+        .expect("src\\letters.rs must still declare `draw_demo`");
+
+    assert!(
+        the_demonstration_draws_in_one_frame(body),
+        "156.10: the demonstration must be drawn into theme::PaintBuffer, grounded first, and \
+         blitted once:\n{body}"
+    );
+
+    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
+    assert_ne!(
+        at_the_message, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !the_demonstration_draws_in_one_frame(&at_the_message),
+        "the sweep does not see a paint call aimed at the DC of the message"
+    );
+
+    let unbuffered = body.replace(
+        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
+        "let target = dc;",
+    );
+    assert_ne!(
+        unbuffered, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !the_demonstration_draws_in_one_frame(&unbuffered),
+        "the sweep does not see a body that draws past the buffer"
+    );
+
+    let chips_at_the_message = body.replacen(
+        "paint_chip_row(\n            target,",
+        "paint_chip_row(\n            dc,",
+        1,
+    );
+    assert_ne!(
+        chips_at_the_message, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !the_demonstration_draws_in_one_frame(&chips_at_the_message),
+        "the sweep does not see the chip row aimed at the DC of the message"
+    );
+
+    let fill = "unsafe { FillRect(target, &rect, brushes.window_bg()) };";
+    let ground_last = body
+        .lines()
+        .filter(|line| !line.contains(fill))
+        .chain(["    let _late = 0;", fill])
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_ne!(
+        ground_last, body,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !the_demonstration_draws_in_one_frame(&ground_last),
+        "the sweep does not see the ground laid after the figure"
+    );
+}
+
+/// **Task T-92-1, (г) of TZ-E92 — the second instrument of П3 made a sentry: no erase reaches the
+/// demonstration on a tick, and the counter can see one.**
+///
+/// The Welcome letter is opened by the product's own `letters::show_letter` through the door
+/// `letters::testing::show_letter_from`, **on a desktop of its own** (`CreateDesktopW` +
+/// `SetThreadDesktop`, the road of stage Э85: nothing reaches the screen of the person at the
+/// machine), and a hook of the thread counts the `WM_ERASEBKGND` of the static `IDC_LETTER_DEMO`.
+/// Twelve forged ticks (SEC-05: a forged `WM_TIMER` buys one frame) must bring twelve drawings and
+/// no erase; the positive control — twelve repaints through the door **with** the erase — must
+/// bring twelve erases, so the zero above is the counter's answer and not its blindness.
+#[cfg(feature = "testing")]
+mod the_demonstration_on_a_desktop_of_its_own {
+    use super::{PRODUCT, with_product_strings};
+    use lang_switcher::letters::{self, Letter};
+    use lang_switcher::widgets;
+    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
+    use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CWPSTRUCT, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GetDlgItem,
+        MSG, PM_REMOVE, PeekMessageW, PostMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, WH_CALLWNDPROC, WM_DRAWITEM, WM_ERASEBKGND, WM_TIMER,
+        WS_EX_TOOLWINDOW, WS_POPUP,
+    };
+    use windows::core::{PCWSTR, w};
+
+    #[link(name = "user32", kind = "raw-dylib")]
+    unsafe extern "system" {
+        fn CreateDesktopW(
+            name: *const u16,
+            device: *const u16,
+            devmode: *const core::ffi::c_void,
+            flags: u32,
+            access: u32,
+            attributes: *const core::ffi::c_void,
+        ) -> isize;
+        fn SetThreadDesktop(desktop: isize) -> i32;
+    }
+
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    /// `IDC_LETTER_DEMO` of `app.rc` and `src\letters.rs`.
+    const IDC_LETTER_DEMO: i32 = 1205;
+    /// `DEMO_TIMER` of `src\letters.rs`.
+    const DEMO_TIMER: usize = 1;
+    const TICKS: u32 = 12;
+
+    static DIALOG: AtomicIsize = AtomicIsize::new(0);
+    static DEMO: AtomicIsize = AtomicIsize::new(0);
+    static ERASES: AtomicU32 = AtomicU32::new(0);
+    static DRAWS: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "system" fn count(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            // SAFETY: the documented payload of the hook, read only.
+            let m = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+            let demo = DEMO.load(Ordering::SeqCst);
+
+            if demo != 0 && m.hwnd.0 as isize == demo && m.message == WM_ERASEBKGND {
+                ERASES.fetch_add(1, Ordering::SeqCst);
+            }
+
+            if m.hwnd.0 as isize == DIALOG.load(Ordering::SeqCst)
+                && m.message == WM_DRAWITEM
+                && m.lParam.0 != 0
+            {
+                // SAFETY: the sender owns the struct for the length of the send; read only.
+                let item = unsafe { &*(m.lParam.0 as *const DRAWITEMSTRUCT) };
+
+                if item.CtlID as i32 == IDC_LETTER_DEMO {
+                    DRAWS.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+
+        // SAFETY: forwards the call unchanged.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+
+    /// Serves every message of this thread that is waiting, the paints included.
+    fn pump() {
+        let mut msg = MSG::default();
+
+        // SAFETY: the ordinary pump of this thread, over its own messages.
+        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            // SAFETY: the live message just taken.
+            if unsafe { letters::filter_message(&msg) } {
+                continue;
+            }
+
+            // SAFETY: as above.
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    /// (erases and drawings over the forged ticks, erases over the repaints with the erase)
+    fn measure(module: usize) -> Result<(u32, u32, u32), String> {
+        let name: Vec<u16> = format!("LangSwT921Sentry{}\0", std::process::id())
+            .encode_utf16()
+            .collect();
+
+        // SAFETY: plain values and a NUL-terminated name alive for the call.
+        let desktop = unsafe {
+            CreateDesktopW(
+                name.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                GENERIC_ALL,
+                std::ptr::null(),
+            )
+        };
+
+        if desktop == 0 {
+            return Err(
+                "CreateDesktopW refused — the sentry cannot keep the window off the \
+                        screen, so it does not open it"
+                    .to_owned(),
+            );
+        }
+
+        // SAFETY: this fresh thread owns no window and no hook yet.
+        if unsafe { SetThreadDesktop(desktop) } == 0 {
+            return Err("SetThreadDesktop refused".to_owned());
+        }
+
+        // SAFETY: a hook of this thread, removed below on every path that follows.
+        let hook =
+            unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(count), None, GetCurrentThreadId()) }
+                .map_err(|e| format!("the hook of the thread: {e}"))?;
+
+        // SAFETY: a system class, no parent; destroyed below.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .map_err(|e| format!("a hidden owner: {e}"))?;
+
+        let module = HMODULE(std::ptr::without_provenance_mut(module));
+        let outcome = (|| {
+            let dialog = letters::testing::show_letter_from(owner, module, Letter::Welcome)
+                .ok_or("the Welcome letter did not open")?;
+            // SAFETY: a live window of this thread.
+            let demo = unsafe { GetDlgItem(Some(dialog), IDC_LETTER_DEMO) }
+                .map_err(|_| "the letter has no IDC_LETTER_DEMO")?;
+
+            DIALOG.store(dialog.0 as isize, Ordering::SeqCst);
+            DEMO.store(demo.0 as isize, Ordering::SeqCst);
+
+            // The first paint of a fresh window erases everything once — that is the window
+            // being shown and not a tick, so it is served before the count starts.
+            pump();
+            ERASES.store(0, Ordering::SeqCst);
+            DRAWS.store(0, Ordering::SeqCst);
+
+            for _ in 0..TICKS {
+                // SAFETY: a posted message carrying plain values, to a window of this thread.
+                let _ =
+                    unsafe { PostMessageW(Some(dialog), WM_TIMER, WPARAM(DEMO_TIMER), LPARAM(0)) };
+                pump();
+            }
+
+            let ticked = (ERASES.load(Ordering::SeqCst), DRAWS.load(Ordering::SeqCst));
+
+            ERASES.store(0, Ordering::SeqCst);
+
+            for _ in 0..TICKS {
+                widgets::repaint::control(dialog, IDC_LETTER_DEMO);
+                pump();
+            }
+
+            let control = ERASES.load(Ordering::SeqCst);
+
+            DEMO.store(0, Ordering::SeqCst);
+            DIALOG.store(0, Ordering::SeqCst);
+            // SAFETY: the letter is a window of this thread, destroyed once.
+            let _ = unsafe { DestroyWindow(dialog) };
+
+            Ok::<_, String>((ticked.0, ticked.1, control))
+        })();
+
+        // SAFETY: made above on this thread, each released once.
+        unsafe {
+            let _ = UnhookWindowsHookEx(hook);
+            let _ = DestroyWindow(owner);
+        }
+
+        outcome
+    }
+
+    #[test]
+    fn a_tick_of_the_demonstration_reaches_it_without_a_single_erase() {
+        with_product_strings();
+        let module = *PRODUCT
+            .get()
+            .expect("with_product_strings maps the product image");
+
+        let (erases, draws, control) = std::thread::spawn(move || measure(module))
+            .join()
+            .expect("the measuring thread must not panic")
+            .unwrap_or_else(|why| panic!("{why}"));
+
+        println!(
+            "{TICKS} forged ticks: {erases} erases, {draws} drawings; {TICKS} repaints through the \
+             door with the erase: {control} erases"
+        );
+
+        assert!(
+            draws >= TICKS,
+            "every forged tick must repaint the demonstration — {draws} drawings for {TICKS} ticks, \
+             so the count below would be the count of nothing"
+        );
+        assert_eq!(
+            control, TICKS,
+            "the positive control: the door with the erase erases the static once a repaint — the \
+             counter cannot see erases otherwise"
+        );
+        assert_eq!(
+            erases, 0,
+            "156.10: a tick of the demonstration must not erase the static ({erases} erases over \
+             {TICKS} ticks)"
+        );
+    }
+}
+
 /// The version line of «От автора» says what is installed, and what is available when the feed
 /// names something newer.
 #[test]
