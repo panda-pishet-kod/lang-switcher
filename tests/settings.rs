@@ -130,8 +130,9 @@ fn defaults_match_section_7_field_by_field() {
     // ⚠ **This is the one place the number is written as a literal**, and it is written twice on
     // purpose: everywhere else in this file a file "of today" is stamped
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
-    assert_eq!(config.schema_version, 7);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
+    // Schema 8 — task T-95-1, вопрос 159: `[hotkey] trigger`, the double press of `Shift`.
+    assert_eq!(config.schema_version, 8);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 8);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -139,6 +140,7 @@ fn defaults_match_section_7_field_by_field() {
     assert_eq!(config.general.theme, ThemeSetting::System);
 
     assert_eq!(config.hotkey.key, "Pause");
+    assert_eq!(config.hotkey.trigger, "press");
 
     assert_eq!(config.layouts.mode, LayoutMode::Pair);
     assert_eq!(config.layouts.pair_source, "0x00000409");
@@ -1087,9 +1089,10 @@ fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves
     // lands on the current schema rather than on four. That the ladder is walked to the top and
     // not one step is the thing worth pinning, and the number the file lands on is asserted by
     // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
-    // Task T-93-1 put a fifth rung on top (6 → 7), and the file climbs that one too.
+    // Task T-93-1 put a fifth rung on top (6 → 7), and the file climbs that one too — and task
+    // T-95-1 a sixth (7 → 8, the stamp of `[hotkey] trigger`).
     assert_eq!(
-        config.schema_version, 7,
+        config.schema_version, 8,
         "and it climbed the whole ladder, not one rung of it"
     );
 
@@ -1153,8 +1156,9 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
     // ⚠ Task Т-32-1: a schema 4 file now climbs **two** rungs, 4 → 5 → 6, and the rung this test
     // owns is still the bare stamp of решение 97.3. What the rung above it does to such a file is
     // asserted by `a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new`.
-    // ⚠ Task T-93-1: three rungs now, 4 → 5 → 6 → 7 — the stamp of `[hotkey] modifiers` on top.
-    assert_eq!(config.schema_version, 7, "and that version is seven");
+    // ⚠ Task T-93-1: three rungs now, 4 → 5 → 6 → 7 — the stamp of `[hotkey] modifiers` on top;
+    // task T-95-1: four, the stamp of `[hotkey] trigger` (7 → 8) above it.
+    assert_eq!(config.schema_version, 8, "and that version is eight");
 
     assert!(
         !config.general.enabled,
@@ -1219,8 +1223,9 @@ fn a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new() {
     assert_eq!(outcome, ReadOutcome::Migrated { from: 5 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
     // ⚠ Task T-93-1: the file climbs on past six to the stamp of `[hotkey] modifiers`, which
-    // carries nothing of the letters — what this rung decided arrives at seven untouched.
-    assert_eq!(config.schema_version, 7, "and that version is seven");
+    // carries nothing of the letters — what this rung decided arrives at seven untouched; and on
+    // past seven to the stamp of `[hotkey] trigger` (task T-95-1), which carries nothing either.
+    assert_eq!(config.schema_version, 8, "and that version is eight");
 
     // What the rung carries — the three decisions of the rung, in order.
     assert!(
@@ -14000,6 +14005,7 @@ fn bare(key: &str) -> settings::Hotkey {
     settings::Hotkey {
         key: key.to_owned(),
         modifiers: Vec::new(),
+        trigger: settings::TRIGGER_PRESS.to_owned(),
     }
 }
 
@@ -14008,6 +14014,7 @@ fn combination(modifiers: &[&str], key: &str) -> settings::Hotkey {
     settings::Hotkey {
         key: key.to_owned(),
         modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+        trigger: settings::TRIGGER_PRESS.to_owned(),
     }
 }
 
@@ -14201,12 +14208,14 @@ fn a_build_too_old_for_the_modifiers_reads_the_file_and_never_writes_it_back() {
     // --- 2. the reader too old for the stamp --------------------------------------------------
     let dir = TestDir::new("modifiers_downgrade_meets_the_stamp");
     let newer = CURRENT_SCHEMA_VERSION + 1;
+    // ⚠ Task T-95-1: the field this build does not know was `trigger` until schema 8 made it
+    // known (вопрос 159); any field outside section 7 serves, and the example is another one.
     let original = format!(
         "schema_version = {newer}\n\
          \n\
          [hotkey]\n\
          key = \"F12\"\n\
-         trigger = \"double_tap\"\n"
+         repeat = \"never\"\n"
     );
     let path = write_file(&dir, &original);
 
@@ -14236,7 +14245,7 @@ fn a_build_too_old_for_the_modifiers_reads_the_file_and_never_writes_it_back() {
 
     // --- 3. the control: the same field under a stamp this build knows is lost on the write ---
     let (current, outcome) = Config::from_toml_str(&format!(
-        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F12\"\ntrigger = \"double_tap\"\n"
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F12\"\nrepeat = \"never\"\n"
     ))
     .expect("an unknown field is ignored, not refused");
 
@@ -14248,7 +14257,7 @@ fn a_build_too_old_for_the_modifiers_reads_the_file_and_never_writes_it_back() {
 
     let rewritten = current.to_toml_string().expect("the file must serialise");
     assert!(
-        !rewritten.contains("trigger"),
+        !rewritten.contains("repeat"),
         "a field the schema does not know does not survive a write — which is what the stamp \
          keeps an older build from doing to `modifiers`: {rewritten}"
     );
@@ -14281,7 +14290,10 @@ fn a_file_of_schema_six_is_raised_to_seven_and_its_hotkey_is_the_bare_key() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 6 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 7, "and that version is seven");
+    // ⚠ Task T-95-1: the file climbs on past seven to the stamp of `[hotkey] trigger`, which
+    // carries nothing of the hotkey but its default `press` — what this rung decided arrives at
+    // eight untouched.
+    assert_eq!(config.schema_version, 8, "and that version is eight");
 
     assert_eq!(
         config.hotkey,
@@ -14295,6 +14307,266 @@ fn a_file_of_schema_six_is_raised_to_seven_and_its_hotkey_is_the_bare_key() {
     assert_eq!(config.general.language, Language::He);
     assert!(config.letters.welcome_shown, "and the letters' memory");
     assert_eq!(config.letters.last_seen_version, "0.91.0");
+}
+
+// -----------------------------------------------------------------------------------------
+// Task T-95-1, вопрос 159 — `[hotkey] trigger`: the double press of `Shift` in the file
+// -----------------------------------------------------------------------------------------
+
+/// A `[hotkey]` written out whole — the key, the modifiers and the trigger (task T-95-1).
+fn hotkey_of(key: &str, modifiers: &[&str], trigger: &str) -> settings::Hotkey {
+    settings::Hotkey {
+        key: key.to_owned(),
+        modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+        trigger: trigger.to_owned(),
+    }
+}
+
+/// **The double press of `Shift` is written, read back, published as `Shift` with the flag, and
+/// named «Shift, Shift»** — task T-95-1, §0 п. 4–5 of the TZ. ⭐ A red «before» of the task: on the
+/// base the build knows no name `Shift`, and the file means `Pause`.
+#[test]
+fn the_double_press_is_written_read_back_and_published_as_shift_with_the_flag() {
+    let double = settings::Hotkey::double_shift();
+    assert_eq!(double, hotkey_of("Shift", &[], "double_tap"));
+
+    let config = Config {
+        hotkey: double.clone(),
+        ..Config::default()
+    };
+    let text = config.to_toml_string().expect("the file must serialise");
+    println!("{text}");
+
+    for line in [
+        "key = \"Shift\"",
+        "modifiers = []",
+        "trigger = \"double_tap\"",
+    ] {
+        assert!(text.contains(line), "the file carries `{line}`: {text}");
+    }
+
+    let (back, outcome) = Config::from_toml_str(&text).expect("the written file must parse");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(back.hotkey, double);
+    assert_eq!(
+        back.hotkey.binding(),
+        Some((0x10, hook::DOUBLE_TAP)),
+        "the start-up publishes VK_SHIFT with the flag (app::publish_configuration)"
+    );
+    assert_eq!(
+        settings::Hotkey::from_binding(0x10, hook::DOUBLE_TAP),
+        Some(double.clone()),
+        "and the flag reads back to the same section"
+    );
+    assert_eq!(settings::effective_hotkey_name(&double), "Shift, Shift");
+    assert_eq!(
+        settings::hotkey_note(&double),
+        None,
+        "nothing to warn about"
+    );
+
+    // Written by hand, in any case and with blanks — the rule `hook::vk_from_name` reads names by.
+    let by_hand = hotkey_of(" shift ", &[], "Double_Tap");
+    assert_eq!(by_hand.binding(), Some((0x10, hook::DOUBLE_TAP)));
+    assert_eq!(settings::effective_hotkey_name(&by_hand), "Shift, Shift");
+}
+
+/// **`trigger` is `press` by default and always written** — task T-95-1: every file before schema
+/// 8 has no such field, and its hotkey is pressed; a capture of a key or a combination writes
+/// `press` too.
+#[test]
+fn the_trigger_is_press_by_default_and_always_written() {
+    let defaults = Config::default()
+        .to_toml_string()
+        .expect("the defaults must serialise");
+    assert!(
+        defaults.contains("trigger = \"press\""),
+        "the default writes the trigger: {defaults}"
+    );
+    assert_eq!(Config::default().hotkey.trigger, settings::TRIGGER_PRESS);
+
+    let older = Config::from_toml_str(&format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F9\"\n"
+    ))
+    .expect("a file without the trigger must parse")
+    .0;
+    assert_eq!(older.hotkey, bare("F9"));
+    assert_eq!(older.hotkey.binding(), Some((0x78, 0)));
+
+    assert_eq!(
+        settings::Hotkey::from_binding(0x7B, hook::MOD_CTRL).map(|hotkey| hotkey.trigger),
+        Some(settings::TRIGGER_PRESS.to_owned()),
+        "a combination is pressed"
+    );
+}
+
+/// **The double press is lawful with `Shift` alone; anything else leaves the default `Pause`** —
+/// task T-95-1, §0 п. 4: the fate of an unknown name (stage 1). `Ctrl` and `Alt` twice are not
+/// assigned (157.17), a single `Shift` is no hotkey (157.1), and a word outside the closed set of
+/// `trigger` is no trigger.
+#[test]
+fn a_double_press_of_anything_but_shift_alone_leaves_the_default() {
+    for unlawful in [
+        hotkey_of("F12", &[], "double_tap"),
+        hotkey_of("Ctrl", &[], "double_tap"),
+        hotkey_of("Alt", &[], "double_tap"),
+        hotkey_of("Shift", &["Ctrl"], "double_tap"),
+        hotkey_of("Shift", &[], "press"),
+        hotkey_of("Shift", &[], "triple_tap"),
+        hotkey_of("Pause", &[], "hold"),
+        hotkey_of("Pause", &[], ""),
+    ] {
+        assert_eq!(unlawful.binding(), None, "{unlawful:?}");
+        assert_eq!(
+            settings::effective_hotkey_name(&unlawful),
+            "Pause",
+            "{unlawful:?}: the help names the key that really acts"
+        );
+        assert_eq!(
+            settings::hotkey_note(&unlawful),
+            Some(settings::IDS_NOTE_UNKNOWN_KEY),
+            "{unlawful:?}: and the settings window says why"
+        );
+    }
+
+    // The controls: the lawful two.
+    assert_eq!(hotkey_of("Pause", &[], "press").binding(), Some((0x13, 0)));
+    assert_eq!(
+        hotkey_of("Shift", &[], "double_tap").binding(),
+        Some((0x10, hook::DOUBLE_TAP))
+    );
+
+    // And nothing but `Shift` alone reads back out of the flag.
+    assert_eq!(
+        settings::Hotkey::from_binding(0x10, hook::DOUBLE_TAP | hook::MOD_CTRL),
+        None
+    );
+    assert_eq!(settings::Hotkey::from_binding(0x7B, hook::DOUBLE_TAP), None);
+}
+
+/// The last schema a build that had never heard of `[hotkey] trigger` could have stamped — task
+/// T-95-1, вопрос 159: `0.93.0` and every build before it.
+const LAST_SCHEMA_WITHOUT_TRIGGER: u32 = 7;
+
+/// **Task T-95-1 — the stamp of the trigger: a build too old for it reads the file and never writes
+/// it back** — the shape of `a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining`
+/// (Э29), for a new field as at schema 7.
+///
+/// 1. What this build writes for the double press carries the trigger and a stamp no build before
+///    it had — and the const block makes lowering the schema a build that does not compile.
+/// 2. A reader too old for the stamp, modelled by this build meeting `CURRENT + 1` and a field it
+///    does not know: the file is read, `Forbidden` to be written, and its bytes stay put. (The real
+///    `0.93.0` was measured on the base by a probe — посылка П4: `FromNewerSchema { version: 8 }`,
+///    the hotkey `Pause`, the bytes untouched — `scratchpad-E95\premises-base-618ef27.log`.)
+/// 3. The control — what the stamp prevents: the same unknown field under the stamp this build
+///    knows is read as current, and the next write drops it. That is what `0.93.0` would do to
+///    `trigger` if the schema had stayed 7.
+#[test]
+fn a_downgrade_meets_the_stamp_of_the_trigger_and_refuses_to_write_rather_than_dropping_it() {
+    // --- 1. what this build writes for the double press ---------------------------------------
+    let ours = Config {
+        hotkey: settings::Hotkey::double_shift(),
+        ..Config::default()
+    };
+    let text = ours.to_toml_string().expect("the file must serialise");
+
+    assert!(text.contains("trigger = \"double_tap\""), "{text}");
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_SCHEMA_WITHOUT_TRIGGER,
+            "a file of the double press must be stamped with a schema no build before it had — \
+             without it such a build reads the file as its own and drops the trigger on its next write"
+        );
+    }
+    assert!(
+        text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+        "and the stamp is in the file: {text}"
+    );
+
+    // --- 2. the reader too old for the stamp --------------------------------------------------
+    let dir = TestDir::new("trigger_downgrade_meets_the_stamp");
+    let newer = CURRENT_SCHEMA_VERSION + 1;
+    let original = format!(
+        "schema_version = {newer}\n\
+         \n\
+         [hotkey]\n\
+         key = \"Shift\"\n\
+         modifiers = []\n\
+         trigger = \"double_tap\"\n\
+         repeat = \"never\"\n"
+    );
+    let path = write_file(&dir, &original);
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: newer })
+    );
+    assert_eq!(SavePolicy::for_read(&outcome), SavePolicy::Forbidden);
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original,
+        "the bytes stay where they were"
+    );
+    assert_eq!(dir.entries(), [CONFIG_FILE_NAME]);
+    assert_eq!(config.hotkey, settings::Hotkey::double_shift());
+
+    // --- 3. the control: an unknown field under the stamp this build knows is lost on the write --
+    let (current, outcome) = Config::from_toml_str(&format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"Shift\"\nrepeat = \"never\"\n"
+    ))
+    .expect("an unknown field is ignored, not refused");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    let rewritten = current.to_toml_string().expect("the file must serialise");
+    assert!(
+        !rewritten.contains("repeat"),
+        "a field the schema does not know does not survive a write — which is what the stamp \
+         keeps `0.93.0` from doing to `trigger`: {rewritten}"
+    );
+}
+
+/// **The rung of the trigger — task T-95-1: a schema 7 file climbs to 8, and its hotkey is
+/// pressed.** `step_7_to_8` is a stamp: an absent `trigger` already means `press`, which is what a
+/// file of schema 7 meant by its hotkey. The other fields are deliberately not the defaults, so
+/// that damage would show.
+#[test]
+fn a_file_of_schema_seven_is_raised_to_eight_and_its_hotkey_is_pressed() {
+    let dir = TestDir::new("trigger_schema_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 7\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"he\"\n\
+         \n\
+         [hotkey]\n\
+         key = \"F12\"\n\
+         modifiers = [\"Ctrl\"]\n\
+         \n\
+         [letters]\n\
+         welcome_shown = true\n\
+         last_seen_version = \"0.93.0\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 7 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 7 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.schema_version, 8, "and that version is eight");
+
+    assert_eq!(config.hotkey, combination(&["Ctrl"], "F12"));
+    assert_eq!(config.hotkey.trigger, settings::TRIGGER_PRESS);
+    assert!(
+        !config.general.enabled,
+        "the rung carried the switch through"
+    );
+    assert_eq!(config.general.language, Language::He);
+    assert!(config.letters.welcome_shown, "and the letters' memory");
+    assert_eq!(config.letters.last_seen_version, "0.93.0");
 }
 
 /// **Задача Т-33а-4** — пределы оболочки для шара уведомления, по всем четырнадцати языкам.
@@ -18433,6 +18705,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
         &mut hook::HotkeyState::default(),
         press,
         || 0,
+        || 0,
     );
     println!("before the capture: {before:?}");
     assert!(before.fire_hotkey, "the hotkey fires when nothing is armed");
@@ -18457,6 +18730,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
             &mut hook::HotkeyState::default(),
             press,
             || 0,
+            || 0,
         );
         println!("during the capture: {during:?}");
 
@@ -18474,6 +18748,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
             hook::current_mode(),
             &mut hook::HotkeyState::default(),
             press,
+            || 0,
             || 0,
         );
         println!("with the active flag re-published under it: {clobbered:?}");
@@ -18503,6 +18778,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
         hook::current_mode(),
         &mut hook::HotkeyState::default(),
         press,
+        || 0,
         || 0,
     );
     println!("after the capture: {after:?}");
@@ -25141,9 +25417,11 @@ fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
     // The schema itself did not move for FR-15 — the whole point of the paragraph above. ⚠ Task
     // T-93-1 moved it, for a reason of its own: the one rung above the 6 FR-15 shipped on is the
     // stamp of `[hotkey] modifiers` (вопрос 157), and the number here says so rather than six.
+    // ⚠ Task T-95-1 moved it once more: the stamp of `[hotkey] trigger` (вопрос 159) is the second.
     assert_eq!(
-        CURRENT_SCHEMA_VERSION, 7,
-        "FR-15 не поднимал схему (была 6); 7 — штамп `[hotkey] modifiers` Э93, и только он"
+        CURRENT_SCHEMA_VERSION, 8,
+        "FR-15 не поднимал схему (была 6); 7 — штамп `[hotkey] modifiers` Э93, 8 — штамп \
+         `[hotkey] trigger` Э95, и только они"
     );
 
     // And the far side of that promise: a file stamped above the current schema *would* be read

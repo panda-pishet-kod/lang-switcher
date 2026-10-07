@@ -12835,6 +12835,7 @@ fn combination_config(path: &Path, modifiers: &[&str]) -> Result<crate::config::
         hotkey: Hotkey {
             key: "F12".to_owned(),
             modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+            ..Hotkey::default()
         },
         ..Config::default()
     };

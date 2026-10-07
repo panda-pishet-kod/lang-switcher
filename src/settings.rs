@@ -207,7 +207,13 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// schema 6 file meant — and the number buys the other direction once more: a build that has
 /// never heard of the list meets a stamp it does not know, reads the file and leaves it alone,
 /// instead of dropping the list on its next write.
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+///
+/// Version 8 arrived with **вопрос 159** and task T-95-1: `[hotkey] trigger`, the double press of
+/// `Shift`. [`step_7_to_8`] is a bare stamp again — an absent trigger is `press`, which is what a
+/// schema 7 hotkey was — and the number is spent on `0.93.0` and the builds before it: they meet a
+/// stamp they do not know and leave the file alone instead of dropping the trigger (measured on the
+/// base — посылка П4 of stage Э95: `FromNewerSchema`, the hotkey `Pause`, the bytes untouched).
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -781,6 +787,16 @@ pub struct Hotkey {
     /// unknown key.
     #[serde(default)]
     pub modifiers: Vec<String>,
+    /// **How the key is pressed — task T-95-1, вопрос 159**: [`TRIGGER_PRESS`], the default and
+    /// what every file before schema 8 means, or [`TRIGGER_DOUBLE_TAP`] — two taps of `Shift` in a
+    /// row (157.17: the double press is `Shift`'s alone). Always written, as `modifiers = []` is.
+    ///
+    /// A string for the reason [`Self::key`] is one: a word nobody knows must not cost the whole
+    /// document. [`Self::binding`] answers `None` for it and the **whole** hotkey stays the default
+    /// `Pause` — the fate of an unknown key name; and `double_tap` is lawful with `key = "Shift"`
+    /// and no modifiers only, with anything else it is the same `None`.
+    #[serde(default = "default_hotkey_trigger")]
+    pub trigger: String,
 }
 
 impl Default for Hotkey {
@@ -788,6 +804,7 @@ impl Default for Hotkey {
         Self {
             key: default_hotkey_key(),
             modifiers: Vec::new(),
+            trigger: default_hotkey_trigger(),
         }
     }
 }
@@ -799,9 +816,28 @@ impl Hotkey {
     /// `None` is read by every caller as «the default of section 7 acts»: the start-up publication
     /// leaves `Pause` in place (`app::publish_configuration`), the help names `Pause`
     /// ([`effective_hotkey_name`]) and the settings window says why ([`hotkey_note`]).
+    ///
+    /// ⭐ **The double press of `Shift` — task T-95-1, вопрос 159**: `trigger = "double_tap"` with
+    /// `key = "Shift"` and no modifiers means `VK_SHIFT` with the flag `hook::DOUBLE_TAP` and
+    /// nothing else; the trigger with anything else, and a word outside its closed set, is `None`
+    /// like an unknown name — the whole hotkey stays `Pause`. A single `Shift` is no hotkey
+    /// (157.1): `hook::vk_from_name` knows no modifier, so `key = "Shift"` that is pressed is `None`
+    /// too. Names are read the way key names are, in any case and with the blanks around ignored.
     pub fn binding(&self) -> Option<(u16, u16)> {
-        let vk = crate::hook::vk_from_name(&self.key)?;
         let modifiers = crate::hook::modifiers_from_names(&self.modifiers)?;
+        let trigger = self.trigger.trim();
+
+        if trigger.eq_ignore_ascii_case(TRIGGER_DOUBLE_TAP) {
+            let lawful = modifiers == 0 && self.key.trim().eq_ignore_ascii_case(DOUBLE_TAP_KEY);
+
+            return lawful.then_some((VK_SHIFT.0, crate::hook::DOUBLE_TAP));
+        }
+
+        if !trigger.eq_ignore_ascii_case(TRIGGER_PRESS) {
+            return None;
+        }
+
+        let vk = crate::hook::vk_from_name(&self.key)?;
 
         Some((vk, modifiers))
     }
@@ -812,7 +848,16 @@ impl Hotkey {
     ///
     /// `None` for a key section 7 has no name for, and for a set with a bit no hotkey carries —
     /// `hook::MOD_WIN` is held, never written.
+    ///
+    /// The flag `hook::DOUBLE_TAP` reads back to [`Self::double_shift`] — with a `Shift` and
+    /// nothing else beside it (task T-95-1); with anything else it is `None`.
     pub fn from_binding(vk: u16, modifiers: u16) -> Option<Self> {
+        if modifiers & crate::hook::DOUBLE_TAP != 0 {
+            let shift = [VK_SHIFT.0, VK_LSHIFT.0, VK_RSHIFT.0].contains(&vk);
+
+            return (shift && modifiers == crate::hook::DOUBLE_TAP).then(Self::double_shift);
+        }
+
         let known = crate::hook::HOTKEY_MODIFIERS
             .iter()
             .fold(0, |set, (_, bit)| set | bit);
@@ -828,9 +873,30 @@ impl Hotkey {
                 .filter(|(_, bit)| modifiers & bit != 0)
                 .map(|(name, _)| (*name).to_owned())
                 .collect(),
+            trigger: default_hotkey_trigger(),
         })
     }
+
+    /// The double press of `Shift` as section 7 stores it — `key = "Shift"`, `modifiers = []`,
+    /// `trigger = "double_tap"` (task T-95-1, вопрос 159): what a capture of two taps writes.
+    pub fn double_shift() -> Self {
+        Self {
+            key: DOUBLE_TAP_KEY.to_owned(),
+            modifiers: Vec::new(),
+            trigger: TRIGGER_DOUBLE_TAP.to_owned(),
+        }
+    }
 }
+
+/// `[hotkey] trigger` of a hotkey that is pressed — the default of section 7 (task T-95-1).
+pub const TRIGGER_PRESS: &str = "press";
+
+/// `[hotkey] trigger` of the double press of `Shift` — task T-95-1, вопрос 159.
+pub const TRIGGER_DOUBLE_TAP: &str = "double_tap";
+
+/// The one key a double press is assigned to — 157.17, «Только Shift»: the name section 7 stores
+/// for it, and each half of the name the windows show, «Shift, Shift» (task T-95-1).
+pub const DOUBLE_TAP_KEY: &str = "Shift";
 
 /// Section `[layouts]` of section 7, with the defaults confirmed by decision 19.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1313,6 +1379,12 @@ fn default_true() -> bool {
 /// Serde default for `hotkey.key`.
 fn default_hotkey_key() -> String {
     "Pause".to_owned()
+}
+
+/// Serde default for `hotkey.trigger` — [`TRIGGER_PRESS`]: a file before schema 8 has no such
+/// field, and its hotkey is pressed (task T-95-1).
+fn default_hotkey_trigger() -> String {
+    TRIGGER_PRESS.to_owned()
 }
 
 /// Serde default for `layouts.pair_source`, en-US (decision 19).
@@ -1871,6 +1943,9 @@ impl Config {
         if self.schema_version < 7 {
             step_6_to_7(self);
         }
+        if self.schema_version < 8 {
+            step_7_to_8(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -2034,6 +2109,21 @@ fn step_5_to_6(config: &mut Config) {
 /// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
 fn step_6_to_7(config: &mut Config) {
     config.schema_version = 7;
+}
+
+/// Raises a file from schema 7 to schema 8 — **вопрос 159**, task T-95-1: `[hotkey] trigger`.
+///
+/// **The stamp and nothing else**, as [`step_6_to_7`] one rung down: a schema 7 file carries no
+/// `trigger`, and its absence reads as `press` — the hotkey a schema 7 file meant. There is nothing
+/// to raise.
+///
+/// The number is spent in the other direction once more. `0.93.0` has no `deny_unknown_fields`
+/// either, so under an unchanged stamp it would read a file of the double press, find a key named
+/// `Shift` it does not know, answer to `Pause` — and drop the trigger the next time it writes the
+/// file. Under a stamp it has never seen, it reads the file and leaves it alone
+/// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
+fn step_7_to_8(config: &mut Config) {
+    config.schema_version = 8;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -5750,10 +5840,18 @@ fn types_a_character(vk: u16, modifiers: u16) -> bool {
 /// hand-written `f12` or `Break` is shown as `F12` and `Pause`. This is the one function every
 /// window shows the hotkey through: the field of the settings window, the help of «О программе»,
 /// the letters and the chip of their demonstration (`letters.rs`).
+///
+/// ⭐ **The double press — task T-95-1, вопрос 159: «Shift, Shift»**, the key twice with
+/// [`DOUBLE_TAP_JOINER`] between, in every language alike (the names of keys are not translated):
+/// the field after a capture and at rest, «О программе» and the letters show this one string.
 pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
     let Some((vk, modifiers)) = hotkey.binding() else {
         return default_hotkey_key();
     };
+
+    if modifiers & crate::hook::DOUBLE_TAP != 0 {
+        return [DOUBLE_TAP_KEY, DOUBLE_TAP_KEY].join(DOUBLE_TAP_JOINER);
+    }
 
     let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
     let mut name = modifier_label(modifiers);
@@ -5768,6 +5866,10 @@ pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
 
 /// What stands between the parts of a hotkey's name — « + », task T-93-1 (the mock-up of 157.5).
 pub const HOTKEY_JOINER: &str = " + ";
+
+/// What stands between the two taps in the name of the double press — «, », task T-95-1 (the
+/// mock-up of 157.18: «Shift, Shift»).
+pub const DOUBLE_TAP_JOINER: &str = ", ";
 
 /// The modifiers of a set, by name, in the canonical order and joined — `Ctrl + Alt` — or empty
 /// for a bare key (task T-93-1). The head of [`effective_hotkey_name`].

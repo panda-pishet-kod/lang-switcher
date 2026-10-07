@@ -148,6 +148,32 @@ pub const MOD_WIN: u16 = 0x0008;
 pub const HOTKEY_MODIFIERS: [(&str, u16); 3] =
     [("Ctrl", MOD_CTRL), ("Alt", MOD_ALT), ("Shift", MOD_SHIFT)];
 
+/// **The double press of `Shift` — the flag in the word of the hotkey**, task T-95-1, вопрос 159.
+///
+/// Not a modifier: the way the hotkey is pressed. It rides the high half of [`HOTKEY`] beside the
+/// modifier set — bit 15, where the set uses bits 0…3 — so that one store publishes the key, the set
+/// and the way together ([`set_hotkey`]), and no reader matches a new way against an old key: the
+/// shape task T-93-1 gave the modifiers. With the flag up, [`Mode::hotkey_double_tap`] is `true`, the
+/// key of the word is `VK_SHIFT` and is never compared as a key — the hotkey is two taps of it.
+///
+/// A capture of the settings window publishes [`set_hotkey`] over the whole word, so the flag goes
+/// down with the key for as long as a capture is armed and comes back with it (посылка П9).
+pub const DOUBLE_TAP: u16 = 0x8000;
+
+/// **The window of the double press of `Shift`, in milliseconds** — task T-95-1, вопрос 159.
+///
+/// ⚠ **The owner's decision 157.16, not a measurement.** The count of taps over a day of typing was
+/// cancelled — «выбрать какое-то умеренное значение и если будут поступать жалобы от пользователей
+/// программы, тогда уже его корректировать» — and four hundred is the middle between three hundred
+/// and the five hundred of the double click of Windows (`GetDoubleClickTime` on the owner's machine).
+/// Complaints of users move it, by a release: there is no field for it in the window or in the file
+/// (157.16).
+///
+/// One number for the three limits of [`Taps`]: a tap is held no longer than this, the second tap
+/// begins no later than this after the first began, and the capture of the settings window waits
+/// this long for the second.
+pub const DOUBLE_TAP_MS: u32 = 400;
+
 /// Message the callback posts to the input thread's window when the hotkey of FR-02 has been
 /// recognised. **This is the interface task T-03-2 attaches to.**
 ///
@@ -313,6 +339,13 @@ pub struct Mode {
     /// Published together with [`Self::hotkey_vk`] as one word ([`set_hotkey`]), so the two are
     /// never read from two different publications.
     pub hotkey_modifiers: u16,
+    /// **The hotkey is the double press of `Shift` — task T-95-1, вопрос 159**: two taps of
+    /// `Shift` within [`DOUBLE_TAP_MS`] start what a press of the hotkey starts, and no key is
+    /// compared with [`Self::hotkey_vk`] at all — `Pause` is then an ordinary key.
+    ///
+    /// The flag [`DOUBLE_TAP`] of the same word as the key and its modifiers, so the three are
+    /// never read from two different publications either.
+    pub hotkey_double_tap: bool,
     /// **The foreground process is one the user excluded — FR-84**, task T-52-3.
     ///
     /// `true` means the hotkey is not ours here: it is passed to the application untouched and
@@ -358,6 +391,118 @@ pub struct HotkeyState {
     /// a `Ctrl` pressed while `F12` repeats), and an application must see a whole keystroke or
     /// none of it.
     pub hotkey_ordinary: bool,
+    /// **The `Shift` held right now — task T-95-1**: the code the callback saw go down
+    /// (`VK_LSHIFT`, `VK_RSHIFT`, or the neutral `VK_SHIFT` another program may send), zero when
+    /// none is. What tells the auto-repeat of a held `Shift` from a new press: the system repeats a
+    /// key as a run of presses with no release between them.
+    ///
+    /// Kept only while the hotkey is the double press, like the two fields below it.
+    pub shift_held: u16,
+    /// The taps of the double press made so far — [`Taps`], task T-95-1.
+    pub taps: Taps,
+    /// **The count of mouse buttons pressed when the pair began** — `watchdog::mouse_flushes`,
+    /// FR-13, task T-95-1. Read again on every release that may end a tap: a button pressed
+    /// anywhere between the first press and the second release — `Shift` + a click, the selection
+    /// of text by mouse — leaves the number moved and the pair unmade.
+    pub taps_mouse: u32,
+}
+
+/// **The double press of `Shift`, as a rule of times — task T-95-1, вопрос 159.**
+///
+/// One body for the two places that need it: the callback, which acts on a double press
+/// ([`classify`]), and the capture of the settings window, which assigns one (task T-95-2) — so the
+/// field takes exactly the pair the hook answers to.
+///
+/// The rule — §0 п. 2 of the TZ of stage Э95, the owner's 157.16 and 157.17:
+///
+/// * a **tap** is a `Shift` that goes down and comes up within [`DOUBLE_TAP_MS`], with nothing else
+///   pressed in between — what «nothing else» is, the caller says: [`Self::interrupt`] for a key,
+///   and the `clean` of [`Self::press`] and [`Self::release`] for what only it can see (`Ctrl`,
+///   `Alt` or `Win` held at the press; a mouse button since the pair began);
+/// * the **double press** is a second tap that begins within [`DOUBLE_TAP_MS`] of the beginning of
+///   the first, and it is complete on the **release** of the second. The pair is then over: two
+///   more taps are the next pair, which returns the word as a second `Pause` would.
+///
+/// The times are the times of the events — `KBDLLHOOKSTRUCT.time` in the hook, the time of the
+/// window message in the capture — and a distance between two of them is taken **forwards only**:
+/// an event stamped earlier than the one before it reads as far away and answers «no pair», the
+/// safe answer. (The lesson of Э73 — an unsigned difference of two ticks is not «how long ago» — is
+/// about a rule that must accept either order; this one must not.)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Taps {
+    /// When the `Shift` that is down went down — while that press may still be a tap.
+    pressed_at: Option<u32>,
+    /// When the first tap of a pair began — while the second may still come.
+    first_at: Option<u32>,
+}
+
+impl Taps {
+    /// No press and no pair — `const`, so that the thread-local of the callback starts on it.
+    pub const NONE: Self = Self {
+        pressed_at: None,
+        first_at: None,
+    };
+
+    /// A `Shift` went down — a new press, not the repeat of a held one. `clean`: nothing that
+    /// breaks a tap is held at that moment (the hook asks for `Ctrl`, `Alt` and `Win` —
+    /// `Alt+Shift` switches the layout and is no tap).
+    pub fn press(&mut self, time: u32, clean: bool) {
+        if !clean {
+            *self = Self::NONE;
+            return;
+        }
+
+        // The second tap has to begin within the window of the first; a press later than that
+        // is no second tap, and it may be the first of the next pair.
+        if self.first_at.is_some_and(|first| !within(first, time)) {
+            self.first_at = None;
+        }
+
+        self.pressed_at = Some(time);
+    }
+
+    /// A `Shift` came up. `clean`: nothing that breaks the pair happened that only the caller can
+    /// see. `true` when this release completes a double press — and the pair is then over.
+    pub fn release(&mut self, time: u32, clean: bool) -> bool {
+        let tap = self
+            .pressed_at
+            .take()
+            .filter(|&pressed| clean && within(pressed, time));
+
+        let Some(pressed) = tap else {
+            // Not a tap — held too long, broken, or a release with no press of ours behind it —
+            // and a pair has no room for anything but taps.
+            self.first_at = None;
+            return false;
+        };
+
+        if self.first_at.take().is_some() {
+            return true;
+        }
+
+        self.first_at = Some(pressed);
+        false
+    }
+
+    /// Something else was pressed: the press is no tap, and the pair is broken.
+    pub fn interrupt(&mut self) {
+        *self = Self::NONE;
+    }
+
+    /// Whether a `Shift` is down that may still be a tap.
+    pub fn pressing(&self) -> bool {
+        self.pressed_at.is_some()
+    }
+
+    /// Whether one tap is made and the second may still come.
+    pub fn waiting(&self) -> bool {
+        self.first_at.is_some()
+    }
+}
+
+/// Whether `time` is within [`DOUBLE_TAP_MS`] of `start` — forwards only, see [`Taps`].
+fn within(start: u32, time: u32) -> bool {
+    time.wrapping_sub(start) <= DOUBLE_TAP_MS
 }
 
 /// The result of [`classify`]: what to do with the stroke, and whether a hotkey press has
@@ -492,9 +637,14 @@ pub fn is_emergency_key(vk: u16, message: u32) -> bool {
 ///
 /// `held` answers which modifiers the user is holding — [`MOD_CTRL`], [`MOD_ALT`], [`MOD_SHIFT`]
 /// and [`MOD_WIN`] — and is **asked at most once, and only for the first press of the hotkey's
-/// own key when the hotkey is a combination** (task T-93-1, вопрос 157). An ordinary letter never
-/// asks it, and neither does a bare hotkey: the system calls behind it are the callback's to
-/// make, on the one stroke that can need them — the shape FR-96 already has.
+/// own key when the hotkey is a combination** (task T-93-1, вопрос 157) **or for a new press of
+/// `Shift` when the hotkey is its double press** (task T-95-1). An ordinary letter never asks it,
+/// and neither does a bare hotkey: the system calls behind it are the callback's to make, on the
+/// one stroke that can need them — the shape FR-96 already has.
+///
+/// `mouse` answers how many mouse buttons have been pressed so far — `watchdog::mouse_flushes`,
+/// FR-13 — and is asked **only on the events of `Shift` while the hotkey is its double press**,
+/// at most once each: when a pair begins, and on a release that may end a tap (task T-95-1).
 ///
 /// The order of the tests is fixed by the requirements and is not free:
 ///
@@ -511,6 +661,7 @@ pub fn classify(
     state: &mut HotkeyState,
     key: KeyEvent,
     held: impl FnOnce() -> u16,
+    mouse: impl FnOnce() -> u32,
 ) -> Outcome {
     // FR-99. Buffering is disarmed and "весь ввод пропускается без обработки"; the hotkey is
     // not suppressed either, because a fail-safe program is not an active one and FR-95 only
@@ -539,6 +690,15 @@ pub fn classify(
     if !mode.active {
         *state = HotkeyState::default();
         return Outcome::PASS;
+    }
+
+    // ⭐ **The double press of `Shift` — task T-95-1, вопрос 159.** No key is the hotkey then:
+    // every stroke is an ordinary one — passed on, recorded, probed — `Pause` among them, and the
+    // taps of `Shift` are counted on the way (see [`double_tap_stroke`]). Above the comparison of
+    // the code on purpose: the word carries `VK_SHIFT`, and a neutral `VK_SHIFT` some program
+    // sends must not be swallowed as a hotkey.
+    if mode.hotkey_double_tap {
+        return double_tap_stroke(mode, state, key, held, mouse);
     }
 
     if key.vk != mode.hotkey_vk {
@@ -681,6 +841,115 @@ fn ordinary_stroke(key: KeyEvent) -> Outcome {
         probe_layout: is_layout_probe(key),
         ..Outcome::PASS
     }
+}
+
+/// Whether `vk` is a `Shift` — either side, or the neutral code another program may send. The
+/// double press counts them as one key (157.17: «левый и правый Shift — одна клавиша»).
+fn is_shift(vk: u16) -> bool {
+    vk == VK_LSHIFT.0 || vk == VK_RSHIFT.0 || vk == VK_SHIFT.0
+}
+
+/// One stroke while the hotkey is **the double press of `Shift`** — task T-95-1, вопрос 159.
+///
+/// Every stroke is an ordinary one ([`ordinary_stroke`]): **nothing is suppressed** — the programs
+/// see both taps (FR-95 has nothing to say about a key that types nothing), the buffer records
+/// `Shift` as the modifier it is (посылка П1: no flush, the session of the last row of FR-10 stays
+/// open), and the release of `Shift` keeps its layout probe (FR-21). What this adds is the count of
+/// taps, and on the release that completes a pair the outcome says «fire» beside «pass» (посылка
+/// П5: the callback posts on `fire_hotkey` whatever the decision is).
+///
+/// # The rule of a tap — §0 п. 2 of the TZ of Э95
+///
+/// * a new press of `Shift` — not the auto-repeat of a held one ([`HotkeyState::shift_held`]) —
+///   asks which modifiers are held, the way a combination asks (task T-93-1): `Ctrl`, `Alt` or
+///   `Win` held make it no tap (`Alt+Shift` switches the layout);
+/// * the count of mouse buttons is read when a pair begins and again on a release that may end a
+///   tap: `Shift` and a click select text, and a button pressed anywhere in the pair unmakes it;
+/// * any other key pressed — the other `Shift` included — breaks the press and the pair: two taps
+///   in a row («подряд», 159.20) have nothing between them. A release of another key breaks
+///   nothing: a letter typed before the `Shift` may come up after it went down;
+/// * the times are `KBDLLHOOKSTRUCT.time`, as everything in this module; the rule of times is
+///   [`Taps`].
+///
+/// # NFR-01
+///
+/// A letter costs a comparison of three codes and a store of the empty [`Taps`] — no call, no
+/// read; an event of `Shift` costs at most one question about the modifiers (on a new press) and
+/// one relaxed load of the mouse count. The press of a hotkey that is pressed (`trigger = "press"`)
+/// does not come here at all.
+///
+/// # FR-84
+///
+/// In an excluded process the hotkey is the application's (task T-52-3), and so is a double press:
+/// the pair is counted as anywhere, and it fires nothing.
+fn double_tap_stroke(
+    mode: Mode,
+    state: &mut HotkeyState,
+    key: KeyEvent,
+    held: impl FnOnce() -> u16,
+    mouse: impl FnOnce() -> u32,
+) -> Outcome {
+    let fire = match (is_shift(key.vk), key.edge) {
+        (true, Edge::Down) => {
+            shift_pressed(state, key, held, mouse);
+            false
+        }
+        (true, Edge::Up) => shift_released(state, key, mouse),
+        (false, Edge::Down) => {
+            state.taps.interrupt();
+            false
+        }
+        (false, Edge::Up) => false,
+    };
+
+    Outcome {
+        fire_hotkey: fire && !mode.hotkey_yields,
+        ..ordinary_stroke(key)
+    }
+}
+
+/// A press of `Shift` while the hotkey is the double press — see [`double_tap_stroke`].
+fn shift_pressed(
+    state: &mut HotkeyState,
+    key: KeyEvent,
+    held: impl FnOnce() -> u16,
+    mouse: impl FnOnce() -> u32,
+) {
+    if state.shift_held == key.vk {
+        // The auto-repeat of the `Shift` already down: no new press.
+        return;
+    }
+
+    if state.shift_held != 0 {
+        // The other `Shift` while one is down: another key pressed in the middle of a tap.
+        state.shift_held = key.vk;
+        state.taps.interrupt();
+        return;
+    }
+
+    state.shift_held = key.vk;
+
+    let clean = held() & (MOD_CTRL | MOD_ALT | MOD_WIN) == 0;
+
+    state.taps.press(key.time, clean);
+
+    // A press that may be a tap with no tap before it begins a pair: the mouse count of the pair
+    // is taken here, and every release of the pair compares with it.
+    if state.taps.pressing() && !state.taps.waiting() {
+        state.taps_mouse = mouse();
+    }
+}
+
+/// A release of `Shift` while the hotkey is the double press — `true` when it completes the pair.
+fn shift_released(state: &mut HotkeyState, key: KeyEvent, mouse: impl FnOnce() -> u32) -> bool {
+    if state.shift_held == key.vk {
+        state.shift_held = 0;
+    }
+
+    // The mouse is read only for a release that can end a tap.
+    let clean = state.taps.pressing() && mouse() == state.taps_mouse;
+
+    state.taps.release(key.time, clean)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -886,6 +1155,9 @@ static HOTKEY_TARGET: AtomicUsize = AtomicUsize::new(NO_HANDLE);
 /// two stores would match the new key against the old modifiers — `F12` taken for the hotkey
 /// in the instant `Pause` became `Ctrl+F12`. One store writes both halves and one load reads
 /// both ([`set_hotkey`], [`hotkey`]).
+///
+/// Task T-95-1 puts the third thing into the same word: the flag [`DOUBLE_TAP`], bit 15 of the
+/// high half, for the hotkey that is the double press of `Shift` — for the same reason.
 static HOTKEY: AtomicU32 = AtomicU32::new(DEFAULT_HOTKEY_VK as u32);
 
 /// `general.enabled` as the callback sees it — FR-90, FR-95. Published by the UI thread.
@@ -979,6 +1251,9 @@ thread_local! {
             hotkey_down: false,
             hotkey_passed: false,
             hotkey_ordinary: false,
+            shift_held: 0,
+            taps: Taps::NONE,
+            taps_mouse: 0,
         })
     };
 }
@@ -1291,6 +1566,9 @@ pub fn is_installed() -> bool {
 
 /// Publishes the hotkey of FR-02 — the key and its modifier set, **in one store** (task T-93-1,
 /// вопрос 157). Called by the UI thread; see [`install`].
+///
+/// Since task T-95-1 the set may carry the flag [`DOUBLE_TAP`] — the double press of `Shift`,
+/// published as `VK_SHIFT` with the flag and nothing else (`settings::Hotkey::binding`).
 pub fn set_hotkey(vk: u16, modifiers: u16) {
     HOTKEY.store(
         u32::from(vk) | (u32::from(modifiers) << 16),
@@ -1440,14 +1718,17 @@ pub fn emergency_terminate_failed() -> bool {
 
 /// The [`Mode`] the callback would use right now.
 pub fn current_mode() -> Mode {
-    // Task T-93-1: the key and its modifiers out of **one** load — see [`HOTKEY`].
-    let (hotkey_vk, hotkey_modifiers) = hotkey();
+    // Task T-93-1: the key and its modifiers out of **one** load — see [`HOTKEY`]. Task T-95-1:
+    // and the flag of the double press, out of the same half as the modifiers (посылка П7 — a
+    // flag left in the set would make every combination unequal to the set held).
+    let (hotkey_vk, set) = hotkey();
 
     Mode {
         active: is_active(),
         fail_safe: fail_safe(),
         hotkey_vk,
-        hotkey_modifiers,
+        hotkey_modifiers: set & !DOUBLE_TAP,
+        hotkey_double_tap: set & DOUBLE_TAP != 0,
         // ⚠ **A fourth relaxed load on the path of every keystroke — task T-52-3, and it is
         // paid here on purpose.** It could be read inside the hotkey branch alone, which would
         // cost an ordinary letter nothing at all; what that would cost instead is the property
@@ -2377,8 +2658,9 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     }
 
     // FR-21, task T-03-3c. One `PostMessageW` and nothing else, on the same terms as the one
-    // above: `classify` decided, this posts. The two are mutually exclusive in practice — the
-    // hotkey of FR-02 is not a modifier — so no stroke ever costs both.
+    // above: `classify` decided, this posts. The two are mutually exclusive for a hotkey that is
+    // pressed — its key is not a modifier — and since task T-95-1 one stroke costs both: the
+    // release of `Shift` that completes a double press, posted in this order, the conversion first.
     if outcome.probe_layout {
         post_layout_probe();
     }
@@ -2411,7 +2693,13 @@ fn decide_here(key: KeyEvent) -> Outcome {
 
     HOTKEY_STATE.with(|cell| {
         let mut state = cell.get();
-        let outcome = classify(mode, &mut state, key, held_modifiers);
+        let outcome = classify(
+            mode,
+            &mut state,
+            key,
+            held_modifiers,
+            crate::watchdog::mouse_flushes,
+        );
         cell.set(state);
         outcome
     })

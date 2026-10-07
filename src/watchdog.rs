@@ -1172,6 +1172,18 @@ fn message_tick() -> u32 {
     (unsafe { windows::Win32::UI::WindowsAndMessaging::GetMessageTime() }) as u32
 }
 
+/// The mouse buttons pressed so far — [`MOUSE_FLUSHES`] alone, for the callback of the hook — task
+/// T-95-1, вопрос 159.
+///
+/// The double press of `Shift` is two taps with no mouse button pressed between them: `Shift` and a
+/// click select text, and two of those must not convert it. The callback reads this number when a
+/// pair begins and again on a release that may end a tap (`hook::classify`), and the pair is made
+/// only if it has not moved. One relaxed load — what NFR-01 allows the callback here; [`counters`]
+/// reads thirteen and is for the dump.
+pub fn mouse_flushes() -> u32 {
+    MOUSE_FLUSHES.load(Ordering::Relaxed)
+}
+
 /// What the subscriptions of this module have done so far.
 pub fn counters() -> Counters {
     Counters {
