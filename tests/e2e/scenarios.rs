@@ -1658,6 +1658,20 @@ fn notepad_repeat_held(ctx: &Context, modifiers: &[u16]) -> Result<String, Strin
 
         layout::ensure(hwnd, layout::US, Duration::from_secs(5))
             .map_err(|error| format!("исходная раскладка: {error}"))?;
+
+        // ⚠ **The field is emptied first — debt Э93-Б-3, stage Э96.** Notepad of Windows 11 opens
+        // with the text of its previous session, and the first run of this measurement read
+        // «приветghbdtn» where it waited for `ghbdtn` and stopped before the first press. The same
+        // three steps as step 3 of `replacement`: select all, delete, and wait until the field
+        // reads empty — a condition, never a clock.
+        input::chord(&[VK_CONTROL.0], VK_A.0, &target)
+            .map_err(|error| format!("Ctrl+A: {error}"))?;
+        input::tap(VK_DELETE.0, &target).map_err(|error| format!("Delete: {error}"))?;
+        wait::until(wait::TEXT_TIMEOUT, || {
+            read_field(&content).filter(String::is_empty)
+        })
+        .ok_or_else(|| format!("поле не очистилось: {:?}", read_field(&content)))?;
+
         input::type_text(TYPED, &target).map_err(|error| format!("ввод {TYPED:?}: {error}"))?;
         wait::until(wait::TEXT_TIMEOUT, || {
             read_field(&content).filter(|text| text == TYPED)
@@ -12807,6 +12821,14 @@ fn witnessed(title: &str) -> Option<Witnessed> {
 /// `SC_KEYMENU` is counted and **not passed on**: the question is whether the system asked the
 /// window to enter its menu, and a window that then entered a modal menu loop would hold the
 /// keystrokes that follow. Everything else goes to the form's own procedure.
+///
+/// ⚠ **`-WarningAction SilentlyContinue` on the `Add-Type` — debt Э93-Б-2, stage Э96.** The type
+/// defines no public member of its own, and Windows PowerShell says so with a warning, printed into
+/// the output the bench shares with its children — in the console's OEM code page, so the bench's
+/// UTF-8 log carried one line of cp866 («ПРЕДУПРЕЖДЕНИЕ: В созданном типе не определены общие
+/// методы или свойства.» once decoded). The warning says nothing the bench needs; measured with the
+/// type alone, no window: 1 line not UTF-8 → 0, the type loads either way
+/// (`scratchpad-E96\witness-probe\`).
 fn launch_witness_window() -> Result<App, String> {
     let scratch = scratch_dir("witness");
     let script = scratch.join("witness-window.ps1");
@@ -12831,7 +12853,7 @@ public class WitnessForm : Form {
     }
 }
 "@
-Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition $code
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition $code -WarningAction SilentlyContinue
 $form = New-Object WitnessForm
 $form.Width = 520
 $form.Height = 200

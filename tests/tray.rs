@@ -201,6 +201,18 @@ fn locale_turn() -> MutexGuard<'static, ()> {
 ///
 /// Held by every test that calls `toggle_state`, whether or not it cares about the counter: a
 /// lock only one side takes is not a lock.
+///
+/// ⭐ **And by every test that applies a configuration — debt Э92-Б-1, stage Э96.**
+/// `tray::apply_settings_via` ends in `app::publish_configuration`, which hands `general.enabled`
+/// to `hook::set_active` — process-wide, and **disarmed until the first publication** of a test
+/// process (`hook::DEFAULT_ACTIVE` is `false`). So the first «Применить» of the binary flips
+/// `hook::is_active` from `false` to `true` once, and
+/// `a_forged_fail_safe_message_leaves_no_configuration_behind`, which reads the flag before and
+/// after its own work, went red whenever that flip fell between its two readings: 1 run of 7 in
+/// a battery of Э92, 2 of 3 000 direct runs under contention here — and 100 of 100 with the window
+/// between the readings widened to 40 ms, 0 of 100 once the six tests that publish took this turn
+/// (`scratchpad-E96\race-tray-probe-widened-*.log`). Taken **after** `LOCALE`, like every pair in
+/// this file.
 static TOGGLE: Mutex<()> = Mutex::new(());
 
 /// Takes the turn of [`TOGGLE`], ignoring poisoning: a panic in one test must fail that test and
@@ -4757,6 +4769,11 @@ fn a_tray_with_no_appdata_lives_by_the_configuration_of_a_first_run() {
 // parallel threads — `a_forged_fail_safe_message_leaves_no_configuration_behind` reads
 // `hook::is_active()` before and after its own work. Changing anything else is free; changing
 // that one field would be reaching across into another test.
+//
+// ⛔ **Leaving the field alone was not enough — debt Э92-Б-1, stage Э96.** A test process starts
+// with the hook disarmed (`hook::DEFAULT_ACTIVE` is `false`), so the first publication flips the
+// flag even when the field says what it always says. Every test here that publishes takes
+// [`TOGGLE`] for that reason; see the note at the lock.
 // ---------------------------------------------------------------------------------------
 
 /// The configuration the user is supposed to have produced in the dialog: the autostart turned
@@ -4805,6 +4822,8 @@ fn a_refused_run_key_keeps_the_autostart_of_the_file_and_stores_every_other_chan
     // Task Т-31-1: `dialog_produced` asks for `language = "en"`, and «Применить» now publishes
     // the locale — see [`LOCALE`].
     let _locale = locale_turn();
+    // Debt Э92-Б-1: «Применить» publishes `general.enabled` too — see [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-refused");
     let _attached = attach_ui(&window, &home);
@@ -4904,6 +4923,8 @@ fn a_refused_run_key_keeps_the_autostart_of_the_file_and_stores_every_other_chan
 fn an_accepted_run_key_stores_the_autostart_the_user_asked_for() {
     // Task Т-31-1 — see [`LOCALE`].
     let _locale = locale_turn();
+    // Debt Э92-Б-1 — see [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-accepted");
     let _attached = attach_ui(&window, &home);
@@ -4960,6 +4981,8 @@ fn an_accepted_run_key_stores_the_autostart_the_user_asked_for() {
 fn a_refused_apply_leaves_the_two_readings_of_fr93_independent() {
     // Task Т-31-1 — see [`LOCALE`].
     let _locale = locale_turn();
+    // Debt Э92-Б-1 — see [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("registry-disagreement");
     let _attached = attach_ui(&window, &home);
@@ -5019,6 +5042,8 @@ fn a_refused_apply_leaves_the_two_readings_of_fr93_independent() {
 fn the_step_back_and_the_save_policy_of_t_13_6_answer_different_questions() {
     // Task Т-31-1 — see [`LOCALE`].
     let _locale = locale_turn();
+    // Debt Э92-Б-1 — see [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
     let home = TestDir::new("refused-and-forbidden");
 
@@ -5413,6 +5438,8 @@ fn a_build_that_may_not_register_itself_asks_the_registry_nothing() {
 #[test]
 fn the_run_key_follows_only_a_configuration_a_person_stands_behind() {
     let _locale = locale_turn();
+    // Debt Э92-Б-1: «Применить» publishes `general.enabled` too — see [`TOGGLE`].
+    let _turn = toggle_turn();
     let window = TestWindow::new();
 
     let current = format!(
@@ -5883,6 +5910,8 @@ fn the_start_of_the_product_hands_the_guard_and_the_real_registry_to_the_seam() 
 #[test]
 fn applying_a_configuration_publishes_its_language_into_the_running_process() {
     let _locale = product_strings(Language::Ru);
+    // Debt Э92-Б-1: «Применить» publishes `general.enabled` too — see [`TOGGLE`].
+    let _turn = toggle_turn();
 
     let window = TestWindow::new();
     let home = TestDir::new("live-language");
