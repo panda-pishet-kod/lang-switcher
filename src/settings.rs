@@ -201,7 +201,13 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// FR-102. The first rung since [`step_1_to_2`] that is **not** a bare stamp — it has a
 /// decision to carry, and [`step_5_to_6`] spells it out: a machine that is being updated has
 /// already been used, so it must not meet «Привет», and it must meet «Что нового» exactly once.
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+///
+/// Version 7 arrived with **вопрос 157** and task T-93-1: `[hotkey] modifiers`, the combinations
+/// `Ctrl`/`Alt`/`Shift` + a key. [`step_6_to_7`] is a bare stamp — an absent list is the bare key a
+/// schema 6 file meant — and the number buys the other direction once more: a build that has
+/// never heard of the list meets a stamp it does not know, reads the file and leaves it alone,
+/// instead of dropping the list on its next write.
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -764,13 +770,65 @@ pub struct Hotkey {
     /// module must not grow a key table that would then exist in two places.
     #[serde(default = "default_hotkey_key")]
     pub key: String,
+    /// **The modifiers held with the key — task T-93-1, вопрос 157.** Empty — the default and
+    /// what every file before schema 7 means — is the bare key.
+    ///
+    /// Names from the closed set `Ctrl`, `Alt`, `Shift` (`hook::HOTKEY_MODIFIERS`); the program
+    /// writes them in that order, and a capture never writes anything else. Kept as strings for
+    /// the reason [`Self::key`] is: the file is also written by hand, a name nobody knows must not
+    /// cost the whole document, and the reading is `hook`'s — [`Self::binding`] answers `None`
+    /// for an unknown name and the **whole** hotkey stays the default `Pause`, exactly as for an
+    /// unknown key.
+    #[serde(default)]
+    pub modifiers: Vec<String>,
 }
 
 impl Default for Hotkey {
     fn default() -> Self {
         Self {
             key: default_hotkey_key(),
+            modifiers: Vec::new(),
         }
+    }
+}
+
+impl Hotkey {
+    /// The code and the modifier set this hotkey means — task T-93-1, вопрос 157 — or `None` when
+    /// the key or one of the modifiers is a name this build does not know.
+    ///
+    /// `None` is read by every caller as «the default of section 7 acts»: the start-up publication
+    /// leaves `Pause` in place (`app::publish_configuration`), the help names `Pause`
+    /// ([`effective_hotkey_name`]) and the settings window says why ([`hotkey_note`]).
+    pub fn binding(&self) -> Option<(u16, u16)> {
+        let vk = crate::hook::vk_from_name(&self.key)?;
+        let modifiers = crate::hook::modifiers_from_names(&self.modifiers)?;
+
+        Some((vk, modifiers))
+    }
+
+    /// The `[hotkey]` that means `vk` with `modifiers` — task T-93-1: the key under the name
+    /// section 7 stores ([`key_name`]) and the modifiers **in the canonical order** `Ctrl`, `Alt`,
+    /// `Shift` (`hook::HOTKEY_MODIFIERS`), whatever order they were pressed in.
+    ///
+    /// `None` for a key section 7 has no name for, and for a set with a bit no hotkey carries —
+    /// `hook::MOD_WIN` is held, never written.
+    pub fn from_binding(vk: u16, modifiers: u16) -> Option<Self> {
+        let known = crate::hook::HOTKEY_MODIFIERS
+            .iter()
+            .fold(0, |set, (_, bit)| set | bit);
+
+        if modifiers & !known != 0 {
+            return None;
+        }
+
+        Some(Self {
+            key: key_name(vk)?,
+            modifiers: crate::hook::HOTKEY_MODIFIERS
+                .iter()
+                .filter(|(_, bit)| modifiers & bit != 0)
+                .map(|(name, _)| (*name).to_owned())
+                .collect(),
+        })
     }
 }
 
@@ -1810,6 +1868,9 @@ impl Config {
         if self.schema_version < 6 {
             step_5_to_6(self);
         }
+        if self.schema_version < 7 {
+            step_6_to_7(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -1957,6 +2018,22 @@ fn step_5_to_6(config: &mut Config) {
     config.letters.welcome_shown = true;
     config.letters.last_seen_version = String::new();
     config.schema_version = 6;
+}
+
+/// Raises a file from schema 6 to schema 7 — **вопрос 157**, task T-93-1: `[hotkey] modifiers`.
+///
+/// **The stamp and nothing else, and that is the whole decision.** A schema 6 file carries no
+/// `modifiers`, and its absence reads as the empty list — the bare key, which is exactly what a
+/// schema 6 hotkey was. There is nothing to raise.
+///
+/// The number is spent in the other direction, as [`step_3_to_4`]'s was. There is no
+/// `deny_unknown_fields` in this module, so a build that has never heard of the list would read a
+/// file of the combinations as one of its own, answer to the bare key, and — under an unchanged
+/// stamp — drop the list the next time it writes the file (on «Применить», on the date of the
+/// letters). Under a stamp it has never seen, it reads the file and leaves it alone
+/// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
+fn step_6_to_7(config: &mut Config) {
+    config.schema_version = 7;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -4104,10 +4181,10 @@ const NO_HOTKEY_VK: u16 = 0;
 /// # What is suspended, and why by two different switches
 ///
 /// **The one that matters is the hotkey code.** Arming publishes [`NO_HOTKEY_VK`] through
-/// [`crate::hook::set_hotkey_vk`] — the interface this task is given for the hotkey — and
-/// dropping publishes back exactly what stood there before. No press can equal a code no
-/// keyboard produces, so nothing is converted and nothing is suppressed for as long as the
-/// capture is armed.
+/// [`crate::hook::set_hotkey`] — the interface this task is given for the hotkey — and
+/// dropping publishes back exactly what stood there before, the key and its modifiers in one
+/// store (task T-93-1). No press can equal a code no keyboard produces, so nothing is converted
+/// and nothing is suppressed for as long as the capture is armed.
 ///
 /// `hook::set_active(false)` is published as well, and it is deliberately **not** what the
 /// suspension rests on.
@@ -4138,9 +4215,11 @@ const NO_HOTKEY_VK: u16 = 0;
 /// panic (FR-98, FR-99), and a capture that swallowed a panic would leave the program with no
 /// hotkey at all and no way back short of a restart.
 pub struct CaptureSession {
-    /// `[hotkey] key` as it stood when the capture was armed — what «отмена» puts back.
-    previous_key: String,
-    /// The code the callback was comparing against when the capture was armed.
+    /// `[hotkey]` as it stood when the capture was armed — what «отмена» puts back: the key and,
+    /// since task T-93-1, the modifiers held with it.
+    previous: Hotkey,
+    /// The hotkey the callback was comparing against when the capture was armed — the code and
+    /// its modifier set, which `hook` publishes as one word (task T-93-1).
     ///
     /// ⚠ The only value this session remembers since task T-36-6. There used to be a second —
     /// `hook::is_active()` as it stood at arming — and it was put back in `Drop`; both halves went
@@ -4149,15 +4228,15 @@ pub struct CaptureSession {
     /// message of being taken, and putting it back at the end of a capture wrote a value older
     /// than the one the program already had. What the flag must equal after a capture is
     /// `tray.enabled()`, and that is published by the procedure itself.
-    published_vk: u16,
+    published: (u16, u16),
 }
 
 impl CaptureSession {
     /// Arms a capture and suspends the hotkey for its duration.
-    pub fn arm(previous_key: String) -> Self {
-        let published_vk = crate::hook::hotkey_vk();
+    pub fn arm(previous: Hotkey) -> Self {
+        let published = crate::hook::hotkey();
 
-        crate::hook::set_hotkey_vk(NO_HOTKEY_VK);
+        crate::hook::set_hotkey(NO_HOTKEY_VK, 0);
 
         // ⚠ Task T-36-6 left this call exactly where it was and took away only the belief about
         // it: the flag is cleared, and `app::window_proc` publishes `tray.enabled()` back over it
@@ -4166,31 +4245,35 @@ impl CaptureSession {
         crate::hook::set_active(false);
 
         Self {
-            previous_key,
-            published_vk,
+            previous,
+            published,
         }
     }
 
-    /// The key name to go back to if the capture is cancelled.
-    pub fn previous_key(&self) -> &str {
-        &self.previous_key
+    /// The hotkey to go back to if the capture is cancelled — the key and its modifiers.
+    pub fn previous(&self) -> &Hotkey {
+        &self.previous
     }
 
-    /// The hotkey code the callback will be given back when this capture ends.
-    pub fn published_vk(&self) -> u16 {
-        self.published_vk
+    /// The hotkey the callback will be given back when this capture ends — the code and its
+    /// modifier set.
+    pub fn published(&self) -> (u16, u16) {
+        self.published
     }
 }
 
 impl Drop for CaptureSession {
-    /// Gives the hotkey code back — and **only** it, since task T-36-6.
+    /// Gives the hotkey back — and **only** it, since task T-36-6: the code and its modifiers, in
+    /// one store (task T-93-1).
     ///
     /// `hook::set_active` is not touched here: the value it must hold after a capture is
     /// `tray.enabled()`, which `app::window_proc` publishes after every message the UI thread
     /// sees, and writing back a copy taken at arming would put a staler value than the one the
     /// program already has.
     fn drop(&mut self) {
-        crate::hook::set_hotkey_vk(self.published_vk);
+        let (vk, modifiers) = self.published;
+
+        crate::hook::set_hotkey(vk, modifiers);
     }
 }
 
@@ -5569,12 +5652,29 @@ pub fn is_text_key(vk: u16) -> bool {
 /// decision of what to say is this function's; which language to say it in belongs to
 /// [`text`], and the two are separated so that a test can check the decision without a resource
 /// and check the resource without the decision.
-pub fn hotkey_note(key: &str) -> Option<u16> {
-    match crate::hook::vk_from_name(key) {
+pub fn hotkey_note(hotkey: &Hotkey) -> Option<u16> {
+    match hotkey.binding() {
         None => Some(IDS_NOTE_UNKNOWN_KEY),
-        Some(vk) if is_text_key(vk) => Some(IDS_NOTE_TEXT_KEY),
+        Some((vk, modifiers)) if types_a_character(vk, modifiers) => Some(IDS_NOTE_TEXT_KEY),
         Some(_) => None,
     }
+}
+
+/// Whether `vk` pressed with `modifiers` types a character — task T-93-1, **157.10** (вариант 1
+/// until the owner's word).
+///
+/// A text key ([`is_text_key`]) types with nothing held and with `Shift` — a capital, a symbol —
+/// and with `Ctrl` and `Alt` together, which is `AltGr`: the program's own FR-10 records both as
+/// text (`buffer::Recorder::record`, the command row stands aside for `AltGr`), and on many
+/// layouts `AltGr` is where the letters of a language live (`ą`, `ę`, `ł`; `@` and `€`). With
+/// `Ctrl` alone, `Alt` alone, or either of them with `Shift`, the key is a command and types
+/// nothing — FR-10 throws such a stroke away as one.
+fn types_a_character(vk: u16, modifiers: u16) -> bool {
+    use crate::hook::{MOD_ALT, MOD_CTRL};
+
+    let command = modifiers & (MOD_CTRL | MOD_ALT);
+
+    is_text_key(vk) && (command == 0 || command == MOD_CTRL | MOD_ALT)
 }
 
 /// The name of the key the program **actually answers to** — task Т-23-4, решение 82.5.
@@ -5591,11 +5691,41 @@ pub fn hotkey_note(key: &str) -> Option<u16> {
 /// telling a person the truth about their own configuration is the point.
 ///
 /// Public so a test can call the very function the window calls.
-pub fn effective_hotkey_name(key: &str) -> String {
-    match crate::hook::vk_from_name(key) {
-        Some(_) => key.to_owned(),
-        None => default_hotkey_key(),
+///
+/// ⭐ **One string for a combination — task T-93-1, вопрос 157.** `Ctrl + Alt + Shift + F12`: the
+/// modifiers in the canonical order `Ctrl`, `Alt`, `Shift` whatever order the file lists them in,
+/// [`HOTKEY_JOINER`] between, and the key under the name the program writes ([`key_name`]) — so a
+/// hand-written `f12` or `Break` is shown as `F12` and `Pause`. This is the one function every
+/// window shows the hotkey through: the field of the settings window, the help of «О программе»,
+/// the letters and the chip of their demonstration (`letters.rs`).
+pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
+    let Some((vk, modifiers)) = hotkey.binding() else {
+        return default_hotkey_key();
+    };
+
+    let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
+    let mut name = modifier_label(modifiers);
+
+    if !name.is_empty() {
+        name.push_str(HOTKEY_JOINER);
     }
+
+    name.push_str(&key);
+    name
+}
+
+/// What stands between the parts of a hotkey's name — « + », task T-93-1 (the mock-up of 157.5).
+pub const HOTKEY_JOINER: &str = " + ";
+
+/// The modifiers of a set, by name, in the canonical order and joined — `Ctrl + Alt` — or empty
+/// for a bare key (task T-93-1). The head of [`effective_hotkey_name`].
+pub fn modifier_label(modifiers: u16) -> String {
+    crate::hook::HOTKEY_MODIFIERS
+        .iter()
+        .filter(|(_, bit)| modifiers & bit != 0)
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(HOTKEY_JOINER)
 }
 
 /// Shows the settings dialog of FR-92, modally, and returns when it closes.
@@ -12816,7 +12946,7 @@ fn relabel_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // The key name is not a string of the interface; the note under it is — FR-94, and it is
     // also what a capture writes into. A capture cannot be armed here: `apply_now` cancels one
     // before it publishes, and on `WM_INITDIALOG` there is nothing to cancel.
-    show_hotkey(hwnd, &state.working.hotkey.key);
+    show_hotkey(hwnd, &state.working.hotkey);
 
     show_layout_note(hwnd, state);
     show_log_dir(hwnd);
@@ -14033,10 +14163,13 @@ thread_local! {
     static HOTKEY_FIELD_PROC: Cell<WNDPROC> = const { Cell::new(None) };
 }
 
-/// Puts the key name and the note that belongs to it into the two controls of the section.
-fn show_hotkey(hwnd: HWND, key: &str) {
-    set_text(hwnd, IDC_HOTKEY, key);
-    set_note(hwnd, &hotkey_note(key).map_or_else(String::new, text));
+/// Puts the hotkey's name and the note that belongs to it into the two controls of the section.
+///
+/// The name is [`effective_hotkey_name`] since task T-93-1 — `Ctrl + F12` for a combination, and
+/// the default that really acts for a name this build does not know, with the note saying so.
+fn show_hotkey(hwnd: HWND, hotkey: &Hotkey) {
+    set_text(hwnd, IDC_HOTKEY, &effective_hotkey_name(hotkey));
+    set_note(hwnd, &hotkey_note(hotkey).map_or_else(String::new, text));
 }
 
 /// Puts one line into the note under the hotkey field **and makes it appear**.
@@ -14298,7 +14431,7 @@ unsafe fn toggle_capture(hwnd: HWND) {
 /// ⚠ The field is **not** focused here — [`toggle_capture`] does that after this borrow ends;
 /// see the ⚠ there.
 fn arm_capture(hwnd: HWND, state: &mut DialogState<'_>) {
-    state.capture = Some(CaptureSession::arm(state.working.hotkey.key.clone()));
+    state.capture = Some(CaptureSession::arm(state.working.hotkey.clone()));
 
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));
     // Решение 82.6: the invitation stands **in the field**, where the key name was — the field
@@ -14339,13 +14472,13 @@ fn cancel_capture(hwnd: HWND, state: &mut DialogState<'_>) {
         return;
     };
 
-    let previous = session.previous_key().to_owned();
+    let previous = session.previous().clone();
 
     drop(session);
 
-    state.working.hotkey.key = previous;
+    state.working.hotkey = previous;
 
-    show_hotkey(hwnd, &state.working.hotkey.key);
+    show_hotkey(hwnd, &state.working.hotkey);
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
@@ -14358,9 +14491,15 @@ fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, name: String) {
     // Ends the capture and publishes the callback's previous `general.enabled` back.
     state.capture = None;
 
-    state.working.hotkey.key = name;
+    // Task T-93-1: a captured key is a bare key until the capture learns combinations (task
+    // T-93-2), so modifiers a hand-written file carried do not survive it — `F8` taken over a
+    // file's `Ctrl` must not become `Ctrl+F8`.
+    state.working.hotkey = Hotkey {
+        key: name,
+        modifiers: Vec::new(),
+    };
 
-    show_hotkey(hwnd, &state.working.hotkey.key);
+    show_hotkey(hwnd, &state.working.hotkey);
     set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
 }
 
@@ -16608,7 +16747,7 @@ pub fn show_about_dialog(
     instance: HINSTANCE,
     setting: ThemeSetting,
     version: Option<(u16, u16, u16, u16)>,
-    hotkey: &str,
+    hotkey: &Hotkey,
 ) -> windows::core::Result<bool> {
     if about_is_open() || dialog_is_open() {
         return Ok(false);

@@ -116,12 +116,37 @@ pub const INJECTED_SIGNATURE: usize = 0x4C53_575F_494E_4A01;
 ///
 /// `Pause`, from section 7 of SPEC (`[hotkey] key = "Pause"`) and FR-92. It is a *default*
 /// and not the setting itself: [`install`] must not read a file (NFR-08), so the hook starts
-/// on this value and [`set_hotkey_vk`] replaces it as soon as the UI thread has the
+/// on this value and [`set_hotkey`] replaces it as soon as the UI thread has the
 /// configuration in hand. See [`install`] for why that split exists.
 pub const DEFAULT_HOTKEY_VK: u16 = VK_PAUSE.0;
 
 /// Virtual-key code of the emergency combination of FR-96 — `Ctrl+Alt+Shift+F12`.
 pub const EMERGENCY_VK: u16 = VK_F12.0;
+
+/// `Ctrl` in the modifier set of a hotkey — **вопрос 157, task T-93-1**. Either key: the left and
+/// the right `Ctrl` are one modifier here, as they are for FR-96.
+pub const MOD_CTRL: u16 = 0x0001;
+
+/// `Alt` in the modifier set of a hotkey, either key — task T-93-1. `AltGr` is the right `Alt`
+/// with a `Ctrl` the keyboard adds itself, so it reads as both.
+pub const MOD_ALT: u16 = 0x0002;
+
+/// `Shift` in the modifier set of a hotkey, either key — task T-93-1.
+pub const MOD_SHIFT: u16 = 0x0004;
+
+/// `Win`, either key — **held, never assigned**, task T-93-1.
+///
+/// No hotkey carries it: the capture refuses it (`settings::Refusal::Reserved`) and section 7 has
+/// no name for it. It exists for the other side of the comparison — the set the user is
+/// *holding* — so that a `Win` held over `Ctrl+F12` makes a set no hotkey can equal, which is the
+/// «ни при зажатом `Win`» of вопрос 157.
+pub const MOD_WIN: u16 = 0x0008;
+
+/// The modifiers `[hotkey] modifiers` of section 7 can name, by the names it names them with, **in
+/// the one order the program writes and shows them** — `Ctrl`, `Alt`, `Shift` (task T-93-1,
+/// вопрос 157). A closed set: [`modifiers_from_names`] answers `None` for any other name.
+pub const HOTKEY_MODIFIERS: [(&str, u16); 3] =
+    [("Ctrl", MOD_CTRL), ("Alt", MOD_ALT), ("Shift", MOD_SHIFT)];
 
 /// Message the callback posts to the input thread's window when the hotkey of FR-02 has been
 /// recognised. **This is the interface task T-03-2 attaches to.**
@@ -282,6 +307,12 @@ pub struct Mode {
     pub fail_safe: bool,
     /// Virtual-key code of the hotkey of FR-02.
     pub hotkey_vk: u16,
+    /// **The modifiers the hotkey carries — task T-93-1, вопрос 157**: a set of [`MOD_CTRL`],
+    /// [`MOD_ALT`] and [`MOD_SHIFT`], zero for a bare key.
+    ///
+    /// Published together with [`Self::hotkey_vk`] as one word ([`set_hotkey`]), so the two are
+    /// never read from two different publications.
+    pub hotkey_modifiers: u16,
     /// **The foreground process is one the user excluded — FR-84**, task T-52-3.
     ///
     /// `true` means the hotkey is not ours here: it is passed to the application untouched and
@@ -317,6 +348,16 @@ pub struct HotkeyState {
     /// leaves it holding a key it never saw go down; a passed press whose release was swallowed
     /// leaves it holding one for ever.
     pub hotkey_passed: bool,
+    /// **Whether the press this hold began with was not the hotkey at all** — task T-93-1,
+    /// вопрос 157: the key of a combination pressed with another set of modifiers held (`F12`
+    /// alone, `Ctrl+Shift+F12` or `Win+Ctrl+F12` while the hotkey is `Ctrl+F12`).
+    ///
+    /// Such a hold is an ordinary keystroke from its press to its release — passed on and
+    /// recorded like any other key — and it is decided once, on the press, for the reason
+    /// [`Self::hotkey_passed`] is: the modifiers move during a hold (a `Ctrl` let go before `F12`,
+    /// a `Ctrl` pressed while `F12` repeats), and an application must see a whole keystroke or
+    /// none of it.
+    pub hotkey_ordinary: bool,
 }
 
 /// The result of [`classify`]: what to do with the stroke, and whether a hotkey press has
@@ -442,12 +483,18 @@ pub fn is_emergency_key(vk: u16, message: u32) -> bool {
     vk == EMERGENCY_VK && matches!(edge_of(message), Some(Edge::Down))
 }
 
-/// The whole decision, as a function of its three arguments and of nothing else.
+/// The whole decision, as a function of its four arguments and of nothing else.
 ///
 /// One effect, and it is deliberate: at the point where the stroke has been established to be
 /// the user's own text, the stroke is handed to [`crate::buffer::record`] — task T-03-2, and
 /// see the comment at that line for why the point is exactly there. Everything else here is a
 /// comparison. No Win32, no global, no allocation, nothing that can block (NFR-01 to NFR-05).
+///
+/// `held` answers which modifiers the user is holding — [`MOD_CTRL`], [`MOD_ALT`], [`MOD_SHIFT`]
+/// and [`MOD_WIN`] — and is **asked at most once, and only for the first press of the hotkey's
+/// own key when the hotkey is a combination** (task T-93-1, вопрос 157). An ordinary letter never
+/// asks it, and neither does a bare hotkey: the system calls behind it are the callback's to
+/// make, on the one stroke that can need them — the shape FR-96 already has.
 ///
 /// The order of the tests is fixed by the requirements and is not free:
 ///
@@ -459,16 +506,20 @@ pub fn is_emergency_key(vk: u16, message: u32) -> bool {
 ///
 /// FR-96 is not here: it is handled before this function is even called. See
 /// [`keyboard_hook_proc`].
-pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
+pub fn classify(
+    mode: Mode,
+    state: &mut HotkeyState,
+    key: KeyEvent,
+    held: impl FnOnce() -> u16,
+) -> Outcome {
     // FR-99. Buffering is disarmed and "весь ввод пропускается без обработки"; the hotkey is
     // not suppressed either, because a fail-safe program is not an active one and FR-95 only
     // speaks of the active case. The remembered down state is dropped so that a hotkey held
     // across the transition cannot come back as a stale "still down". Task T-52-3 drops the
     // remembered fate of the press with it, and for the same reason: both halves of the hold
-    // describe a keystroke this program is no longer part of.
+    // describe a keystroke this program is no longer part of — and task T-93-1 the third half.
     if mode.fail_safe {
-        state.hotkey_down = false;
-        state.hotkey_passed = false;
+        *state = HotkeyState::default();
         return Outcome::PASS;
     }
 
@@ -486,36 +537,12 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
     // программа активна"; a suspended program has to leave `Pause` working for whatever else
     // wants it.
     if !mode.active {
-        state.hotkey_down = false;
-        state.hotkey_passed = false;
+        *state = HotkeyState::default();
         return Outcome::PASS;
     }
 
     if key.vk != mode.hotkey_vk {
-        // An ordinary stroke of an active program. Task T-03-2 puts it in the ring buffer
-        // here; T-03-1 ended at this line by the terms of the task.
-        //
-        // The point is here and not higher up because everything above it is a reason *not*
-        // to buffer: FR-99 has disarmed the program, FR-03 has recognised our own injected
-        // input, or FR-90 has suspended it. `record` applies the flush rules of FR-10 itself
-        // and returns a `Copy` value; it allocates nothing, takes no lock and calls nothing
-        // of Win32 (NFR-01 to NFR-05).
-        crate::buffer::record(key);
-
-        // **FR-21, the limit task T-03-3 left open** — task T-03-3c. A modifier going up is
-        // the one event all three layout switchers of FR-11 have in common, so this is where
-        // the program asks whether the layout moved. It is a flag and not a call: the answer
-        // travels out with the outcome and `keyboard_hook_proc` posts it, which keeps this
-        // function free of Win32 (NFR-01, NFR-05) and keeps the rule reachable from a test.
-        //
-        // Below the three early returns above on purpose. A fail-safe program (FR-99) asks
-        // nothing, our own injected input (FR-03) switches no layout, and a suspended one
-        // (FR-90) has no buffer to record under — all three answer `Outcome::PASS`, whose
-        // `probe_layout` is false.
-        return Outcome {
-            probe_layout: is_layout_probe(key),
-            ..Outcome::PASS
-        };
+        return ordinary_stroke(key);
     }
 
     match key.edge {
@@ -526,6 +553,36 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
             // "first" is exactly "we did not already think it was down".
             let first_press = !state.hotkey_down;
             state.hotkey_down = true;
+
+            // ---------------------------------------------------------------------------
+            // ⭐ **A combination answers only to its own set — task T-93-1, вопрос 157.**
+            //
+            // `Ctrl+F12` is the hotkey when exactly `Ctrl` is held: not with nothing held, not
+            // with `Ctrl+Shift`, not with a `Win`. Any other set makes the press an ordinary
+            // stroke, passed on and recorded like any key that is not the hotkey — so the bare
+            // `F12` stays with the programs, and FR-10 meets `Ctrl+Shift+F12` as the command it
+            // is. The set is asked here, on the first press of the hotkey's own key, and nowhere
+            // else: a letter never reaches this line, a repeat or a release follows the answer
+            // the press got (see [`HotkeyState::hotkey_ordinary`]), and a bare hotkey (no set)
+            // does not ask at all.
+            //
+            // ⚠ **A bare hotkey answers with any modifiers held** — 157.11, вариант А: `Shift`
+            // held over `Pause` is position 22 of the matrix of §11.3 («результат без
+            // искажений»), and step 3 of FR-40 exists for exactly that press. Exactness is the
+            // combinations' rule.
+            //
+            // In an excluded process (FR-84, below) nothing is asked either: the key is the
+            // application's whatever is held.
+            // ---------------------------------------------------------------------------
+            if first_press {
+                state.hotkey_ordinary = !mode.hotkey_yields
+                    && mode.hotkey_modifiers != 0
+                    && held() != mode.hotkey_modifiers;
+            }
+
+            if state.hotkey_ordinary {
+                return ordinary_stroke(key);
+            }
 
             // ---------------------------------------------------------------------------
             // ⭐ **FR-84, and it is the remedy FR-95 already promised — task T-52-3.**
@@ -569,11 +626,19 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
             // The fate of the press this release ends — FR-84, task T-52-3. A release that
             // arrives with no press behind it (the key went down before the program was
             // running, or while it was suspended) finds the flag false and is suppressed, which
-            // is what this branch has always done.
-            let passed = state.hotkey_passed;
+            // is what this branch has always done. Task T-93-1 adds the third fate: a press that
+            // was not the hotkey's set was an ordinary stroke, and so is its release.
+            let HotkeyState {
+                hotkey_passed: passed,
+                hotkey_ordinary: ordinary,
+                ..
+            } = *state;
 
-            state.hotkey_down = false;
-            state.hotkey_passed = false;
+            *state = HotkeyState::default();
+
+            if ordinary {
+                return ordinary_stroke(key);
+            }
 
             if passed {
                 return Outcome::PASS;
@@ -587,6 +652,34 @@ pub fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
                 probe_layout: false,
             }
         }
+    }
+}
+
+/// An ordinary stroke of an active program — passed on, recorded, and probed for a layout
+/// switch. The one answer [`classify`] gives every key that is not the hotkey, and since task
+/// T-93-1 the hotkey's own key pressed with another set of modifiers.
+///
+/// Task T-03-2 puts the stroke in the ring buffer here; T-03-1 ended at this point by the terms
+/// of the task. The point is below the three early returns of [`classify`] because everything
+/// above it is a reason *not* to buffer: FR-99 has disarmed the program, FR-03 has recognised our
+/// own injected input, or FR-90 has suspended it. `record` applies the flush rules of FR-10
+/// itself and returns a `Copy` value; it allocates nothing, takes no lock and calls nothing of
+/// Win32 (NFR-01 to NFR-05).
+fn ordinary_stroke(key: KeyEvent) -> Outcome {
+    crate::buffer::record(key);
+
+    // **FR-21, the limit task T-03-3 left open** — task T-03-3c. A modifier going up is the one
+    // event all three layout switchers of FR-11 have in common, so this is where the program asks
+    // whether the layout moved. It is a flag and not a call: the answer travels out with the
+    // outcome and `keyboard_hook_proc` posts it, which keeps the decision free of Win32 (NFR-01,
+    // NFR-05) and keeps the rule reachable from a test.
+    //
+    // Below the three early returns of `classify` on purpose. A fail-safe program (FR-99) asks
+    // nothing, our own injected input (FR-03) switches no layout, and a suspended one (FR-90) has
+    // no buffer to record under — all three answer `Outcome::PASS`, whose `probe_layout` is false.
+    Outcome {
+        probe_layout: is_layout_probe(key),
+        ..Outcome::PASS
     }
 }
 
@@ -785,8 +878,15 @@ static HOOK: AtomicUsize = AtomicUsize::new(NO_HANDLE);
 /// The input thread's window, where [`WM_APP_HOTKEY`] is posted.
 static HOTKEY_TARGET: AtomicUsize = AtomicUsize::new(NO_HANDLE);
 
-/// Virtual-key code of the hotkey — FR-02, published by the UI thread (section 6.3).
-static HOTKEY_VK: AtomicU32 = AtomicU32::new(DEFAULT_HOTKEY_VK as u32);
+/// The hotkey — FR-02, published by the UI thread (section 6.3) — **as one word**: the
+/// virtual-key code in the low sixteen bits and its modifier set ([`MOD_CTRL`], [`MOD_ALT`],
+/// [`MOD_SHIFT`]) in the high sixteen, task T-93-1 (вопрос 157).
+///
+/// One word and not two atomics, because two would be two publications: a reader between the
+/// two stores would match the new key against the old modifiers — `F12` taken for the hotkey
+/// in the instant `Pause` became `Ctrl+F12`. One store writes both halves and one load reads
+/// both ([`set_hotkey`], [`hotkey`]).
+static HOTKEY: AtomicU32 = AtomicU32::new(DEFAULT_HOTKEY_VK as u32);
 
 /// `general.enabled` as the callback sees it — FR-90, FR-95. Published by the UI thread.
 ///
@@ -878,6 +978,7 @@ thread_local! {
         Cell::new(HotkeyState {
             hotkey_down: false,
             hotkey_passed: false,
+            hotkey_ordinary: false,
         })
     };
 }
@@ -937,7 +1038,7 @@ pub enum HotkeyMemory {
 /// the task specification names the way to lose them: reading a file, building the layout
 /// cache, touching COM. So the hook goes up on [`DEFAULT_HOTKEY_VK`] — `Pause`, which is what
 /// section 7 says the setting defaults to — and the UI thread, which reads the configuration
-/// anyway for the tray, publishes the configured code through [`set_hotkey_vk`] a moment
+/// anyway for the tray, publishes the configured code through [`set_hotkey`] a moment
 /// later. Section 6.3 prescribes exactly that direction: "Конфигурация публикуется потоком
 /// UI".
 ///
@@ -1188,14 +1289,49 @@ pub fn is_installed() -> bool {
 // Public surface — the state the UI thread publishes, and the counters
 // ---------------------------------------------------------------------------------------
 
-/// Publishes the hotkey of FR-02. Called by the UI thread; see [`install`].
-pub fn set_hotkey_vk(vk: u16) {
-    HOTKEY_VK.store(u32::from(vk), Ordering::Relaxed);
+/// Publishes the hotkey of FR-02 — the key and its modifier set, **in one store** (task T-93-1,
+/// вопрос 157). Called by the UI thread; see [`install`].
+pub fn set_hotkey(vk: u16, modifiers: u16) {
+    HOTKEY.store(
+        u32::from(vk) | (u32::from(modifiers) << 16),
+        Ordering::Relaxed,
+    );
 }
 
-/// The hotkey the callback is currently matching against.
+/// The hotkey the callback is currently matching against: the key and its modifier set, read
+/// in one load.
+pub fn hotkey() -> (u16, u16) {
+    let word = HOTKEY.load(Ordering::Relaxed);
+
+    (word as u16, (word >> 16) as u16)
+}
+
+/// The key of the hotkey the callback is currently matching against — the low half of
+/// [`hotkey`].
 pub fn hotkey_vk() -> u16 {
-    HOTKEY_VK.load(Ordering::Relaxed) as u16
+    hotkey().0
+}
+
+/// The modifier set a list of `[hotkey] modifiers` names — task T-93-1, вопрос 157.
+///
+/// Each name is matched against [`HOTKEY_MODIFIERS`] case-insensitively and with the blanks
+/// around it ignored, because the file is written by hand as often as by the program — the rule
+/// [`vk_from_name`] reads key names by. A repeated name is the same modifier twice and changes
+/// nothing; the order is not significant.
+///
+/// `None` for a name outside the closed set, which the caller reads exactly as it reads an
+/// unknown key: **the whole hotkey keeps the default**. A combination with one modifier silently
+/// dropped would be another key than the one written — `Win+F12` read as a bare `F12` — and that
+/// is worse than the documented `Pause`.
+pub fn modifiers_from_names<S: AsRef<str>>(names: &[S]) -> Option<u16> {
+    names.iter().try_fold(0u16, |set, name| {
+        let name = name.as_ref().trim();
+
+        HOTKEY_MODIFIERS
+            .iter()
+            .find(|(label, _)| label.eq_ignore_ascii_case(name))
+            .map(|(_, bit)| set | bit)
+    })
 }
 
 /// Publishes whether the foreground process is excluded — **FR-84**, task T-52-3.
@@ -1304,10 +1440,14 @@ pub fn emergency_terminate_failed() -> bool {
 
 /// The [`Mode`] the callback would use right now.
 pub fn current_mode() -> Mode {
+    // Task T-93-1: the key and its modifiers out of **one** load — see [`HOTKEY`].
+    let (hotkey_vk, hotkey_modifiers) = hotkey();
+
     Mode {
         active: is_active(),
         fail_safe: fail_safe(),
-        hotkey_vk: hotkey_vk(),
+        hotkey_vk,
+        hotkey_modifiers,
         // ⚠ **A fourth relaxed load on the path of every keystroke — task T-52-3, and it is
         // paid here on purpose.** It could be read inside the hotkey branch alone, which would
         // cost an ordinary letter nothing at all; what that would cost instead is the property
@@ -1531,6 +1671,45 @@ pub fn physical_modifiers() -> crate::buffer::Physical {
         shift_left: is_held(shift_left),
         shift_right: is_held(shift_right),
     }
+}
+
+/// The modifiers the user is holding, as the set [`classify`] compares with the hotkey's —
+/// **task T-93-1, вопрос 157**.
+///
+/// Out of [`physical_modifiers`] — the snapshot the command row of FR-10 already takes — and of
+/// nothing new: the same seven reads of the asynchronous key state, made by the same callback, so
+/// the figures NFR-01 and NFR-02 are measured against stay the ones that document gives.
+/// [`classify`] asks for this only on the first press of the key of a combination, which is the
+/// one stroke that can need it.
+///
+/// The reading of the snapshot is [`held_set`], apart so that a test reaches it without a
+/// keyboard.
+fn held_modifiers() -> u16 {
+    held_set(physical_modifiers())
+}
+
+/// The modifier set a snapshot of [`physical_modifiers`] holds — task T-93-1.
+///
+/// The sides are merged — either `Ctrl` is `Ctrl`, either `Alt` is `Alt`, either `Shift` is
+/// `Shift` — so `AltGr`, the right `Alt` with a `Ctrl` the keyboard adds itself, reads as
+/// `Ctrl + Alt`. A `Win` is reported as [`MOD_WIN`], which no hotkey carries.
+pub fn held_set(held: crate::buffer::Physical) -> u16 {
+    let mut set = 0;
+
+    if held.ctrl {
+        set |= MOD_CTRL;
+    }
+    if held.alt_left || held.alt_right {
+        set |= MOD_ALT;
+    }
+    if held.shift_left || held.shift_right {
+        set |= MOD_SHIFT;
+    }
+    if held.win {
+        set |= MOD_WIN;
+    }
+
+    set
 }
 
 /// Whether the machine's `CapsLock` is **on** — the Win32 half of task T-13-4.
@@ -2232,7 +2411,7 @@ fn decide_here(key: KeyEvent) -> Outcome {
 
     HOTKEY_STATE.with(|cell| {
         let mut state = cell.get();
-        let outcome = classify(mode, &mut state, key);
+        let outcome = classify(mode, &mut state, key, held_modifiers);
         cell.set(state);
         outcome
     })

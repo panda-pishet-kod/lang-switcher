@@ -2790,8 +2790,12 @@ pub fn publish_configuration(config: &settings::Config) {
     // would be a worse answer than one that keeps answering to the documented default. The
     // settings dialog is where a bad name is reported to the user; that is FR-92, task
     // T-08-1.
-    if let Some(vk) = crate::hook::vk_from_name(&config.hotkey.key) {
-        crate::hook::set_hotkey_vk(vk);
+    //
+    // Task T-93-1, вопрос 157: the key and its modifiers go out **together, in one store** — a
+    // modifier name nobody knows leaves the whole default in place, exactly as an unknown key
+    // does (`Hotkey::binding`).
+    if let Some((vk, modifiers)) = config.hotkey.binding() {
+        crate::hook::set_hotkey(vk, modifiers);
     }
 
     // Section `[replacement]` of section 7 — FR-42 and FR-44, task T-04-2. This is the only

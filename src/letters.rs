@@ -5793,10 +5793,15 @@ fn fresh_state(owner: HWND, kind: Kind) -> WindowState {
     let (setting, hotkey) = crate::tray::with_tray(|tray| {
         (
             tray.config().general.theme,
-            settings::effective_hotkey_name(&tray.config().hotkey.key),
+            settings::effective_hotkey_name(&tray.config().hotkey),
         )
     })
-    .unwrap_or_else(|| (ThemeSetting::System, settings::effective_hotkey_name("")));
+    .unwrap_or_else(|| {
+        (
+            ThemeSetting::System,
+            settings::effective_hotkey_name(&settings::Hotkey::default()),
+        )
+    });
 
     let palette = theme::resolve(setting, theme::system_is_light());
 
@@ -6910,7 +6915,7 @@ pub mod report {
 
     /// The settings, as **values without paths** — §7 and nothing about this disk.
     fn settings_now(config: &settings::Config) -> String {
-        let hotkey = config.hotkey.key.clone();
+        let hotkey = settings::effective_hotkey_name(&config.hotkey);
         let layouts = match config.layouts.mode {
             settings::LayoutMode::Pair => format!(
                 "{} → {}",

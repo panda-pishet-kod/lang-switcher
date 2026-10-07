@@ -117,7 +117,9 @@ fn a_thoroughly_customised_config() -> Config {
 fn defaults_match_section_7_field_by_field() {
     let config = Config::default();
 
-    // Schema 6 — task Т-32-1, вопрос 101: the section `[letters]` of FR-101 and FR-102. Schema 5
+    // Schema 7 — task T-93-1, вопрос 157: `[hotkey] modifiers`, a bare stamp that keeps an older
+    // build from dropping the list. Schema 6 — task Т-32-1, вопрос 101: the section `[letters]` of
+    // FR-101 and FR-102. Schema 5
     // — решение 97.3 (Hebrew and Arabic). Schema 4 — task Т-29-1, вопрос 94.1: the twelve locales
     // of решение 93 became a schema of their own, so that a build which knows two of them
     // recognises a file of the twelve by its stamp instead of by failing to parse it. Schema 3 —
@@ -128,8 +130,8 @@ fn defaults_match_section_7_field_by_field() {
     // ⚠ **This is the one place the number is written as a literal**, and it is written twice on
     // purpose: everywhere else in this file a file "of today" is stamped
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
-    assert_eq!(config.schema_version, 6);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
+    assert_eq!(config.schema_version, 7);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -1085,8 +1087,9 @@ fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves
     // lands on the current schema rather than on four. That the ladder is walked to the top and
     // not one step is the thing worth pinning, and the number the file lands on is asserted by
     // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
+    // Task T-93-1 put a fifth rung on top (6 → 7), and the file climbs that one too.
     assert_eq!(
-        config.schema_version, 6,
+        config.schema_version, 7,
         "and it climbed the whole ladder, not one rung of it"
     );
 
@@ -1150,7 +1153,8 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
     // ⚠ Task Т-32-1: a schema 4 file now climbs **two** rungs, 4 → 5 → 6, and the rung this test
     // owns is still the bare stamp of решение 97.3. What the rung above it does to such a file is
     // asserted by `a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new`.
-    assert_eq!(config.schema_version, 6, "and that version is six");
+    // ⚠ Task T-93-1: three rungs now, 4 → 5 → 6 → 7 — the stamp of `[hotkey] modifiers` on top.
+    assert_eq!(config.schema_version, 7, "and that version is seven");
 
     assert!(
         !config.general.enabled,
@@ -1214,7 +1218,9 @@ fn a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 5 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 6, "and that version is six");
+    // ⚠ Task T-93-1: the file climbs on past six to the stamp of `[hotkey] modifiers`, which
+    // carries nothing of the letters — what this rung decided arrives at seven untouched.
+    assert_eq!(config.schema_version, 7, "and that version is seven");
 
     // What the rung carries — the three decisions of the rung, in order.
     assert!(
@@ -1370,14 +1376,18 @@ fn the_day_of_the_last_feed_attempt_is_written_only_once_there_is_one() {
 #[test]
 fn a_date_written_by_hand_in_quotes_is_read_as_a_date() {
     let dir = TestDir::new("letters_quoted_date");
+    // A file of today — `{CURRENT_SCHEMA_VERSION}` since task T-93-1 raised the schema past the 6
+    // this was written with; what is measured is the date, and the stamp only has to be current.
     let path = write_file(
         &dir,
-        "schema_version = 6\n\
-         \n\
-         [letters]\n\
-         feed = false\n\
-         first_run = \"2026-09-01\"\n\
-         welcome_shown = true\n",
+        &format!(
+            "schema_version = {CURRENT_SCHEMA_VERSION}\n\
+             \n\
+             [letters]\n\
+             feed = false\n\
+             first_run = \"2026-09-01\"\n\
+             welcome_shown = true\n"
+        ),
     );
 
     let (config, outcome) = settings::read_from(&path).expect("a quoted date must be readable");
@@ -2189,11 +2199,13 @@ fn the_capture_no_longer_promises_to_stop_the_typing_buffer() {
     }
 
     // And the suspension itself is untouched: it rests on the hotkey code, which is what task
-    // T-36-6 was told not to change.
-    let arm = function_body(&source, "pub fn arm(previous_key: String) -> Self {");
+    // T-36-6 was told not to change. ⚠ Task T-93-1 moved the needles and not the property: the
+    // session remembers the whole `[hotkey]` since the modifiers joined it, and the code goes out
+    // with its modifier set in one store (`hook::set_hotkey`, вопрос 157).
+    let arm = function_body(&source, "pub fn arm(previous: Hotkey) -> Self {");
 
     assert!(
-        arm.contains("set_hotkey_vk(NO_HOTKEY_VK)"),
+        arm.contains("set_hotkey(NO_HOTKEY_VK, 0)"),
         "arming still publishes a code no keyboard produces"
     );
     assert!(
@@ -13849,26 +13861,334 @@ fn the_help_panel_is_drawn_by_the_windows_own_erase_and_reads_its_caption_off_it
 /// that does nothing at all — the one thing решение 82.5 is against.
 #[test]
 fn the_help_of_the_about_window_names_the_key_that_is_really_in_force() {
-    // A key this build knows is shown as the file spells it.
-    assert_eq!(settings::effective_hotkey_name("Pause"), "Pause");
-    assert_eq!(settings::effective_hotkey_name("ScrollLock"), "ScrollLock");
-    assert_eq!(settings::effective_hotkey_name("F9"), "F9");
+    // A key this build knows is shown by its name.
+    assert_eq!(settings::effective_hotkey_name(&bare("Pause")), "Pause");
+    assert_eq!(
+        settings::effective_hotkey_name(&bare("ScrollLock")),
+        "ScrollLock"
+    );
+    assert_eq!(settings::effective_hotkey_name(&bare("F9")), "F9");
 
     // A name nobody knows falls back to the default of section 7 — the key that really acts.
-    assert_eq!(settings::effective_hotkey_name("Хрюкозябра"), "Pause");
-    assert_eq!(settings::effective_hotkey_name(""), "Pause");
+    assert_eq!(
+        settings::effective_hotkey_name(&bare("Хрюкозябра")),
+        "Pause"
+    );
+    assert_eq!(settings::effective_hotkey_name(&bare("")), "Pause");
 
     // ⚠ A **text** key is deliberately not replaced: `Q` really is the hotkey when the file
     // says so — FR-95 warns about it in the settings window, and the help telling the truth
     // about the user's own configuration is the point.
-    assert_eq!(settings::effective_hotkey_name("Q"), "Q");
+    assert_eq!(settings::effective_hotkey_name(&bare("Q")), "Q");
 
     // And the fallback is the default of section 7 itself, not a second copy of the word.
     assert_eq!(
         Config::default().hotkey.key,
-        settings::effective_hotkey_name("нет такой клавиши"),
+        settings::effective_hotkey_name(&bare("нет такой клавиши")),
         "the fallback of the help is the default of section 7"
     );
+}
+
+/// A hotkey with no modifiers — `[hotkey]` as every file before schema 7 has it (task T-93-1).
+fn bare(key: &str) -> settings::Hotkey {
+    settings::Hotkey {
+        key: key.to_owned(),
+        modifiers: Vec::new(),
+    }
+}
+
+/// A hotkey with modifiers, named the way `[hotkey] modifiers` names them (task T-93-1).
+fn combination(modifiers: &[&str], key: &str) -> settings::Hotkey {
+    settings::Hotkey {
+        key: key.to_owned(),
+        modifiers: modifiers.iter().map(|name| (*name).to_owned()).collect(),
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// Task T-93-1, вопрос 157 — `[hotkey] modifiers`: the file, the name, the schema
+// -----------------------------------------------------------------------------------------
+
+/// **The name of a combination is one string, in the canonical order** — task T-93-1, вопрос
+/// 157: `Ctrl + Alt + Shift + F12`, the modifiers `Ctrl`, `Alt`, `Shift` whatever order the file
+/// lists them in, « + » between, and the key under the name the program writes. The field of the
+/// settings window, the help of «О программе» and the letters all show this one string.
+#[test]
+fn the_name_of_a_combination_is_one_string_in_the_canonical_order() {
+    assert_eq!(
+        settings::effective_hotkey_name(&combination(&["Ctrl"], "F12")),
+        "Ctrl + F12"
+    );
+    assert_eq!(
+        settings::effective_hotkey_name(&combination(&["Shift", "Alt", "Ctrl"], "F12")),
+        "Ctrl + Alt + Shift + F12",
+        "the order is the program's, not the file's"
+    );
+    assert_eq!(
+        settings::effective_hotkey_name(&combination(&["shift", " ctrl "], "f9")),
+        "Ctrl + Shift + F9",
+        "a hand-written file is shown in the spelling the program writes"
+    );
+    assert_eq!(
+        settings::effective_hotkey_name(&combination(&["Alt"], "Break")),
+        "Alt + Pause",
+        "the key is named by `key_name`, the writer's spelling of its code"
+    );
+    assert_eq!(
+        settings::effective_hotkey_name(&bare("F12")),
+        "F12",
+        "a bare key is its name alone"
+    );
+}
+
+/// **A modifier nobody knows leaves the whole hotkey at the default** — task T-93-1: the fate of
+/// an unknown key, `Pause`, and the same note under the field. A combination with one of its
+/// modifiers dropped would be another key than the one written.
+#[test]
+fn an_unknown_modifier_leaves_the_whole_hotkey_at_the_default() {
+    for unknown in [
+        combination(&["Win"], "F12"),
+        combination(&["Ctrl", "Strg"], "F12"),
+        combination(&[""], "F12"),
+    ] {
+        assert_eq!(unknown.binding(), None, "{unknown:?}");
+        assert_eq!(
+            settings::effective_hotkey_name(&unknown),
+            "Pause",
+            "{unknown:?}: the help names the key that really acts"
+        );
+        assert_eq!(
+            settings::hotkey_note(&unknown),
+            Some(settings::IDS_NOTE_UNKNOWN_KEY),
+            "{unknown:?}: and the settings window says why"
+        );
+    }
+
+    assert_eq!(
+        combination(&["Ctrl"], "F12").binding(),
+        Some((0x7B, hook::MOD_CTRL)),
+        "the control: a known pair is read"
+    );
+    assert_eq!(bare("F12").binding(), Some((0x7B, 0)));
+}
+
+/// **A letter with a modifier is not warned about as a text key** — task T-93-1: the warning of
+/// FR-92 says the key will stop typing its character, and with `Ctrl` held it types none; the
+/// bare `K` stays with the programs.
+#[test]
+fn a_letter_with_a_command_modifier_is_not_a_text_key_warning() {
+    assert_eq!(
+        settings::hotkey_note(&bare("K")),
+        Some(settings::IDS_NOTE_TEXT_KEY)
+    );
+    assert_eq!(settings::hotkey_note(&combination(&["Ctrl"], "K")), None);
+}
+
+/// **`[hotkey] modifiers` is written in the canonical order and read back to the same set** —
+/// task T-93-1. What the program writes for a set is `Hotkey::from_binding` — the names of
+/// `hook::HOTKEY_MODIFIERS` in their order, whatever order the bits came in — and the file reads
+/// back to the very code and set it came from. An empty list is the bare key, and a file that
+/// does not mention `modifiers` at all — every file before schema 7 — reads as one.
+#[test]
+fn the_modifiers_are_written_in_the_canonical_order_and_read_back() {
+    let all = hook::MOD_SHIFT | hook::MOD_CTRL | hook::MOD_ALT;
+    let written = settings::Hotkey::from_binding(0x7B, all).expect("F12 has a name");
+
+    assert_eq!(written, combination(&["Ctrl", "Alt", "Shift"], "F12"));
+
+    let config = Config {
+        hotkey: written.clone(),
+        ..Config::default()
+    };
+
+    let text = config.to_toml_string().expect("the file must serialise");
+    println!("{text}");
+
+    assert!(
+        text.contains("modifiers = [\"Ctrl\", \"Alt\", \"Shift\"]"),
+        "the list is in the file in the canonical order: {text}"
+    );
+
+    let (back, outcome) = Config::from_toml_str(&text).expect("the written file must parse");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(back.hotkey, written);
+    assert_eq!(back.hotkey.binding(), Some((0x7B, all)));
+
+    // The bare key: an empty list in the file, and the absent field of an older one.
+    let defaults = Config::default()
+        .to_toml_string()
+        .expect("the defaults must serialise");
+    assert!(
+        defaults.contains("modifiers = []"),
+        "the default writes the empty list: {defaults}"
+    );
+
+    let older = Config::from_toml_str(&format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F9\"\n"
+    ))
+    .expect("a file without the list must parse")
+    .0;
+    assert_eq!(older.hotkey, bare("F9"));
+    assert_eq!(older.hotkey.binding(), Some((0x78, 0)));
+
+    // A set with a bit no hotkey carries is not written at all.
+    assert_eq!(
+        settings::Hotkey::from_binding(0x7B, hook::MOD_CTRL | hook::MOD_WIN),
+        None
+    );
+    assert_eq!(
+        settings::Hotkey::from_binding(0x08, 0),
+        None,
+        "Backspace has no name"
+    );
+}
+
+/// The last schema a build that had never heard of `[hotkey] modifiers` could have stamped — task
+/// T-93-1, вопрос 157.
+///
+/// `deny_unknown_fields` is in no struct of this module (the rule of section 7: unknown fields
+/// are ignored), so such a build reads a file of the combinations without a word and drops the
+/// list. Under the same stamp it would also **write** that file back — on «Применить», on the
+/// letters' date — and the person's `Ctrl+F12` would be a bare `F12` after the next update. The
+/// stamp it has never seen makes it read the file and leave it alone instead.
+const LAST_SCHEMA_WITHOUT_MODIFIERS: u32 = 6;
+
+/// **Task T-93-1 — the stamp of the modifiers: a build too old for them reads the file and never
+/// writes it back.** The shape of `a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining`
+/// (Э29), for a new **field** rather than a new value.
+///
+/// 1. What this build writes for a combination carries the list and a stamp no build before the
+///    modifiers had — and the const block makes lowering the schema a build that does not compile.
+/// 2. A reader too old for the stamp, modelled by this build meeting `CURRENT + 1` and a field it
+///    does not know in `[hotkey]` (a test may not install an older build): the file is read,
+///    `Forbidden` to be written, and its bytes stay exactly where they were.
+/// 3. The control — what the stamp prevents: the same unknown field under the stamp this build
+///    *does* know is read as current, and the next write drops it. That is what a build of schema
+///    6 would do to `modifiers` if the schema had stayed 6.
+#[test]
+fn a_build_too_old_for_the_modifiers_reads_the_file_and_never_writes_it_back() {
+    // --- 1. what this build writes for a combination ------------------------------------------
+    let ours = Config {
+        hotkey: combination(&["Ctrl"], "F12"),
+        ..Config::default()
+    };
+
+    let text = ours.to_toml_string().expect("the file must serialise");
+
+    assert!(
+        text.contains("modifiers = [\"Ctrl\"]"),
+        "the file carries the list it was given: {text}"
+    );
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_SCHEMA_WITHOUT_MODIFIERS,
+            "a file of the combinations must be stamped with a schema no build before them had — \
+             without it such a build reads the file as its own and drops the list on its next write"
+        );
+    }
+    assert!(
+        text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+        "and the stamp is in the file, not merely in memory: {text}"
+    );
+
+    // --- 2. the reader too old for the stamp --------------------------------------------------
+    let dir = TestDir::new("modifiers_downgrade_meets_the_stamp");
+    let newer = CURRENT_SCHEMA_VERSION + 1;
+    let original = format!(
+        "schema_version = {newer}\n\
+         \n\
+         [hotkey]\n\
+         key = \"F12\"\n\
+         trigger = \"double_tap\"\n"
+    );
+    let path = write_file(&dir, &original);
+
+    let (config, outcome) = settings::read_or_default(&path);
+
+    assert_eq!(
+        outcome.as_ref().ok(),
+        Some(&ReadOutcome::FromNewerSchema { version: newer }),
+        "the stamp decides"
+    );
+    assert_eq!(
+        SavePolicy::for_read(&outcome),
+        SavePolicy::Forbidden,
+        "and a file from the future is never written back"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("the file must still be readable"),
+        original,
+        "the bytes — the field this build does not know among them — stay where they were"
+    );
+    assert_eq!(
+        dir.entries(),
+        [CONFIG_FILE_NAME],
+        "and nothing was made beside them"
+    );
+    assert_eq!(config.hotkey.key, "F12", "what can be read is read");
+
+    // --- 3. the control: the same field under a stamp this build knows is lost on the write ---
+    let (current, outcome) = Config::from_toml_str(&format!(
+        "schema_version = {CURRENT_SCHEMA_VERSION}\n\n[hotkey]\nkey = \"F12\"\ntrigger = \"double_tap\"\n"
+    ))
+    .expect("an unknown field is ignored, not refused");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(
+        SavePolicy::for_read(&Ok::<_, ConfigError>(outcome)),
+        SavePolicy::Allowed
+    );
+
+    let rewritten = current.to_toml_string().expect("the file must serialise");
+    assert!(
+        !rewritten.contains("trigger"),
+        "a field the schema does not know does not survive a write — which is what the stamp \
+         keeps an older build from doing to `modifiers`: {rewritten}"
+    );
+}
+
+/// **The rung of the modifiers — task T-93-1: a schema 6 file climbs to 7, and its hotkey is the
+/// bare key it always was.** `step_6_to_7` is a stamp: an absent `modifiers` already means the
+/// empty list, which is what a file of schema 6 meant by its hotkey. The other fields are
+/// deliberately not the defaults, so that damage would show.
+#[test]
+fn a_file_of_schema_six_is_raised_to_seven_and_its_hotkey_is_the_bare_key() {
+    let dir = TestDir::new("modifiers_schema_migration");
+    let path = write_file(
+        &dir,
+        "schema_version = 6\n\
+         \n\
+         [general]\n\
+         enabled = false\n\
+         language = \"he\"\n\
+         \n\
+         [hotkey]\n\
+         key = \"F9\"\n\
+         \n\
+         [letters]\n\
+         welcome_shown = true\n\
+         last_seen_version = \"0.91.0\"\n",
+    );
+
+    let (config, outcome) = settings::read_from(&path).expect("a schema 6 file must be read");
+
+    assert_eq!(outcome, ReadOutcome::Migrated { from: 6 });
+    assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+    assert_eq!(config.schema_version, 7, "and that version is seven");
+
+    assert_eq!(
+        config.hotkey,
+        bare("F9"),
+        "the hotkey is the bare key it was"
+    );
+    assert!(
+        !config.general.enabled,
+        "the rung carried the switch through"
+    );
+    assert_eq!(config.general.language, Language::He);
+    assert!(config.letters.welcome_shown, "and the letters' memory");
+    assert_eq!(config.letters.last_seen_version, "0.91.0");
 }
 
 /// **Задача Т-33а-4** — пределы оболочки для шара уведомления, по всем четырнадцати языкам.
@@ -14656,9 +14976,9 @@ fn the_first_character_is_raised_whole_and_the_rest_of_the_name_is_left_alone() 
 #[test]
 fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
     // The default of section 7 is a key that types nothing, so there is nothing to say.
-    assert_eq!(settings::hotkey_note("Pause"), None);
-    assert_eq!(settings::hotkey_note("ScrollLock"), None);
-    assert_eq!(settings::hotkey_note("F9"), None);
+    assert_eq!(settings::hotkey_note(&bare("Pause")), None);
+    assert_eq!(settings::hotkey_note(&bare("ScrollLock")), None);
+    assert_eq!(settings::hotkey_note(&bare("F9")), None);
 
     // FR-92: «предупреждение при выборе текстовой клавиши». Since FR-94 the answer is the
     // identifier of an interface string rather than the string itself, so the text is fetched
@@ -14666,7 +14986,7 @@ fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
     // only is half a warning.
     let product = ProductImage::shared();
 
-    let letter = settings::hotkey_note("A").expect("a letter must be warned about");
+    let letter = settings::hotkey_note(&bare("A")).expect("a letter must be warned about");
     let letter_ru = product.string(settings::Language::Ru, letter);
     let letter_en = product.string(settings::Language::En, letter);
     println!("A -> {letter} -> ru: {letter_ru}\n         -> en: {letter_en}");
@@ -14675,7 +14995,7 @@ fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
 
     // And the other silent failure: a name this build does not know leaves `Pause` in force,
     // which `app::publish_configuration` does without telling anybody. This is the telling.
-    let unknown = settings::hotkey_note("Ктулху").expect("an unknown name must be reported");
+    let unknown = settings::hotkey_note(&bare("Ктулху")).expect("an unknown name must be reported");
     let unknown_ru = product.string(settings::Language::Ru, unknown);
     let unknown_en = product.string(settings::Language::En, unknown);
     println!("unknown -> {unknown} -> ru: {unknown_ru}\n               -> en: {unknown_en}");
@@ -17144,11 +17464,11 @@ fn a_press_with_nothing_held_becomes_the_hotkey() {
     // still carries the warning of FR-95. What Т-23-5 closed is the one road that assigned one
     // without asking.
     assert_eq!(
-        settings::hotkey_note("A"),
+        settings::hotkey_note(&bare("A")),
         Some(settings::IDS_NOTE_TEXT_KEY)
     );
     assert_eq!(
-        settings::effective_hotkey_name("A"),
+        settings::effective_hotkey_name(&bare("A")),
         "A",
         "a text key in the file acts, and the help of FR-92а names it"
     );
@@ -17712,7 +18032,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
     let _guard = with_product_strings();
 
     hook::set_active(true);
-    hook::set_hotkey_vk(hook::DEFAULT_HOTKEY_VK);
+    hook::set_hotkey(hook::DEFAULT_HOTKEY_VK, 0);
 
     let press = hook::KeyEvent {
         vk: hook::DEFAULT_HOTKEY_VK,
@@ -17723,19 +18043,21 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
         time: 0,
     };
 
+    // Task T-93-1: the decision takes the held modifiers as well; this press holds none.
     let before = hook::classify(
         hook::current_mode(),
         &mut hook::HotkeyState::default(),
         press,
+        || 0,
     );
     println!("before the capture: {before:?}");
     assert!(before.fire_hotkey, "the hotkey fires when nothing is armed");
 
     {
-        let session = settings::CaptureSession::arm("Pause".to_owned());
+        let session = settings::CaptureSession::arm(bare("Pause"));
 
-        assert_eq!(session.previous_key(), "Pause");
-        assert_eq!(session.published_vk(), hook::DEFAULT_HOTKEY_VK);
+        assert_eq!(session.previous(), &bare("Pause"));
+        assert_eq!(session.published(), (hook::DEFAULT_HOTKEY_VK, 0));
         assert!(
             !hook::is_active(),
             "arming a capture must suspend the conversion path"
@@ -17750,6 +18072,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
             hook::current_mode(),
             &mut hook::HotkeyState::default(),
             press,
+            || 0,
         );
         println!("during the capture: {during:?}");
 
@@ -17767,6 +18090,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
             hook::current_mode(),
             &mut hook::HotkeyState::default(),
             press,
+            || 0,
         );
         println!("with the active flag re-published under it: {clobbered:?}");
 
@@ -17795,13 +18119,14 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
         hook::current_mode(),
         &mut hook::HotkeyState::default(),
         press,
+        || 0,
     );
     println!("after the capture: {after:?}");
     assert!(after.fire_hotkey);
 
     // A capture armed while the program was suspended gives back "suspended" and not "active".
     hook::set_active(false);
-    drop(settings::CaptureSession::arm("Pause".to_owned()));
+    drop(settings::CaptureSession::arm(bare("Pause")));
     assert!(!hook::is_active(), "a suspended program stays suspended");
 
     // ⭐ **Task T-36-6, finding Н116, решение 123.1 — a capture does not put back a stale flag.**
@@ -17813,7 +18138,7 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
     // round while the session is alive, and what must survive the `Drop` is the **new** value.
     hook::set_active(true);
 
-    let session = settings::CaptureSession::arm("Pause".to_owned());
+    let session = settings::CaptureSession::arm(bare("Pause"));
 
     hook::set_active(false);
     drop(session);
@@ -17836,8 +18161,8 @@ fn a_capture_stops_the_conversion_and_gives_it_back_when_it_ends() {
 fn the_captured_key_reaches_the_hook_through_publish_configuration() {
     // **Criteria 13, 18 and 25.** The dialog publishes nothing itself: it puts the captured name
     // into the configuration and «Применить» hands that configuration to
-    // `app::publish_configuration`, which is the one caller of `hook::set_hotkey_vk` there has
-    // ever been. `src\hook.rs` is not touched by this task.
+    // `app::publish_configuration`, which is the one caller of `hook::set_hotkey` there has ever
+    // been (named `set_hotkey_vk` until task T-93-1 put the modifiers in the same store).
     let _guard = with_product_strings();
     let _publishing = publishing();
 
@@ -18243,7 +18568,8 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
 
     // The positive control: nothing is up, the gate lets the call through, and the call goes on
     // to the dialog manager — which has no template and no owner to give it, and says so.
-    let reached = settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+    let reached =
+        settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
 
     println!("with neither window up: {reached:?}");
 
@@ -18259,7 +18585,7 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
         AboutSession::record(a_handle_that_names_no_window());
 
         let second =
-            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
 
         println!("over an about window: {second:?}");
 
@@ -18274,7 +18600,8 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
     {
         let _dialog = settings::DialogSession::open();
 
-        let over = settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, "Pause");
+        let over =
+            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
 
         println!("over the settings dialog: {over:?}");
 
@@ -18330,7 +18657,7 @@ fn a_template_the_mirror_could_not_find_is_journaled_under_its_own_name() {
         instance,
         ThemeSetting::Dark,
         None,
-        "Pause",
+        &bare("Pause"),
     );
 
     let entries: Vec<_> = diag::snapshot()
@@ -24398,18 +24725,22 @@ fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
     );
     assert_eq!(config.buffer.capacity, 256, "и остальное на месте");
 
-    // The schema itself did not move — the whole point of the paragraph above.
+    // The schema itself did not move for FR-15 — the whole point of the paragraph above. ⚠ Task
+    // T-93-1 moved it, for a reason of its own: the one rung above the 6 FR-15 shipped on is the
+    // stamp of `[hotkey] modifiers` (вопрос 157), and the number here says so rather than six.
     assert_eq!(
-        CURRENT_SCHEMA_VERSION, 6,
-        "FR-15 не поднимает схему: цена подъёма — карантин конфигурации при откате на e51"
+        CURRENT_SCHEMA_VERSION, 7,
+        "FR-15 не поднимал схему (была 6); 7 — штамп `[hotkey] modifiers` Э93, и только он"
     );
 
-    // And the far side of that promise: a file stamped 7 *would* be quarantined, which is what
-    // makes the choice above a choice and not a coincidence.
-    let newer = write_file(&dir, "schema_version = 7\n");
+    // And the far side of that promise: a file stamped above the current schema *would* be read
+    // as one from the future, which is what makes the choice above a choice and not a
+    // coincidence.
+    let ahead = CURRENT_SCHEMA_VERSION + 1;
+    let newer = write_file(&dir, &format!("schema_version = {ahead}\n"));
     let (_, outcome) = settings::read_from(&newer).expect("a newer file is read, not refused");
 
-    assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: 7 });
+    assert_eq!(outcome, ReadOutcome::FromNewerSchema { version: ahead });
 }
 
 // =========================================================================================

@@ -2102,8 +2102,9 @@ fn the_hotkey_state_of_fr08_survives_a_planned_tick_and_not_a_real_absence() {
     let window = TestWindow::new();
 
     // The mode the callback will read, written out rather than assumed: both of these are
-    // published values that another test in this binary is free to have moved.
-    lang_switcher::hook::set_hotkey_vk(lang_switcher::hook::DEFAULT_HOTKEY_VK);
+    // published values that another test in this binary is free to have moved. The hotkey goes
+    // out with no modifiers — the bare `Pause` `send_pause` presses (task T-93-1).
+    lang_switcher::hook::set_hotkey(lang_switcher::hook::DEFAULT_HOTKEY_VK, 0);
     lang_switcher::hook::set_active(true);
     assert!(
         !lang_switcher::hook::fail_safe(),

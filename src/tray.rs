@@ -4492,13 +4492,11 @@ pub fn toggle_autostart_via(write_run_key: impl FnOnce(bool) -> WinResult<()>) {
 fn show_about(hwnd: HWND) {
     // FR-92а, task Т-23-4: the help panel of решение 82.5 names the hotkey, so the key travels
     // beside the theme setting — copied out of the tray in **one** borrow that ends before the
-    // modal call begins, exactly as the setting alone used to be.
-    let Some((setting, key)) = with_tray(|tray| {
-        (
-            tray.config().general.theme,
-            tray.config().hotkey.key.clone(),
-        )
-    }) else {
+    // modal call begins, exactly as the setting alone used to be. The whole `[hotkey]` since
+    // task T-93-1: the help names `Ctrl + F12`, and the modifiers are half of that name.
+    let Some((setting, key)) =
+        with_tray(|tray| (tray.config().general.theme, tray.config().hotkey.clone()))
+    else {
         return;
     };
 

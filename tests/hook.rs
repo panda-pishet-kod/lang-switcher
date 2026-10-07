@@ -47,8 +47,19 @@ fn armed() -> Mode {
         active: true,
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
+        hotkey_modifiers: 0,
         hotkey_yields: false,
     }
+}
+
+/// `hook::classify` with **no modifier held** — task T-93-1.
+///
+/// The decision has taken the held modifiers as a fourth argument since вопрос 157, and every
+/// test of this file written before it is about a stroke made with nothing held: the hotkey of
+/// FR-02 and FR-08, the signature of FR-03, the states of FR-90 and FR-99, the probe of FR-21.
+/// The tests of the combinations call `hook::classify` themselves, with the set they hold.
+fn classify(mode: Mode, state: &mut HotkeyState, key: KeyEvent) -> Outcome {
+    hook::classify(mode, state, key, || 0)
 }
 
 /// The outcome every "not ours" path has to produce: hand it on, start nothing, ask nothing.
@@ -120,13 +131,14 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         active: hook::DEFAULT_ACTIVE,
         fail_safe: false,
         hotkey_vk: hook::DEFAULT_HOTKEY_VK,
+        hotkey_modifiers: 0,
         hotkey_yields: false,
     };
 
     // FR-95 suppresses the hotkey "когда программа активна", and this program is not yet known
     // to be. The press of the default hotkey goes to whoever owns the focus.
     let mut state = HotkeyState::default();
-    let hotkey = hook::classify(unpublished, &mut state, user_key(VK_PAUSE, Edge::Down));
+    let hotkey = classify(unpublished, &mut state, user_key(VK_PAUSE, Edge::Down));
 
     assert_eq!(
         hotkey,
@@ -147,7 +159,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         buffer::install_recorder(Recorder::with_capacity(8));
         assert_eq!(buffer::len(), 0, "the ring starts empty");
 
-        let typed = hook::classify(unpublished, &mut state, user_key(b'A'.into(), Edge::Down));
+        let typed = classify(unpublished, &mut state, user_key(b'A'.into(), Edge::Down));
 
         assert_eq!(
             typed,
@@ -173,7 +185,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
 fn pressing_the_hotkey_suppresses_it_and_starts_a_conversion() {
     let mut state = HotkeyState::default();
 
-    let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    let outcome = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
 
     // FR-95: suppressed. FR-02: recognised, and the conversion is asked for.
     assert_eq!(outcome.decision, Decision::Suppress);
@@ -184,8 +196,8 @@ fn pressing_the_hotkey_suppresses_it_and_starts_a_conversion() {
 fn releasing_the_hotkey_is_suppressed_too_and_starts_nothing() {
     let mut state = HotkeyState::default();
 
-    hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
-    let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up));
+    classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    let outcome = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up));
 
     // A press that was swallowed and a release that was not would leave the application
     // holding a key it never saw go down.
@@ -198,7 +210,7 @@ fn an_ordinary_stroke_is_passed_on_untouched() {
     let mut state = HotkeyState::default();
 
     for edge in [Edge::Down, Edge::Up] {
-        let outcome = hook::classify(armed(), &mut state, user_key(VK_A, edge));
+        let outcome = classify(armed(), &mut state, user_key(VK_A, edge));
 
         assert_eq!(outcome, passed_on(), "an ordinary stroke, {edge:?}");
     }
@@ -214,12 +226,12 @@ fn the_hotkey_is_whatever_was_published_not_whatever_pause_is() {
     };
 
     // `A` is now the hotkey and is suppressed...
-    let on_a = hook::classify(mode, &mut state, user_key(VK_A, Edge::Down));
+    let on_a = classify(mode, &mut state, user_key(VK_A, Edge::Down));
     assert_eq!(on_a.decision, Decision::Suppress);
     assert!(on_a.fire_hotkey);
 
     // ...and `Pause` is an ordinary key that goes through.
-    let on_pause = hook::classify(mode, &mut state, user_key(VK_PAUSE, Edge::Down));
+    let on_pause = classify(mode, &mut state, user_key(VK_PAUSE, Edge::Down));
     assert_eq!(on_pause, passed_on());
 }
 
@@ -235,7 +247,7 @@ fn holding_the_hotkey_fires_once_however_long_it_is_held() {
     // between. Ten of them stand for a key held for a second.
     let fired = (0..10)
         .filter(|_| {
-            let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+            let outcome = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
 
             // FR-95 does not weaken for repeats: every one of them is still suppressed.
             assert_eq!(outcome.decision, Decision::Suppress);
@@ -256,12 +268,12 @@ fn the_hotkey_fires_again_after_it_has_been_released() {
     for _ in 0..3 {
         // Press, hold a little, release: three separate presses by the user.
         for _ in 0..4 {
-            if hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down)).fire_hotkey {
+            if classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down)).fire_hotkey {
                 fired += 1;
             }
         }
 
-        hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up));
+        classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up));
     }
 
     assert_eq!(fired, 3, "FR-08 suppresses repeats, not presses");
@@ -299,7 +311,7 @@ fn our_own_injected_stroke_is_filtered_out_and_still_delivered() {
         time: 0,
     };
 
-    let outcome = hook::classify(armed(), &mut state, ours);
+    let outcome = classify(armed(), &mut state, ours);
 
     // Passed on, not suppressed: it was sent *to* the application on purpose, and swallowing
     // it would mean replacing the user's text with nothing.
@@ -319,7 +331,7 @@ fn a_foreign_injected_stroke_is_ordinary_user_input() {
     for extra_info in [0, 1, FOREIGN_SIGNATURE, usize::MAX, INJECTED_SIGNATURE ^ 1] {
         let mut state_here = HotkeyState::default();
 
-        let outcome = hook::classify(
+        let outcome = classify(
             armed(),
             &mut state_here,
             KeyEvent {
@@ -370,7 +382,7 @@ fn a_suspended_program_suppresses_nothing_at_all() {
     // FR-95 makes the hotkey vanish only "когда программа активна". A suspended program has
     // to give `Pause` back to whatever else wants it.
     for edge in [Edge::Down, Edge::Up] {
-        let outcome = hook::classify(suspended, &mut state, user_key(VK_PAUSE, edge));
+        let outcome = classify(suspended, &mut state, user_key(VK_PAUSE, edge));
         assert_eq!(outcome, passed_on(), "suspended, {edge:?}");
     }
 }
@@ -389,7 +401,7 @@ fn the_fail_safe_of_fr99_passes_everything_through() {
     for extra_info in [FOREIGN_SIGNATURE, INJECTED_SIGNATURE] {
         for vk in [VK_PAUSE, VK_A] {
             for edge in [Edge::Down, Edge::Up] {
-                let outcome = hook::classify(
+                let outcome = classify(
                     tripped,
                     &mut state,
                     KeyEvent {
@@ -413,7 +425,7 @@ fn a_hotkey_held_across_a_state_change_does_not_stay_stuck_down() {
     let mut state = HotkeyState::default();
 
     // Held down while armed...
-    hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
     assert!(state.hotkey_down);
 
     // ...the program is suspended while the key is still down...
@@ -421,11 +433,11 @@ fn a_hotkey_held_across_a_state_change_does_not_stay_stuck_down() {
         active: false,
         ..armed()
     };
-    hook::classify(suspended, &mut state, user_key(VK_PAUSE, Edge::Down));
+    classify(suspended, &mut state, user_key(VK_PAUSE, Edge::Down));
     assert!(!state.hotkey_down, "the remembered state must not go stale");
 
     // ...and when it comes back, the next press is a press and not a repeat.
-    let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    let outcome = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
     assert!(outcome.fire_hotkey);
 }
 
@@ -572,7 +584,7 @@ fn every_layout_switcher_of_fr11_ends_in_a_stroke_that_asks_for_the_probe() {
         let mut last_asked = false;
 
         for &(vk, edge) in events {
-            let outcome = hook::classify(armed(), &mut state, user_key(vk, edge));
+            let outcome = classify(armed(), &mut state, user_key(vk, edge));
 
             // None of the six keys involved is the hotkey, so every one of them is passed on
             // to the application untouched — a layout switch must still switch the layout.
@@ -607,11 +619,11 @@ fn the_probe_is_asked_for_by_a_modifier_going_up_and_by_nothing_else() {
         // The press must not ask. The system performs the switch after this callback has
         // returned, so a probe fired here would read the layout that is on its way out.
         assert!(
-            !hook::classify(armed(), &mut state, user_key(vk, Edge::Down)).probe_layout,
+            !classify(armed(), &mut state, user_key(vk, Edge::Down)).probe_layout,
             "the press of {vk:#04x} must not ask"
         );
         assert!(
-            hook::classify(armed(), &mut state, user_key(vk, Edge::Up)).probe_layout,
+            classify(armed(), &mut state, user_key(vk, Edge::Up)).probe_layout,
             "the release of {vk:#04x} must ask"
         );
     }
@@ -624,7 +636,7 @@ fn the_probe_is_asked_for_by_a_modifier_going_up_and_by_nothing_else() {
 
         for edge in [Edge::Down, Edge::Up] {
             assert!(
-                !hook::classify(armed(), &mut state, user_key(vk, edge)).probe_layout,
+                !classify(armed(), &mut state, user_key(vk, edge)).probe_layout,
                 "vk {vk:#04x}, {edge:?} is not a layout switch"
             );
         }
@@ -649,7 +661,7 @@ fn a_program_that_is_not_listening_asks_for_no_probe() {
 
         for vk in PROBE_MODIFIERS {
             assert!(
-                !hook::classify(mode, &mut state, user_key(vk, Edge::Up)).probe_layout,
+                !classify(mode, &mut state, user_key(vk, Edge::Up)).probe_layout,
                 "vk {vk:#04x}"
             );
         }
@@ -670,7 +682,7 @@ fn a_program_that_is_not_listening_asks_for_no_probe() {
         };
 
         assert!(
-            !hook::classify(armed(), &mut state, ours).probe_layout,
+            !classify(armed(), &mut state, ours).probe_layout,
             "our own stroke, vk {vk:#04x}"
         );
     }
@@ -684,7 +696,7 @@ fn a_program_that_is_not_listening_asks_for_no_probe() {
     };
     let mut state = HotkeyState::default();
 
-    let outcome = hook::classify(
+    let outcome = classify(
         hotkey_is_a_modifier,
         &mut state,
         user_key(VK_LSHIFT, Edge::Up),
@@ -731,7 +743,7 @@ fn typing_an_ordinary_phrase_costs_fourteen_probes_per_hundred_characters() {
         let mut stroke = |vk, edge| {
             events += 1;
 
-            if hook::classify(armed(), &mut state, user_key(vk, edge)).probe_layout {
+            if classify(armed(), &mut state, user_key(vk, edge)).probe_layout {
                 probes += 1;
             }
         };
@@ -1010,7 +1022,7 @@ fn the_genuine_fail_safe_message_still_disarms_the_program() {
         flags: 0,
         time: 0,
     };
-    let outcome = hook::classify(hook::current_mode(), &mut state, stroke);
+    let outcome = classify(hook::current_mode(), &mut state, stroke);
 
     assert_eq!(outcome.decision, Decision::Pass);
     assert!(!outcome.fire_hotkey);
@@ -1296,7 +1308,7 @@ fn fr_96_is_not_subject_to_the_filter_of_fr_03() {
         time: 0,
     };
 
-    let outcome = hook::classify(hook::current_mode(), &mut state, signed);
+    let outcome = classify(hook::current_mode(), &mut state, signed);
 
     assert_eq!(
         outcome.decision,
@@ -1558,7 +1570,7 @@ fn in_an_excluded_process_the_hotkey_reaches_the_application() {
     // and the dull thud of FR-100 played — the requirement's own remedy did nothing.
     let mut state = HotkeyState::default();
 
-    let outcome = hook::classify(
+    let outcome = classify(
         armed_in_an_excluded_process(),
         &mut state,
         user_key(VK_PAUSE, Edge::Down),
@@ -1575,7 +1587,7 @@ fn in_an_excluded_process_the_hotkey_reaches_the_application() {
     );
 
     // And the release goes the same way, so the application sees a whole keystroke.
-    let up = hook::classify(
+    let up = classify(
         armed_in_an_excluded_process(),
         &mut state,
         user_key(VK_PAUSE, Edge::Up),
@@ -1599,7 +1611,7 @@ fn the_release_of_the_hotkey_repeats_the_fate_of_its_press() {
     let mut state = HotkeyState::default();
 
     assert_eq!(
-        hook::classify(
+        classify(
             armed_in_an_excluded_process(),
             &mut state,
             user_key(VK_PAUSE, Edge::Down)
@@ -1608,7 +1620,7 @@ fn the_release_of_the_hotkey_repeats_the_fate_of_its_press() {
         Decision::Pass
     );
     assert_eq!(
-        hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up)).decision,
+        classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Up)).decision,
         Decision::Pass,
         "нажатие пропущено, а отпускание подавлено — приложение держит клавишу вечно"
     );
@@ -1616,12 +1628,12 @@ fn the_release_of_the_hotkey_repeats_the_fate_of_its_press() {
     // Pressed in an ordinary process, released after the process became excluded.
     let mut state = HotkeyState::default();
 
-    let down = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    let down = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
     assert_eq!(down.decision, Decision::Suppress);
     assert!(down.fire_hotkey);
 
     assert_eq!(
-        hook::classify(
+        classify(
             armed_in_an_excluded_process(),
             &mut state,
             user_key(VK_PAUSE, Edge::Up)
@@ -1641,7 +1653,7 @@ fn the_auto_repeat_of_a_yielded_hotkey_reaches_the_application_as_it_is() {
     let mut state = HotkeyState::default();
 
     for _ in 0..5 {
-        let outcome = hook::classify(
+        let outcome = classify(
             armed_in_an_excluded_process(),
             &mut state,
             user_key(VK_PAUSE, Edge::Down),
@@ -1655,7 +1667,7 @@ fn the_auto_repeat_of_a_yielded_hotkey_reaches_the_application_as_it_is() {
     }
 
     assert_eq!(
-        hook::classify(
+        classify(
             armed_in_an_excluded_process(),
             &mut state,
             user_key(VK_PAUSE, Edge::Up)
@@ -1665,7 +1677,7 @@ fn the_auto_repeat_of_a_yielded_hotkey_reaches_the_application_as_it_is() {
     );
 
     // And the very next press outside the exclusion is an ordinary hotkey press again.
-    let outcome = hook::classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
+    let outcome = classify(armed(), &mut state, user_key(VK_PAUSE, Edge::Down));
 
     assert_eq!(outcome.decision, Decision::Suppress);
     assert!(outcome.fire_hotkey, "вне исключения горячая клавиша наша");
@@ -1680,7 +1692,7 @@ fn the_exclusion_changes_nothing_for_an_ordinary_stroke() {
 
     for edge in [Edge::Down, Edge::Up] {
         assert_eq!(
-            hook::classify(
+            classify(
                 armed_in_an_excluded_process(),
                 &mut state,
                 user_key(VK_A, edge)
@@ -1708,7 +1720,7 @@ fn the_states_above_the_exclusion_still_answer_first() {
     ] {
         let mut state = HotkeyState::default();
 
-        let outcome = hook::classify(mode, &mut state, user_key(VK_PAUSE, Edge::Down));
+        let outcome = classify(mode, &mut state, user_key(VK_PAUSE, Edge::Down));
 
         assert_eq!(outcome.decision, Decision::Pass);
         assert!(!outcome.fire_hotkey);
@@ -2265,4 +2277,595 @@ fn tap_capslock() {
     // The toggle is the system's state, set while the events are dispatched; the reading that
     // follows has to happen after that, and this is the shortest wait that is still a wait.
     sleep(Duration::from_millis(120));
+}
+
+// -------------------------------------------------------------------------------------
+// Task T-93-1, вопрос 157 — the hotkey with modifiers: `Ctrl`/`Alt`/`Shift` + a key
+// -------------------------------------------------------------------------------------
+//
+// The owner's word (157.1, 157.6): a combination of `Ctrl`, `Alt` and `Shift` with a key is a
+// lawful hotkey, and it answers **only to its own set** — `Ctrl+F12` neither to `F12`, nor to
+// `Ctrl+Shift+F12`, nor with a `Win` held; the bare key goes to the application. The set held is
+// the fourth argument of `classify`, so every row below is a pure call with the set written out.
+
+/// Virtual-key code of `F12` — the key of the emergency combination, and the one the owner's
+/// laptop example is about (`Ctrl+F12` instead of a `Pause` it does not have).
+const VK_F12: u16 = 0x7B;
+
+/// The ordinary running state with `Ctrl+F12` as the hotkey.
+fn armed_on_ctrl_f12() -> Mode {
+    Mode {
+        hotkey_vk: VK_F12,
+        hotkey_modifiers: hook::MOD_CTRL,
+        ..armed()
+    }
+}
+
+/// `hook::classify` with the set `held` written out — the tests of this section.
+fn classify_holding(mode: Mode, state: &mut HotkeyState, key: KeyEvent, held: u16) -> Outcome {
+    hook::classify(mode, state, key, || held)
+}
+
+/// **(а) The combination pressed with its own set is the hotkey**: suppressed (FR-95) and the
+/// conversion asked for (FR-02) — and its release is suppressed too, so the application sees
+/// nothing of the keystroke.
+#[test]
+fn a_combination_pressed_with_its_own_set_is_the_hotkey() {
+    let mut state = HotkeyState::default();
+
+    let pressed = classify_holding(
+        armed_on_ctrl_f12(),
+        &mut state,
+        user_key(VK_F12, Edge::Down),
+        hook::MOD_CTRL,
+    );
+
+    assert_eq!(
+        pressed.decision,
+        Decision::Suppress,
+        "Ctrl+F12 должна подавляться"
+    );
+    assert!(pressed.fire_hotkey, "Ctrl+F12 должна запускать конвертацию");
+
+    let released = classify_holding(
+        armed_on_ctrl_f12(),
+        &mut state,
+        user_key(VK_F12, Edge::Up),
+        hook::MOD_CTRL,
+    );
+
+    assert_eq!(released.decision, Decision::Suppress);
+    assert!(!released.fire_hotkey);
+    assert_eq!(state, HotkeyState::default(), "the hold is over");
+}
+
+/// **(б) The bare key of a combination reaches the application** — вопрос 157: «голая клавиша
+/// при назначенном сочетании проходит в программы». Its release goes the same way, so the
+/// application sees a whole keystroke.
+#[test]
+fn the_bare_key_of_a_combination_reaches_the_application() {
+    let mut state = HotkeyState::default();
+
+    for edge in [Edge::Down, Edge::Down, Edge::Up] {
+        let outcome = classify_holding(armed_on_ctrl_f12(), &mut state, user_key(VK_F12, edge), 0);
+
+        assert_eq!(
+            outcome,
+            passed_on(),
+            "голая F12 при горячей клавише Ctrl+F12 должна уйти программе, {edge:?}"
+        );
+    }
+
+    assert_eq!(state, HotkeyState::default(), "and nothing is left held");
+}
+
+/// **(в) Another set is not the hotkey**: a larger one, a different one, and the set with a
+/// `Win` in it all reach the application — the exactness of вопрос 157 is the whole of it.
+#[test]
+fn a_combination_with_another_set_held_reaches_the_application() {
+    for (held, what) in [
+        (hook::MOD_CTRL | hook::MOD_SHIFT, "Ctrl+Shift+F12"),
+        (hook::MOD_CTRL | hook::MOD_WIN, "Win+Ctrl+F12"),
+        (hook::MOD_ALT, "Alt+F12"),
+        (hook::MOD_SHIFT, "Shift+F12"),
+        (hook::MOD_CTRL | hook::MOD_ALT, "Ctrl+Alt+F12"),
+    ] {
+        let mut state = HotkeyState::default();
+
+        let pressed = classify_holding(
+            armed_on_ctrl_f12(),
+            &mut state,
+            user_key(VK_F12, Edge::Down),
+            held,
+        );
+        let released = classify_holding(
+            armed_on_ctrl_f12(),
+            &mut state,
+            user_key(VK_F12, Edge::Up),
+            held,
+        );
+
+        assert_eq!(
+            pressed,
+            passed_on(),
+            "{what} при горячей клавише Ctrl+F12 должна уйти программе"
+        );
+        assert_eq!(released, passed_on(), "{what}: и её отпускание тоже");
+    }
+}
+
+/// **The set is decided on the press and kept for the whole hold** — the shape FR-84 gave the
+/// fate of a press (task T-52-3), and for the same reason: an application must see a whole
+/// keystroke or none of it.
+///
+/// Two ways the modifiers move during a hold: the `Ctrl` of a fired `Ctrl+F12` let go before
+/// `F12` — the rest of the hold is still the hotkey's, swallowed, and the next press fires again;
+/// and a `Ctrl` pressed while a bare `F12` repeats — the hold stays the application's to the end,
+/// with no conversion in the middle of it and no release swallowed under it.
+#[test]
+fn the_set_of_a_press_is_kept_for_the_whole_hold() {
+    let mut state = HotkeyState::default();
+    let mode = armed_on_ctrl_f12();
+
+    let fired = classify_holding(
+        mode,
+        &mut state,
+        user_key(VK_F12, Edge::Down),
+        hook::MOD_CTRL,
+    );
+    assert!(fired.fire_hotkey);
+
+    // The `Ctrl` goes up first: the repeats and the release of `F12` arrive with nothing held.
+    let repeat = classify_holding(mode, &mut state, user_key(VK_F12, Edge::Down), 0);
+    let release = classify_holding(mode, &mut state, user_key(VK_F12, Edge::Up), 0);
+
+    assert_eq!(
+        (repeat.decision, repeat.fire_hotkey),
+        (Decision::Suppress, false),
+        "the repeat of a fired hold is swallowed and converts nothing (FR-08, FR-95)"
+    );
+    assert_eq!(
+        release.decision,
+        Decision::Suppress,
+        "the release of a swallowed press must not reach the application"
+    );
+
+    // And the next press with the set is a press again.
+    let again = classify_holding(
+        mode,
+        &mut state,
+        user_key(VK_F12, Edge::Down),
+        hook::MOD_CTRL,
+    );
+    assert!(
+        again.fire_hotkey,
+        "the hotkey fires again after the release"
+    );
+    classify_holding(mode, &mut state, user_key(VK_F12, Edge::Up), hook::MOD_CTRL);
+
+    // A bare `F12` held, and the `Ctrl` pressed while it repeats.
+    let bare = classify_holding(mode, &mut state, user_key(VK_F12, Edge::Down), 0);
+    let repeat_with_ctrl = classify_holding(
+        mode,
+        &mut state,
+        user_key(VK_F12, Edge::Down),
+        hook::MOD_CTRL,
+    );
+    let release_with_ctrl =
+        classify_holding(mode, &mut state, user_key(VK_F12, Edge::Up), hook::MOD_CTRL);
+
+    assert_eq!(bare, passed_on());
+    assert_eq!(
+        repeat_with_ctrl,
+        passed_on(),
+        "a hold the application got does not become the hotkey half way"
+    );
+    assert_eq!(
+        release_with_ctrl,
+        passed_on(),
+        "and its release is the application's"
+    );
+    assert_eq!(state, HotkeyState::default());
+}
+
+/// **(д) FR-08 for a combination**: a held `Ctrl+F12` converts once however long it is held, and
+/// the set is asked **once** — on the first press — not on every repeat.
+#[test]
+fn holding_a_combination_fires_once_and_asks_for_the_set_once() {
+    let mut state = HotkeyState::default();
+    let asked = std::cell::Cell::new(0_u32);
+
+    let fired = (0..10)
+        .filter(|_| {
+            let outcome = hook::classify(
+                armed_on_ctrl_f12(),
+                &mut state,
+                user_key(VK_F12, Edge::Down),
+                || {
+                    asked.set(asked.get() + 1);
+                    hook::MOD_CTRL
+                },
+            );
+
+            assert_eq!(
+                outcome.decision,
+                Decision::Suppress,
+                "every repeat is swallowed"
+            );
+
+            outcome.fire_hotkey
+        })
+        .count();
+
+    assert_eq!(fired, 1, "FR-08: one conversion, not a stream of them");
+    assert_eq!(asked.get(), 1, "the set is asked on the first press only");
+}
+
+/// **NFR-01 and NFR-02 — an ordinary letter costs no question about the modifiers, and neither
+/// does a bare hotkey.** The system calls behind the set (`hook::physical_modifiers`, seven reads
+/// of the asynchronous key state) are made for the first press of the key of a **combination**
+/// and for nothing else — the shape FR-96 already has: the cheap comparison first, the system
+/// call only when the answer is almost «yes».
+///
+/// ⚠ The negative control of this guard is a mutant that asks first and compares after
+/// (`scratchpad-E93`): it turns the first count red.
+#[test]
+fn neither_a_letter_nor_a_bare_hotkey_asks_for_the_modifiers() {
+    let asked = std::cell::Cell::new(0_u32);
+    let counting = || {
+        asked.set(asked.get() + 1);
+        0
+    };
+
+    // Every letter and digit, both edges, with `Ctrl+F12` as the hotkey.
+    let mut state = HotkeyState::default();
+
+    for vk in (0x30..=0x39).chain(0x41..=0x5A) {
+        for edge in [Edge::Down, Edge::Up] {
+            hook::classify(
+                armed_on_ctrl_f12(),
+                &mut state,
+                user_key(vk, edge),
+                counting,
+            );
+        }
+    }
+
+    assert_eq!(
+        asked.get(),
+        0,
+        "a letter asked the system about the modifiers"
+    );
+
+    // The bare hotkey of section 7 — `Pause` — pressed, repeated and released.
+    let mut state = HotkeyState::default();
+
+    for edge in [Edge::Down, Edge::Down, Edge::Up] {
+        hook::classify(armed(), &mut state, user_key(VK_PAUSE, edge), counting);
+    }
+
+    assert_eq!(
+        asked.get(),
+        0,
+        "a bare hotkey asked the system about the modifiers"
+    );
+}
+
+/// **A bare hotkey answers with any modifiers held** — 157.11, variant А (до слова владельца):
+/// `Shift` held over `Pause` is position 22 of the matrix of §11.3 («результат без искажений»),
+/// and step 3 of FR-40 exists for exactly that press. The exactness of вопрос 157 is the
+/// combinations' rule.
+#[test]
+fn a_bare_hotkey_answers_with_any_modifier_held() {
+    for held in [
+        0,
+        hook::MOD_SHIFT,
+        hook::MOD_CTRL,
+        hook::MOD_ALT,
+        hook::MOD_CTRL | hook::MOD_ALT | hook::MOD_SHIFT,
+        hook::MOD_WIN,
+    ] {
+        let mut state = HotkeyState::default();
+        let outcome = classify_holding(armed(), &mut state, user_key(VK_PAUSE, Edge::Down), held);
+
+        assert_eq!(outcome.decision, Decision::Suppress, "held {held:#06b}");
+        assert!(outcome.fire_hotkey, "held {held:#06b}");
+    }
+}
+
+/// **The sides are one modifier** — вопрос 157: left and right `Ctrl`, `Alt` and `Shift` are the
+/// same, `AltGr` (the right `Alt` with the `Ctrl` the keyboard adds) reads as `Ctrl + Alt`, and a
+/// `Win` of either side is the bit no hotkey carries.
+#[test]
+fn the_held_set_merges_the_sides_and_names_the_windows_key() {
+    use lang_switcher::buffer::Physical;
+
+    let nothing = Physical {
+        ctrl: false,
+        alt_left: false,
+        alt_right: false,
+        win: false,
+        shift_left: false,
+        shift_right: false,
+    };
+
+    assert_eq!(hook::held_set(nothing), 0);
+    assert_eq!(
+        hook::held_set(Physical {
+            ctrl: true,
+            ..nothing
+        }),
+        hook::MOD_CTRL
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            alt_left: true,
+            ..nothing
+        }),
+        hook::MOD_ALT
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            alt_right: true,
+            ..nothing
+        }),
+        hook::MOD_ALT
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            shift_left: true,
+            ..nothing
+        }),
+        hook::MOD_SHIFT
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            shift_right: true,
+            ..nothing
+        }),
+        hook::MOD_SHIFT
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            win: true,
+            ..nothing
+        }),
+        hook::MOD_WIN
+    );
+    assert_eq!(
+        hook::held_set(Physical {
+            ctrl: true,
+            alt_right: true,
+            ..nothing
+        }),
+        hook::MOD_CTRL | hook::MOD_ALT,
+        "AltGr is Ctrl + Alt"
+    );
+}
+
+/// **The key and its modifiers are one publication** — вопрос 157, task T-93-1: one word, one
+/// store, one load, so no reader ever pairs a new key with the old set.
+///
+/// Measured twice: through the door (`set_hotkey` → `hotkey` → `current_mode`) and in the source,
+/// where the one word has exactly one writer.
+#[test]
+fn the_key_and_its_modifiers_are_published_as_one_word() {
+    let restore = hook::hotkey();
+
+    hook::set_hotkey(VK_F12, hook::MOD_CTRL | hook::MOD_SHIFT);
+    assert_eq!(hook::hotkey(), (VK_F12, hook::MOD_CTRL | hook::MOD_SHIFT));
+    assert_eq!(hook::hotkey_vk(), VK_F12);
+
+    let mode = hook::current_mode();
+    assert_eq!(
+        (mode.hotkey_vk, mode.hotkey_modifiers),
+        (VK_F12, hook::MOD_CTRL | hook::MOD_SHIFT),
+        "current_mode reads both halves of the publication"
+    );
+
+    hook::set_hotkey(VK_PAUSE, 0);
+    assert_eq!(
+        hook::hotkey(),
+        (VK_PAUSE, 0),
+        "and a bare key clears the set"
+    );
+
+    hook::set_hotkey(restore.0, restore.1);
+
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable");
+    let product = source
+        .split("\n#[cfg(test)]\nmod tests {")
+        .next()
+        .expect("the product half");
+
+    assert_eq!(
+        product.matches("static HOTKEY: AtomicU32").count(),
+        1,
+        "one word holds the hotkey"
+    );
+    assert_eq!(
+        product.matches("HOTKEY.store(").count(),
+        1,
+        "and it has one writer — `set_hotkey`"
+    );
+    assert_eq!(
+        product.matches("HOTKEY.load(").count(),
+        1,
+        "and one reader — `hotkey`"
+    );
+
+    // And no second word beside it: a set published apart from the key is the race this test
+    // exists against. Controls: the needles see a second atomic of the modifiers when one is
+    // written into a copy of the source.
+    let second_word = |text: &str| {
+        text.matches("MODIFIERS.store(").count() + text.matches("MODIFIERS.load(").count()
+    };
+    assert_eq!(
+        second_word(product),
+        0,
+        "the modifiers travel in the word of the key, never in a static of their own"
+    );
+    let mutant = product.replacen(
+        "pub fn set_hotkey(vk: u16, modifiers: u16) {",
+        "pub fn set_hotkey(vk: u16, modifiers: u16) { HOTKEY_MODIFIERS.store(modifiers, R);",
+        1,
+    );
+    assert_ne!(
+        mutant, product,
+        "the control must change the text it is made of"
+    );
+    assert!(
+        second_word(&mutant) > 0,
+        "the sweep does not see a second atomic — it cannot fail"
+    );
+}
+
+/// **The names of the modifiers in section 7** — a closed set, read the way key names are read:
+/// any case, blanks around, any order; an unknown name is `None` for the whole list.
+#[test]
+fn the_names_of_the_modifiers_are_a_closed_set() {
+    let none: [&str; 0] = [];
+
+    assert_eq!(hook::modifiers_from_names(&none), Some(0));
+    assert_eq!(hook::modifiers_from_names(&["Ctrl"]), Some(hook::MOD_CTRL));
+    assert_eq!(
+        hook::modifiers_from_names(&["shift", " CTRL "]),
+        Some(hook::MOD_CTRL | hook::MOD_SHIFT),
+        "any case, blanks around, any order"
+    );
+    assert_eq!(
+        hook::modifiers_from_names(&["Ctrl", "Alt", "Shift"]),
+        Some(hook::MOD_CTRL | hook::MOD_ALT | hook::MOD_SHIFT)
+    );
+    assert_eq!(
+        hook::modifiers_from_names(&["Ctrl", "Ctrl"]),
+        Some(hook::MOD_CTRL),
+        "a name twice is the modifier once"
+    );
+
+    for unknown in ["Win", "Strg", "Control", "", "Ctrl+Alt"] {
+        assert_eq!(
+            hook::modifiers_from_names(&["Ctrl", unknown]),
+            None,
+            "«{unknown}» is not a modifier section 7 knows"
+        );
+    }
+
+    assert_eq!(
+        hook::HOTKEY_MODIFIERS.map(|(name, _)| name),
+        ["Ctrl", "Alt", "Shift"],
+        "the canonical order of вопрос 157"
+    );
+}
+
+// The minimal layouts of the probe П1 — `ghbdtn` on both halves, so that a stroke recorded is a
+// stroke counted.
+const SCAN_G: u16 = 0x22;
+const SCAN_H: u16 = 0x23;
+const SCAN_B: u16 = 0x30;
+const SCAN_D: u16 = 0x20;
+const SCAN_T: u16 = 0x14;
+const SCAN_N: u16 = 0x31;
+
+fn ghbdtn_cache() -> lang_switcher::layouts::LayoutCache {
+    use lang_switcher::layouts::{KeyMapping, LayoutCache, LayoutId, LayoutMapBuilder, Mods};
+
+    let mut english = LayoutMapBuilder::new(LayoutId::from_raw(0x0409_0409));
+    let mut russian = LayoutMapBuilder::new(LayoutId::from_raw(0x0419_0419));
+
+    for (scan, latin, cyrillic) in [
+        (SCAN_G, 'g', 'п'),
+        (SCAN_H, 'h', 'р'),
+        (SCAN_B, 'b', 'и'),
+        (SCAN_D, 'd', 'в'),
+        (SCAN_T, 't', 'е'),
+        (SCAN_N, 'n', 'т'),
+    ] {
+        english.set(scan, false, Mods::NONE, KeyMapping::from_char(latin));
+        russian.set(scan, false, Mods::NONE, KeyMapping::from_char(cyrillic));
+    }
+
+    LayoutCache::from_maps(vec![english.finish(), russian.finish()]).expect("two maps")
+}
+
+/// A stroke with its scan code, as the callback delivers one.
+fn scanned(vk: u16, scan: u16, edge: Edge) -> KeyEvent {
+    KeyEvent {
+        scan,
+        ..user_key(vk, edge)
+    }
+}
+
+/// **(г) Посылка П1 — the hotkey's branch returns before the command row of FR-10.** The rule
+/// «`Ctrl`/`Alt`/`Win` + клавиша — полный сброс» lives in `buffer::record`, which `classify`
+/// reaches only for a stroke that is not the hotkey; so `Ctrl+F12` converts the word typed before
+/// it instead of throwing it away. The contrast proves the order: `Ctrl+Shift+F12`, which is not
+/// the hotkey, does reach the record and does flush the ring.
+#[test]
+fn a_combination_hotkey_never_reaches_the_command_row_of_fr10() {
+    use lang_switcher::buffer::{self, Recorder};
+    use lang_switcher::layouts::LayoutId;
+
+    const VK_LCONTROL: u16 = 0xA2;
+    const VK_LSHIFT: u16 = 0xA0;
+
+    let typed = |held: &[u16], key_held: u16| -> (usize, Outcome, usize) {
+        let mut recorder = Recorder::with_capacity(64);
+        recorder.set_cache(ghbdtn_cache());
+        recorder.set_active_layout(LayoutId::from_raw(0x0409_0409));
+        buffer::install_recorder(recorder);
+
+        let mode = armed_on_ctrl_f12();
+        let mut state = HotkeyState::default();
+
+        for (vk, scan) in [
+            (b'G', SCAN_G),
+            (b'H', SCAN_H),
+            (b'B', SCAN_B),
+            (b'D', SCAN_D),
+            (b'T', SCAN_T),
+            (b'N', SCAN_N),
+        ] {
+            classify_holding(mode, &mut state, scanned(vk.into(), scan, Edge::Down), 0);
+            classify_holding(mode, &mut state, scanned(vk.into(), scan, Edge::Up), 0);
+        }
+
+        let before = buffer::len();
+
+        for &modifier in held {
+            classify_holding(mode, &mut state, user_key(modifier, Edge::Down), 0);
+        }
+
+        let pressed = classify_holding(mode, &mut state, user_key(VK_F12, Edge::Down), key_held);
+        let after = buffer::len();
+
+        buffer::uninstall();
+
+        (before, pressed, after)
+    };
+
+    let (before, pressed, after) = typed(&[VK_LCONTROL], hook::MOD_CTRL);
+    println!("Ctrl+F12 (the hotkey): ring {before} -> {after}, {pressed:?}");
+
+    assert_eq!(before, 6, "the probe typed six strokes");
+    assert!(pressed.fire_hotkey, "Ctrl+F12 starts the conversion");
+    assert_eq!(
+        after, 6,
+        "П1: the word typed before the hotkey is still there to be converted"
+    );
+
+    let (before, pressed, after) =
+        typed(&[VK_LCONTROL, VK_LSHIFT], hook::MOD_CTRL | hook::MOD_SHIFT);
+    println!("Ctrl+Shift+F12 (not the hotkey): ring {before} -> {after}, {pressed:?}");
+
+    assert_eq!(pressed, passed_on());
+    assert_eq!(
+        after, 0,
+        "the contrast: a combination that is not the hotkey is an ordinary command of FR-10"
+    );
 }

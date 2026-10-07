@@ -2198,11 +2198,14 @@ fn armed() -> Mode {
         active: true,
         fail_safe: false,
         hotkey_vk: VK_PAUSE,
+        hotkey_modifiers: 0,
         hotkey_yields: false,
     }
 }
 
-/// Delivers one stroke the way the callback does: one whole `KeyEvent`, one `classify`.
+/// Delivers one stroke the way the callback does: one whole `KeyEvent`, one `classify` — with no
+/// modifier held, which is what every stroke of these tests is made with (task T-93-1 gave the
+/// decision the held set as a fourth argument).
 fn through_the_hook(state: &mut HotkeyState, vk: u16, scan: u16, extra_info: usize) -> Decision {
     hook::classify(
         armed(),
@@ -2215,6 +2218,7 @@ fn through_the_hook(state: &mut HotkeyState, vk: u16, scan: u16, extra_info: usi
             flags: 0,
             time: SOME_TIME,
         },
+        || 0,
     )
     .decision
 }
@@ -2293,6 +2297,7 @@ fn a_suspended_or_failed_program_buffers_nothing() {
                 flags: 0,
                 time: SOME_TIME,
             },
+            || 0,
         );
     }
 
