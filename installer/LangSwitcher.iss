@@ -75,7 +75,7 @@
 ; heading of the program's notifications is the name of its shortcut -- and so is the autostart
 ; value below.  AppId is not touched, so an update is still the same application.
 #define AppTitle       "Lang Switcher for Windows"
-#define AppVersion     "0.92.0"
+#define AppVersion     "0.93.0"
 #define AppPublisher   "Panda Koder"
 #define AppExeName     "LangSwitcher.exe"
 #define AppCopyright   "Copyright (C) 2026 Panda Koder"
@@ -140,10 +140,10 @@ AppVersion={#AppVersion}
 AppVerName={#AppTitle} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
-VersionInfoVersion=0.92.0.0
+VersionInfoVersion=0.93.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppTitle}
-VersionInfoProductVersion=0.92.0.0
+VersionInfoProductVersion=0.93.0.0
 VersionInfoDescription={#AppTitle} Setup
 VersionInfoCopyright={#AppCopyright}
 
