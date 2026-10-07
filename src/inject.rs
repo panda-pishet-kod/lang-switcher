@@ -1233,6 +1233,62 @@ pub fn keyboard(event: &INPUT) -> Option<KEYBDINPUT> {
 }
 
 // ---------------------------------------------------------------------------------------
+// The menu mask — task T-93-3, вопрос 157 (посылка П5)
+// ---------------------------------------------------------------------------------------
+
+/// The virtual key of the menu mask — `0x07`, a code Windows leaves unassigned, with no
+/// character in any layout and no meaning to any application. Task T-93-3.
+pub const MENU_MASK_VK: u16 = 0x07;
+
+/// The two events of the menu mask for a hotkey carrying `modifiers` — or `None` when the set
+/// has no `Alt`, and then nothing is ever sent. Task T-93-3, вопрос 157, посылка П5.
+///
+/// # Why a hotkey with `Alt` needs one
+///
+/// FR-95 suppresses the key of the hotkey, so of `Alt+F12` the application sees `Alt` go down and
+/// `Alt` come up with nothing between — **a lone `Alt`**, which `DefWindowProc` answers by taking
+/// the window into its menu (`SC_KEYMENU`). The keystrokes of the replacement would then land in
+/// the menu. The remedy is the one AutoHotkey ships as its menu mask key: a press and a release of
+/// a key nobody uses, between the `Alt` going down and the `Alt` coming up, so that the release
+/// is no longer a lone one. Measured on the bench before it was written (`scratchpad-E93`,
+/// `--experiment-combination`): the witness window counts `SC_KEYMENU`.
+///
+/// Built by [`key_event`], so the mask carries the signature of FR-03 like every event of this
+/// program: the hook passes it on untouched and the buffer never records it.
+pub fn menu_mask(modifiers: u16) -> Option<[INPUT; 2]> {
+    if modifiers & crate::hook::MOD_ALT == 0 {
+        return None;
+    }
+
+    let mask = VIRTUAL_KEY(MENU_MASK_VK);
+
+    Some([key_event(mask, false, false), key_event(mask, false, true)])
+}
+
+/// Sends the menu mask of the published hotkey, if it carries `Alt` — task T-93-3.
+///
+/// Called by the input thread on `hook::WM_APP_HOTKEY`, **first**, before the press is given to
+/// either path: the user still holds `Alt` at that moment, and whatever follows — the release of
+/// step 3 of FR-40, the `Ctrl+C` of the selection path, the person letting go — comes after the
+/// mask. A hotkey without `Alt` sends nothing. FR-45: a mask the system did not take whole is
+/// counted like any other discrepancy.
+pub fn send_menu_mask() {
+    let (_, modifiers) = crate::hook::hotkey();
+
+    let Some(events) = menu_mask(modifiers) else {
+        return;
+    };
+
+    let accepted = send_input(&events);
+
+    record_discrepancy(Dispatched {
+        calls: 1,
+        requested: events.len(),
+        accepted: usize::try_from(accepted).unwrap_or(0),
+    });
+}
+
+// ---------------------------------------------------------------------------------------
 // FR-41, FR-44, FR-45 — sending
 // ---------------------------------------------------------------------------------------
 

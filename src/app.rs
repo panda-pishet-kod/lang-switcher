@@ -3474,6 +3474,15 @@ unsafe extern "system" fn window_proc(
             let hotkey = message == crate::hook::WM_APP_HOTKEY;
             let handed_back = message == crate::selection::WM_APP_BUFFER_PATH;
 
+            // ⭐ **The menu mask — task T-93-3, вопрос 157, посылка П5.** A hotkey with `Alt` would
+            // leave the application a lone `Alt` (FR-95 swallowed the key between), and a lone
+            // `Alt` takes the window into its menu. The mask goes out first, while the user still
+            // holds `Alt`, before either path is chosen; a hotkey without `Alt` sends nothing. The
+            // input window only — SEC-05, the gate the arm below uses.
+            if hotkey && is_input_window(hwnd) {
+                crate::inject::send_menu_mask();
+            }
+
             if (hotkey || handed_back) && !(hotkey && crate::selection::wants_selection_path()) {
                 // ⚠ **FR-100, task Т-21-5 — the answer is not made here.** This is the input
                 // thread, whose budget NFR-09 puts at thirty milliseconds for the whole of a

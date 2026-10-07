@@ -3993,3 +3993,107 @@ mod behavioural {
         buffer::uninstall();
     }
 }
+
+// -------------------------------------------------------------------------------------
+// Task T-93-3, вопрос 157, посылка П5 — the menu mask of a hotkey with `Alt`
+// -------------------------------------------------------------------------------------
+
+/// **The mask is two events of the unassigned key 0x07 — a press and a release, signed — and only
+/// for a set with `Alt`.** Of `Alt+F12` an application sees `Alt` down and `Alt` up (FR-95 took
+/// the `F12`), which is a lone `Alt` and takes the window into its menu; the mask between the two
+/// makes the `Alt` a used one. A hotkey without `Alt` sends nothing at all.
+#[test]
+fn the_menu_mask_is_a_signed_press_and_release_of_0x07_and_only_for_alt() {
+    use lang_switcher::hook::{MOD_ALT, MOD_CTRL, MOD_SHIFT};
+
+    for set in [0, MOD_CTRL, MOD_SHIFT, MOD_CTRL | MOD_SHIFT] {
+        assert!(
+            inject::menu_mask(set).is_none(),
+            "a hotkey without Alt sends no mask ({set:#05b})"
+        );
+    }
+
+    for set in [
+        MOD_ALT,
+        MOD_CTRL | MOD_ALT,
+        MOD_ALT | MOD_SHIFT,
+        MOD_CTRL | MOD_ALT | MOD_SHIFT,
+    ] {
+        let events = inject::menu_mask(set).expect("a hotkey with Alt sends the mask");
+        let keys: Vec<_> = events
+            .iter()
+            .map(|event| inject::keyboard(event).expect("a keyboard event"))
+            .collect();
+
+        assert_eq!(keys.len(), 2, "a press and a release ({set:#05b})");
+        assert_eq!(keys[0].wVk, VIRTUAL_KEY(inject::MENU_MASK_VK));
+        assert_eq!(keys[1].wVk, VIRTUAL_KEY(inject::MENU_MASK_VK));
+        assert_eq!(keys[0].dwFlags.0 & KEYEVENTF_KEYUP.0, 0, "the press first");
+        assert_ne!(keys[1].dwFlags.0 & KEYEVENTF_KEYUP.0, 0, "then the release");
+
+        for key in &keys {
+            assert_eq!(
+                key.dwExtraInfo, INJECTED_SIGNATURE,
+                "FR-03: the mask carries the signature, so the hook passes it and the buffer never \
+                 records it"
+            );
+        }
+    }
+
+    assert_eq!(
+        inject::MENU_MASK_VK,
+        0x07,
+        "the unassigned key of the measurement"
+    );
+}
+
+/// **The mask goes out first** — the input window answers `WM_APP_HOTKEY` with the mask before
+/// it chooses a path for the press: the person still holds `Alt` at that moment, and the release of
+/// step 3 of FR-40, the `Ctrl+C` of the selection path and the hand letting go all come after it.
+///
+/// Read off `src\app.rs`: in the window procedure the call stands between the line that names the
+/// hotkey and the gate of the selection path. Controls: the order reversed in a copy is seen.
+#[test]
+fn the_input_window_sends_the_menu_mask_before_it_chooses_a_path() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("app.rs"),
+    )
+    .expect("src/app.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let order = |text: &str| -> Option<(usize, usize, usize)> {
+        let hotkey = text.find("let hotkey = message == crate::hook::WM_APP_HOTKEY;")?;
+        let mask = text.find("crate::inject::send_menu_mask();")?;
+        let path = text.find("crate::selection::wants_selection_path()")?;
+        Some((hotkey, mask, path))
+    };
+
+    let (hotkey, mask, path) = order(&source).expect("all three lines are in src/app.rs");
+
+    assert!(
+        hotkey < mask && mask < path,
+        "the mask is sent after the hotkey is named ({hotkey}) and before the path is chosen \
+         ({path}), at {mask}"
+    );
+    assert_eq!(
+        source.matches("crate::inject::send_menu_mask();").count(),
+        1,
+        "one place sends the mask"
+    );
+
+    // Control: a copy with the mask moved below the gate must be caught.
+    let moved = source
+        .replacen("crate::inject::send_menu_mask();", "", 1)
+        .replacen(
+            "crate::selection::wants_selection_path()",
+            "crate::selection::wants_selection_path() && { crate::inject::send_menu_mask(); true }",
+            1,
+        );
+    let (_, mask, path) = order(&moved).expect("the control keeps the three lines");
+    assert!(
+        mask > path,
+        "the sweep does not see the mask moved below the gate"
+    );
+}
