@@ -1623,6 +1623,129 @@ fn notepad_position_held(ctx: &Context, number: u8, name: &str, modifiers: &[u16
     )
 }
 
+/// **The second press with the modifier still held** — the experiment of task T-93-3, decision
+/// 157.15, and no position of the matrix.
+///
+/// A hand that presses `Ctrl+F12`, keeps `Ctrl` down and presses `F12` once more is asking for the
+/// rollback of FR-33. By then step 3 of FR-40 has let `Ctrl` go with an event of the program's own,
+/// and the hook reads the set it compares with the hotkey's from the asynchronous key state, which
+/// that event moved too. Read off the code, the second `F12` comes bare and goes to the
+/// application; this measures it instead of quoting the code.
+///
+/// The observation is returned, not judged: whichever way it falls, it is what SPEC §10 and the
+/// README are to say (157.15). An `Err` is the instrument failing — a step of the setup, or a first
+/// press that did not give `привет`, after which a second press would measure nothing.
+fn notepad_repeat_held(ctx: &Context, modifiers: &[u16]) -> Result<String, String> {
+    let _clipboard = clip::Guard::capture();
+
+    let mut app = launch_notepad()?;
+
+    let outcome = (|| -> Result<String, String> {
+        let window = adopt_window(ctx.automation, &mut app, &|element: &Element| {
+            element.class() == "Notepad"
+        })?;
+        let hwnd = app
+            .window
+            .ok_or_else(|| "у окна нет дескриптора".to_owned())?;
+        let content = ctx
+            .automation
+            .await_element(&window, wait::WINDOW_TIMEOUT, &|e: &Element| text_field(e))
+            .ok_or_else(|| "элемент ввода не найден в дереве UI Automation".to_owned())?;
+
+        shell::activate_window(app.pid, Some(hwnd))
+            .map_err(|error| format!("вывод окна вперёд: {error}"))?;
+        let target = input::Target { pid: app.pid, hwnd };
+
+        layout::ensure(hwnd, layout::US, Duration::from_secs(5))
+            .map_err(|error| format!("исходная раскладка: {error}"))?;
+        input::type_text(TYPED, &target).map_err(|error| format!("ввод {TYPED:?}: {error}"))?;
+        wait::until(wait::TEXT_TIMEOUT, || {
+            read_field(&content).filter(|text| text == TYPED)
+        })
+        .ok_or_else(|| format!("введённое не дошло до поля: {:?}", read_field(&content)))?;
+
+        let handoffs = || -> Option<u64> {
+            crate::channel::read()
+                .ok()?
+                .get("hotkey_handoffs")?
+                .parse()
+                .ok()
+        };
+
+        input::hold_down(modifiers, &target).map_err(|error| format!("удержание: {error}"))?;
+
+        let pressed = (|| -> Result<String, String> {
+            input::tap(ctx.hotkey_vk, &target)
+                .map_err(|error| format!("первое нажатие: {error}"))?;
+            wait::until(wait::TEXT_TIMEOUT, || {
+                read_field(&content).filter(|text| text == EXPECTED)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "первое нажатие не дало {EXPECTED:?}, второе не отправлялось: {:?}",
+                    read_field(&content)
+                )
+            })?;
+            let after_first = handoffs();
+
+            // The second press: the key alone — the modifier is still down from `hold_down`.
+            input::tap(ctx.hotkey_vk, &target)
+                .map_err(|error| format!("второе нажатие: {error}"))?;
+            let rolled_back = wait::until(wait::TEXT_TIMEOUT, || {
+                read_field(&content).filter(|text| text == TYPED)
+            });
+            let shown = rolled_back
+                .clone()
+                .or_else(|| read_field(&content))
+                .unwrap_or_else(|| "<чтение не удалось>".to_owned());
+            let after_second = handoffs();
+
+            Ok(format!(
+                "{} — поле {shown:?}; hotkey_handoffs после первого {}, после второго {}",
+                repeat_reading(rolled_back.is_some(), after_first, after_second),
+                after_first.map_or("?".to_owned(), |n| n.to_string()),
+                after_second.map_or("?".to_owned(), |n| n.to_string()),
+            ))
+        })();
+
+        let released = match input::let_go(modifiers, &target) {
+            Ok(()) => "модификатор отпущен после второго нажатия".to_owned(),
+            Err(error) => format!("⚠ отпускание модификатора: {error}"),
+        };
+
+        pressed.map(|text| format!("{text}; {released}"))
+    })();
+
+    let closed = app.close();
+
+    outcome
+        .map(|text| format!("{text}; закрытие: {closed}"))
+        .map_err(|error| format!("{error}; закрытие: {closed}"))
+}
+
+/// What the two counters and the field say about the second press — decision 157.15.
+///
+/// Apart from [`notepad_repeat_held`] so that a test reaches it without a keyboard. Only the two
+/// clean outcomes are named; anything else — the text back while the product counted nothing, the
+/// product counting a press the field does not show, a channel that did not answer — is «иное»,
+/// with the numbers beside it for a person to read.
+fn repeat_reading(
+    text_back: bool,
+    after_first: Option<u64>,
+    after_second: Option<u64>,
+) -> &'static str {
+    match (text_back, after_first, after_second) {
+        (true, Some(first), Some(second)) if second > first => {
+            "второе нажатие СРАБОТАЛО — исходный текст вернулся (FR-33)"
+        }
+        (false, Some(first), Some(second)) if second == first => {
+            "второе нажатие продукт НЕ узнал — текст остался, счётчик горячей клавиши не вырос, \
+             клавиша ушла программе"
+        }
+        _ => "иное — смотреть числа",
+    }
+}
+
 /// Starts Notepad for the positions that type into it — 1, 16, 22, and 23.
 fn launch_notepad() -> Result<App, String> {
     let child = Command::new("notepad.exe")
@@ -12756,6 +12879,8 @@ fn combination_check(what: &str, held: bool, detail: &str) -> bool {
 ///      letter, with the modifier still down while the product replaces;
 ///    * **the selection path with the modifier held** (П6, the second path) — the window of
 ///      position 15;
+///    * **Блокнот, the second press with the modifier still held** (decision 157.15) — printed as
+///      a measurement, not judged: does it roll back (FR-33) or go to the application bare;
 ///    * **the witness**: the bare `F12` reaches it, the combination does not, and — for `Alt+F12`
 ///      — whether the system asked the window into its menu (П5).
 ///
@@ -12893,6 +13018,22 @@ pub fn experiment_combination(ctx: &Context) -> std::process::ExitCode {
                         );
                     }
 
+                    // Decision 157.15: a measurement, printed and not judged — only an instrument
+                    // that did not run counts against the verdict.
+                    match notepad_repeat_held(&ctx93, keys) {
+                        Ok(observation) => println!(
+                            "  [замер повтора] {name}: модификатор удержан, F12 второй раз (Блокнот) \
+                             — {observation}"
+                        ),
+                        Err(error) => {
+                            held &= combination_check(
+                                &format!("{name}: замер повтора с удержанием"),
+                                false,
+                                &error,
+                            );
+                        }
+                    }
+
                     match round(&|target| input::tap(VK_F12_CODE, target)) {
                         Ok((before, after)) => {
                             held &= combination_check(
@@ -12988,6 +13129,20 @@ mod tests {
             witnessed("LangSw-Witness-93 menu=x f12=0 mask=0 end=0"),
             None
         );
+    }
+
+    /// **Decision 157.15** — the reading of the second press names only the two clean outcomes,
+    /// and everything that does not add up reads as «иное» rather than as either of them.
+    #[test]
+    fn the_second_press_reads_as_rolled_back_or_unrecognised_only_when_both_counts_agree() {
+        assert!(repeat_reading(true, Some(1), Some(2)).contains("СРАБОТАЛО"));
+        assert!(repeat_reading(false, Some(1), Some(1)).contains("НЕ узнал"));
+
+        // Controls: the field and the counter disagree, or the counter is missing.
+        assert!(repeat_reading(true, Some(1), Some(1)).starts_with("иное"));
+        assert!(repeat_reading(false, Some(1), Some(2)).starts_with("иное"));
+        assert!(repeat_reading(true, None, Some(2)).starts_with("иное"));
+        assert!(repeat_reading(false, Some(1), None).starts_with("иное"));
     }
 
     /// **Task Т-14-1, the remainder of Н-Э13-34.** A switched-off selection path is one
