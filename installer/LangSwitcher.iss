@@ -122,6 +122,14 @@
 ; tests\installer_uninstall.rs would say so.
 #define ProductMutex "Local\Lang_Switcher.SingleInstance"
 
+; The class of the product's one top-level window, the hidden UI window that owns
+; the tray icon.  MUST MATCH src\app.rs LITERALLY:
+;   WINDOW_CLASS_NAME = w!("LangSwitcher.Hidden")
+; The uninstaller posts WM_ENDSESSION to it to close the running program (decision
+; 155.25); the two other windows of that class are message-only and are neither
+; found nor asked.  tests\installer_uninstall.rs keeps the two names together.
+#define ProductWindowClass "LangSwitcher.Hidden"
+
 [Setup]
 ; AppId is the identity Windows matches an upgrade against.  It is a constant and
 ; must never change: a new AppId turns every future update into a second parallel
@@ -487,27 +495,96 @@ begin
 end;
 
 { Uninstall, before anything is removed: the program must not be running
-  (decisions 155.23, 155.24).  Inno's uninstaller does not close programs -- the
-  Restart Manager of CloseApplications serves Setup only -- and a running
-  LangSwitcher.exe keeps its file locked: the uninstaller skips the file, the
-  folder stays and the program goes on living in the tray.  The product holds the
-  mutex ProductMutex while it runs; while the mutex exists, the person is asked to
-  exit the program and click OK, in Inno's own words (UninstallAppRunningError,
-  translated in every language of this installer).  Cancel aborts the uninstall
-  before a single file, value or certificate is touched.  /SUPPRESSMSGBOXES gets
-  the default answer, Cancel: a silent uninstall of a running program is aborted
-  with a non-zero exit code instead of leaving it half removed.  The mutex lives
-  in the session namespace (Local\): a copy running in ANOTHER user's session is
-  not seen, and its file stays, as before this check.  The [Setup] directive
-  AppMutex is not used: it would stop Setup at startup too, and an update closes
-  the product by itself (CloseApplications above). }
-<event('InitializeUninstall')>
-function InitializeUninstallProgramRunning(): Boolean;
+  (decisions 155.23, 155.24, 155.25).  Inno's uninstaller does not close programs
+  -- the Restart Manager of CloseApplications serves Setup only -- and a running
+  LangSwitcher.exe keeps its file locked: the uninstaller would skip the file, the
+  folder would stay and the program would go on living in the tray.
+
+  1. The product holds the mutex ProductMutex while it runs.  If it exists, the
+     program is asked to close the way Windows asks at sign-out and the Restart
+     Manager asks on an update: WM_ENDSESSION, wParam TRUE, lParam
+     ENDSESSION_CLOSEAPP, posted to its one top-level window, ProductWindowClass.
+     The product answers it with its one cleanup path, the same as "Exit" in its
+     menu (FR-83): the hook goes, the tray icon goes, the configuration is saved,
+     the process ends.  Posted, not sent: a program that hangs cannot hang the
+     uninstaller.  Nothing is asked of the person.
+  2. The uninstaller waits until the mutex is gone AND the program file can be
+     opened for writing -- the image of a process that has just ended is released
+     a moment after its mutex -- for up to LangSwCloseWaitMs.
+  3. Only a program still there after that is left to the person: the request to
+     exit it and click OK, in Inno's own words (UninstallAppRunningError, translated
+     in every language of this installer).  Cancel aborts the uninstall before a
+     single file, value or certificate is touched; /SUPPRESSMSGBOXES gets the
+     default answer, Cancel, and a non-zero exit code.
+
+  The mutex lives in the session namespace (Local\) and FindWindowByClassName looks
+  at one desktop: a copy running in ANOTHER user's session is neither closed nor
+  seen, and its file stays.  The [Setup] directive AppMutex is not used: it would
+  stop Setup at startup too, and an update closes the product by itself
+  (CloseApplications above). }
+const
+  LangSwEndSession = $0016;       { WM_ENDSESSION }
+  LangSwCloseApp = $00000001;     { ENDSESSION_CLOSEAPP }
+  LangSwOpenReadWrite = $0002;    { fmOpenReadWrite }
+  LangSwShareExclusive = $0010;   { fmShareExclusive }
+  LangSwCloseWaitMs = 10000;
+  LangSwAfterOkWaitMs = 5000;
+  LangSwPollMs = 250;
+
+function ProgramFileIsFree(const FileName: String): Boolean;
+var
+  Stream: TFileStream;
 begin
   Result := True;
+  if not FileExists(FileName) then
+    Exit;
+  try
+    Stream := TFileStream.Create(FileName, LangSwOpenReadWrite or LangSwShareExclusive);
+    Stream.Free;
+  except
+    Result := False;
+  end;
+end;
+
+function ProgramIsGone(const FileName: String; const TimeoutMs: Integer): Boolean;
+var
+  Waited: Integer;
+begin
+  Waited := 0;
+  while (CheckForMutexes('{#ProductMutex}') or not ProgramFileIsFree(FileName)) and (Waited < TimeoutMs) do
+  begin
+    Sleep(LangSwPollMs);
+    Waited := Waited + LangSwPollMs;
+  end;
+  Result := (not CheckForMutexes('{#ProductMutex}')) and ProgramFileIsFree(FileName);
+  Log(Format('Lang Switcher: waited %d ms; mutex gone and file free: %s', [Waited, YesNo(Result)]));
+end;
+
+<event('InitializeUninstall')>
+function InitializeUninstallProgramRunning(): Boolean;
+var
+  ExeFile: String;
+  Wnd: HWND;
+begin
+  Result := True;
+  if not CheckForMutexes('{#ProductMutex}') then
+    Exit;
+  ExeFile := ExpandConstant('{app}\{#AppExeName}');
+  Wnd := FindWindowByClassName('{#ProductWindowClass}');
+  if Wnd = 0 then
+    Log('Lang Switcher: the program is running, but its window {#ProductWindowClass} is not found')
+  else if PostMessage(Wnd, LangSwEndSession, 1, LangSwCloseApp) then
+    Log('Lang Switcher: the program is running; asked to close as at sign-out (WM_ENDSESSION)')
+  else
+    Log('Lang Switcher: the program is running; WM_ENDSESSION could not be posted');
+  if ProgramIsGone(ExeFile, LangSwCloseWaitMs) then
+  begin
+    Log('Lang Switcher: the program has closed by itself; the uninstall goes on');
+    Exit;
+  end;
+  Log('Lang Switcher: the program did not close by itself; the person is asked');
   while CheckForMutexes('{#ProductMutex}') do
   begin
-    Log('Lang Switcher: the program is running (mutex {#ProductMutex} exists)');
     if SuppressibleMsgBox(FmtMessage(SetupMessage(msgUninstallAppRunningError), ['{#AppTitle}']),
          mbError, MB_OKCANCEL, IDCANCEL) <> IDOK then
     begin
@@ -516,6 +593,8 @@ begin
       Exit;
     end;
   end;
+  if not ProgramIsGone(ExeFile, LangSwAfterOkWaitMs) then
+    Log('Lang Switcher: the program file is still busy; the uninstaller may have to leave it');
 end;
 
 { Uninstall: the certificate this computer got from the helper leaves LocalMachine\Root
