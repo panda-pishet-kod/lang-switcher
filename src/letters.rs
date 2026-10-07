@@ -3510,16 +3510,46 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
     let palette = state.palette;
     let frame = demo_frame(state.tick);
 
+    // ⭐ **Один кадр вместо череды — задача T-92-1, решение 156.10 (находка владельца Д2: «в
+    // приветственном окне после установки мигает текст»).** Тело ниже кладёт заливку цветом окна,
+    // потом поле, потом строку с чипом, и, пока оно писало прямо в DC сообщения, композитор
+    // успевал снять окно посреди — 2,3…8,2 мс на кадр, 7,7 кадра в секунду. Замерено прибором
+    // этапа Э92, а не выведено: на настоящем экране 63 переходных кадра из 780 за два оборота
+    // демонстрации, из них 19 — «поле без единой буквы» (`scratchpad-E92\probe-e92-screen-*.log`);
+    // на поверхности окна — 186 промежуточных картинок, среди них и «ни поля, ни слова». Стирание
+    // перед перерисовкой здесь ни при чём — статик `SS_OWNERDRAW` на `WM_ERASEBKGND` не рисует ни
+    // пикселя (46 из 46, `probe-e92-demo-base.log`), и дверь без стирания одна не лечила ничего (186
+    // → 193). Лечит то, чем задача Т-33-5 вылечила карточки мастера, а T-71-5 — выключатель: три
+    // строки [`theme::PaintBuffer`], общий механизм окон. С ним — 0 переходных кадров и 1,0 мс на кадр.
+    //
+    // ⚠ **Цена, принятая владельцем (156.10): кадр покоя не байт в байт прежний.** В буфере плитка
+    // клавиши выходит ровно цветом своей кисти (`202329` в «Графите»), а прямо в окне выходила на
+    // единицу иной (`202428`), края букв — ±1 в синем канале: 551 пиксель из 29 232, на 1 единицу
+    // одного канала, глазом неразличимо (экран и отдельный рабочий стол дали одно и то же).
+    //
+    // `None` — GDI отказал (NFR-13): `map_or` тогда отдаёт телу DC сообщения, и демонстрация
+    // рисуется ровно как до этой задачи — с морганием, то есть ухудшенно, но живо. DPI выше взят у
+    // DC сообщения, а не у буфера: `GetDeviceCaps` буфера отвечает про память.
+    //
+    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер читает его глубину цвета и
+    // начертание и освобождает свои DC и растр, когда кончится этот кадр.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
     // The ground first: an owner-drawn static answers for the whole of its rectangle, and the
     // figure below is rounded — without this the four corners would keep whatever was there.
+    // ⛔ And since task T-92-1 this fill is also what **grounds the buffer**: `paint_rounded` blends
+    // the arc of each corner with the ground it reads back out of the DC it paints into, and the
+    // pixels of a fresh `CreateCompatibleBitmap` are undefined (the lesson of the wizard's cards,
+    // Т-33-5). The colour stays the window's — what lies under the cut corners is the window.
     //
-    // SAFETY: `dc` is the DC of the message and `rect` a live local of the caller's; the brush
-    // belongs to this window's state.
-    unsafe { FillRect(dc, &rect, brushes.window_bg()) };
+    // SAFETY: `target` is this frame's buffer or, on a refusal of GDI, the DC of the message;
+    // `rect` is a live local of the caller's; the brush belongs to this window's state.
+    unsafe { FillRect(target, &rect, brushes.window_bg()) };
 
     // The field the word is typed into.
     theme::paint_rounded(
-        dc,
+        target,
         &rect,
         theme::scaled(theme::CORNER_RADIUS, dpi),
         palette.field_border,
@@ -3547,11 +3577,11 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
         DEMO_BADGE[usize::from(frame.converted)]
     );
 
-    // SAFETY: `dc` is the DC of the message and every handle of the style is an object this
-    // window's state owns for longer than the call.
-    unsafe {
+    // SAFETY: `target` is this frame's buffer or, on a refusal of GDI, the DC of the message, and
+    // every handle of the style is an object this window's state owns for longer than the call.
+    let drawn = unsafe {
         theme::paint_chip_row(
-            dc,
+            target,
             row,
             theme::chip_row(&template, &state.hotkey),
             theme::ChipRowStyle {
@@ -3578,7 +3608,19 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
                 dpi,
             },
         )
+    };
+
+    // The one moment any of this becomes visible. A refused blit leaves the demonstration showing
+    // the frame the window already had there — the previous one and never a hole; painting the
+    // body a second time into the DC of the message would be the very flicker this removes.
+    //
+    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it goes
+    // out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
     }
+
+    drawn
 }
 
 /// Draws the feed switch of FR-102 — the one check box of «От автора».
@@ -4140,8 +4182,17 @@ unsafe extern "system" fn letter_proc(
                 })
             };
 
+            // ⭐ **Задача T-92-1, решение 156.10: без стирания — дверь Т-45-3, как выключатель
+            // «От автора» (находка Э70-Б-2).** Стирание этому статику не
+            // нужно ни для чего: [`draw_demo`] первым делом заливает весь свой прямоугольник сам. И
+            // ничего не давало — замер этапа Э92: статик `SS_OWNERDRAW` на `WM_ERASEBKGND` не
+            // рисует ни пикселя (46 стираний из 46 не изменили ни одного, кисть у окна внутри
+            // стирания не спрашивалась), — так что дверь ничего не лечит сама по себе и не меняет
+            // ни одного пикселя; лечит буфер в `draw_demo`, а здесь уходят 7,7 лишних
+            // `WM_ERASEBKGND` в секунду. ⚠ Посылка ТЗ Э92 («стирание заливает поле кистью поля —
+            // кадр без слова») была опровергнута этим замером (C1, 156.10).
             if ticked == Some(true) {
-                widgets::repaint::control(hwnd, IDC_LETTER_DEMO);
+                widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO);
             }
 
             0
@@ -5903,7 +5954,7 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 /// measured exactly as the product builds it, and never shown.
 #[cfg(feature = "testing")]
 pub mod testing {
-    use super::{HWND, author_state, open_window};
+    use super::{HWND, Kind, Letter, author_state, open_window, show_letter, window_of};
     use std::cell::Cell;
     use windows::Win32::Foundation::HMODULE;
 
@@ -5938,6 +5989,27 @@ pub mod testing {
         TEMPLATES.with(|templates| templates.set(0));
 
         window
+    }
+
+    /// **The door of task T-92-1** — opens `letter` on `owner` out of the templates of `module`
+    /// by the product's own [`show_letter`], and **shows** it, without activation.
+    ///
+    /// Shown and not hidden, because what it is for is the painting: a hidden window gets no
+    /// `WM_PAINT`, and the demonstration of «Привет» (FR-101) is a timer that repaints a control
+    /// seven times a second. ⛔ So the caller's thread must stand on a desktop of its own
+    /// (`CreateDesktopW` + `SetThreadDesktop`, the road of stage Э85) — on the input desktop this
+    /// would be a window on the owner's screen, which is the very thing [`open_author_hidden`]
+    /// keeps its windows hidden for.
+    ///
+    /// The window answered is the caller's to destroy.
+    pub fn show_letter_from(owner: HWND, module: HMODULE, letter: Letter) -> Option<HWND> {
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let shown = show_letter(owner, letter, None, false);
+
+        TEMPLATES.with(|templates| templates.set(0));
+
+        shown.then(|| window_of(Kind::Letter)).flatten()
     }
 }
 
