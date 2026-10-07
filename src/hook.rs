@@ -2046,11 +2046,21 @@ pub fn caps_lock_on() -> bool {
 /// `TerminateProcess` and not `ExitProcess`: this runs inside the hook callback, called by
 /// the system, and `ExitProcess` would run the loader's detach path from that context.
 /// Nothing is cleaned up on the way out, and that is the trade FR-96 makes explicitly —
-/// "немедленное снятие всех хуков и завершение процесса". The tray icon can be left behind as
+/// "немедленное снятие всех хуков и завершение процесса" — with one exception since task T-95-6:
+/// a setting of Windows this program changed, the shortcut of the sticky keys, is given back
+/// after the hook is off (решение 159.25). The tray icon can be left behind as
 /// a ghost until the shell next repaints the notification area; that is a cosmetic price for
 /// a guaranteed escape, and the user pressing this combination has a worse problem.
 fn emergency_exit() {
     uninstall();
+
+    // ⭐ **Task T-95-6, решение 159.25 — the one thing FR-96 puts back.** The shortcut of the
+    // sticky keys of Windows, if the double press took it: the bench and the delivery scripts end
+    // the program this way, and a person who reaches for this combination should not be left
+    // without five presses of `Shift` until the session ends. After the hook is off — the
+    // keyboard is already the system's, so the callback's budget (NFR-01) is no longer at stake —
+    // and without a line of the journal (NFR-05).
+    crate::sticky::give_back_quietly();
 
     // SAFETY: `GetCurrentProcess` returns the process pseudo-handle, a constant that names
     // the calling process, needs no closing and cannot be invalid. `TerminateProcess` on it

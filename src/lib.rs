@@ -23,6 +23,7 @@ pub mod layouts;
 pub mod letters;
 pub mod selection;
 pub mod settings;
+pub mod sticky;
 pub mod switch;
 pub mod theme;
 pub mod tray;

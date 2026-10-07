@@ -1344,6 +1344,11 @@ fn run_as_first_instance(instance: SingleInstance) -> ExitCode {
     // today the panic hook, from T-01-4 onwards the tray's "Exit" and FR-83.
     let clean = join_all(threads);
 
+    // ⭐ **Task T-95-6, решение 159.25** — the ordinary end of the process gives back the shortcut
+    // of the sticky keys the double press took: every thread is joined, no publication can take it
+    // again. Asks the system nothing when nothing is owed.
+    crate::sticky::give_back();
+
     // SEC-04a: the channel comes down after the three threads and not before, so that a bench
     // holding it open sees the program right up to the end. Bounded — see `Channel::stop` —
     // and reached by neither FR-96, which terminates the process from inside the callback, nor
@@ -2794,9 +2799,20 @@ pub fn publish_configuration(config: &settings::Config) {
     // Task T-93-1, вопрос 157: the key and its modifiers go out **together, in one store** — a
     // modifier name nobody knows leaves the whole default in place, exactly as an unknown key
     // does (`Hotkey::binding`).
-    if let Some((vk, modifiers)) = config.hotkey.binding() {
+    let binding = config.hotkey.binding();
+
+    if let Some((vk, modifiers)) = binding {
         crate::hook::set_hotkey(vk, modifiers);
     }
+
+    // ⭐ **Task T-95-6, решение 159.25.** The shortcut of the sticky keys of Windows — five presses
+    // of `Shift` — follows the hotkey just published: off while it is the double press of `Shift`
+    // (two pairs, forth and back, and the capital after them make five), given back for any other.
+    // Module `sticky` keeps the debt and writes the session's memory and never the profile. Here,
+    // on the UI thread, like everything this function publishes — never in the callback (NFR-01).
+    crate::sticky::follow_hotkey(
+        binding.is_some_and(|(_, modifiers)| modifiers & crate::hook::DOUBLE_TAP != 0),
+    );
 
     // Section `[replacement]` of section 7 — FR-42 and FR-44, task T-04-2. This is the only
     // place either value may be published from: section 6.3 gives the configuration to the UI
@@ -3244,6 +3260,10 @@ unsafe extern "system" fn window_proc(
             // must not cost the program its hook.
             if message == WM_ENDSESSION && wparam.0 != 0 {
                 crate::hook::uninstall();
+                // Task T-95-6: the shortcut of the sticky keys back — the end of a session needs
+                // it no more than it needs the hook, but the uninstaller of 155.25 and the update
+                // of Restart Manager post this very message to a session that goes on.
+                crate::sticky::give_back();
             }
 
             // FR-21, task T-03-2a. `layouts` names the two messages that oblige the owner of
