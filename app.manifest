@@ -3,7 +3,7 @@
   <assemblyIdentity
       type="win32"
       name="PandaKoder.LangSwitcher"
-      version="0.96.0.0"
+      version="0.97.0.0"
       processorArchitecture="amd64"/>
 
   <!-- Release manifest. Section 8.1 of SPEC: the process stays at medium integrity, the

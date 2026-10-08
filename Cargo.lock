@@ -62,7 +62,7 @@ dependencies = [
 
 [[package]]
 name = "lang_switcher"
-version = "0.96.0"
+version = "0.97.0"
 dependencies = [
  "embed-resource",
  "serde",
