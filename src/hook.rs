@@ -861,8 +861,9 @@ fn is_shift(vk: u16) -> bool {
 /// # The rule of a tap — §0 п. 2 of the TZ of Э95
 ///
 /// * a new press of `Shift` — not the auto-repeat of a held one ([`HotkeyState::shift_held`]) —
-///   asks which modifiers are held, the way a combination asks (task T-93-1): `Ctrl`, `Alt` or
-///   `Win` held make it no tap (`Alt+Shift` switches the layout);
+///   asks which modifiers are held: `Ctrl`, `Alt` or `Win` held make it no tap (`Alt+Shift`
+///   switches the layout). Since task T-97-2 the product asks exactly those three
+///   ([`held_command_modifiers`], four reads), not the whole set a combination asks (task T-93-1);
 /// * the count of mouse buttons is read when a pair begins and again on a release that may end a
 ///   tap: `Shift` and a click select text, and a button pressed anywhere in the pair unmakes it;
 /// * any other key pressed — the other `Shift` included — breaks the press and the pair: two taps
@@ -874,9 +875,9 @@ fn is_shift(vk: u16) -> bool {
 /// # NFR-01
 ///
 /// A letter costs a comparison of three codes and a store of the empty [`Taps`] — no call, no
-/// read; an event of `Shift` costs at most one question about the modifiers (on a new press) and
-/// one relaxed load of the mouse count. The press of a hotkey that is pressed (`trigger = "press"`)
-/// does not come here at all.
+/// read; an event of `Shift` costs at most one question about the modifiers (on a new press — four
+/// reads of the key state since task T-97-2) and one relaxed load of the mouse count. The press of
+/// a hotkey that is pressed (`trigger = "press"`) does not come here at all.
 ///
 /// # FR-84
 ///
@@ -1993,6 +1994,66 @@ pub fn held_set(held: crate::buffer::Physical) -> u16 {
     set
 }
 
+/// The modifiers that make a press of `Shift` no tap — `Ctrl`, `Alt` and `Win`, as the system
+/// reports them: **task T-97-2, вопрос 164** (долг Э95-Б-1, решение 159.24).
+///
+/// [`decide_here`] hands this to [`classify`], and not [`held_modifiers`], while the hotkey is the
+/// double press of `Shift`. The rule of a tap asks one thing of the set — is `Ctrl`, `Alt` or `Win`
+/// held (see [`double_tap_stroke`]) — and neither the sides of `Alt` nor the two `Shift` that the
+/// snapshot of [`physical_modifiers`] carries for the buffer. So a new press of `Shift` costs
+/// **four** reads of the asynchronous key state instead of seven, and the rule reads the same
+/// answer bit for bit: `VK_MENU` is held exactly when either `Alt` is, `Win` has no combined code
+/// and is asked on both sides as before, and `Shift` was never part of the question.
+///
+/// # NFR-01
+///
+/// With the seven reads, the volley of the bench (`--experiment-latency --shift --trigger
+/// double_tap`) put p99 of the callback at 158.1 µs against the 100 of NFR-01 (159.24); the
+/// figures after this task are in its report (`reports\ITOG-E97.md`).
+///
+/// The combination of task T-93-1 keeps [`held_modifiers`]: it compares the whole set, `Shift`
+/// included, and asks it once, on the first press of its key.
+fn held_command_modifiers() -> u16 {
+    command_set(read_key_state)
+}
+
+/// One read of the asynchronous key state — the reader [`held_command_modifiers`] gives
+/// [`command_set`].
+fn read_key_state(vk: u16) -> i16 {
+    // SAFETY: the invariants are the ones `emergency_modifiers_held` states above, and they hold
+    // identically here — the call takes a virtual-key code by value, returns a `SHORT`, touches no
+    // memory of ours, cannot block and is callable from inside a hook callback, which is where
+    // this runs.
+    unsafe { GetAsyncKeyState(i32::from(vk)) }
+}
+
+/// The set of `Ctrl`, `Alt` and `Win` that `read` reports — task T-97-2.
+///
+/// `read` answers the asynchronous state of one virtual key ([`read_key_state`] on the product's
+/// path) and is asked exactly four times — `VK_CONTROL`, `VK_MENU`, `VK_LWIN`, `VK_RWIN`, in that
+/// order — apart so that a test counts the reads and states the keyboard. The bits are the ones
+/// [`held_set`] gives the same keys, and no others: [`MOD_SHIFT`] is never in the answer.
+pub fn command_set(mut read: impl FnMut(u16) -> i16) -> u16 {
+    let ctrl = read(VK_CONTROL.0);
+    let alt = read(VK_MENU.0);
+    let win_left = read(VK_LWIN.0);
+    let win_right = read(VK_RWIN.0);
+
+    let mut set = 0;
+
+    if is_held(ctrl) {
+        set |= MOD_CTRL;
+    }
+    if is_held(alt) {
+        set |= MOD_ALT;
+    }
+    if is_held(win_left) || is_held(win_right) {
+        set |= MOD_WIN;
+    }
+
+    set
+}
+
 /// Whether the machine's `CapsLock` is **on** — the Win32 half of task T-13-4.
 ///
 /// Handed to module `buffer` through [`crate::buffer::set_caps_lock`], which names the five
@@ -2701,15 +2762,19 @@ fn decide_here(key: KeyEvent) -> Outcome {
 
     let mode = current_mode();
 
+    // ⭐ **Task T-97-2, вопрос 164:** the question about the modifiers is the one the hotkey needs
+    // — `Ctrl`, `Alt` and `Win` for the double press of `Shift` (four reads), the whole set for a
+    // combination (seven, task T-93-1). Either is asked at most once a stroke, and a letter asks
+    // neither (see [`classify`]).
+    let held: fn() -> u16 = if mode.hotkey_double_tap {
+        held_command_modifiers
+    } else {
+        held_modifiers
+    };
+
     HOTKEY_STATE.with(|cell| {
         let mut state = cell.get();
-        let outcome = classify(
-            mode,
-            &mut state,
-            key,
-            held_modifiers,
-            crate::watchdog::mouse_flushes,
-        );
+        let outcome = classify(mode, &mut state, key, held, crate::watchdog::mouse_flushes);
         cell.set(state);
         outcome
     })

@@ -3436,6 +3436,165 @@ fn with_the_double_press_a_letter_asks_for_nothing() {
     assert_eq!(mouse.get(), 0, "a press that is no tap read the mouse");
 }
 
+// -------------------------------------------------------------------------------------
+// Task T-97-2 — the double press asks the system four keys, not seven (вопрос 164)
+// -------------------------------------------------------------------------------------
+//
+// With the double press as the hotkey every new press of `Shift` asked the whole snapshot of the
+// buffer — seven reads of the asynchronous key state — and the volley of the bench put p99 of the
+// callback at 158.1 µs against the 100 of NFR-01 (159.24, долг Э95-Б-1). The rule of a tap needs
+// `Ctrl`, `Alt` and `Win` only. The sentries of the pair above feed `classify` the set held by a
+// closure, past every read, so the reads are counted here, at the reader the product hands it.
+
+/// **NFR-01 — a new press of `Shift` under the double press reads four keys, each once:** `Ctrl`,
+/// `Alt` through the combined `VK_MENU`, and both `Win` — no `Shift`, no side of `Alt`.
+///
+/// The product's reader is `hook::command_set` over the asynchronous key state; here it counts.
+/// ⚠ The red «before» and the mutant «a second snapshot»: the reader brought back to the seven
+/// reads of the snapshot reads seven keys here.
+#[test]
+fn a_new_press_of_shift_reads_four_keys_once_each() {
+    let mut read = Vec::new();
+
+    let set = hook::command_set(|vk| {
+        read.push(vk);
+        0
+    });
+
+    assert_eq!(set, 0, "nothing held, nothing in the set");
+    assert_eq!(
+        read,
+        [VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN],
+        "the double press asks the system {} keys: {read:02X?}",
+        read.len()
+    );
+}
+
+/// **The four reads answer what the rule of a tap asks** — `Ctrl`, `Alt` and either `Win` each
+/// make the set, and a `Shift` held is not in it.
+///
+/// ⚠ The mutant «no `Win`» — the two reads of `Win` dropped — reddens this row and the count above.
+/// `shift_pressed_under_ctrl_alt_or_win_is_no_tap` stays green on it: it feeds the set by a
+/// closure, past every read (measured, `scratchpad-E97`).
+#[test]
+fn the_four_reads_see_ctrl_alt_and_either_win_and_never_shift() {
+    const HELD: i16 = i16::MIN;
+
+    for (key, expected, what) in [
+        (VK_CONTROL, hook::MOD_CTRL, "Ctrl"),
+        (VK_MENU, hook::MOD_ALT, "Alt"),
+        (VK_LWIN, hook::MOD_WIN, "the left Win"),
+        (VK_RWIN, hook::MOD_WIN, "the right Win"),
+    ] {
+        assert_eq!(
+            hook::command_set(|vk| if vk == key { HELD } else { 0 }),
+            expected,
+            "{what} held"
+        );
+    }
+
+    assert_eq!(
+        hook::command_set(|_| HELD),
+        hook::MOD_CTRL | hook::MOD_ALT | hook::MOD_WIN,
+        "everything held: the three, and no MOD_SHIFT"
+    );
+
+    // The low bit — «pressed since the last call» — is not «held», as everywhere in `hook`.
+    assert_eq!(hook::command_set(|_| 1), 0, "the low bit alone");
+}
+
+/// **The product hands the double press the four reads, and a combination its whole set** — the
+/// wiring in `decide_here`, which no test can call: it reads the thread's state and the published
+/// mode. Swept over the source, comments dropped (the lesson of Э95: a call turned into a comment
+/// must not count).
+///
+/// ⚠ The red «before»: on the base `decide_here` hands `held_modifiers` — the seven reads — to
+/// every stroke. The mutant «a second snapshot» in the wiring (the double press back on
+/// `held_modifiers`) reddens this sweep and leaves the count above green: the helper and its
+/// wiring are two claims.
+#[test]
+fn the_double_press_is_handed_the_four_reads_and_a_combination_its_whole_set() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("hook.rs"),
+    )
+    .expect("src/hook.rs must be readable")
+    .replace("\r\n", "\n");
+    let code = without_comments(&source);
+
+    let decide = body_of_fn(&code, "fn decide_here(");
+    let choice = decide
+        .split_once("if mode.hotkey_double_tap {")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    let (double, combination) = choice.split_once("} else {").unwrap_or(("", ""));
+
+    assert!(
+        double.trim() == "held_command_modifiers",
+        "decide_here must hand the double press `held_command_modifiers`, not {:?}",
+        double.trim()
+    );
+    assert!(
+        combination.trim_start().starts_with("held_modifiers\n"),
+        "decide_here must keep `held_modifiers` for a combination (task T-93-1)"
+    );
+    let packed: String = decide.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        packed.contains("classify(mode,&mutstate,key,held,"),
+        "the choice is what decide_here hands classify"
+    );
+
+    assert!(
+        body_of_fn(&code, "fn held_command_modifiers()").contains("command_set(read_key_state)"),
+        "the product's four reads are `command_set` over the asynchronous key state"
+    );
+    assert_eq!(
+        body_of_fn(&code, "fn read_key_state(")
+            .matches("GetAsyncKeyState(")
+            .count(),
+        1,
+        "one read of the key state per call of the reader"
+    );
+}
+
+/// The source without its comment lines — the sweep above must not count a call turned into one.
+fn without_comments(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+/// The body of the function that `signature` opens: from it to the first line that is a lone `}` at
+/// the left margin.
+fn body_of_fn<'a>(code: &'a str, signature: &str) -> &'a str {
+    let start = code
+        .find(signature)
+        .unwrap_or_else(|| panic!("`{signature}` must be in the source"));
+    let rest = &code[start..];
+    let end = rest
+        .find("\n}\n")
+        .unwrap_or_else(|| panic!("the body of `{signature}` must end"));
+
+    &rest[..end]
+}
+
+/// The controls of the two helpers above: a call turned into a comment is not found, and a body
+/// ends at its own brace.
+#[test]
+fn the_sweep_of_the_four_reads_does_not_read_comments() {
+    let code = without_comments(
+        "fn a() {\n    // held_modifiers\n    real();\n}\nfn b() {\n    held_modifiers();\n}\n",
+    );
+
+    assert!(!body_of_fn(&code, "fn a()").contains("held_modifiers"));
+    assert!(body_of_fn(&code, "fn a()").contains("real();"));
+    assert!(body_of_fn(&code, "fn b()").contains("held_modifiers"));
+}
+
 /// **(м) Посылка П1 — the taps of the double press leave the word in the buffer**, so the pair
 /// converts the word typed before it, and the next pair — after the conversion has been noted —
 /// finds the session of the last row of FR-10 still open: the return, as a second `Pause`.
