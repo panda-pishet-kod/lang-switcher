@@ -272,3 +272,189 @@ fn the_script_uses_only_the_messages_the_sample_defines() {
         "the script asks for messages English.isl does not define: {unknown:?}"
     );
 }
+
+/// The tokens of Pascal code, the way the compiler of `[Code]` reads it: identifiers and keywords
+/// in lower case, a string `'…'` as one token with its quotes, `:=` as one, every other sign
+/// alone — and **no comments**: `{ … }`, `(* … *)` and `// …` are skipped, so a statement that is
+/// only written in a comment is not there.
+fn pascal_tokens(code: &str) -> Vec<String> {
+    let chars: Vec<char> = code.chars().collect();
+    let mut tokens = Vec::new();
+    let mut at = 0;
+
+    while at < chars.len() {
+        let c = chars[at];
+        let next = chars.get(at + 1).copied();
+
+        if c.is_whitespace() {
+            at += 1;
+        } else if c == '{' {
+            at = chars[at..]
+                .iter()
+                .position(|&d| d == '}')
+                .map_or(chars.len(), |end| at + end + 1);
+        } else if c == '(' && next == Some('*') {
+            at = (at + 2..chars.len().saturating_sub(1))
+                .find(|&i| chars[i] == '*' && chars[i + 1] == ')')
+                .map_or(chars.len(), |end| end + 2);
+        } else if c == '/' && next == Some('/') {
+            at = chars[at..]
+                .iter()
+                .position(|&d| d == '\n')
+                .map_or(chars.len(), |end| at + end);
+        } else if c == '\'' {
+            let end = chars[at + 1..]
+                .iter()
+                .position(|&d| d == '\'')
+                .map_or(chars.len(), |end| at + 1 + end + 1);
+            tokens.push(chars[at..end].iter().collect::<String>().to_lowercase());
+            at = end;
+        } else if c.is_alphanumeric() || c == '_' {
+            let end = chars[at..]
+                .iter()
+                .position(|&d| !(d.is_alphanumeric() || d == '_'))
+                .map_or(chars.len(), |end| at + end);
+            tokens.push(chars[at..end].iter().collect::<String>().to_lowercase());
+            at = end;
+        } else if c == ':' && next == Some('=') {
+            tokens.push(":=".to_owned());
+            at += 2;
+        } else {
+            tokens.push(c.to_string());
+            at += 1;
+        }
+    }
+
+    tokens
+}
+
+/// The event of the wizard the routine holding `statement` is attached to — `InitializeWizard` or
+/// `CurPageChanged`, by an `<event('…')>` attribute in front of its header or by its own name — or
+/// why there is none. `statement` is Pascal, tokenised the same way as `code`.
+fn wizard_event_holding(code: &[String], statement: &str) -> Result<String, String> {
+    const EVENTS: [&str; 2] = ["initializewizard", "curpagechanged"];
+
+    let wanted = pascal_tokens(statement);
+    let at = code
+        .windows(wanted.len())
+        .position(|window| window == wanted.as_slice())
+        .ok_or_else(|| format!("«{statement}» is not in the code"))?;
+
+    let header = code[..at]
+        .iter()
+        .rposition(|token| token == "procedure" || token == "function")
+        .ok_or_else(|| format!("«{statement}» stands in no routine"))?;
+    // What stands between the end of the routine before and this header: the attribute, if any.
+    let start = code[..header]
+        .windows(2)
+        .rposition(|pair| pair[0] == "end" && pair[1] == ";")
+        .map_or(0, |end| end + 2);
+    let front = &code[start..header];
+    let name = code.get(header + 1).map_or("", String::as_str);
+
+    EVENTS
+        .iter()
+        .find(|event| {
+            let attribute = ["<", "event", "(", &format!("'{event}'"), ")", ">"];
+            name == **event
+                || front
+                    .windows(attribute.len())
+                    .any(|window| window.iter().zip(&attribute).all(|(a, b)| a == b))
+        })
+        .map(|event| (*event).to_owned())
+        .ok_or_else(|| {
+            format!("«{statement}» stands in «{name}», which is not an event of the wizard")
+        })
+}
+
+/// The two statements that make the field of the Ready page wrap — task T-98-3, decision 166.3.
+const READY_MEMO_WRAPS: [&str; 2] = [
+    "WizardForm.ReadyMemo.WordWrap := True;",
+    "WizardForm.ReadyMemo.ScrollBars := ssVertical;",
+];
+
+/// **The field of the Ready page wraps its lines — task T-98-3, finding 165.3 of the owner.**
+///
+/// «Готово к установке» is the first page the wizard shows — the pages of the folder and of the
+/// group are off — and its field carries the sentence about the certificate, `LocalCertReady`:
+/// one line, longer than the field in every one of the fourteen languages. The field of Inno Setup
+/// does not wrap unless the script tells it to, and the owner saw the sentence run off the right
+/// edge of the window. The script turns on the wrap by words and the vertical scroll bar of
+/// `WizardForm.ReadyMemo` in an event of the wizard; a statement in a comment of any of the three
+/// kinds, or in a string, does not count.
+///
+/// ⚠ Отрицательные контроли below, on scripts written here: the statements in comments and in a
+/// string are not found, and in a routine that is no event of the wizard they are refused.
+#[test]
+fn the_field_of_the_ready_page_wraps_the_sentence_about_the_certificate() {
+    let script = fs::read_to_string(installer().join("LangSwitcher.iss"))
+        .expect("installer\\LangSwitcher.iss must be readable");
+    let code = pascal_tokens(&section(&script, "Code").join("\n"));
+
+    assert!(
+        code.windows(2)
+            .any(|pair| pair[0] == "function" && pair[1] == "updatereadymemo"),
+        "the [Code] of the script was not found: no UpdateReadyMemo in {} tokens",
+        code.len()
+    );
+
+    let problems: Vec<String> = READY_MEMO_WRAPS
+        .iter()
+        .filter_map(|statement| wizard_event_holding(&code, statement).err())
+        .collect();
+
+    assert!(
+        problems.is_empty(),
+        "the field of the Ready page does not wrap:\n  {}",
+        problems.join("\n  ")
+    );
+
+    // ⚠ Отрицательные контроли: the instrument must be able to say «no».
+    let commented = pascal_tokens(concat!(
+        "<event('InitializeWizard')>\n",
+        "procedure Wrap();\n",
+        "begin\n",
+        "  { WizardForm.ReadyMemo.WordWrap := True; }\n",
+        "  (* WizardForm.ReadyMemo.WordWrap := True; *)\n",
+        "  // WizardForm.ReadyMemo.WordWrap := True;\n",
+        "  Log('WizardForm.ReadyMemo.WordWrap := True;');\n",
+        "end;\n",
+    ));
+    assert!(
+        wizard_event_holding(&commented, READY_MEMO_WRAPS[0]).is_err(),
+        "a statement in a comment or in a string must not count"
+    );
+
+    let elsewhere = pascal_tokens(concat!(
+        "<event('InitializeWizard')>\n",
+        "procedure Other();\n",
+        "begin\n",
+        "end;\n",
+        "\n",
+        "procedure Wrap();\n",
+        "begin\n",
+        "  WizardForm.ReadyMemo.WordWrap := True;\n",
+        "end;\n",
+    ));
+    assert!(
+        wizard_event_holding(&elsewhere, READY_MEMO_WRAPS[0]).is_err(),
+        "a statement in a routine that is no event of the wizard must not count"
+    );
+
+    let right = pascal_tokens(concat!(
+        "procedure Other();\n",
+        "begin\n",
+        "end;\n",
+        "\n",
+        "<event('InitializeWizard')>\n",
+        "procedure Wrap();\n",
+        "begin\n",
+        "  WizardForm.ReadyMemo.WordWrap := True;\n",
+        "end;\n",
+    ));
+    assert_eq!(
+        wizard_event_holding(&right, READY_MEMO_WRAPS[0]),
+        Ok("initializewizard".to_owned()),
+        "the control: the statement in an event of the wizard must be found"
+    );
+}

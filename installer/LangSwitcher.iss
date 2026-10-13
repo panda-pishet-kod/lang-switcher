@@ -414,6 +414,23 @@ begin
     Result := Result + CustomMessage('LocalCertReady');
 end;
 
+(* ---------------------------------------------------------------------------
+  The field of the Ready page wraps (stage E98, finding 165.3 of the owner).
+  The Ready page is the first the wizard shows -- the pages of the folder and
+  of the group are off -- and the line above is one sentence, longer than the
+  field in every language.  The field does not wrap unless told to, and the
+  sentence ran off the right edge of the window.  Wrapping by words, and a
+  vertical scroll bar for a field whose lines grow longer than it is.  The
+  texts of LocalCertReady stay as they are: the field breaks them, not a hand.
+  tests\installer_languages.rs holds both statements to an event of the wizard.
+  --------------------------------------------------------------------------- *)
+<event('InitializeWizard')>
+procedure InitializeWizardReadyMemo();
+begin
+  WizardForm.ReadyMemo.WordWrap := True;
+  WizardForm.ReadyMemo.ScrollBars := ssVertical;
+end;
+
 <event('CurStepChanged')>
 procedure CurStepLocalTrust(CurStep: TSetupStep);
 var
