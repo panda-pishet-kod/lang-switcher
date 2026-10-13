@@ -5,6 +5,14 @@ the English layout on, press `Pause/Break`, and the word becomes `привет` 
 switches to the Russian layout; press again and the original comes back. It is a small tray program
 for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
 [Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
+
+**If the browser or Windows warns you.** The program is signed with the author's own certificate,
+not with one from a certification authority, and a new release is still rarely downloaded, so you
+will see warnings before installing — this is expected. Edge: in Downloads, "…" → "Keep" → in the
+dialog, "Delete ▾" → "Keep anyway". Chrome: "Download suspicious file". When you run it, Windows
+may show "Windows protected your PC" — "More info" → "Run anyway". Then the yellow UAC prompt —
+"Yes". You can check the file against the SHA-256 on its release page.
+
 The rest of this README and all other documents of the project are in Russian.
 
 Резидентная утилита для Windows, исправляющая текст, набранный в неверной раскладке клавиатуры.
@@ -79,18 +87,34 @@ PowerShell 5.1, и в `cmd`, туда и обратно, с заглавными
 могут, — с мёртвой клавишей или `AltGr`, — не заменяется: слово остаётся как набрано, и звучит
 отказ.
 
-Модульных и интеграционных тестов — **1220** обычным `cargo test` и **1323** с фичей
-`testing`, красных ноль. Всего в дереве **1361** функция `#[test]`. Разница до 1323 — ровно
+Модульных и интеграционных тестов — **1221** обычным `cargo test` и **1325** с фичей
+`testing`, красных ноль. Всего в дереве **1363** функции `#[test]`. Разница до 1325 — ровно
 **38** тестов с `#[ignore]`: они трогают настоящий буфер обмена или клавиатуру машины и
 запускаются отдельно (`--ignored --test-threads=1`) при выключенной программе. Без фичи
-`testing` не собираются, сверх того, **105** тестов — отладочного канала SEC-04a, сквозного
-стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1220 + 36 = 1256.
+`testing` не собираются, сверх того, **106** тестов — отладочного канала SEC-04a, сквозного
+стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1221 + 36 = 1257.
 
 ⚠ **Тесты привязаны к конфигурации машины разработчика** (ровно две раскладки, именно
 русская и US) и на произвольной машине не воспроизводятся без правки. Это осознанное
 решение проекта, а не дефект.
 
 ---
+
+## Если браузер или Windows предупреждают
+
+Программа подписана самодельным сертификатом автора, а не сертификатом удостоверяющего центра,
+и новый выпуск пока скачивают редко, поэтому перед установкой будут предупреждения — это
+ожидаемо:
+
+- **Edge:** в загрузках «…» → «Сохранить» → в окне «Удалить ▾» → «Все равно сохранить».
+- **Chrome:** «Скачать подозрительный файл».
+- **Windows** при запуске может показать «Система Windows защитила ваш компьютер» — «Подробнее» →
+  «Выполнить в любом случае».
+- Затем жёлтый запрос UAC — «Да».
+
+Сверить скачанный файл можно по SHA-256 на странице его выпуска в разделе
+[Releases](../../releases). Что установщик делает с сертификатом на вашем компьютере — в разделе
+[«Что установщик делает с сертификатом»](#что-установщик-делает-с-сертификатом).
 
 ## Горячая клавиша
 

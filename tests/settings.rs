@@ -7353,7 +7353,7 @@ impl AuthorWords {
     /// The line of the reading is counted on the 28th of **every** month — which name of a month is
     /// the widest is the language's own business — with the next reading fifteen days away; the
     /// line of the version **both** ways, «доступна» on a build the published update is ahead of
-    /// and «это последняя» on one past it: in Greek, French or English the second is the longer.
+    /// and «это последняя» on one past it: in Greek and in English the second has more letters.
     fn fed(switch: bool, feed: &PublishedFeed) -> Self {
         let mut words = Self::of(fed_view(switch, 10, BEHIND_THE_FEED, feed));
 
