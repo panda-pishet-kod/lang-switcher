@@ -7075,7 +7075,7 @@ fn the_live_author_window_catches_the_mouse_on_the_backing_only() {
     for language in [Language::Ru, Language::El, Language::He, Language::Ar] {
         settings::set_ui_language(language);
 
-        let window = HiddenAuthor::open("0.83.0");
+        let window = HiddenWindow::open("0.83.0");
         let rect = window.control_rect(1261);
 
         println!(
@@ -7120,7 +7120,7 @@ fn the_mirror_holds_at_a_reduced_step() {
         for step in [10_u16, 8] {
             let face = theme::face_at(step, 96);
             let (mirrored, font, name) = settings::testing::with_font_step(step, || {
-                let window = HiddenAuthor::open("0.83.0");
+                let window = HiddenWindow::open("0.83.0");
                 // SAFETY: the window is live for this block; the style is only read.
                 let styles = unsafe { GetWindowLongPtrW(window.window, GWL_EXSTYLE) };
                 (
@@ -7154,18 +7154,43 @@ fn the_mirror_holds_at_a_reduced_step() {
     settings::set_ui_language(Language::Ru);
 }
 
-/// «От автора», built hidden through the measuring door and destroyed on drop — задача T-83-1.
+/// A window of `letters`, built hidden through a measuring door and destroyed on drop — «От автора»
+/// (задача T-83-1) and, since задача T-98-1, «Последние письма».
 #[cfg(feature = "testing")]
-struct HiddenAuthor {
+struct HiddenWindow {
     owner: windows::Win32::Foundation::HWND,
     window: windows::Win32::Foundation::HWND,
 }
 
 #[cfg(feature = "testing")]
-impl HiddenAuthor {
-    /// An owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never shown —
-    /// and the window on it.
+impl HiddenWindow {
+    /// «От автора» as the product opens it — the words out of the configuration and the feed of a
+    /// test binary, which has neither: the window of a first day.
     fn open(version: &str) -> Self {
+        Self::on_owner(|owner| {
+            letters::testing::open_author_hidden(owner, ProductImage::shared().module, version)
+        })
+    }
+
+    /// «От автора» with the words of `view` — the door of задача T-98-1.
+    fn author(view: letters::AuthorView) -> Self {
+        Self::on_owner(|owner| {
+            letters::testing::open_author_hidden_with(owner, ProductImage::shared().module, view)
+        })
+    }
+
+    /// «Последние письма» with `entries` — the door of задача T-98-1.
+    fn list(entries: Vec<letters::Entry>) -> Self {
+        Self::on_owner(|owner| {
+            letters::testing::open_list_hidden(owner, ProductImage::shared().module, entries)
+        })
+    }
+
+    /// An owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never shown —
+    /// and the window `open` makes on it.
+    fn on_owner(
+        open: impl FnOnce(windows::Win32::Foundation::HWND) -> Option<windows::Win32::Foundation::HWND>,
+    ) -> Self {
         use windows::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, WS_EX_TOOLWINDOW, WS_POPUP,
         };
@@ -7190,9 +7215,7 @@ impl HiddenAuthor {
         }
         .expect("a hidden owner must be creatable");
 
-        let window =
-            letters::testing::open_author_hidden(owner, ProductImage::shared().module, version)
-                .expect("«От автора» must open out of the product's templates");
+        let window = open(owner).expect("the window must open out of the product's templates");
 
         Self { owner, window }
     }
@@ -7262,7 +7285,7 @@ impl HiddenAuthor {
 }
 
 #[cfg(feature = "testing")]
-impl Drop for HiddenAuthor {
+impl Drop for HiddenWindow {
     fn drop(&mut self) {
         use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
 
@@ -7274,45 +7297,357 @@ impl Drop for HiddenAuthor {
     }
 }
 
-/// What «От автора» says in the locale in force, for `version` — the words `layout_author`
-/// measures, out of the product's own `author_view` and string table (задача T-83-2). The
-/// configuration is the one of a machine that has never shown a letter, so the switch of FR-102
-/// is hidden — решение 143.9 keeps it out of the tallest window until the feed is ready.
+/// What «От автора» says in the locale in force — the words `layout_author` measures, out of the
+/// product's own `author_view` and string table (задачи T-83-2 и T-98-2).
+///
+/// A view is one window. Two of its lines change with the day and the feed — when the feed was
+/// read, and what version is installed — and the tallest window has each of them at its tallest
+/// (решение 166.2: for every line that changes, the longest the program can show).
+/// `feed_states` and `version_states` are the sentences counted there, and the model takes the
+/// tallest of each; the words of one window hold that window's own sentence only.
 struct AuthorWords {
     view: letters::AuthorView,
-    /// The captions of the four push buttons standing on the three panels.
+    /// The sentences the line of the feed's reading is counted with.
+    feed_states: Vec<String>,
+    /// The sentences the line of the version is counted with.
+    version_states: Vec<String>,
+    /// The captions of the five push buttons the three panels may carry.
     support: String,
     channel: String,
     download: String,
+    letters: String,
     write: String,
 }
 
 impl AuthorWords {
-    fn now(version: &str) -> Self {
-        let view = letters::author_view(
-            &settings::Letters::default(),
-            letters::Date::from_ymd(2026, 9, 23).expect("a day"),
-            version,
-            letters::FeedView::EMPTY,
-        );
-
-        assert!(
-            view.switch.is_none(),
-            "the model is of the window without the switch — решение 143.9"
-        );
-        assert!(
-            !view.letters,
-            "and without «Последние письма»: there is no feed"
-        );
-
+    /// The words of one window — `view`, and nothing besides.
+    fn of(view: letters::AuthorView) -> Self {
         Self {
+            feed_states: vec![view.feed_state.clone()],
+            version_states: vec![view.version_state.clone()],
             view,
             support: settings::text(settings::IDS_SUPPORT_OPEN),
             channel: settings::text(settings::IDS_CHANNEL_OPEN),
             download: settings::text(settings::IDS_NEWS_DOWNLOAD),
+            letters: settings::text(settings::IDS_NEWS_LETTERS),
             write: settings::text(settings::IDS_WRITE_TO_AUTHOR),
         }
     }
+
+    /// The window of a first day, for `version`: a machine that has never read the feed — no
+    /// switch of FR-102 and no «Последние письма».
+    fn now(version: &str) -> Self {
+        Self::of(letters::author_view(
+            &settings::Letters::default(),
+            letters::Date::from_ymd(2026, 9, 23).expect("a day"),
+            version,
+            letters::FeedView::EMPTY,
+        ))
+    }
+
+    /// **The window of a machine whose feed is live, at its tallest — решение 166.2, задача
+    /// T-98-2.** The published feed at full capacity, so «Последние письма» stands in the row beside
+    /// «Открыть страницу загрузки»; the switch of FR-102 and the sentence under it (`switch`), or
+    /// the line about the feed and the quiet line about the file.
+    ///
+    /// The line of the reading is counted on the 28th of **every** month — which name of a month is
+    /// the widest is the language's own business — with the next reading fifteen days away; the
+    /// line of the version **both** ways, «доступна» on a build the published update is ahead of
+    /// and «это последняя» on one past it: in Greek, French or English the second is the longer.
+    fn fed(switch: bool, feed: &PublishedFeed) -> Self {
+        let mut words = Self::of(fed_view(switch, 10, BEHIND_THE_FEED, feed));
+
+        assert_eq!(
+            words.view.switch.is_some(),
+            switch,
+            "the switch of FR-102 must be what was asked for"
+        );
+        assert!(
+            words.view.letters,
+            "«Последние письма» must stand in the row: the feed has news"
+        );
+
+        words.feed_states = (1..=12)
+            .map(|month| fed_view(switch, month, BEHIND_THE_FEED, feed).feed_state)
+            .collect();
+        words.version_states = [BEHIND_THE_FEED, PAST_THE_FEED]
+            .iter()
+            .map(|version| fed_view(switch, 10, version, feed).version_state)
+            .collect();
+
+        assert_ne!(
+            words.version_states[0], words.version_states[1],
+            "the two builds must say two things about the version"
+        );
+
+        words
+    }
+}
+
+/// A build the published update is ahead of — «От автора» says «доступна 0.97.0».
+const BEHIND_THE_FEED: &str = "0.96.0";
+/// A build past the published update — «От автора» says it is the latest.
+const PAST_THE_FEED: &str = "0.98.0";
+
+/// **The feed as it stands published** at the base of stage Э98 — `news.toml` of 2026-10-08
+/// (SHA-256 `01c8855e…aa91`): the update 0.97.0 (id 5) and the news item «Лента заработала» (id 2),
+/// in the fourteen languages of the program; `(language, title and text of the news, title and
+/// text of the update)`. Literals and not a read of the file: a test does not read the author's
+/// machine (решение 166.2).
+const PUBLISHED_FEED: [(Language, &str, &str, &str, &str); 14] = [
+    (
+        Language::Ru,
+        "Лента заработала",
+        concat!(
+            "Это первое письмо из ленты. Программа прочитала один файл с сайта автора,\n",
+            "проверила подпись и показала вам это окно. Больше она ничего не отправляет\n",
+            "и не скачивает: обновления вы ставите сами, ссылки открываются по щелчку.\n",
+            "Отключить чтение можно в файле настроек, [letters] feed = false, а через\n",
+            "90 дней — выключателем в окне «От автора».\n",
+        ),
+        "Вышла версия 0.97.0",
+        "Новое: двойной Shift отвечает быстрее. Подробности — на странице загрузки.\n",
+    ),
+    (
+        Language::En,
+        "The feed is working",
+        concat!(
+            "This is the first letter from the feed. The program read one file from the\n",
+            "author's site, checked the signature and showed you this window. It sends\n",
+            "nothing else and downloads nothing: you install updates yourself and links\n",
+            "open on a click. Reading can be turned off in the settings file,\n",
+            "[letters] feed = false, and after ninety days with a switch in the\n",
+            "«From the author» window.\n",
+        ),
+        "Version 0.97.0 is out",
+        "New: the double Shift answers faster. Details are on the download page.\n",
+    ),
+    (
+        Language::Uk,
+        "Стрічка запрацювала",
+        concat!(
+            "Це перший лист зі стрічки. Програма прочитала один файл із сайту автора,\n",
+            "перевірила підпис і показала вам це вікно. Більше вона нічого не надсилає\n",
+            "і не завантажує.\n",
+        ),
+        "Вийшла версія 0.97.0",
+        "Подробиці — на сторінці завантаження.\n",
+    ),
+    (
+        Language::De,
+        "Der Feed läuft",
+        concat!(
+            "Das ist der erste Brief aus dem Feed. Das Programm hat eine Datei von der\n",
+            "Seite des Autors gelesen, die Signatur geprüft und Ihnen dieses Fenster\n",
+            "gezeigt. Sonst sendet es nichts und lädt nichts herunter.\n",
+        ),
+        "Version 0.97.0 ist da",
+        "Einzelheiten auf der Download-Seite.\n",
+    ),
+    (
+        Language::Fr,
+        "Le flux fonctionne",
+        concat!(
+            "Voici la première lettre du flux. Le programme a lu un fichier sur le site\n",
+            "de l'auteur, vérifié la signature et vous a montré cette fenêtre. Il\n",
+            "n'envoie rien d'autre et ne télécharge rien.\n",
+        ),
+        "La version 0.97.0 est sortie",
+        "Les détails sont sur la page de téléchargement.\n",
+    ),
+    (
+        Language::Es,
+        "El canal funciona",
+        concat!(
+            "Esta es la primera carta del canal. El programa leyó un archivo del sitio\n",
+            "del autor, comprobó la firma y le mostró esta ventana. No envía nada más\n",
+            "ni descarga nada.\n",
+        ),
+        "Ha salido la versión 0.97.0",
+        "Los detalles están en la página de descarga.\n",
+    ),
+    (
+        Language::Pt,
+        "O feed está funcionando",
+        concat!(
+            "Esta é a primeira carta do feed. O programa leu um arquivo do site do autor,\n",
+            "verificou a assinatura e mostrou esta janela. Ele não envia mais nada e não\n",
+            "baixa nada.\n",
+        ),
+        "Saiu a versão 0.97.0",
+        "Os detalhes estão na página de download.\n",
+    ),
+    (
+        Language::It,
+        "Il flusso funziona",
+        concat!(
+            "Questa è la prima lettera dal flusso. Il programma ha letto un file dal sito\n",
+            "dell'autore, ha verificato la firma e ti ha mostrato questa finestra. Non\n",
+            "invia altro e non scarica nulla.\n",
+        ),
+        "È uscita la versione 0.97.0",
+        "I dettagli sono nella pagina di download.\n",
+    ),
+    (
+        Language::Pl,
+        "Kanał działa",
+        concat!(
+            "To pierwszy list z kanału. Program przeczytał jeden plik ze strony autora,\n",
+            "sprawdził podpis i pokazał ci to okno. Poza tym nic nie wysyła i nic nie\n",
+            "pobiera.\n",
+        ),
+        "Wyszła wersja 0.97.0",
+        "Szczegóły na stronie pobierania.\n",
+    ),
+    (
+        Language::Cs,
+        "Kanál funguje",
+        concat!(
+            "Toto je první dopis z kanálu. Program přečetl jeden soubor ze stránek autora,\n",
+            "ověřil podpis a ukázal vám toto okno. Nic jiného neodesílá a nic nestahuje.\n",
+        ),
+        "Vyšla verze 0.97.0",
+        "Podrobnosti najdete na stránce ke stažení.\n",
+    ),
+    (
+        Language::Tr,
+        "Akış çalışıyor",
+        concat!(
+            "Bu, akıştan gelen ilk mektup. Program yazarın sitesinden tek bir dosya okudu,\n",
+            "imzayı doğruladı ve size bu pencereyi gösterdi. Bunun dışında hiçbir şey\n",
+            "göndermez ve indirmez.\n",
+        ),
+        "0.97.0 sürümü çıktı",
+        "Ayrıntılar indirme sayfasında.\n",
+    ),
+    (
+        Language::El,
+        "Η ροή λειτουργεί",
+        concat!(
+            "Αυτό είναι το πρώτο γράμμα από τη ροή. Το πρόγραμμα διάβασε ένα αρχείο από\n",
+            "τον ιστότοπο του δημιουργού, έλεγξε την υπογραφή και σας έδειξε αυτό το\n",
+            "παράθυρο. Τίποτε άλλο δεν στέλνει και τίποτε δεν κατεβάζει.\n",
+        ),
+        "Κυκλοφόρησε η έκδοση 0.97.0",
+        "Λεπτομέρειες στη σελίδα λήψης.\n",
+    ),
+    (
+        Language::He,
+        "ההזנה עובדת",
+        concat!(
+            "זהו המכתב הראשון מההזנה. התוכנה קראה קובץ אחד מאתר המפתח, בדקה את החתימה\n",
+            "והציגה לכם את החלון הזה. יותר מזה היא לא שולחת דבר ולא מורידה דבר.\n",
+        ),
+        "יצאה גרסה 0.97.0",
+        "הפרטים בעמוד ההורדה.\n",
+    ),
+    (
+        Language::Ar,
+        "التغذية تعمل",
+        concat!(
+            "هذه أول رسالة من التغذية. قرأ البرنامج ملفًا واحدًا من موقع المؤلف، وتحقق من\n",
+            "التوقيع، وعرض لك هذه النافذة. وما عدا ذلك لا يرسل شيئًا ولا ينزّل شيئًا.\n",
+        ),
+        "صدر الإصدار 0.97.0",
+        "التفاصيل في صفحة التنزيل.\n",
+    ),
+];
+
+/// The published feed in the locale in force, **at full capacity** — the update and
+/// [`letters::NEWS_KEPT`] news items: the one item published stands for all three, each under an
+/// id of its own (решение 166.2).
+struct PublishedFeed {
+    update: letters::FeedItem,
+    news: Vec<letters::FeedItem>,
+}
+
+impl PublishedFeed {
+    fn now() -> Self {
+        let language = settings::ui_language();
+        let (_, title, text, update_title, update_text) = PUBLISHED_FEED
+            .iter()
+            .find(|row| row.0 == language)
+            .expect("every language of the program must be in the feed");
+
+        let news = (2_u64..)
+            .take(letters::NEWS_KEPT)
+            .map(|id| letters::FeedItem {
+                id,
+                date: letters::Date::from_ymd(2026, 9, 25),
+                title: (*title).to_owned(),
+                text: (*text).to_owned(),
+                link: "https://panda-pishet-kod.dev/langswitcher/".to_owned(),
+                version: None,
+            })
+            .collect();
+
+        Self {
+            update: letters::FeedItem {
+                id: 5,
+                date: letters::Date::from_ymd(2026, 10, 8),
+                title: (*update_title).to_owned(),
+                text: (*update_text).to_owned(),
+                link: "https://panda-pishet-kod.dev/langswitcher/download/".to_owned(),
+                version: Some("0.97.0".to_owned()),
+            },
+            news,
+        }
+    }
+
+    fn view(&self) -> letters::FeedView<'_> {
+        letters::FeedView {
+            update: Some(&self.update),
+            news: &self.news,
+        }
+    }
+}
+
+/// The `[letters]` of a machine whose feed is live and was read on `read` — FR-102: the feed on, a
+/// letter out of it shown, and the program on the machine for ninety days when `switch` (the
+/// switch is shown) or since `read` (the quiet line). Nothing marked read.
+fn fed_letters(switch: bool, read: letters::Date) -> settings::Letters {
+    settings::Letters {
+        feed: true,
+        first_run: Some(if switch {
+            read.plus_days(-letters::SWITCH_AFTER_DAYS)
+        } else {
+            read
+        }),
+        first_feed_letter: Some(read),
+        feed_last_read: Some(read),
+        ..settings::Letters::default()
+    }
+}
+
+/// «От автора» of a machine whose feed is live, for a build of `version`, on the 28th of `month`
+/// — the day it read the feed: a day of two digits, and the next reading fifteen days away.
+fn fed_view(switch: bool, month: u32, version: &str, feed: &PublishedFeed) -> letters::AuthorView {
+    let day = letters::Date::from_ymd(2026, month, 28).expect("a day");
+
+    letters::author_view(&fed_letters(switch, day), day, version, feed.view())
+}
+
+/// «Последние письма» of a machine whose feed is live, **at full capacity** — the update (the build
+/// is behind it) and the three news items, none of them read, each with its «Прочитано»
+/// (решение 166.2).
+fn full_list(feed: &PublishedFeed) -> Vec<letters::Entry> {
+    let entries =
+        letters::list_entries(&settings::Letters::default(), BEHIND_THE_FEED, feed.view());
+
+    assert_eq!(
+        entries.len(),
+        letters::NEWS_KEPT + 1,
+        "the update and every news item kept"
+    );
+    assert!(
+        entries
+            .iter()
+            .filter(|entry| entry.news.is_some())
+            .all(|entry| entry.unread),
+        "every news item unread"
+    );
+
+    entries
 }
 
 /// The dialog's own face at `face` pixels, as the dialog manager makes it of `FONT 10, "Segoe
@@ -7341,139 +7676,288 @@ fn dialog_face_at(face: i32) -> LOGFONTW {
 /// `Metrics` of `letters`, `dlu × base / 4|8`), the template's head by `MulDiv` (the dialog manager,
 /// measured), `theme::measure_label` for every paragraph in the face the window measures it in,
 /// and the wrapping row of buttons of `place_panel_buttons`. The head's bottom is the lowest of its
-/// five controls; the logo is `theme::scaled(56)` at the drawing DPI.
+/// five controls; the logo is `theme::scaled(56)` at the drawing DPI. «Новости и обновления» in
+/// both states of FR-102 — the line about the feed, or the switch (`y(11)`) and its sentence beside
+/// the glyph — with «Последние письма» in the row when the view has it (задача T-98-2).
 ///
 /// ⚠ A model is a second opinion until it is held against the window: the live «От автора» of the
 /// measuring door is its known answer, locale by locale.
 fn author_client_by_model(face: i32, drawing_dpi: i32, words: &AuthorWords) -> i32 {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::Graphics::Gdi::{DT_CALCRECT, DT_SINGLELINE, DrawTextW};
-
     /// The head of the template, `(y, cy)` in dialog units: name, version, the two lines.
     const HEAD: [(i32, i32); 4] = [(11, 12), (24, 8), (37, 10), (47, 10)];
     /// The icon's `y` in dialog units; its height is the logo's.
     const ICON_Y: i32 = 13;
 
-    let base = dialog_face_at(face);
-    let body_face = settings::about_body_logfont(base);
-    let text_face = theme::smoothed_logfont(base);
-    let pitch = Some(settings::about_body_line_pitch(body_face.lfHeight));
+    let model = WindowModel::at(face, drawing_dpi);
+    let (x, y) = (|units| model.x(units), |units| model.y(units));
+    let inner_width = model.inner_width();
+    let tight = y(3);
+    let gap = y(8);
+    let inset = x(7);
+    let button = y(14);
 
-    // SAFETY: every handle made below is selected out and deleted on the one path out of this
-    // block; the DC is a memory DC of this process.
-    unsafe {
-        let dc = CreateCompatibleDC(None);
+    let logo = theme::scaled(56, drawing_dpi);
+    let head = HEAD
+        .iter()
+        .map(|(top, height)| mul_div(*top, model.unit_y, 8) + mul_div(*height, model.unit_y, 8))
+        .chain(std::iter::once(mul_div(ICON_Y, model.unit_y, 8) + logo))
+        .max()
+        .expect("a head");
 
-        let dialog = CreateFontIndirectW(&base);
-        let previous = SelectObject(dc, dialog.into());
-        let mut metrics = TEXTMETRICW::default();
-        let _ = GetTextMetricsW(dc, &mut metrics);
-        let alphabet: Vec<u16> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            .encode_utf16()
-            .collect();
-        let mut size = Default::default();
-        let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
-        let unit_x = (size.cx / 26 + 1) / 2;
-        let unit_y = metrics.tmHeight;
-        SelectObject(dc, previous);
-        let _ = DeleteObject(dialog.into());
-
-        let body = CreateFontIndirectW(&body_face);
-        let text = CreateFontIndirectW(&text_face);
-
-        let x = |units: i32| units * unit_x / 4;
-        let y = |units: i32| units * unit_y / 8;
-
-        let client_width = mul_div(256, unit_x, 4);
-        let pad = x(12);
-        let full_width = client_width - pad * 2;
-        let inset = x(7);
-        let inner_width = full_width - inset * 2;
-        let tight = y(3);
-        let gap = y(8);
-        let button = y(14);
-
-        let measure = |face: HFONT, width: i32, caption: &str, pitch: Option<i32>| -> i32 {
-            if caption.is_empty() {
-                return 0;
-            }
-            let mut wide: Vec<u16> = caption.encode_utf16().collect();
-            let previous = SelectObject(dc, face.into());
-            let height = theme::measure_label(dc, width, &mut wide, pitch);
-            SelectObject(dc, previous);
-            height
-        };
-
-        let button_width = |caption: &str| -> i32 {
-            let mut wide: Vec<u16> = caption.encode_utf16().collect();
-            let previous = SelectObject(dc, text.into());
-            let mut rect = RECT::default();
-            let _ = DrawTextW(dc, &mut wide, &mut rect, DT_CALCRECT | DT_SINGLELINE);
-            SelectObject(dc, previous);
-            (rect.right - rect.left + x(10) * 2).max(x(40))
-        };
-
-        // `place_panel_buttons`: left to right, a new line when the next would run off the block.
-        let buttons = |top: i32, captions: &[&str]| -> i32 {
-            let height = y(14);
-            let between = x(4);
-            let mut left = 0;
-            let mut row = top;
-            for caption in captions {
-                let width = button_width(caption);
-                if left > 0 && left + width > inner_width {
-                    left = 0;
-                    row += height + y(3);
-                }
-                left += width + between;
-            }
-            if captions.is_empty() {
-                top
-            } else {
-                row + height + y(3)
-            }
-        };
-
-        let logo = theme::scaled(56, drawing_dpi);
-        let head = HEAD
+    let view = &words.view;
+    let body = |width: i32, caption: &str| model.measure(model.body, width, caption, model.pitch);
+    // A line counted with every sentence it may say: the tallest of them stands.
+    let tallest = |captions: &[String]| -> i32 {
+        captions
             .iter()
-            .map(|(top, height)| mul_div(*top, unit_y, 8) + mul_div(*height, unit_y, 8))
-            .chain(std::iter::once(mul_div(ICON_Y, unit_y, 8) + logo))
+            .map(|caption| body(inner_width, caption))
             .max()
-            .expect("a head");
+            .unwrap_or(0)
+    };
 
-        let view = &words.view;
+    // «Автор»
+    let mut top = head + gap;
+    let mut at = top + y(20);
+    at += body(inner_width, &view.author_text) + tight;
+    at = model.buttons(at, &[&words.support, &words.channel]);
+    top = at + inset + gap;
 
-        // «Автор»
-        let mut top = head + gap;
-        let mut at = top + y(20);
-        at += measure(body, inner_width, &view.author_text, pitch) + tight;
-        at = buttons(at, &[&words.support, &words.channel]);
-        top = at + inset + gap;
-
-        // «Новости и обновления», without the switch
-        at = top + y(20);
-        at += measure(body, inner_width, &view.feed_about, pitch) + tight;
-        for caption in [&view.feed_state, &view.version_state] {
-            at += measure(body, inner_width, caption, pitch) + tight;
+    // «Новости и обновления» — FR-102: the line about the feed, or the switch and its sentence
+    // indented by `ROW_TEXT` (задача T-98-2).
+    at = top + y(20);
+    match view.switch {
+        None => at += body(inner_width, &view.feed_about) + tight,
+        Some(_) => {
+            at += y(11);
+            at += body(inner_width - x(11), &view.switch_note) + tight;
         }
-        at = buttons(at, &[&words.download]);
-        if !view.file_only.is_empty() {
-            at += measure(text, inner_width, &view.file_only, None) + tight;
+    }
+    at += tallest(&words.feed_states) + tight;
+    at += tallest(&words.version_states) + tight;
+    at = if view.letters {
+        model.buttons(at, &[&words.download, &words.letters])
+    } else {
+        model.buttons(at, &[&words.download])
+    };
+    if !view.file_only.is_empty() {
+        at += model.measure(model.text, inner_width, &view.file_only, model.label_pitch) + tight;
+    }
+    top = at + inset + gap;
+
+    // «Обратная связь»
+    at = top + y(20);
+    at += body(inner_width, &view.feedback_text) + tight;
+    at = model.buttons(at, &[&words.write]);
+    top = at + inset + gap;
+
+    top + button + y(12)
+}
+
+/// **The model of `letters::layout_list`** — the client height of «Последние письма» at a dialog
+/// face of `face` pixels with `entries` in it (задача T-98-2). The window grows by what it holds
+/// since задача T-81-4, so its template's 296 units stand for nothing but the window before
+/// `WM_INITDIALOG`.
+///
+/// The window's order: the panel from the top with the inset of the block, every entry as its
+/// title (the face of numbers), its line of date and state (the face of text) and its first line
+/// (the body), each `TIGHT` apart, its row of buttons — «Открыть» and, while unread, «Прочитано» —
+/// and `GAP` after it; the panel as tall as that; then the quiet line under the panel at the full
+/// width, the closing button and the window's own pad.
+///
+/// ⚠ A model is a second opinion until it is held against the window: the live «Последние письма»
+/// of the measuring door is its known answer, locale by locale.
+fn list_client_by_model(face: i32, drawing_dpi: i32, entries: &[letters::Entry]) -> i32 {
+    let model = WindowModel::at(face, drawing_dpi);
+    let (x, y) = (|units| model.x(units), |units| model.y(units));
+    let inner_width = model.inner_width();
+    let full_width = inner_width + x(7) * 2;
+    let tight = y(3);
+    let gap = y(8);
+    let inset = x(7);
+
+    let open = settings::text(settings::IDS_LETTERS_OPEN);
+    let read = settings::text(settings::IDS_NEWS_READ_BUTTON);
+    let foot = settings::text(settings::IDS_LETTERS_FOOT);
+
+    let top = y(12);
+    let mut at = top + inset;
+
+    for entry in entries {
+        at += model.measure(model.number, inner_width, &entry.title, model.label_pitch) + tight;
+        at += model.measure(model.text, inner_width, &entry.meta, model.label_pitch) + tight;
+        at += model.measure(model.body, inner_width, &entry.excerpt, model.pitch) + tight;
+        at = if entry.unread {
+            model.buttons(at, &[&open, &read])
+        } else {
+            model.buttons(at, &[&open])
+        };
+        at += gap;
+    }
+
+    let panel_bottom = if entries.is_empty() {
+        at + inset
+    } else {
+        at - gap + inset
+    };
+
+    let mut below = panel_bottom + gap;
+    below += model.measure(model.text, full_width, &foot, model.label_pitch) + tight;
+
+    below + y(14) + y(12)
+}
+
+/// The memory DC, the base units and the faces the models of the windows of `letters` measure with
+/// at a dialog face of `face` pixels drawn at `drawing_dpi` — what `Metrics::of` and `Faces::new`
+/// give the live window, made the same way (задачи T-83-2 и T-98-2). Everything made is deleted on
+/// drop.
+///
+/// ⚠ A label the window measures without a pitch of its own is measured here **with that pitch
+/// named** ([`WindowModel::label_pitch`]): `theme::measure_label` without one takes
+/// `LABEL_LINE_PITCH` at the drawing DPI of its DC, and a memory DC has no window — it would answer
+/// the screen's 96 where the window of eight points draws at 76. Found by the quiet line of
+/// «Последние письма», which wraps (задача T-98-1: 29 px against the window's 26 at 11 px) — the
+/// lesson of 143б again, on the model's side.
+struct WindowModel {
+    dc: HDC,
+    /// The base units the documented way: the average width of the alphabet, and `tmHeight`.
+    unit_x: i32,
+    unit_y: i32,
+    body: HFONT,
+    text: HFONT,
+    /// The face of the titles of «Последние письма».
+    number: HFONT,
+    /// The pitch of the body — `Faces::body_pitch`.
+    pitch: Option<i32>,
+    /// The pitch a label measured without one of its own is given — `LABEL_LINE_PITCH` at the
+    /// drawing DPI.
+    label_pitch: Option<i32>,
+}
+
+impl WindowModel {
+    fn at(face: i32, drawing_dpi: i32) -> Self {
+        let base = dialog_face_at(face);
+        let body_face = settings::about_body_logfont(base);
+
+        // SAFETY: a memory DC of this process; the dialog's face is selected out and deleted
+        // before the call returns, the three others are owned by the value and deleted on drop.
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+
+            let dialog = CreateFontIndirectW(&base);
+            let previous = SelectObject(dc, dialog.into());
+            let mut metrics = TEXTMETRICW::default();
+            let _ = GetTextMetricsW(dc, &mut metrics);
+            let alphabet: Vec<u16> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                .encode_utf16()
+                .collect();
+            let mut size = Default::default();
+            let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
+            SelectObject(dc, previous);
+            let _ = DeleteObject(dialog.into());
+
+            Self {
+                dc,
+                unit_x: (size.cx / 26 + 1) / 2,
+                unit_y: metrics.tmHeight,
+                body: CreateFontIndirectW(&body_face),
+                text: CreateFontIndirectW(&theme::smoothed_logfont(base)),
+                number: CreateFontIndirectW(&settings::about_number_logfont(
+                    base,
+                    settings::Emphasis::Semibold,
+                )),
+                pitch: Some(settings::about_body_line_pitch(body_face.lfHeight)),
+                label_pitch: Some(theme::scaled(theme::LABEL_LINE_PITCH, drawing_dpi)),
+            }
         }
-        top = at + inset + gap;
+    }
 
-        // «Обратная связь»
-        at = top + y(20);
-        at += measure(body, inner_width, &view.feedback_text, pitch) + tight;
-        at = buttons(at, &[&words.write]);
-        top = at + inset + gap;
+    /// Horizontal dialog units in pixels — the `Metrics` of `letters`, by **truncation**.
+    fn x(&self, units: i32) -> i32 {
+        units * self.unit_x / 4
+    }
 
-        let _ = DeleteObject(body.into());
-        let _ = DeleteObject(text.into());
-        let _ = DeleteDC(dc);
+    /// Vertical dialog units in pixels, the same way.
+    fn y(&self, units: i32) -> i32 {
+        units * self.unit_y / 8
+    }
 
-        top + button + y(12)
+    /// The block inside a panel: the client of 256 units the manager's way (`MulDiv`), less the
+    /// pad of the window and the inset of the panel on both sides.
+    fn inner_width(&self) -> i32 {
+        mul_div(256, self.unit_x, 4) - self.x(12) * 2 - self.x(7) * 2
+    }
+
+    /// `measure` of `letters` — `theme::measure_label` in `face`, nothing for no words.
+    fn measure(&self, face: HFONT, width: i32, caption: &str, pitch: Option<i32>) -> i32 {
+        if caption.is_empty() {
+            return 0;
+        }
+
+        let mut wide: Vec<u16> = caption.encode_utf16().collect();
+
+        // SAFETY: the DC and the face are live while `self` is; the previous face is put back.
+        unsafe {
+            let previous = SelectObject(self.dc, face.into());
+            let height = theme::measure_label(self.dc, width, &mut wide, pitch);
+            SelectObject(self.dc, previous);
+            height
+        }
+    }
+
+    /// `button_width` of `letters` — the caption on one line in the face of text, the pad on both
+    /// sides, never narrower than forty units.
+    fn button_width(&self, caption: &str) -> i32 {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::{DT_CALCRECT, DT_SINGLELINE, DrawTextW};
+
+        let mut wide: Vec<u16> = caption.encode_utf16().collect();
+        let mut rect = RECT::default();
+
+        // SAFETY: as in `measure`; `DT_CALCRECT` paints nothing.
+        unsafe {
+            let previous = SelectObject(self.dc, self.text.into());
+            let _ = DrawTextW(self.dc, &mut wide, &mut rect, DT_CALCRECT | DT_SINGLELINE);
+            SelectObject(self.dc, previous);
+        }
+
+        (rect.right - rect.left + self.x(10) * 2).max(self.x(40))
+    }
+
+    /// `place_panel_buttons`: left to right, a new line when the next would run off the block;
+    /// answers where the panel's content now ends.
+    fn buttons(&self, top: i32, captions: &[&str]) -> i32 {
+        let height = self.y(14);
+        let between = self.x(4);
+        let inner_width = self.inner_width();
+        let mut left = 0;
+        let mut row = top;
+
+        for caption in captions {
+            let width = self.button_width(caption);
+            if left > 0 && left + width > inner_width {
+                left = 0;
+                row += height + self.y(3);
+            }
+            left += width + between;
+        }
+
+        if captions.is_empty() {
+            top
+        } else {
+            row + height + self.y(3)
+        }
+    }
+}
+
+impl Drop for WindowModel {
+    fn drop(&mut self) {
+        // SAFETY: each was made by `at`, is selected into nothing and is deleted once here.
+        unsafe {
+            for face in [self.body, self.text, self.number] {
+                let _ = DeleteObject(face.into());
+            }
+            let _ = DeleteDC(self.dc);
+        }
     }
 }
 
@@ -7681,6 +8165,11 @@ fn about_client_by_model(face: i32, drawing_dpi: i32, key: &str) -> i32 {
 ///
 /// ⚠ The numbers of П6 in the ТЗ (789 / 827 / 846) are those of Э81's model **before** T-81-6 made
 /// the head the template's; on `e82` the window is two pixels taller: 791 / 829 (measured here).
+///
+/// ⭐ Since задача T-98-2 the window is held in **every state FR-102 gives it** (Э83-Б-1, решение
+/// 166.2): the first day, as the product opens it; and a machine whose feed is live — the quiet
+/// line about the file with «доступна» in the line of the version, and the switch with its sentence
+/// with «это последняя» — «Последние письма» in the row both times.
 #[cfg(feature = "testing")]
 #[test]
 fn the_model_of_the_author_window_is_the_live_window() {
@@ -7691,13 +8180,29 @@ fn the_model_of_the_author_window_is_the_live_window() {
         settings::set_ui_language(language);
 
         let words = AuthorWords::now("0.83.0");
-        let live = HiddenAuthor::open("0.83.0").client_height();
+        let live = HiddenWindow::open("0.83.0").client_height();
         let model = author_client_by_model(13, 96, &words);
 
         println!("{language:?}: live {live} px, model {model} px");
 
         if live != model {
             differences.push(format!("{language:?}: live {live}, model {model}"));
+        }
+
+        let feed = PublishedFeed::now();
+
+        for (switch, version) in [(false, BEHIND_THE_FEED), (true, PAST_THE_FEED)] {
+            let view = fed_view(switch, 9, version, &feed);
+            let model = author_client_by_model(13, 96, &AuthorWords::of(view.clone()));
+            let live = HiddenWindow::author(view).client_height();
+
+            println!("{language:?}, feed live, switch {switch}: live {live} px, model {model} px");
+
+            if live != model {
+                differences.push(format!(
+                    "{language:?}, switch {switch}: live {live}, model {model}"
+                ));
+            }
         }
     }
 
@@ -7718,24 +8223,106 @@ fn the_model_of_the_author_window_is_the_live_window() {
 /// the step asks for (C7 through the product's own road — `put_font_step` in `show_modeless_dialog`).
 ///
 /// ⚠ «Красное до»: without the substitution every one of these windows opens at 13 px.
+///
+/// ⭐ Since задача T-98-2 in the three states of [`the_model_of_the_author_window_is_the_live_window`]
+/// — the first day and both states of FR-102 with the feed live (Э83-Б-1).
 #[cfg(feature = "testing")]
 #[test]
 fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
     let _guard = with_product_strings();
     let mut differences = Vec::new();
+    let mut measured = 0;
 
     for language in Language::ALL {
         settings::set_ui_language(language);
 
-        let words = AuthorWords::now("0.83.0");
+        let feed = PublishedFeed::now();
+        let fed = [(false, BEHIND_THE_FEED), (true, PAST_THE_FEED)]
+            .map(|(switch, version)| fed_view(switch, 9, version, &feed));
+        // `(what, the view the window is opened with — `None` for the product's own road)`.
+        let states = [
+            ("first day", None),
+            ("quiet line", Some(fed[0].clone())),
+            ("switch", Some(fed[1].clone())),
+        ];
+
+        for (what, view) in states {
+            let words = view
+                .clone()
+                .map_or_else(|| AuthorWords::now("0.83.0"), AuthorWords::of);
+
+            for step in 8..=15_u16 {
+                let face = theme::face_at(step, 96);
+                let (live, font) = settings::testing::with_font_step(step, || {
+                    let window = view
+                        .clone()
+                        .map_or_else(|| HiddenWindow::open("0.83.0"), HiddenWindow::author);
+                    (window.client_height(), window.dialog_font_height())
+                });
+                let model = author_client_by_model(face, theme::drawing_dpi_at(96, step), &words);
+                measured += 1;
+
+                if font != -face {
+                    differences.push(format!(
+                        "{language:?} {what} {step} pt: the window got lfHeight {font}, not \
+                         -{face} (C7)"
+                    ));
+                } else if live != model {
+                    differences.push(format!(
+                        "{language:?} {what} {step} pt ({face} px): live {live}, model {model}"
+                    ));
+                }
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{measured} windows measured, differences: {differences:?}");
+
+    assert_eq!(
+        measured,
+        14 * 3 * 8,
+        "fourteen languages, three states, eight faces"
+    );
+    assert!(
+        differences.is_empty(),
+        "the model of layout_author is not the window at every face: {differences:?}"
+    );
+}
+
+/// **The model of «Последние письма» at full capacity IS the live window — задача T-98-2**
+/// (Э83-Б-1, решение 166.2): the update and three unread news items of the published feed, in
+/// fourteen languages, at every face a test can reach (the debug substitution of the step, as for
+/// «От автора» above). The window grows by its entries, so its template's 296 units say nothing of
+/// how tall it is; the known answer is the window itself.
+///
+/// ⚠ Мутант: a model that answers the template's 296 units instead of laying out the entries is
+/// caught here.
+#[cfg(feature = "testing")]
+#[test]
+fn the_model_of_the_full_list_is_the_live_window_at_every_reachable_face() {
+    let _guard = with_product_strings();
+    let mut differences = Vec::new();
+    let mut measured = 0;
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let entries = full_list(&PublishedFeed::now());
 
         for step in 8..=15_u16 {
             let face = theme::face_at(step, 96);
             let (live, font) = settings::testing::with_font_step(step, || {
-                let window = HiddenAuthor::open("0.83.0");
+                let window = HiddenWindow::list(entries.clone());
                 (window.client_height(), window.dialog_font_height())
             });
-            let model = author_client_by_model(face, 96, &words);
+            let model = list_client_by_model(face, theme::drawing_dpi_at(96, step), &entries);
+            measured += 1;
+
+            if step == 10 {
+                println!("{language:?} 10 pt ({face} px): live {live} px, model {model} px");
+            }
 
             if font != -face {
                 differences.push(format!(
@@ -7751,11 +8338,12 @@ fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
 
     settings::set_ui_language(Language::Ru);
 
-    println!("{} windows measured, differences: {differences:?}", 14 * 8);
+    println!("{measured} windows measured, differences: {differences:?}");
 
+    assert_eq!(measured, 14 * 8, "fourteen languages, eight faces");
     assert!(
         differences.is_empty(),
-        "the model of layout_author is not the window at every face: {differences:?}"
+        "the model of layout_list is not the window: {differences:?}"
     );
 }
 
@@ -7765,15 +8353,21 @@ fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
 const RULE_FACES: std::ops::RangeInclusive<i32> = 11..=40;
 
 /// **The tallest window of the program, face by face, is the table the rule counts with —
-/// задача T-83-2, решения 143.1, 143.9 и 143.11.**
+/// задача T-83-2, решения 143.1 и 143.11; with the feed live, задача T-98-2 (Э83-Б-1, решение
+/// 166.2).**
 ///
 /// For every face the rule may answer with: the six windows × fourteen languages, each in dialog
-/// units — «От автора» by the model held against the live window above, «О программе» by the model
-/// of `fit_about_help` with the widest key the program can name and with «Pause», and the four
-/// windows whose height the template decides (настройки 380; «Письмо» and the wizard 276, which
-/// their layouts never resize; «Последние письма» 296, whose content is the feed — a stub today, so
-/// its template stands for it, the way 143.9 keeps the switch out). The switch of FR-102 is not
-/// counted (143.9).
+/// units, **in every state the window is really in** —
+/// * «От автора» by the model held against the live window above: the first day (no feed), and a
+///   machine whose feed is live — the quiet line about the file or the switch of FR-102 with its
+///   sentence, «Последние письма» in the row, the line of the reading and the line of the version
+///   each at the tallest sentence the program can put there ([`AuthorWords::fed`]);
+/// * «Последние письма» by the model held against the live window, at full capacity — the update
+///   and three unread news items of the published feed ([`full_list`]);
+/// * «О программе» by the model of `fit_about_help` with the widest key the program can name and
+///   with «Pause»;
+/// * the three windows whose height the template decides: настройки 380; «Письмо» and the wizard
+///   276, which their layouts never resize.
 ///
 /// The statement is **equality** at every face: the table is the least number of units that holds
 /// the tallest window there — enough (`MulDiv(table, cell, 8)` reaches the window) and no more
@@ -7784,12 +8378,7 @@ const RULE_FACES: std::ops::RangeInclusive<i32> = 11..=40;
 #[test]
 fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
     /// The templates whose height the template decides, in dialog units.
-    const FIXED: [(&str, i32); 4] = [
-        ("настройки", 380),
-        ("«Последние письма»", 296),
-        ("«Письмо»", 276),
-        ("мастер", 276),
-    ];
+    const FIXED: [(&str, i32); 3] = [("настройки", 380), ("«Письмо»", 276), ("мастер", 276)];
 
     let _guard = with_product_strings();
 
@@ -7804,6 +8393,26 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
             .max_by_key(|name| extent_of(&sheet, &chip_face, name).cx)
             .expect("the program must name at least one key")
     };
+
+    // The words of every language, made once: `(language, «От автора» in its three states, the
+    // full «Последние письма»)`.
+    let words: Vec<_> = Language::ALL
+        .into_iter()
+        .map(|language| {
+            settings::set_ui_language(language);
+            let feed = PublishedFeed::now();
+
+            (
+                language,
+                [
+                    ("first day", AuthorWords::now("0.83.0")),
+                    ("quiet line", AuthorWords::fed(false, &feed)),
+                    ("switch", AuthorWords::fed(true, &feed)),
+                ],
+                full_list(&feed),
+            )
+        })
+        .collect();
 
     let mut measured = Vec::new();
 
@@ -7820,14 +8429,21 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
             }
         }
 
-        for language in Language::ALL {
-            settings::set_ui_language(language);
+        for (language, states, list) in &words {
+            settings::set_ui_language(*language);
 
-            let words = AuthorWords::now("0.83.0");
-            let author = units_of_client(author_client_by_model(face, drawing, &words), cell);
+            for (state, words) in states {
+                let author = units_of_client(author_client_by_model(face, drawing, words), cell);
 
-            if author > tallest.0 {
-                tallest = (author, format!("«От автора» {language:?}"));
+                if author > tallest.0 {
+                    tallest = (author, format!("«От автора» {language:?}, {state}"));
+                }
+            }
+
+            let list = units_of_client(list_client_by_model(face, drawing, list), cell);
+
+            if list > tallest.0 {
+                tallest = (list, format!("«Последние письма» {language:?}"));
             }
 
             for key in [widest_key.as_str(), "Pause"] {
@@ -8541,7 +9157,7 @@ fn the_live_window_draws_by_its_step() {
 
     let at = |step: u16| -> (i32, i32, i32) {
         settings::testing::with_font_step(step, || {
-            let window = HiddenAuthor::open("0.83.0");
+            let window = HiddenWindow::open("0.83.0");
             // SAFETY: the window is live for this block; the DC is released at once.
             let (screen, drawing) = unsafe {
                 let dc = GetDC(Some(window.window));
@@ -8829,7 +9445,7 @@ fn the_paragraphs_of_the_author_window_are_drawn_inside_their_rectangles() {
             settings::set_ui_language(language);
 
             settings::testing::with_font_step(step, || {
-                let window = HiddenAuthor::open("0.83.0");
+                let window = HiddenWindow::open("0.83.0");
 
                 // SAFETY: the window and its children are live for this block; the face made here
                 // is selected out of every DC before it is deleted, and every DC is released.
@@ -9089,7 +9705,7 @@ fn the_live_author_window_stands_where_the_rule_expects() {
     for step in [10_u16, 11, 15] {
         let face = theme::face_at(step, 96);
         let (outer, client, work) = settings::testing::with_font_step(step, || {
-            let window = HiddenAuthor::open("0.83.0");
+            let window = HiddenWindow::open("0.83.0");
             let mut outer = RECT::default();
             // SAFETY: the window is live for this block; the buffers are locals.
             let work = unsafe {

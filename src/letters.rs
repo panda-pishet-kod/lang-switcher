@@ -6017,7 +6017,10 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 /// measured exactly as the product builds it, and never shown.
 #[cfg(feature = "testing")]
 pub mod testing {
-    use super::{HWND, Kind, Letter, author_state, open_window, show_letter, window_of};
+    use super::{
+        AuthorView, Entry, HWND, Kind, Letter, author_state, fresh_state, open_window, show_letter,
+        window_of,
+    };
     use std::cell::Cell;
     use windows::Win32::Foundation::HMODULE;
 
@@ -6047,6 +6050,51 @@ pub mod testing {
         TEMPLATES.with(|templates| templates.set(module.0 as usize));
 
         let window = open_window(owner, author_state(owner, version), false);
+
+        HIDDEN.with(|hidden| hidden.set(false));
+        TEMPLATES.with(|templates| templates.set(0));
+
+        window
+    }
+
+    /// **The door of task T-98-1** — opens «От автора» on `owner` out of the templates of `module`
+    /// with the words of `view`, and never shows it.
+    ///
+    /// [`open_author_hidden`] builds the words out of the configuration and the feed of the running
+    /// program, and a test binary has neither: its window is always the one of a first day, with
+    /// no switch of FR-102 and no «Последние письма». The window of a machine whose feed is live
+    /// is a view of [`super::author_view`] the caller builds, and the window lays it out exactly
+    /// as the product does (Э83-Б-1, решение 166.2).
+    ///
+    /// The window answered is the caller's to destroy.
+    pub fn open_author_hidden_with(owner: HWND, module: HMODULE, view: AuthorView) -> Option<HWND> {
+        HIDDEN.with(|hidden| hidden.set(true));
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let mut state = fresh_state(owner, Kind::Author);
+        state.author = view;
+        let window = open_window(owner, state, false);
+
+        HIDDEN.with(|hidden| hidden.set(false));
+        TEMPLATES.with(|templates| templates.set(0));
+
+        window
+    }
+
+    /// **The door of task T-98-1** — opens «Последние письма» on `owner` out of the templates of
+    /// `module` with `entries`, and never shows it.
+    ///
+    /// The window grows by what it holds (задача T-81-4), and the entries are those of
+    /// [`super::list_entries`] the caller builds out of a feed — a test binary reads none.
+    ///
+    /// The window answered is the caller's to destroy.
+    pub fn open_list_hidden(owner: HWND, module: HMODULE, entries: Vec<Entry>) -> Option<HWND> {
+        HIDDEN.with(|hidden| hidden.set(true));
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let mut state = fresh_state(owner, Kind::List);
+        state.entries = entries;
+        let window = open_window(owner, state, false);
 
         HIDDEN.with(|hidden| hidden.set(false));
         TEMPLATES.with(|templates| templates.set(0));

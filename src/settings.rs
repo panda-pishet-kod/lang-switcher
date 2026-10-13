@@ -5043,24 +5043,28 @@ pub const FONT_STEP_FLOOR: i32 = 11;
 const TALLEST_FIRST_FACE: i32 = FONT_STEP_FLOOR;
 
 /// **The tallest window of the program, in dialog units, face by face** — 11 to 40 px, решения
-/// 143.1, 143.9 и 143.11, задача T-83-2.
+/// 143.1 и 143.11, задача T-83-2; with the feed live, задача T-98-2 (Э83-Б-1, решение 166.2).
 ///
 /// The height of a window **in dialog units is not the same at every face**: the lines of the body
 /// are 140 % of their own size, and the cell of a face rounds its own way, so the same words take
-/// 381 units at 14 px and 397 at 11 px (greek «От автора»). One number for all faces would be the
+/// 390 units at 14 px and 407 at 11 px (greek «От автора»). One number for all faces would be the
 /// largest and would push 150 % on a 1080p screen from 7 pt to 6 pt — развилка C4, 143.11 — so the
 /// rule asks for the tallest window **at the face it is weighing**.
 ///
-/// Measured, not reasoned: the six windows × fourteen languages at every face, «От автора» by the
-/// model of `layout_author` held against the live window (112 points of 112), «О программе» with the
-/// growth of its help, the four others by their templates; the switch of FR-102 is not in it
-/// (143.9). The test `the_tallest_window_by_face_is_the_table_the_rule_counts_with` measures it
-/// again every run and wants this table **exactly** — enough units at every face, and not one more.
-/// ⏳ When the feed is ready, the switch and «Последние письма» are measured into it (BACKLOG).
+/// Measured, not reasoned: the six windows × fourteen languages at every face, each in every state
+/// it is really in — «От автора» by the model of `layout_author` held against the live window, on
+/// the first day and with the feed live, with the quiet line or with the switch of FR-102,
+/// «Последние письма» in the row and the lines of the reading and of the version at their tallest;
+/// «Последние письма» by the model of `layout_list` at full capacity, held against the live window;
+/// «О программе» with the growth of its help; the three others by their templates. Since the feed
+/// went live the tallest is «От автора» with the quiet line: the switch makes the window shorter,
+/// and the reading with its date is what grew it. The test
+/// `the_tallest_window_by_face_is_the_table_the_rule_counts_with` measures it again every run and
+/// wants this table **exactly** — enough units at every face, and not one more.
 const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
-    397, 389, 390, 381, 389, 380, 387, 391, 393, 387, // 11 … 20 px
-    380, 390, 394, 395, 380, 388, 392, 403, 395, 383, // 21 … 30 px
-    392, 387, 389, 392, 392, 399, 394, 395, 398, 394, // 31 … 40 px
+    407, 399, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
+    386, 399, 403, 404, 386, 396, 401, 421, 404, 392, // 21 … 30 px
+    401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
 ];
 
 /// The height, in dialog units, of the tallest window of the program at a dialog face of `face`
