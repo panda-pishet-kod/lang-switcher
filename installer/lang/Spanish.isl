@@ -7,3 +7,4 @@ LocalCertReady=El programa de instalación creará un certificado en este equipo
 LocalCertFailed=Lang Switcher se ha instalado, pero no funcionará en las ventanas de los programas ejecutados como administrador: Windows no aceptó el certificado creado en este equipo. Encontrará los detalles en el registro de instalación.
 RemoveSettingsQuestion=¿Eliminar también el archivo de configuración de Lang Switcher?
 RemoveSettingsKeep=Elija «No» para conservar su configuración para una futura reinstalación.
+AuthorSlogan=programas hechos con alma

@@ -211,7 +211,29 @@ LanguageDetectionMethod=uilanguage
 UsePreviousLanguage=no
 Compression=lzma2/max
 SolidCompression=yes
-WizardStyle=modern
+; The look of the site panda-pishet-kod.dev (stage E99, decision 167.1: variant B of question 167,
+; chosen by the owner on the mock-up).  The background is the "paper" of the site in the light
+; theme of Windows and its "ink" in the dark one, with the bamboo of its margins at the left and
+; the right edge; no picture of Inno's own.  dynamic: the wizard follows the theme of Windows,
+; looked at once, at the start -- without it the ...DynamicDark lines do nothing and the wizard is
+; always light.  windows11 is the light counterpart of the dark style of Inno, excludelightcontrols
+; keeps the native controls of Windows in the light theme, hidebevels takes the lines away.  The
+; uninstaller gets the colour alone: Inno shows a background picture in the wizard only.
+; The two empty ...DynamicDark lines of the pictures are not decoration (decision 167.20): in the
+; dark theme Inno reads them instead of WizardImageFile and WizardSmallImageFile, and without them
+; it puts its own dark picture back into the corner.
+; The pictures are drawn by tools\make-installer-art.ps1, one per scale of the table of the Inno
+; help -- Inno takes the nearest; tests\installer_art.rs holds them to their sizes and
+; tests\installer_languages.rs holds these lines.
+WizardStyle=modern dynamic windows11 excludelightcontrols hidebevels
+WizardBackColor=#FAF9F6
+WizardBackColorDynamicDark=#23272F
+WizardBackImageFile=art\back-light-100.png,art\back-light-125.png,art\back-light-150.png,art\back-light-175.png,art\back-light-200.png
+WizardBackImageFileDynamicDark=art\back-dark-100.png,art\back-dark-125.png,art\back-dark-150.png,art\back-dark-175.png,art\back-dark-200.png
+WizardImageFile=
+WizardImageFileDynamicDark=
+WizardSmallImageFile=
+WizardSmallImageFileDynamicDark=
 ; The installer is signed afterwards by tools\build-installer.ps1, not by an Inno
 ; SignTool= directive: the private key is non-exportable and lives in
 ; Cert:\CurrentUser\My, so signing happens in the same user session, once, over
@@ -251,6 +273,18 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Source: "{#SourceExeBase}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#FullTempName}"; Flags: ignoreversion
 Source: "local-trust.ps1"; Flags: dontcopy
+; Stage E99, decision 167.1 (B1): the logo of the signature of the author, one per theme and scale
+; (tools\make-installer-art.ps1); [Code] extracts the one it needs into {tmp}.
+Source: "art\logo-light-100.png"; Flags: dontcopy
+Source: "art\logo-light-125.png"; Flags: dontcopy
+Source: "art\logo-light-150.png"; Flags: dontcopy
+Source: "art\logo-light-175.png"; Flags: dontcopy
+Source: "art\logo-light-200.png"; Flags: dontcopy
+Source: "art\logo-dark-100.png"; Flags: dontcopy
+Source: "art\logo-dark-125.png"; Flags: dontcopy
+Source: "art\logo-dark-150.png"; Flags: dontcopy
+Source: "art\logo-dark-175.png"; Flags: dontcopy
+Source: "art\logo-dark-200.png"; Flags: dontcopy
 
 [InstallDelete]
 ; The Start menu folder of the versions before e90 was named "Lang Switcher" (the short name);
@@ -429,6 +463,132 @@ procedure InitializeWizardReadyMemo();
 begin
   WizardForm.ReadyMemo.WordWrap := True;
   WizardForm.ReadyMemo.ScrollBars := ssVertical;
+end;
+
+(* ---------------------------------------------------------------------------
+  The line above the field of the Ready page (stage E99, decision 167.5).
+  Inno puts ReadyLabel2a there -- "click Install to continue, or click Back
+  if you want to review or change any settings" -- although the Ready page
+  is the first page of this wizard and has no Back button (measured on the
+  live window, decision 167.20).  ReadyLabel2b is the same sentence without
+  the Back button, in every official translation; no text of Inno is
+  rewritten.  The label becomes a line shorter, and the field moves up and
+  grows by as much -- what Inno does with its own label when it lays the page
+  out, so the page keeps its spacing.
+  Not in InitializeWizard: Inno sets the label again, and lays the field out
+  under it, each time it shows the Ready page -- set there, the line came back
+  with Back on the live window (decision 167.21).  CurPageChanged comes after.
+  --------------------------------------------------------------------------- *)
+<event('CurPageChanged')>
+procedure CurPageChangedReadyLabel(CurPageID: Integer);
+var
+  Delta: Integer;
+begin
+  if CurPageID <> wpReady then
+    Exit;
+  WizardForm.ReadyLabel.Caption := SetupMessage(msgReadyLabel2b);
+  Delta := WizardForm.ReadyLabel.AdjustHeight;
+  WizardForm.ReadyMemo.Top := WizardForm.ReadyMemo.Top + Delta;
+  WizardForm.ReadyMemo.Height := WizardForm.ReadyMemo.Height - Delta;
+end;
+
+(* ---------------------------------------------------------------------------
+  The signature of the author on every page of the wizard (stage E99,
+  decision 167.1, signature B1 of question 167, chosen by the owner on the
+  mock-up): at the bottom left, beside the buttons, the logo of the site, the
+  name -- bold -- with the slogan, and the address of the site on the second
+  line.  A click on the address opens the site.
+  * The colours are those of the site (tools\make-installer-art.ps1 names
+    where they come from): the name --ink, the slogan --ink-2, the address
+    --accent, of the light or the dark theme as the wizard is.  Under a
+    style of Inno a colour set here is dropped unless seFont is taken out of
+    StyleElements (measured both ways, decision 167.20).
+  * The name and the address are not translated; the slogan is AuthorSlogan
+    of lang\<Language>.isl.  The font is the font of the wizard.
+  * The place follows the buttons, not numbers of its own: the margin at the
+    left is the margin the buttons keep at the right, the space after the
+    logo is the space between two buttons, and the block stands in the
+    middle of the height of the buttons.  In Hebrew and Arabic the wizard
+    mirrors it together with everything else.
+  * The address opens with ShellExecAsOriginalUser: Setup runs as an
+    administrator, and the site must open in the browser of the person who
+    started it, without those rights.  The installer itself never goes to
+    the network.  The address is a label, not a button: like on the mock-up,
+    the keyboard does not reach it.
+  * The logo is a PNG for the theme and the scale -- ScaleX(28) at the five
+    scales is 28, 37, 47, 56 and 60 -- the nearest one, stretched to the
+    exact size.
+  Not in the uninstaller: its windows carry the colour of the wizard alone.
+  tests\installer_languages.rs holds the address, the call and the event.
+  --------------------------------------------------------------------------- *)
+var
+  AuthorLogo: TBitmapImage;
+  AuthorName: TNewStaticText;
+  AuthorSlogan: TNewStaticText;
+  AuthorSite: TNewStaticText;
+
+procedure AuthorSiteClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  if not ShellExecAsOriginalUser('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    Log('Lang Switcher: the site of the author did not open, code ' + IntToStr(ErrorCode));
+end;
+
+function AuthorText(const Caption, Light, Dark: String): TNewStaticText;
+begin
+  Result := TNewStaticText.Create(WizardForm);
+  Result.Caption := Caption;
+  Result.Parent := WizardForm;
+  Result.StyleElements := Result.StyleElements - [seFont];
+  if IsDarkInstallMode then
+    Result.Font.Color := StrToColor(Dark)
+  else
+    Result.Font.Color := StrToColor(Light);
+end;
+
+<event('InitializeWizard')>
+procedure InitializeWizardAuthorSignature();
+var
+  Theme, Scale, LogoFile: String;
+  Size, Gap, Margin, Middle, TextHeight, TextLeft: Integer;
+begin
+  if IsDarkInstallMode then Theme := 'dark' else Theme := 'light';
+  Size := ScaleX(28);
+  if Size < 33 then Scale := '100'
+  else if Size < 42 then Scale := '125'
+  else if Size < 52 then Scale := '150'
+  else if Size < 58 then Scale := '175'
+  else Scale := '200';
+  LogoFile := 'logo-' + Theme + '-' + Scale + '.png';
+  ExtractTemporaryFile(LogoFile);
+
+  Margin := WizardForm.ClientWidth - (WizardForm.CancelButton.Left + WizardForm.CancelButton.Width);
+  Gap := WizardForm.CancelButton.Left - (WizardForm.NextButton.Left + WizardForm.NextButton.Width);
+  Middle := WizardForm.NextButton.Top + WizardForm.NextButton.Height div 2;
+
+  AuthorLogo := TBitmapImage.Create(WizardForm);
+  AuthorLogo.BackColor := clNone;
+  AuthorLogo.Stretch := True;
+  AuthorLogo.PngImage.LoadFromFile(ExpandConstant('{tmp}\') + LogoFile);
+  AuthorLogo.SetBounds(Margin, Middle - Size div 2, Size, Size);
+  AuthorLogo.Parent := WizardForm;
+
+  AuthorName := AuthorText('{#AppPublisher}', '#1C1B18', '#D6DAE0');
+  AuthorName.Font.Style := [fsBold];
+  AuthorSlogan := AuthorText(' ' + #$00B7 + ' ' + CustomMessage('AuthorSlogan'), '#5B5955', '#A2A8B3');
+  AuthorSite := AuthorText('panda-pishet-kod.dev', '#1F7A4A', '#6CC894');
+  AuthorSite.Cursor := crHand;
+  AuthorSite.OnClick := @AuthorSiteClick;
+
+  TextLeft := Margin + Size + Gap;
+  TextHeight := AuthorName.Height + AuthorSite.Height;
+  AuthorName.Left := TextLeft;
+  AuthorName.Top := Middle - TextHeight div 2;
+  AuthorSlogan.Left := AuthorName.Left + AuthorName.Width;
+  AuthorSlogan.Top := AuthorName.Top;
+  AuthorSite.Left := TextLeft;
+  AuthorSite.Top := AuthorName.Top + AuthorName.Height;
 end;
 
 <event('CurStepChanged')>

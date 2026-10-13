@@ -7,3 +7,4 @@ LocalCertReady=תוכנת ההתקנה תיצור אישור במחשב זה ו�
 LocalCertFailed=Lang Switcher הותקן, אך הוא לא יפעל בחלונות של תוכניות שהופעלו כמנהל: Windows לא קיבלה את האישור שנוצר במחשב זה. הפרטים ביומן ההתקנה.
 RemoveSettingsQuestion=להסיר גם את קובץ ההגדרות של Lang Switcher?
 RemoveSettingsKeep=בחרו «לא» כדי לשמור את ההגדרות להתקנה מחדש.
+AuthorSlogan=תוכנות שנעשו עם נשמה

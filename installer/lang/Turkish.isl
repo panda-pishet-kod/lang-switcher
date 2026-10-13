@@ -7,3 +7,4 @@ LocalCertReady=Kurulum yardımcısı bu bilgisayarda bir sertifika oluşturacak 
 LocalCertFailed=Lang Switcher kuruldu, ancak yönetici olarak çalıştırılan programların pencerelerinde çalışmayacak: Windows bu bilgisayarda oluşturulan sertifikayı kabul etmedi. Ayrıntılar kurulum günlüğündedir.
 RemoveSettingsQuestion=Lang Switcher ayar dosyası da kaldırılsın mı?
 RemoveSettingsKeep=Ayarlarınızı sonraki bir yeniden kurulum için saklamak üzere «Hayır» seçin.
+AuthorSlogan=sevgiyle yapılmış programlar

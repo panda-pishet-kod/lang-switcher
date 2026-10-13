@@ -7,3 +7,4 @@ LocalCertReady=سيُنشئ برنامج الإعداد شهادة على هذا
 LocalCertFailed=تم تثبيت Lang Switcher، لكنه لن يعمل في نوافذ البرامج التي تعمل كمسؤول: لم يقبل Windows الشهادة التي أُنشئت على هذا الكمبيوتر. التفاصيل في سجل الإعداد.
 RemoveSettingsQuestion=هل تريد إزالة ملف إعدادات Lang Switcher أيضًا؟
 RemoveSettingsKeep=اختر «لا» للاحتفاظ بإعداداتك لإعادة التثبيت لاحقًا.
+AuthorSlogan=برامج مصنوعة بحب

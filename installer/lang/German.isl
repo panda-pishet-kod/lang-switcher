@@ -7,3 +7,4 @@ LocalCertReady=Das Setup erstellt auf diesem Computer ein Zertifikat und signier
 LocalCertFailed=Lang Switcher wurde installiert, funktioniert aber nicht in Fenstern von Programmen, die als Administrator ausgeführt werden: Windows hat das auf diesem Computer erstellte Zertifikat nicht angenommen. Einzelheiten stehen im Setup-Protokoll.
 RemoveSettingsQuestion=Auch die Einstellungsdatei von Lang Switcher entfernen?
 RemoveSettingsKeep=Wählen Sie «Nein», um Ihre Einstellungen für eine spätere Neuinstallation zu behalten.
+AuthorSlogan=Programme, mit Herz gemacht

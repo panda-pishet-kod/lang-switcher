@@ -458,3 +458,197 @@ fn the_field_of_the_ready_page_wraps_the_sentence_about_the_certificate() {
         "the control: the statement in an event of the wizard must be found"
     );
 }
+
+/// The address the signature of the author opens — task T-99-3, decision 167.1.
+const AUTHOR_SITE: &str = "https://panda-pishet-kod.dev/";
+
+/// The scales of the pictures, in the order of the table of the Inno help — `tests\installer_art.rs`
+/// holds the files to their sizes.
+const ART_SCALES: [&str; 5] = ["100", "125", "150", "175", "200"];
+
+/// How many times the code opens [`AUTHOR_SITE`] — every one of them as
+/// `ShellExecAsOriginalUser('open', '<address>', …`, the browser of the person and not the rights of
+/// Setup — or why not. `code` is tokenised by [`pascal_tokens`]: an address in a comment is not
+/// there.
+fn site_opens_as_the_user(code: &[String]) -> Result<usize, String> {
+    let address = format!("'{AUTHOR_SITE}'");
+    let call = ["shellexecasoriginaluser", "(", "'open'", ","];
+    let mut found = 0;
+    for (at, token) in code.iter().enumerate() {
+        if *token != address {
+            continue;
+        }
+        if at < call.len() || code[at - call.len()..at] != call {
+            return Err(format!(
+                "{address} is opened otherwise: «{}»",
+                code[at.saturating_sub(call.len())..at].join(" ")
+            ));
+        }
+        found += 1;
+    }
+    if found == 0 {
+        return Err(format!("{address} is not in the code"));
+    }
+    Ok(found)
+}
+
+/// **The wizard wears the look of the site the owner chose, and its signature opens the site as the
+/// person — task T-99-3, decision 167.1 (variant B with the signature B1 of question 167).**
+///
+/// `[Setup]`: `WizardStyle` is exactly `modern dynamic windows11 excludelightcontrols hidebevels`;
+/// the background is `#FAF9F6` and in the dark theme `#23272F`; the four pictures of Inno's own are
+/// empty — the two `…DynamicDark` as well, or the dark theme puts Inno's picture back (decision
+/// 167.20); the background pictures are the bamboo of `installer\art` for the five scales, light and
+/// dark, in order, and every one of them is on disk. `[Files]`: the ten logos, each on disk.
+/// `[Code]`, without comments: the address of the site is opened only by
+/// `ShellExecAsOriginalUser('open', …)` and never by `ShellExec`; the slogan is set with the wizard
+/// (`InitializeWizard`), and the line without «Back» over the field of the Ready page when the page
+/// is shown (`CurPageChanged`).
+///
+/// ⚠ Отрицательные контроли below: the address in a comment is not found, and opened by `ShellExec`
+/// it is refused.
+#[test]
+fn the_wizard_wears_the_look_of_the_site_and_its_signature_opens_the_site_as_the_person() {
+    let script = fs::read_to_string(installer().join("LangSwitcher.iss"))
+        .expect("installer\\LangSwitcher.iss must be readable");
+    let mut problems = Vec::new();
+
+    let setup = section(&script, "Setup");
+    let directive = |key: &str| -> Option<String> {
+        let found: Vec<&str> = setup
+            .iter()
+            .filter_map(|line| line.split_once('='))
+            .filter(|(name, _)| name.trim().eq_ignore_ascii_case(key))
+            .map(|(_, value)| value.trim())
+            .collect();
+        match found.as_slice() {
+            [one] => Some((*one).to_owned()),
+            _ => None,
+        }
+    };
+    let check = |key: &str, want: &str| match directive(key) {
+        Some(value) if value.eq_ignore_ascii_case(want) => None,
+        Some(value) => Some(format!("{key}={value} — wanted «{want}»")),
+        None => Some(format!("{key} is not in [Setup] exactly once")),
+    };
+
+    let style: Vec<String> = directive("WizardStyle")
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect();
+    let mut sorted = style.clone();
+    sorted.sort();
+    let mut wanted = [
+        "dynamic",
+        "excludelightcontrols",
+        "hidebevels",
+        "modern",
+        "windows11",
+    ];
+    wanted.sort_unstable();
+    if sorted != wanted {
+        problems.extend(check(
+            "WizardStyle",
+            "modern dynamic windows11 excludelightcontrols hidebevels",
+        ));
+    }
+    problems.extend(check("WizardBackColor", "#FAF9F6"));
+    problems.extend(check("WizardBackColorDynamicDark", "#23272F"));
+    for empty in [
+        "WizardImageFile",
+        "WizardImageFileDynamicDark",
+        "WizardSmallImageFile",
+        "WizardSmallImageFileDynamicDark",
+    ] {
+        problems.extend(check(empty, ""));
+    }
+    for (key, theme) in [
+        ("WizardBackImageFile", "light"),
+        ("WizardBackImageFileDynamicDark", "dark"),
+    ] {
+        let list: Vec<String> = ART_SCALES
+            .iter()
+            .map(|scale| format!("art\\back-{theme}-{scale}.png"))
+            .collect();
+        problems.extend(check(key, &list.join(",")));
+        for picture in &list {
+            if !installer().join(picture).is_file() {
+                problems.push(format!("{key}: installer\\{picture} does not exist"));
+            }
+        }
+    }
+
+    let files = section(&script, "Files");
+    for theme in ["light", "dark"] {
+        for scale in ART_SCALES {
+            let logo = format!("art\\logo-{theme}-{scale}.png");
+            let entry = format!("Source: \"{logo}\"; Flags: dontcopy");
+            if !files.contains(&entry.as_str()) {
+                problems.push(format!("[Files] has no «{entry}»"));
+            }
+            if !installer().join(&logo).is_file() {
+                problems.push(format!("[Files]: installer\\{logo} does not exist"));
+            }
+        }
+    }
+
+    let code = pascal_tokens(&section(&script, "Code").join("\n"));
+    assert!(
+        code.windows(2)
+            .any(|pair| pair[0] == "function" && pair[1] == "updatereadymemo"),
+        "the [Code] of the script was not found: no UpdateReadyMemo in {} tokens",
+        code.len()
+    );
+    if let Err(why) = site_opens_as_the_user(&code) {
+        problems.push(why);
+    }
+    // The signature is made once, with the wizard. The line over the field is set when the page
+    // is shown: Inno sets its own line again then, and one set with the wizard came back with
+    // «Back» on the live window (decision 167.21).
+    for (statement, wanted) in [
+        ("CustomMessage('AuthorSlogan')", "initializewizard"),
+        (
+            "WizardForm.ReadyLabel.Caption := SetupMessage(msgReadyLabel2b);",
+            "curpagechanged",
+        ),
+    ] {
+        match wizard_event_holding(&code, statement) {
+            Ok(event) if event == wanted => {}
+            Ok(event) => problems.push(format!("«{statement}» stands in {event}, not {wanted}")),
+            Err(why) => problems.push(why),
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "{} problem(s) with the look of the wizard:\n  {}",
+        problems.len(),
+        problems.join("\n  ")
+    );
+
+    // ⚠ Отрицательные контроли: the instrument must be able to say «no».
+    let commented = pascal_tokens(concat!(
+        "{ ShellExecAsOriginalUser('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, E); }\n",
+        "// ShellExecAsOriginalUser('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, E);\n",
+    ));
+    assert!(
+        site_opens_as_the_user(&commented).is_err(),
+        "an address in a comment must not count"
+    );
+    let elevated = pascal_tokens(concat!(
+        "ShellExecAsOriginalUser('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, E);\n",
+        "ShellExec('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, E);\n",
+    ));
+    assert!(
+        site_opens_as_the_user(&elevated).is_err(),
+        "the address opened by ShellExec, with the rights of Setup, must be refused"
+    );
+    assert_eq!(
+        site_opens_as_the_user(&pascal_tokens(
+            "ShellExecAsOriginalUser('open', 'https://panda-pishet-kod.dev/', '', '', SW_SHOWNORMAL, ewNoWait, E);"
+        )),
+        Ok(1),
+        "the control: the address opened as the person must be found"
+    );
+}
