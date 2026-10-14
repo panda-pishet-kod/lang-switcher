@@ -122,11 +122,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetMessageTime,
     GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND,
     IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LBN_SETFOCUS, LR_DEFAULTCOLOR,
-    LR_DEFAULTSIZE, LoadCursorW, LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW,
-    RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION,
-    SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXVSCROLL,
-    SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
+    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCURSEL, LBN_SETFOCUS,
+    LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW,
+    PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP,
+    SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE,
+    SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
     SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
     ScrollWindowEx, SendDlgItemMessageW, SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW,
     SetWindowPos, SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
@@ -3328,6 +3328,28 @@ pub const IDS_CAPTURE_SHIFT_AGAIN: u16 = 3232;
 /// подряд. Обычный набор с Shift не затронут.» (task T-95-2, the moment 5 of the mock-up of
 /// 157.18), as [`IDS_CAPTURE_COMBO_NOTE`] after a combination.
 pub const IDS_CAPTURE_DOUBLE_NOTE: u16 = 3233;
+
+// The eight strings of the two ways of the panel «Исключения» — task T-100-3, вопрос 172 (the
+// mock-up of 172.4, variant В). 3234…3241 continue the block of sixteen 3232…3247 that the double
+// press of Shift opened; they were the first free numbers when the task wrote them.
+/// «Автоматически» — the word over the way that takes the program out of its window.
+pub const IDS_EXCLUSION_AUTO: u16 = 3234;
+/// «Вручную» — the word over the way that has always been there: the field and «Добавить».
+pub const IDS_EXCLUSION_MANUAL: u16 = 3235;
+/// «Выбрать окно программы» — the button of the automatic way, as it stands at rest.
+pub const IDS_EXCLUSION_PICK: u16 = 3236;
+/// «Нажмите и за 5 секунд переключитесь в программу» — the line under the button at rest. The «5»
+/// is `guard::CAPTURE_SECONDS`, and a test holds the sentence and the number together.
+pub const IDS_EXCLUSION_PICK_NOTE: u16 = 3237;
+/// «Переключитесь в нужную программу… {0}» — the button while it counts, `{0}` the seconds left.
+pub const IDS_EXCLUSION_PICK_COUNT: u16 = 3238;
+/// «Добавлено: {0}» — the line under the button after the program went into the list.
+pub const IDS_EXCLUSION_ADDED: u16 = 3239;
+/// «Уже в списке: {0}» — the same line when the list held it already; its row is selected.
+pub const IDS_EXCLUSION_ALREADY: u16 = 3240;
+/// «Окно не выбрано» — the same line when there was nothing to take: no window in front, a window
+/// of this program, or a name that cannot be an exclusion.
+pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3541,7 +3563,10 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and twenty since task T-95-2** — вопрос 159, 157.18: the double press of `Shift`
 /// brought [`IDS_CAPTURE_SHIFT_AGAIN`] and [`IDS_CAPTURE_DOUBLE_NOTE`], the first two numbers of a
 /// new block (3232…3247).
-pub const INTERFACE_STRINGS: [u16; 220] = [
+///
+/// ⚠ **Two hundred and twenty-eight since task T-100-3** — вопрос 172: the two ways of «Исключения»
+/// brought eight, [`IDS_EXCLUSION_AUTO`] … [`IDS_EXCLUSION_NOT_PICKED`] (3234…3241).
+pub const INTERFACE_STRINGS: [u16; 228] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3769,6 +3794,15 @@ pub const INTERFACE_STRINGS: [u16; 220] = [
     // one after the double press is captured.
     IDS_CAPTURE_SHIFT_AGAIN,
     IDS_CAPTURE_DOUBLE_NOTE,
+    // Task T-100-3, вопрос 172 — the two ways of «Исключения».
+    IDS_EXCLUSION_AUTO,
+    IDS_EXCLUSION_MANUAL,
+    IDS_EXCLUSION_PICK,
+    IDS_EXCLUSION_PICK_NOTE,
+    IDS_EXCLUSION_PICK_COUNT,
+    IDS_EXCLUSION_ADDED,
+    IDS_EXCLUSION_ALREADY,
+    IDS_EXCLUSION_NOT_PICKED,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -5569,6 +5603,10 @@ const IDC_EXCLUSIONS: i32 = 1050;
 const IDC_EXCLUSION_NAME: i32 = 1051;
 const IDC_EXCLUSION_ADD: i32 = 1052;
 const IDC_EXCLUSION_REMOVE: i32 = 1053;
+/// «Выбрать окно программы» — the button of the automatic way of «Исключения», task T-100-3.
+const IDC_EXCLUSION_PICK: i32 = 1054;
+/// The line under it: the explanation at rest and the answer of the capture — task T-100-3.
+const IDC_EXCLUSION_PICK_NOTE: i32 = 1055;
 const IDC_LOG_ENABLED: i32 = 1060;
 const IDC_LOG_OPEN: i32 = 1061;
 const IDC_LOG_DIR: i32 = 1062;
@@ -5605,6 +5643,9 @@ const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
 const IDC_LOG_DIR_LABEL: i32 = 1107;
 const IDC_GROUP_STATE: i32 = 1108;
 const IDC_THEME_LABEL: i32 = 1109;
+/// «Автоматически» and «Вручную» — the two words over the two ways of «Исключения», task T-100-3.
+const IDC_EXCLUSION_AUTO_LABEL: i32 = 1110;
+const IDC_EXCLUSION_MANUAL_LABEL: i32 = 1111;
 
 // The controls of the about dialog `IDD_ABOUT` — FR-92а, task T-11-11. A block of their own
 // from 1120, contiguous and clear of everything above; its «ОК» is `IDOK` and is not here.
@@ -5747,6 +5788,14 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     (IDC_CYCLE_DOWN, IDS_CYCLE_DOWN),
     (IDC_GROUP_EXCLUSIONS, IDS_GROUP_EXCLUSIONS),
     (IDC_EXCLUSION_REMOVE, IDS_EXCLUSION_REMOVE),
+    // Task T-100-3, вопрос 172: the two words, the button of the automatic way as it stands at
+    // rest, and the line under it at rest. The count and the answers of the capture are written by
+    // the count itself (`show_pick_caption`, `apply_exclusion_pick`); a change of the language puts
+    // the panel back at rest, which is the one state a relabelled window can promise.
+    (IDC_EXCLUSION_AUTO_LABEL, IDS_EXCLUSION_AUTO),
+    (IDC_EXCLUSION_PICK, IDS_EXCLUSION_PICK),
+    (IDC_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_PICK_NOTE),
+    (IDC_EXCLUSION_MANUAL_LABEL, IDS_EXCLUSION_MANUAL),
     (IDC_EXCLUSION_ADD, IDS_EXCLUSION_ADD),
     (IDC_EXCLUSION_HINT, IDS_EXCLUSION_HINT),
     (IDC_GROUP_DIAGNOSTICS, IDS_GROUP_DIAGNOSTICS),
@@ -6212,6 +6261,8 @@ pub fn show_dialog(
             opening,
             // …and the answer that travels back out, written only by `reopen_in_place`.
             reopen_at: None,
+            // Task T-100-3: nothing counts until «Выбрать окно программы» is pressed.
+            exclusion_pick: None,
         }),
     };
 
@@ -6795,6 +6846,11 @@ struct DialogState<'a> {
     /// (NFR-13) — the new window then goes where `DS_CENTER` puts it, which is a worse place
     /// but not a lost window.
     reopen_at: Option<RECT>,
+    /// The seconds left of «Выбрать окно программы» while it counts — task T-100-3. `Some` is the
+    /// whole of «counting»: [`toggle_exclusion_pick`] sets it with the timer, the tick counts it
+    /// down, and the second press, the ceiling, the capture and the end of the window take it
+    /// away. A tick that finds `None` is a tick of nobody's count and does nothing (SEC-05).
+    exclusion_pick: Option<u32>,
 }
 
 /// The dialog procedure of FR-92.
@@ -7059,6 +7115,12 @@ unsafe extern "system" fn dialog_proc(
                 // SAFETY: called from this dialog's own procedure with its own `hwnd`, which is
                 // the contract of the callee.
                 unsafe { run_capture_step(hwnd, CaptureEvent::PairTimeout) };
+            } else if wparam.0 == EXCLUSION_PICK_TIMER {
+                // Task T-100-3: one second of «Выбрать окно программы». A forged tick buys its
+                // sender one second off a count that is running, and nothing at all when none is
+                // (`exclusion_pick_tick` asks the state first) — the capture it can bring forward
+                // is the one the person asked for.
+                exclusion_pick_tick(hwnd);
             }
 
             0
@@ -7088,6 +7150,13 @@ unsafe extern "system" fn dialog_proc(
             unsubclass_lists(hwnd);
             // Task T-12-8: and the third pair, the nine push buttons, on the very same terms.
             unsubclass_buttons(hwnd, &PUSH_BUTTONS);
+
+            // Task T-100-3: «закрытие окна гасит таймер» — a count of «Выбрать окно программы»
+            // does not outlive its window. The window's timers would go with it anyway; this says
+            // so where a reader looks, and a refusal (no count running) is the ordinary case.
+            //
+            // SAFETY: `hwnd` is the dialog being destroyed; the call touches no memory of ours.
+            let _ = unsafe { KillTimer(Some(hwnd), EXCLUSION_PICK_TIMER) };
 
             // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
             0
@@ -7247,9 +7316,14 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
         IDC_HOTKEY => StaticColorRole::Field,
         // Five since task Т-31-3 — `IDC_LANGUAGE_RESTART` was the sixth and решение 99.4
         // retired it with its sentence.
-        IDC_HOTKEY_NOTE | IDC_CYCLE_HINT | IDC_EXCLUSION_HINT | IDC_LAYOUT_NOTE | IDC_LOG_DIR => {
-            StaticColorRole::Muted
-        }
+        // Task T-100-3 — the line under «Выбрать окно программы» is a note like the hint under the
+        // field below it.
+        IDC_HOTKEY_NOTE
+        | IDC_CYCLE_HINT
+        | IDC_EXCLUSION_HINT
+        | IDC_EXCLUSION_PICK_NOTE
+        | IDC_LAYOUT_NOTE
+        | IDC_LOG_DIR => StaticColorRole::Muted,
         _ => StaticColorRole::Label,
     }
 }
@@ -7267,7 +7341,9 @@ pub fn static_color_role(control: i32) -> StaticColorRole {
 ///
 /// ⚠ This is a list of *controls*, not of colours: the colour role of every one of them comes
 /// from [`static_color_role`], which task T-11-4 wrote and this task reuses unchanged.
-pub const OWNER_DRAWN_LABELS: [i32; 15] = [
+///
+/// Eighteen since task T-100-3: «Автоматически», the line under its button and «Вручную».
+pub const OWNER_DRAWN_LABELS: [i32; 18] = [
     IDC_LANGUAGE_LABEL,
     IDC_THEME_LABEL,
     IDC_HOTKEY_LABEL,
@@ -7276,6 +7352,9 @@ pub const OWNER_DRAWN_LABELS: [i32; 15] = [
     IDC_PAIR_TARGET_LABEL,
     IDC_CYCLE_HINT,
     IDC_LAYOUT_NOTE,
+    IDC_EXCLUSION_AUTO_LABEL,
+    IDC_EXCLUSION_PICK_NOTE,
+    IDC_EXCLUSION_MANUAL_LABEL,
     IDC_EXCLUSION_HINT,
     IDC_LOG_DIR_LABEL,
     IDC_LOG_DIR,
@@ -12639,11 +12718,16 @@ fn invalidate_hot(window: HWND) {
 /// ground — and a panel is the *background* of its block since task T-11-13 and takes no
 /// clicks at all. Subclassing either would arm a notification for a repaint that changes
 /// nothing.
-const PUSH_BUTTONS: [i32; 11] = [
+///
+/// Twelve since task T-100-3: «Выбрать окно программы» is a push button of this list like every
+/// other, and wearing the one table of [`button_color_roles`] (Э80) is what that buys it — the
+/// subclass, the hot face, the drawing and the removal, by this one line.
+const PUSH_BUTTONS: [i32; 12] = [
     IDC_HOTKEY_CAPTURE,
     IDC_CYCLE_UP,
     IDC_CYCLE_DOWN,
     IDC_EXCLUSION_REMOVE,
+    IDC_EXCLUSION_PICK,
     IDC_EXCLUSION_ADD,
     IDC_LOG_OPEN,
     IDC_LOG_SAVE,
@@ -13946,6 +14030,9 @@ unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
 
         IDC_EXCLUSION_ADD => add_exclusion(hwnd),
         IDC_EXCLUSION_REMOVE => remove_exclusion(hwnd),
+        // Task T-100-3, вопрос 172: the automatic way — a press starts the five seconds, a press
+        // while they run cancels them.
+        IDC_EXCLUSION_PICK => toggle_exclusion_pick(hwnd),
 
         // SAFETY: see the caller.
         IDC_CYCLE_UP => unsafe { move_cycle_row(hwnd, -1) },
@@ -14252,12 +14339,263 @@ pub fn exclusions_are_full(count: usize) -> bool {
 ///
 /// ⚠ Both controls together, and that is the substance: a lit field over a dark button invites
 /// typing that leads nowhere.
-fn show_exclusion_ceiling(hwnd: HWND) {
+///
+/// ⭐ **Three since task T-100-3: «Выбрать окно программы» goes dark with them** — a lit button
+/// over a full list would count five seconds towards a name the list cannot take. And a count
+/// that is running when the list fills up (a name typed by hand meanwhile) is stopped here, with
+/// the button's own caption put back: the button is dark, and a dark button does not count.
+///
+/// Public for `tests\settings.rs`, which stands a panel of its own in for the dialog.
+pub fn show_exclusion_ceiling(hwnd: HWND) {
     let full = exclusions_are_full(list_items(hwnd, IDC_EXCLUSIONS).len());
 
-    for control in [IDC_EXCLUSION_NAME, IDC_EXCLUSION_ADD] {
+    for control in [IDC_EXCLUSION_NAME, IDC_EXCLUSION_ADD, IDC_EXCLUSION_PICK] {
         enable(hwnd, control, !full);
     }
+
+    if full && stop_exclusion_pick(hwnd) {
+        show_pick_caption(hwnd, None);
+    }
+}
+
+/// The identifier of the timer that counts the five seconds of «Выбрать окно программы» — task
+/// T-100-3.
+///
+/// The third timer of the settings window: [`JOURNAL_SAVED_TIMER`] is 1 and [`CAPTURE_PAIR_TIMER`]
+/// is 2, so 3 collides with nothing. Set on the dialog, so that the `WM_TIMER` arrives at
+/// [`dialog_proc`], which owns the button, the list and the line under the button. The modal loop
+/// of the window serves it while the person is in another program — посылка П3, measured
+/// (`scratchpad-E100\p3-modal-timer.log`: ten ticks of ten with the window never in front).
+pub const EXCLUSION_PICK_TIMER: usize = 3;
+
+/// What «Выбрать окно программы» does with what it found in front — task T-100-3, вопрос 172.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExclusionPick {
+    /// Nothing to add — no window in front, a window of this program, or a Store frame whose
+    /// program could not be told (решение 172.20). «Окно не выбрано».
+    NotPicked,
+    /// The name goes into the list and its row is selected — «Добавлено: …».
+    Added(String),
+    /// The list holds it already: this row, under its own spelling, is selected —
+    /// «Уже в списке: …».
+    AlreadyListed(usize, String),
+    /// The name cannot be an exclusion — longer than the field takes, or folding to nothing. The
+    /// third tone of FR-100 and «Окно не выбрано».
+    Refused,
+}
+
+/// **The rule of «Выбрать окно программы», as a pure function** — task T-100-3, вопрос 172.
+///
+/// `captured` is the executable name the one body of the capture found in front
+/// (`guard::capture_foreground(guard::Asker::Process)`, task T-100-2), `None` for no window or a
+/// window of this program. The answer:
+///
+/// * nothing found, or a blank name — [`ExclusionPick::NotPicked`];
+/// * **the host of the Store frames** — [`ExclusionPick::NotPicked`] as well. The capture names the
+///   program inside a frame (решение 172.20); the host's own name comes back only when that program
+///   could not be told, and taking it would exclude every Store program at once — the very thing
+///   the owner chose to avoid;
+/// * a name longer than [`EXCLUSION_NAME_CHARS`] — [`ExclusionPick::Refused`]. The field would not
+///   take it either (task Т-22-8), and `guard::publish_exclusions` would drop a longer one on «ОК»
+///   without a word;
+/// * otherwise **the very verdict of the manual way**, [`exclusion_verdict`]: `Add` puts it in,
+///   `Duplicate` points at the row that holds it — found by the same fold — and `Refuse` refuses.
+///
+/// The ceiling is not an arm: the button is dark at it ([`show_exclusion_ceiling`]), and a count
+/// running when the list fills up is stopped there.
+///
+/// Pure, and public so the test calls the very function the window calls.
+pub fn exclusion_pick(captured: Option<&str>, existing: &[String]) -> ExclusionPick {
+    let Some(name) = captured.map(str::trim).filter(|name| !name.is_empty()) else {
+        return ExclusionPick::NotPicked;
+    };
+
+    if crate::guard::is_frame_host(name) {
+        return ExclusionPick::NotPicked;
+    }
+
+    if name.encode_utf16().count() > EXCLUSION_NAME_CHARS {
+        return ExclusionPick::Refused;
+    }
+
+    match exclusion_verdict(name, existing) {
+        ExclusionVerdict::Add => ExclusionPick::Added(name.to_owned()),
+        ExclusionVerdict::Duplicate => {
+            let folded = crate::guard::fold_process_name(name);
+
+            existing
+                .iter()
+                .position(|item| crate::guard::fold_process_name(item) == folded)
+                .map_or(ExclusionPick::NotPicked, |row| {
+                    ExclusionPick::AlreadyListed(row, existing[row].clone())
+                })
+        }
+        ExclusionVerdict::Refuse => ExclusionPick::Refused,
+    }
+}
+
+/// **Puts the answer of [`exclusion_pick`] where it is seen** — task T-100-3.
+///
+/// `Added` — the name becomes the last row of the list and that row is selected; `AlreadyListed` —
+/// its row is selected and nothing is added; both say so under the button. `NotPicked` and
+/// `Refused` touch the list not at all and say «Окно не выбрано». The ceiling is asked again after
+/// an addition, exactly as [`add_exclusion`] asks it.
+///
+/// The window is **not** brought forward (§0 п. 3 of TZ-E100): the person comes back to it
+/// themselves. Nothing applies before «ОК» or «Применить» — the list is the working copy the
+/// whole window edits, and «Отмена» drops it with everything else.
+///
+/// The refusal's sound is not made here but by [`exclusion_pick_tick`], beside the capture: this
+/// half is what a test drives on a panel of its own, silently.
+///
+/// Public for `tests\settings.rs`.
+pub fn apply_exclusion_pick(hwnd: HWND, pick: &ExclusionPick) {
+    let note = match pick {
+        ExclusionPick::Added(name) => {
+            list_add(hwnd, IDC_EXCLUSIONS, name);
+
+            let last = send_to(hwnd, IDC_EXCLUSIONS, LB_GETCOUNT, 0, 0) - 1;
+            send_to(
+                hwnd,
+                IDC_EXCLUSIONS,
+                LB_SETCURSEL,
+                usize::try_from(last).unwrap_or(0),
+                0,
+            );
+
+            format_text(IDS_EXCLUSION_ADDED, &[name.as_str()])
+        }
+        ExclusionPick::AlreadyListed(row, name) => {
+            send_to(hwnd, IDC_EXCLUSIONS, LB_SETCURSEL, *row, 0);
+
+            format_text(IDS_EXCLUSION_ALREADY, &[name.as_str()])
+        }
+        ExclusionPick::NotPicked | ExclusionPick::Refused => text(IDS_EXCLUSION_NOT_PICKED),
+    };
+
+    set_text(hwnd, IDC_EXCLUSION_PICK_NOTE, &note);
+    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK_NOTE);
+
+    if matches!(pick, ExclusionPick::Added(_)) {
+        show_exclusion_ceiling(hwnd);
+    }
+}
+
+/// «Выбрать окно программы» — a press that starts the five seconds, or a press while they run that
+/// cancels them and gives the button its own caption back (§0 п. 3 of TZ-E100).
+///
+/// The count is on the button itself — «Переключитесь в нужную программу… 5» — and the line under
+/// it says what the button does; a cancelled count puts both back at rest.
+fn toggle_exclusion_pick(hwnd: HWND) {
+    if stop_exclusion_pick(hwnd) {
+        show_pick_caption(hwnd, None);
+        show_pick_rest_note(hwnd);
+        return;
+    }
+
+    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is alive for the
+    // whole of this modal call.
+    unsafe {
+        with_state(hwnd, |state| {
+            state.exclusion_pick = Some(crate::guard::CAPTURE_SECONDS);
+        })
+    };
+
+    // SAFETY: `hwnd` is the live dialog; no timer procedure is given, so the ticks arrive as
+    // `WM_TIMER` at the dialog's own procedure, and the call keeps no pointer.
+    if unsafe { SetTimer(Some(hwnd), EXCLUSION_PICK_TIMER, 1000, None) } == 0 {
+        // NFR-13: without the timer the count would stand on the button for good — so the button
+        // is given back at once, and the refusal is journaled.
+        crate::app::report_non_critical("SetTimer", &WinError::from_thread());
+        stop_exclusion_pick(hwnd);
+        show_pick_caption(hwnd, None);
+        return;
+    }
+
+    show_pick_caption(hwnd, Some(crate::guard::CAPTURE_SECONDS));
+    show_pick_rest_note(hwnd);
+}
+
+/// Stops a count of «Выбрать окно программы» — the timer and the state — and answers whether one
+/// was running.
+fn stop_exclusion_pick(hwnd: HWND) -> bool {
+    // SAFETY: as in [`toggle_exclusion_pick`].
+    let was = unsafe { with_state(hwnd, |state| state.exclusion_pick.take()) }
+        .flatten()
+        .is_some();
+
+    // SAFETY: `hwnd` is the live dialog; killing a timer that is not set is a harmless refusal.
+    let _ = unsafe { KillTimer(Some(hwnd), EXCLUSION_PICK_TIMER) };
+
+    was
+}
+
+/// One second of «Выбрать окно программы» — and at the end of the five, the capture.
+///
+/// The capture is the one body of task T-100-2, asked as the exclusions ask it: every window of
+/// this program is no answer, a Store frame is answered by the program inside it (решение 172.20),
+/// and no title is read. The rule of [`exclusion_pick`] decides, the refusal is heard (the third
+/// tone of FR-100, as the manual way's), and [`apply_exclusion_pick`] shows the answer. The window
+/// stays where it is — no `SetForegroundWindow`: the person is in the program they chose and comes
+/// back when they like.
+fn exclusion_pick_tick(hwnd: HWND) {
+    // SAFETY: as in [`toggle_exclusion_pick`].
+    let left = unsafe {
+        with_state(hwnd, |state| {
+            let left = state.exclusion_pick?.saturating_sub(1);
+            state.exclusion_pick = Some(left);
+            Some(left)
+        })
+    }
+    .flatten();
+
+    // A tick of nobody's count — the count was stopped, or the message is forged (SEC-05).
+    let Some(left) = left else {
+        return;
+    };
+
+    if left > 0 {
+        show_pick_caption(hwnd, Some(left));
+        return;
+    }
+
+    stop_exclusion_pick(hwnd);
+    show_pick_caption(hwnd, None);
+
+    let captured = crate::guard::capture_foreground(crate::guard::Asker::Process)
+        .and_then(|found| found.process);
+    let pick = exclusion_pick(captured.as_deref(), &list_items(hwnd, IDC_EXCLUSIONS));
+
+    if pick == ExclusionPick::Refused {
+        crate::app::sound_refusal();
+    }
+
+    apply_exclusion_pick(hwnd, &pick);
+}
+
+/// The caption of «Выбрать окно программы» — the count while there is one, its own words otherwise.
+///
+/// The caption is read back by the drawing from the control itself (see [`paint_push_button`]), so
+/// writing it and repainting the one button is the whole of a step of the count — the way
+/// «Журнал сохранён» takes its two seconds on its own button.
+fn show_pick_caption(hwnd: HWND, left: Option<u32>) {
+    let caption = match left {
+        Some(seconds) => format_text(IDS_EXCLUSION_PICK_COUNT, &[seconds.to_string().as_str()]),
+        None => text(IDS_EXCLUSION_PICK),
+    };
+
+    set_text(hwnd, IDC_EXCLUSION_PICK, &caption);
+    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK);
+}
+
+/// The line under «Выбрать окно программы» at rest — what the button does.
+fn show_pick_rest_note(hwnd: HWND) {
+    set_text(
+        hwnd,
+        IDC_EXCLUSION_PICK_NOTE,
+        &text(IDS_EXCLUSION_PICK_NOTE),
+    );
+    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK_NOTE);
 }
 
 /// Removes the selected name from the exclusion list.

@@ -3085,6 +3085,9 @@ fn the_static_colour_roles_follow_the_table_of_fr_92a() {
         (1105, "IDC_EXCLUSION_HINT"),
         (1027, "IDC_LAYOUT_NOTE"),
         (1062, "IDC_LOG_DIR"),
+        // Task T-100-3 — the line under «Выбрать окно программы»: the explanation at rest and
+        // the answer of the capture, quiet ink like the hint under the field.
+        (1055, "IDC_EXCLUSION_PICK_NOTE"),
     ] {
         assert_eq!(
             settings::static_color_role(control),
@@ -3117,6 +3120,9 @@ fn the_static_colour_roles_follow_the_table_of_fr_92a() {
         (1072, "IDC_STATE_AUTOSTART"),
         (1073, "IDC_STATE_PAIR"),
         (1001, "IDC_AUTOSTART"),
+        // Task T-100-3 — the two words over the two ways of «Исключения».
+        (1110, "IDC_EXCLUSION_AUTO_LABEL"),
+        (1111, "IDC_EXCLUSION_MANUAL_LABEL"),
     ] {
         assert_eq!(
             settings::static_color_role(control),
@@ -3182,6 +3188,9 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
         (1025, "Выше"),
         (1026, "Ниже"),
         (1053, "Удалить"),
+        // Task T-100-3 — the button of the automatic way is an ordinary button of the one table
+        // (Э80): no frame of its own, no colour of its own.
+        (1054, "Выбрать окно программы"),
         (1052, "Добавить"),
         (1061, "Открыть папку журнала"),
         (2, "Отмена"),
@@ -4824,7 +4833,7 @@ const FR_92_SECTIONS: [&str; 6] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 30] = [
+const TEMPLATE_TEXT: [&str; 34] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -4854,6 +4863,12 @@ const TEMPLATE_TEXT: [&str; 30] = [
     "Ниже",
     "Исключения",
     "Удалить",
+    // Task T-100-3, вопрос 172 (вариант В): two ways under the list, each under its own word —
+    // «Автоматически» with its button and the line under it, then «Вручную» over the field.
+    "Автоматически",
+    "Выбрать окно программы",
+    "Нажмите и за 5 секунд переключитесь в программу",
+    "Вручную",
     "Добавить",
     "Имя процесса, например game.exe",
     "Диагностика",
@@ -4886,7 +4901,7 @@ const TEMPLATE_TEXT: [&str; 30] = [
 ///
 /// ⚠ **Thirty-seven since task Т-31-3**: 1092, «вступит в силу после перезапуска», left with
 /// its sentence (решение 99.4). Its number is retired, not freed, exactly as the eleven above.
-const TEMPLATE_CONTROLS: [(u32, &str); 39] = [
+const TEMPLATE_CONTROLS: [(u32, &str); 43] = [
     (1001, "Общие: автозапуск"),
     (1002, "Общие: язык интерфейса"),
     (1003, "Общие: оформление — FR-92а"),
@@ -4907,6 +4922,9 @@ const TEMPLATE_CONTROLS: [(u32, &str); 39] = [
     (1051, "Исключения: имя процесса"),
     (1052, "Исключения: добавить"),
     (1053, "Исключения: удалить"),
+    // Task T-100-3, вопрос 172: the automatic way — the button and the line under it.
+    (1054, "Исключения: выбрать окно программы — T-100-3"),
+    (1055, "Исключения: пояснение и ответ захвата — T-100-3"),
     (1060, "Диагностика: вести журнал"),
     (1061, "Диагностика: открыть папку журнала"),
     (1062, "Диагностика: путь папки журнала"),
@@ -4934,6 +4952,9 @@ const TEMPLATE_CONTROLS: [(u32, &str); 39] = [
         1073,
         "Состояние: действующая пара и отказы выбора — task T-34-6",
     ),
+    // Task T-100-3, вопрос 172: the two words over the two ways.
+    (1110, "Исключения: подпись «Автоматически» — T-100-3"),
+    (1111, "Исключения: подпись «Вручную» — T-100-3"),
 ];
 
 // -----------------------------------------------------------------------------------------
@@ -5444,7 +5465,7 @@ fn the_six_group_boxes_are_owner_drawn_and_take_no_tab_stop() {
 // `SS_ICON` is the type that loads the 32 px frame of the `.ico`, and it draws no text.
 
 /// Every `LTEXT` of the settings template, by identifier and by what it says on the window.
-const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
+const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
     (1091, "Общие: подпись «Язык интерфейса»"),
     (1109, "Общие: подпись «Оформление»"),
     // 1092 — «вступит в силу после перезапуска» — снят задачей Т-31-3, решение 99.4.
@@ -5454,6 +5475,10 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 15] = [
     (1097, "Раскладки: подпись «Цель»"),
     (1098, "Раскладки: пояснение к списку цикла"),
     (1027, "Раскладки: замечание о ненайденной раскладке"),
+    // Task T-100-3, вопрос 172: «Автоматически», the line under its button, «Вручную».
+    (1110, "Исключения: подпись «Автоматически»"),
+    (1055, "Исключения: пояснение и ответ захвата"),
+    (1111, "Исключения: подпись «Вручную»"),
     (1105, "Исключения: пояснение об имени процесса"),
     (1107, "Диагностика: подпись «Папка журнала»"),
     (1062, "Диагностика: путь папки журнала"),
@@ -17039,7 +17064,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **220 since task T-95-2** — вопрос 159: the line while the capture waits for the second
 /// `Shift` and the line after the double press — 218 + 2, row for row.
-const FR_94_STRINGS: [(u16, &str, &str); 220] = [
+const FR_94_STRINGS: [(u16, &str, &str); 228] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18019,6 +18044,46 @@ const FR_94_STRINGS: [(u16, &str, &str); 220] = [
         settings::IDS_CAPTURE_DOUBLE_NOTE,
         "Два нажатия Shift подряд. Обычный набор с Shift не затронут.",
         "Two presses of Shift in a row. Ordinary typing with Shift is not affected.",
+    ),
+    // Task T-100-3, вопрос 172 (вариант В) — the two ways of «Исключения»: the two words, the
+    // button at rest and while it counts, the line under it at rest and after the capture. The
+    // Russian is the mock-up's, word for word; «Уже в списке» and «Окно не выбрано» are the two
+    // the mock-up did not show (172.5).
+    (
+        settings::IDS_EXCLUSION_AUTO,
+        "Автоматически",
+        "Automatically",
+    ),
+    (settings::IDS_EXCLUSION_MANUAL, "Вручную", "Manually"),
+    (
+        settings::IDS_EXCLUSION_PICK,
+        "Выбрать окно программы",
+        "Pick a program window",
+    ),
+    (
+        settings::IDS_EXCLUSION_PICK_NOTE,
+        "Нажмите и за 5 секунд переключитесь в программу",
+        "Click, then switch to the program within 5 seconds",
+    ),
+    (
+        settings::IDS_EXCLUSION_PICK_COUNT,
+        "Переключитесь в нужную программу… {0}",
+        "Switch to the program you need… {0}",
+    ),
+    (
+        settings::IDS_EXCLUSION_ADDED,
+        "Добавлено: {0}",
+        "Added: {0}",
+    ),
+    (
+        settings::IDS_EXCLUSION_ALREADY,
+        "Уже в списке: {0}",
+        "Already in the list: {0}",
+    ),
+    (
+        settings::IDS_EXCLUSION_NOT_PICKED,
+        "Окно не выбрано",
+        "No window picked",
     ),
 ];
 
@@ -24103,11 +24168,18 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
         button_top + 1 + (list_bottom - list_top),
         "the unit the list gave up at the top it takes back nowhere else"
     );
+    // ⚠ **The height is the one number of this test that moved, and by the owner's choice: 163 →
+    // 106 units, task T-100-3, вопрос 172 (172.4, «В — внутри панели»).** The two ways of adding
+    // a program stand under the list now, inside the same group, and the list gave them the room
+    // («список короче — ≈10 строк вместо 15»): 106 units are 9.6 rows of
+    // `EXCLUSION_ROW_HEIGHT_DLU`. The rule this test exists for — the frames on one row, the one
+    // unit of Д-3 — is untouched above; решение 83 п. 1 put the list at the top of the column, and
+    // it is still there.
     assert_eq!(
         (list_top, list_bottom),
-        (20, 183),
-        "«Исключения» stands at the top of the right column and its list is 163 units — \
-         решение 83 п. 1, the user's choice at К-1"
+        (20, 126),
+        "«Исключения» stands at the top of the right column and its list is 106 units — \
+         решение 83 п. 1, and the two ways under it, 172.4"
     );
 }
 
@@ -24814,12 +24886,16 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        220,
-        "two hundred and TWENTY identifiers in use since task T-95-2 (вопрос 159): the line \
-         while a capture waits for the second Shift and the line after the double press arrived \
-         (3232, 3233). Two hundred and eighteen since task T-93-2 (вопрос 157): the refusal \
-         of combinations (3041) left and the two lines under the hotkey field arrived (3230, \
-         3231). Two hundred and seventeen before it; two hundred and eighteen until task \
+        228,
+        "two hundred and TWENTY-EIGHT identifiers in use since task T-100-3 (вопрос 172, \
+         вариант В): the eight strings of the two ways of «Исключения» arrived (3234…3241) — \
+         the two words, the button at rest and counting, the line under it at rest, «Добавлено», \
+         «Уже в списке», «Окно не выбрано». Two hundred and twenty since task T-95-2 (вопрос \
+         159): the line while a capture waits for the second Shift and the line after the double \
+         press arrived (3232, 3233). Two hundred and eighteen since task T-93-2 (вопрос 157): \
+         the refusal of combinations (3041) left and the two lines under the hotkey field \
+         arrived (3230, 3231). Two hundred and seventeen before it; two hundred and eighteen \
+         until task \
          T-81-3 (решение 142.2 п. 5) took `IDS_AUTHOR_VERSION` away, which is the first time \
          this canon has moved downwards. Before that: the mandate of Э32 authorised the canon \
          of seventy-three away («канон INTERFACE_STRINGS растёт с 73»), and the growth is the \
@@ -28074,5 +28150,718 @@ fn a_help_row_takes_the_height_it_needs_and_not_the_slot_of_the_worst_key() {
     assert!(
         of_e81.contains("needed.max(height)") && !of_e81.contains("ifgrow<=0{return;}"),
         "the control must differ from the body in exactly the two ways the assertions look at"
+    );
+}
+
+// =========================================================================================
+// Task T-100-3 — «Исключения»: автоматически и вручную (вопрос 172, вариант В макета 172.4)
+// =========================================================================================
+//
+// Two ways of adding a program, each under its own word, inside the group they belong to: under
+// «Автоматически» the button «Выбрать окно программы» the width of the row of the manual way, with
+// the line under it; under «Вручную» the field, «Добавить» and the hint that were always there.
+// The capture itself is `guard::capture_foreground` (task T-100-2), and the window adds nothing to
+// it but the rule of [`settings::exclusion_pick`] and the way the answer is shown.
+
+/// The places of the panel «Исключения», in dialog units, as the built template carries them:
+/// `(left, top, right, bottom)`.
+mod exclusions_panel {
+    pub const GROUP: u32 = 1104;
+    pub const LIST: u32 = 1050;
+    pub const FIELD: u32 = 1051;
+    pub const ADD: u32 = 1052;
+    pub const REMOVE: u32 = 1053;
+    pub const PICK: u32 = 1054;
+    pub const PICK_NOTE: u32 = 1055;
+    pub const HINT: u32 = 1105;
+    pub const AUTO_LABEL: u32 = 1110;
+    pub const MANUAL_LABEL: u32 = 1111;
+}
+
+/// **Task T-100-3 (1) — the two ways stand inside their group, each under its word, and what was
+/// there keeps its size** (§0 п. 1 of TZ-E100; the places — решение 172.22).
+///
+/// * the group, «Удалить», the field and «Добавить» are the sizes of `e99`;
+/// * the button of the automatic way is exactly the width of the row of the manual way — from the
+///   left of the field to the right of «Добавить» («кнопка во всю ширину строки поля и
+///   «Добавить»»);
+/// * top to bottom: the list, «Автоматически», the button, the line under it, «Вручную», the row
+///   of the field, the hint — no two of them on one band, every one of them inside the group;
+/// * the list keeps at least eight rows (развилка C3 of the TZ);
+/// * and the places themselves, which the owner accepts by eye on the window.
+///
+/// ⚠ «Красное до»: `e99` has neither word, nor the button, nor the line.
+#[test]
+fn the_exclusions_hold_both_ways_inside_their_group() {
+    use exclusions_panel::*;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+    let rect = |id: u32| template.rect_of(id);
+    let size = |(left, top, right, bottom): (i32, i32, i32, i32)| (right - left, bottom - top);
+
+    let group = rect(GROUP);
+    let (list, field, add, remove, hint) =
+        (rect(LIST), rect(FIELD), rect(ADD), rect(REMOVE), rect(HINT));
+    let (auto, pick, note, manual) = (
+        rect(AUTO_LABEL),
+        rect(PICK),
+        rect(PICK_NOTE),
+        rect(MANUAL_LABEL),
+    );
+
+    println!(
+        "group {group:?}; list {list:?}; remove {remove:?}; auto {auto:?}; pick {pick:?}; \
+         note {note:?}; manual {manual:?}; field {field:?}; add {add:?}; hint {hint:?}"
+    );
+
+    // What was there keeps its size — §0 п. 1.
+    assert_eq!(
+        group,
+        (223, 7, 423, 211),
+        "the group is 223, 7, 200, 204, as in e99"
+    );
+    assert_eq!(size(remove), (60, 14), "«Удалить» keeps its size");
+    assert_eq!(size(field), (120, 8), "the field keeps its size");
+    assert_eq!(size(add), (60, 14), "«Добавить» keeps its size");
+    assert_eq!(size(hint), (186, 9), "the hint keeps its size");
+
+    // The button of the automatic way spans the row of the manual one.
+    assert_eq!(
+        (pick.0, pick.2),
+        (field.0, add.2),
+        "«Выбрать окно программы» is as wide as the field and «Добавить» together"
+    );
+    assert_eq!(
+        size(pick).1,
+        14,
+        "a button of the window is fourteen units tall"
+    );
+
+    // Top to bottom, each band below the one before it. The row of the field is its box — the
+    // field's own rectangle is one font height inside the twelve units of `FIELD_BOX_DLU`.
+    let field_box_top = field.1 - (settings::FIELD_BOX_DLU - (field.3 - field.1)) / 2;
+    let bands = [
+        ("the list", list.1, list.3),
+        ("«Автоматически»", auto.1, auto.3),
+        ("the button", pick.1, pick.3),
+        ("the line under the button", note.1, note.3),
+        ("«Вручную»", manual.1, manual.3),
+        ("the row of the field", add.1.min(field_box_top), add.3),
+        ("the hint", hint.1, hint.3),
+    ];
+
+    for pair in bands.windows(2) {
+        let ((upper, _, upper_bottom), (lower, lower_top, _)) = (pair[0], pair[1]);
+
+        assert!(
+            upper_bottom <= lower_top,
+            "{upper} ends at {upper_bottom} and {lower} begins at {lower_top}: they overlap"
+        );
+    }
+
+    for (what, (left, top, right, bottom)) in [
+        ("the list", list),
+        ("«Удалить»", remove),
+        ("«Автоматически»", auto),
+        ("the button", pick),
+        ("the line under it", note),
+        ("«Вручную»", manual),
+        ("the field", field),
+        ("«Добавить»", add),
+        ("the hint", hint),
+    ] {
+        assert!(
+            left >= group.0 && right <= group.2 && top >= group.1 && bottom <= group.3,
+            "{what} must stand inside the group «Исключения» — {:?} in {group:?}",
+            (left, top, right, bottom)
+        );
+    }
+
+    // At least eight rows — развилка C3.
+    let rows = f64::from(list.3 - list.1) / f64::from(settings::EXCLUSION_ROW_HEIGHT_DLU);
+    println!(
+        "the list holds {rows:.1} rows of {} units",
+        settings::EXCLUSION_ROW_HEIGHT_DLU
+    );
+    assert!(
+        rows >= 8.0,
+        "C3: the list holds {rows:.1} rows, fewer than eight"
+    );
+
+    // The places of 172.22 — the canon the owner accepts by eye.
+    assert_eq!(
+        auto,
+        (230, 130, 416, 139),
+        "«Автоматически» — 230, 130, 186, 9"
+    );
+    assert_eq!(pick, (230, 141, 416, 155), "the button — 230, 141, 186, 14");
+    assert_eq!(
+        note,
+        (230, 156, 416, 173),
+        "the line under the button — 230, 156, 186, 17: two lines, for a long process name"
+    );
+    assert_eq!(manual, (230, 174, 416, 183), "«Вручную» — 230, 174, 186, 9");
+}
+
+/// **Task T-100-3 (2) — the rule of «Выбрать окно программы», as a pure function.**
+///
+/// What the capture found (`guard::capture_foreground(guard::Asker::Process)`, task T-100-2) and
+/// the list as it stands decide one of four answers:
+///
+/// * nothing found — no window in front, or a window of this program — «Окно не выбрано»;
+/// * the host of the Store frames when the program inside could not be told — «Окно не выбрано»,
+///   rather than an exclusion of every Store program (решение 172.20);
+/// * a new name — `Added`: into the list, and its row selected;
+/// * a name the list holds under any spelling — `AlreadyListed` with **the row's own spelling**,
+///   which is what the line under the button says and the row that is selected;
+/// * a name that cannot be an exclusion — one longer than the field takes, or one that folds to
+///   nothing — `Refused`, the third tone of FR-100 and «Окно не выбрано».
+///
+/// ⚠ «Красное до» (приём Э20): the signature of step one took nothing.
+#[test]
+fn the_pick_of_the_exclusions_follows_its_rule() {
+    use settings::ExclusionPick as Pick;
+
+    let existing = vec!["game.exe".to_owned(), "Setup.EXE".to_owned()];
+
+    assert_eq!(
+        settings::exclusion_pick(Some("Telegram.exe"), &existing),
+        Pick::Added("Telegram.exe".to_owned()),
+        "a new program goes into the list"
+    );
+    assert_eq!(
+        settings::exclusion_pick(Some("CalculatorApp.exe"), &existing),
+        Pick::Added("CalculatorApp.exe".to_owned()),
+        "172.20: the program inside a Store frame is a program like any other"
+    );
+
+    for (spelling, row, own) in [("GAME.EXE", 0, "game.exe"), ("setup.exe", 1, "Setup.EXE")] {
+        assert_eq!(
+            settings::exclusion_pick(Some(spelling), &existing),
+            Pick::AlreadyListed(row, own.to_owned()),
+            "«{spelling}» folds onto row {row}, which is selected and named as it stands"
+        );
+    }
+
+    for nothing in [None, Some(""), Some("   ")] {
+        assert_eq!(
+            settings::exclusion_pick(nothing, &existing),
+            Pick::NotPicked,
+            "{nothing:?}: nothing was found — «Окно не выбрано»"
+        );
+    }
+
+    for host in [
+        "ApplicationFrameHost.exe",
+        r"C:\Windows\System32\ApplicationFrameHost.exe",
+    ] {
+        assert_eq!(
+            settings::exclusion_pick(Some(host), &existing),
+            Pick::NotPicked,
+            "172.20: «{host}» would exclude every Store program — not taken"
+        );
+    }
+
+    let longest = format!("{}.exe", "a".repeat(settings::EXCLUSION_NAME_CHARS - 4));
+    let longer = format!("{}.exe", "a".repeat(settings::EXCLUSION_NAME_CHARS - 3));
+    assert_eq!(
+        settings::exclusion_pick(Some(&longest), &existing),
+        Pick::Added(longest.clone()),
+        "a name as long as the field takes goes in"
+    );
+    assert_eq!(
+        settings::exclusion_pick(Some(&longer), &existing),
+        Pick::Refused,
+        "T-22-8: a name the field would not take is refused, not dropped on «ОК»"
+    );
+    assert_eq!(
+        settings::exclusion_pick(Some(r"C:\"), &existing),
+        Pick::Refused,
+        "a name that folds to nothing is refused, as the manual way refuses it"
+    );
+}
+
+/// The panel «Исключения» as module `settings` finds its controls — by identifier — on a hidden
+/// popup of the test's own: the list, the field, «Добавить», «Выбрать окно программы» and the line
+/// under it. Destroyed with its children on the way out, panic or no panic.
+struct PickPanel(windows::Win32::Foundation::HWND);
+
+impl PickPanel {
+    fn new() -> Self {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, HMENU, LBS_HASSTRINGS, LBS_NOTIFY, WINDOW_EX_STYLE, WINDOW_STYLE,
+            WS_CHILD, WS_POPUP,
+        };
+        use windows::core::{PCWSTR, w};
+
+        // SAFETY: a system class, no parent and no creation data; the handle is owned by `Self`.
+        let popup = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                400,
+                300,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden popup must be creatable");
+        let panel = Self(popup);
+
+        let list_style = WINDOW_STYLE(WS_CHILD.0 | LBS_HASSTRINGS as u32 | LBS_NOTIFY as u32);
+
+        for (class, id, style) in [
+            (w!("LISTBOX"), 1050, list_style),
+            (w!("EDIT"), 1051, WS_CHILD),
+            (w!("BUTTON"), 1052, WS_CHILD),
+            (w!("BUTTON"), 1054, WS_CHILD),
+            (w!("STATIC"), 1055, WS_CHILD),
+        ] {
+            // SAFETY: a system class as a child of the popup above, under the identifier the
+            // template gives the control; no creation data. Destroyed with its parent.
+            unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    class,
+                    PCWSTR::null(),
+                    style,
+                    0,
+                    0,
+                    200,
+                    20,
+                    Some(popup),
+                    Some(HMENU(std::ptr::without_provenance_mut(id as usize))),
+                    None,
+                    None,
+                )
+            }
+            .unwrap_or_else(|error| panic!("control {id} of the panel: {error}"));
+        }
+
+        panel
+    }
+
+    /// The rows of the list, in order.
+    fn rows(&self) -> Vec<String> {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetDlgItem, LB_GETCOUNT, LB_GETTEXT, SendMessageW,
+        };
+
+        // SAFETY: the list is a live child of this popup; the messages are answered by the list
+        // control of this thread, and the buffer outlives the call.
+        unsafe {
+            let list = GetDlgItem(Some(self.0), 1050).expect("the list");
+            let count = SendMessageW(list, LB_GETCOUNT, Some(WPARAM(0)), Some(LPARAM(0))).0;
+
+            (0..count)
+                .map(|row| {
+                    let mut buffer = [0u16; 128];
+                    let length = SendMessageW(
+                        list,
+                        LB_GETTEXT,
+                        Some(WPARAM(row as usize)),
+                        Some(LPARAM(buffer.as_mut_ptr() as isize)),
+                    )
+                    .0;
+                    String::from_utf16_lossy(&buffer[..length.max(0) as usize])
+                })
+                .collect()
+        }
+    }
+
+    /// The selected row of the list, `-1` for none.
+    fn selected(&self) -> isize {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, LB_GETCURSEL, SendMessageW};
+
+        // SAFETY: as in `rows`.
+        unsafe {
+            let list = GetDlgItem(Some(self.0), 1050).expect("the list");
+            SendMessageW(list, LB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0
+        }
+    }
+
+    /// Puts `names` into the list, as the window does when it opens.
+    fn fill(&self, names: &[String]) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetDlgItem, LB_ADDSTRING, LB_RESETCONTENT, SendMessageW,
+        };
+
+        // SAFETY: as in `rows`; every string is NUL-terminated and outlives its call.
+        unsafe {
+            let list = GetDlgItem(Some(self.0), 1050).expect("the list");
+            SendMessageW(list, LB_RESETCONTENT, Some(WPARAM(0)), Some(LPARAM(0)));
+
+            for name in names {
+                let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                SendMessageW(
+                    list,
+                    LB_ADDSTRING,
+                    Some(WPARAM(0)),
+                    Some(LPARAM(wide.as_ptr() as isize)),
+                );
+            }
+        }
+    }
+
+    /// Whether the control `id` of the panel takes input.
+    fn enabled(&self, id: i32) -> bool {
+        use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
+        use windows::Win32::UI::WindowsAndMessaging::GetDlgItem;
+
+        // SAFETY: a live child of this popup; the call reads a flag of it.
+        unsafe { IsWindowEnabled(GetDlgItem(Some(self.0), id).expect("the control")) }.as_bool()
+    }
+}
+
+impl Drop for PickPanel {
+    fn drop(&mut self) {
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+        // SAFETY: the window was created on this thread by this test and is destroyed once.
+        let _ = unsafe { DestroyWindow(self.0) };
+    }
+}
+
+/// **Task T-100-3 (2), the window's half — the answer of the rule goes where it is seen.**
+///
+/// [`settings::apply_exclusion_pick`] on a panel of the test's own:
+///
+/// * `Added` — the name is the last row of the list and **that row is selected**, the line under
+///   the button says «Добавлено: …»;
+/// * `AlreadyListed` — no second row, the existing one is selected, «Уже в списке: …»;
+/// * `NotPicked` and `Refused` — the list untouched, «Окно не выбрано».
+///
+/// The sound of a refusal is not this function's business: the tick of the count makes it, and the
+/// sweep below holds it there — so this test runs silent on the machine it runs on.
+///
+/// ⚠ «Красное до»: the function of step one told the window nothing.
+#[test]
+fn the_answer_of_the_pick_goes_into_the_list_and_under_the_button() {
+    use settings::ExclusionPick as Pick;
+
+    let _guard = with_product_strings();
+    settings::set_ui_language(Language::Ru);
+
+    let panel = PickPanel::new();
+    let names = vec!["game.exe".to_owned(), "Setup.EXE".to_owned()];
+    panel.fill(&names);
+
+    settings::apply_exclusion_pick(panel.0, &Pick::Added("Telegram.exe".to_owned()));
+    println!(
+        "added: rows {:?}, selected {}, «{}»",
+        panel.rows(),
+        panel.selected(),
+        settings::text_of(panel.0, 1055)
+    );
+    assert_eq!(
+        panel.rows(),
+        ["game.exe", "Setup.EXE", "Telegram.exe"],
+        "the program goes into the list"
+    );
+    assert_eq!(panel.selected(), 2, "and its row is selected");
+    assert_eq!(settings::text_of(panel.0, 1055), "Добавлено: Telegram.exe");
+
+    settings::apply_exclusion_pick(panel.0, &Pick::AlreadyListed(0, "game.exe".to_owned()));
+    assert_eq!(
+        panel.rows().len(),
+        3,
+        "a program already listed is not listed twice"
+    );
+    assert_eq!(panel.selected(), 0, "its own row is selected");
+    assert_eq!(settings::text_of(panel.0, 1055), "Уже в списке: game.exe");
+
+    for nothing in [Pick::NotPicked, Pick::Refused] {
+        settings::apply_exclusion_pick(panel.0, &nothing);
+        assert_eq!(panel.rows().len(), 3, "{nothing:?} adds nothing");
+        assert_eq!(
+            settings::text_of(panel.0, 1055),
+            "Окно не выбрано",
+            "{nothing:?} says so under the button"
+        );
+    }
+}
+
+/// **Task T-100-3 (2) — the ceiling darkens the automatic way with the manual one** (the extension
+/// of [`the_exclusion_list_shows_its_ceiling_and_refuses_a_name_that_folds_to_nothing`]).
+///
+/// At `guard::MAX_EXCLUSIONS` names `show_exclusion_ceiling` darkens the field, «Добавить» **and
+/// «Выбрать окно программы»** — a lit button over a full list would count five seconds to nothing;
+/// one name fewer lights all three.
+///
+/// ⚠ «Красное до»: the ceiling of `e99` knew two controls.
+#[test]
+fn the_ceiling_darkens_the_button_of_the_automatic_way_too() {
+    let panel = PickPanel::new();
+    let full: Vec<String> = (0..lang_switcher::guard::MAX_EXCLUSIONS)
+        .map(|n| format!("program{n}.exe"))
+        .collect();
+
+    panel.fill(&full);
+    settings::show_exclusion_ceiling(panel.0);
+
+    for (id, what) in [
+        (1051, "the field"),
+        (1052, "«Добавить»"),
+        (1054, "«Выбрать окно программы»"),
+    ] {
+        assert!(
+            !panel.enabled(id),
+            "at {} names {what} ({id}) must be dark",
+            full.len()
+        );
+    }
+
+    panel.fill(&full[1..]);
+    settings::show_exclusion_ceiling(panel.0);
+
+    for id in [1051, 1052, 1054] {
+        assert!(
+            panel.enabled(id),
+            "one name fewer lights control {id} again"
+        );
+    }
+}
+
+/// **Task T-100-3 (3) — all fourteen tables carry the eight strings of the two ways**, each in its
+/// own script, and the «5» of the line under the button is the five seconds of the capture.
+///
+/// ⚠ «Красное до»: `e99` carries none of them.
+#[test]
+fn every_locale_carries_the_strings_of_the_two_ways() {
+    let product = ProductImage::shared();
+    let ids = [
+        settings::IDS_EXCLUSION_AUTO,
+        settings::IDS_EXCLUSION_MANUAL,
+        settings::IDS_EXCLUSION_PICK,
+        settings::IDS_EXCLUSION_PICK_NOTE,
+        settings::IDS_EXCLUSION_PICK_COUNT,
+        settings::IDS_EXCLUSION_ADDED,
+        settings::IDS_EXCLUSION_ALREADY,
+        settings::IDS_EXCLUSION_NOT_PICKED,
+    ];
+    let mut wrong = Vec::new();
+
+    for id in ids {
+        assert!(
+            settings::INTERFACE_STRINGS.contains(&id),
+            "string {id} must be in the vocabulary of the interface"
+        );
+    }
+
+    for (tag, langid, _) in ALL_LOCALES {
+        for id in ids {
+            let string = product.string_of_langid(langid, id);
+
+            if string.trim().is_empty() {
+                wrong.push(format!("{tag}: string {id} is empty"));
+            }
+        }
+
+        let note = product.string_of_langid(langid, settings::IDS_EXCLUSION_PICK_NOTE);
+        if !note.contains(&lang_switcher::guard::CAPTURE_SECONDS.to_string()) {
+            wrong.push(format!(
+                "{tag}: «{note}» does not name the {} seconds of the capture",
+                lang_switcher::guard::CAPTURE_SECONDS
+            ));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "the two ways in fourteen languages:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// **Task T-100-3 (4) — every string of the two ways fits its place, in all fourteen languages, at
+/// every face the rule of вопрос 143 may open the window at** (посылка П5).
+///
+/// The places are the template's: the two words, the button and the line under it are 186 units
+/// wide; the button and the words are one line, the line under the button two
+/// ([`the_exclusions_hold_both_ways_inside_their_group`]). The measure is the one
+/// [`both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages`] takes: the
+/// dialog's own face, the horizontal base unit the dialog manager maps the template by.
+///
+/// * the two words, the button at rest and while it counts, the line at rest and «Окно не
+///   выбрано» — **one line**;
+/// * «Добавлено: …» and «Уже в списке: …» with a name of thirty-three characters
+///   (`FortniteClient-Win64-Shipping.exe` — the games FR-84 is written for are named like this) —
+///   one line; with a name as long as the field takes — two lines, the words on the first and the
+///   name on the second.
+///
+/// ⚠ Control: the first German line under the button, «Klicken und binnen 5 Sekunden zum Programm
+/// wechseln», did not fit (330 px of 326 at 13 px, `scratchpad-E100\p5-fit-pre.log`) — the
+/// instrument must see that, or it measures nothing.
+#[test]
+fn every_string_of_the_two_ways_fits_its_place_in_all_fourteen_languages() {
+    const ROW_UNITS: i32 = 186;
+
+    let _guard = with_product_strings();
+    let (font, sheet) = template_font_and_sheet();
+    let game = "FortniteClient-Win64-Shipping.exe";
+    let longest: String = "Program-Name-1234567890"
+        .chars()
+        .cycle()
+        .take(settings::EXCLUSION_NAME_CHARS - 4)
+        .chain(".exe".chars())
+        .collect();
+    let seconds = lang_switcher::guard::CAPTURE_SECONDS.to_string();
+    let mut clips = Vec::new();
+    let mut control_seen = false;
+
+    for pixels in rule_faces() {
+        let face = Face::new(manager_face_at(&sheet, &font, pixels));
+        let letters = extent_of(
+            &sheet,
+            &face,
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        )
+        .cx;
+        let base = (letters / 26 + 1) / 2;
+        let slot = (ROW_UNITS * base + 2) / 4;
+        let width = |text: &str| extent_of(&sheet, &face, text).cx;
+
+        if pixels == 13 && width("Klicken und binnen 5 Sekunden zum Programm wechseln") > slot {
+            control_seen = true;
+        }
+
+        for language in Language::ALL {
+            settings::set_ui_language(language);
+
+            let one_line = [
+                settings::text(settings::IDS_EXCLUSION_AUTO),
+                settings::text(settings::IDS_EXCLUSION_MANUAL),
+                settings::text(settings::IDS_EXCLUSION_PICK),
+                settings::format_text(settings::IDS_EXCLUSION_PICK_COUNT, &[seconds.as_str()]),
+                settings::text(settings::IDS_EXCLUSION_PICK_NOTE),
+                settings::text(settings::IDS_EXCLUSION_NOT_PICKED),
+                settings::format_text(settings::IDS_EXCLUSION_ADDED, &[game]),
+                settings::format_text(settings::IDS_EXCLUSION_ALREADY, &[game]),
+            ];
+
+            for text in one_line {
+                assert!(
+                    !text.trim().is_empty(),
+                    "{language:?}: a string did not load — the instrument would measure nothing"
+                );
+
+                if width(&text) > slot {
+                    clips.push(format!(
+                        "{pixels} px, {language:?}: «{text}» takes {} px of {slot} on one line",
+                        width(&text)
+                    ));
+                }
+            }
+
+            for id in [
+                settings::IDS_EXCLUSION_ADDED,
+                settings::IDS_EXCLUSION_ALREADY,
+            ] {
+                let words = settings::format_text(id, &[""]).trim_end().to_owned();
+
+                if width(&words) > slot || width(&longest) > slot {
+                    clips.push(format!(
+                        "{pixels} px, {language:?}: «{words}» / «{longest}» — {} / {} px of {slot} \
+                         on two lines",
+                        width(&words),
+                        width(&longest)
+                    ));
+                }
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        control_seen,
+        "the instrument does not see the clip of the first German line — it measures nothing"
+    );
+    assert!(
+        clips.is_empty(),
+        "развилка C2 — a string of the two ways would be clipped: {clips:#?}"
+    );
+}
+
+/// **Task T-100-3 — where the window counts, captures and lets go.** The tests above prove what
+/// the functions do; this one pins that the dialog calls them:
+///
+/// * «Выбрать окно программы» is answered by `toggle_exclusion_pick` — the press that starts the
+///   count and the second press that cancels it;
+/// * the third timer of the window is answered by `exclusion_pick_tick`, and `WM_DESTROY` kills it
+///   («закрытие окна гасит таймер»);
+/// * the tick asks the one body of the capture as the exclusions ask it —
+///   `guard::capture_foreground(guard::Asker::Process)` — sounds the refusal of FR-100 for a
+///   `Refused`, puts the answer in through `apply_exclusion_pick`, and **does not bring the window
+///   forward**: no `SetForegroundWindow` on the way;
+/// * the ceiling darkens `IDC_EXCLUSION_PICK` and stops a count it finds running.
+#[test]
+fn the_dialog_counts_and_captures_where_it_must() {
+    let source = settings_module_source();
+    let code = |body: &str| -> String {
+        body.lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let commands = code(function_body(&source, "unsafe fn on_command("));
+    assert!(
+        commands.contains("IDC_EXCLUSION_PICK => toggle_exclusion_pick(hwnd)"),
+        "the button is answered by toggle_exclusion_pick"
+    );
+
+    let procedure = code(function_body(
+        &source,
+        "unsafe extern \"system\" fn dialog_proc(",
+    ));
+    let (_, timers) = procedure
+        .split_once("WM_TIMER =>")
+        .expect("the dialog procedure answers WM_TIMER");
+    assert!(
+        timers.contains("EXCLUSION_PICK_TIMER") && timers.contains("exclusion_pick_tick(hwnd)"),
+        "the third timer is answered by exclusion_pick_tick"
+    );
+    let (_, destroy) = procedure
+        .split_once("WM_DESTROY =>")
+        .expect("the dialog procedure answers WM_DESTROY");
+    assert!(
+        destroy.contains("EXCLUSION_PICK_TIMER"),
+        "WM_DESTROY kills the timer of the count"
+    );
+
+    let tick = code(function_body(&source, "fn exclusion_pick_tick("));
+    for part in [
+        "guard::capture_foreground(crate::guard::Asker::Process)",
+        "exclusion_pick(",
+        "apply_exclusion_pick(",
+        "sound_refusal()",
+    ] {
+        assert!(tick.contains(part), "the tick must make `{part}`:\n{tick}");
+    }
+    assert!(
+        !tick.contains("SetForegroundWindow"),
+        "the window is not brought forward after the capture"
+    );
+    assert_eq!(
+        code(&source).matches("guard::capture_foreground(").count(),
+        1,
+        "the settings window asks the one body of the capture once"
+    );
+
+    let ceiling = code(function_body(&source, "pub fn show_exclusion_ceiling("));
+    assert!(
+        ceiling.contains("IDC_EXCLUSION_PICK"),
+        "the ceiling darkens the button of the automatic way"
     );
 }

@@ -120,6 +120,11 @@
 #define IDC_EXCLUSION_NAME     1051
 #define IDC_EXCLUSION_ADD      1052
 #define IDC_EXCLUSION_REMOVE   1053
+// The automatic way of «Исключения» — task T-100-3, вопрос 172 (вариант В): the button that takes
+// the program out of its window in five seconds, and the line under it that explains the button at
+// rest and says what it took. The first two free numbers of the block 1050…1059.
+#define IDC_EXCLUSION_PICK     1054
+#define IDC_EXCLUSION_PICK_NOTE 1055
 #define IDC_LOG_ENABLED        1060
 #define IDC_LOG_OPEN           1061
 #define IDC_LOG_DIR            1062
@@ -167,6 +172,10 @@
 #define IDC_GROUP_STATE        1108
 // The label of the appearance combo box, FR-92а, task T-11-3. Continues the label block.
 #define IDC_THEME_LABEL        1109
+// The two words over the two ways of «Исключения» — task T-100-3, вопрос 172. They continue the
+// label block too: 1110 and 1111 were its first free numbers.
+#define IDC_EXCLUSION_AUTO_LABEL 1110
+#define IDC_EXCLUSION_MANUAL_LABEL 1111
 
 // Controls of the about dialog IDD_ABOUT, task T-11-11. A block of their own from 1120,
 // contiguous and clear of everything above, exactly as the label block starts at 1090 clear
@@ -817,8 +826,25 @@ BEGIN
     // control (2 px at 96 DPI, the air of the mock-ups before the first row, task T-11-16),
     // where a button frames its own rectangle. Declared level, they came out 2 px apart, which
     // was defect Д-3; the height is one unit short of the box so that its bottom does not move.
-    LISTBOX         IDC_EXCLUSIONS, 230, 20, 120, 163, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    // ⚠⚠ **163 → 106 units by task T-100-3, вопрос 172 (172.4, «В — внутри панели»).** Under the
+    // list there are two ways of adding a program now, each under its own word, and the list gave
+    // them the room: 106 units are 9.6 rows of EXCLUSION_ROW_HEIGHT_DLU (11), the «≈10 строк вместо
+    // 15» of the mock-up. The group, «Удалить», the field and «Добавить» keep their sizes, and the
+    // manual way keeps its very places — the field, «Добавить» and the hint have not moved.
+    LISTBOX         IDC_EXCLUSIONS, 230, 20, 120, 106, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 356, 19, 60, 14, BS_OWNERDRAW
+    // -- «Автоматически»: the word, the button the width of the row of the field and «Добавить»,
+    // and the line under it. Four units of the window's air under the list; two between a word
+    // and what it names (as «Вручную» over the field below); one between a button and the line
+    // under it (as «Добавить» and the hint). The line is TWO lines tall — решение 172.22: «Уже в
+    // списке: FortniteClient-Win64-Shipping.exe» does not fit one line in every language, and a
+    // name the field takes in full (42 characters) does not fit one at all; the label wraps the
+    // words, so a long name stands whole on the second line instead of being cut off.
+    LTEXT           "Автоматически", IDC_EXCLUSION_AUTO_LABEL, 230, 130, 186, 9, SS_OWNERDRAW
+    PUSHBUTTON      "Выбрать окно программы", IDC_EXCLUSION_PICK, 230, 141, 186, 14, BS_OWNERDRAW
+    LTEXT           "Нажмите и за 5 секунд переключитесь в программу", IDC_EXCLUSION_PICK_NOTE, 230, 156, 186, 17, SS_OWNERDRAW
+    // -- «Вручную»: the word over the way that was always there.
+    LTEXT           "Вручную", IDC_EXCLUSION_MANUAL_LABEL, 230, 174, 186, 9, SS_OWNERDRAW
     EDITTEXT        IDC_EXCLUSION_NAME, 230, 188, 120, 8, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "Добавить", IDC_EXCLUSION_ADD, 356, 185, 60, 14, BS_OWNERDRAW
     LTEXT           "Имя процесса, например game.exe", IDC_EXCLUSION_HINT, 230, 200, 186, 9, SS_OWNERDRAW
@@ -1771,6 +1797,17 @@ END
 // sixteen, 3232…3247: the block 3216…3231 is full.
 #define IDS_CAPTURE_SHIFT_AGAIN 3232
 #define IDS_CAPTURE_DOUBLE_NOTE 3233
+// Task T-100-3, вопрос 172 (вариант В) — the eight strings of the two ways of «Исключения»: the
+// two words, the button at rest and while it counts, the line under it at rest, and its three
+// answers. 3234…3241 continue the block 3232…3247.
+#define IDS_EXCLUSION_AUTO      3234
+#define IDS_EXCLUSION_MANUAL    3235
+#define IDS_EXCLUSION_PICK      3236
+#define IDS_EXCLUSION_PICK_NOTE 3237
+#define IDS_EXCLUSION_PICK_COUNT 3238
+#define IDS_EXCLUSION_ADDED     3239
+#define IDS_EXCLUSION_ALREADY   3240
+#define IDS_EXCLUSION_NOT_PICKED 3241
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -1830,6 +1867,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Удалить"
     IDS_EXCLUSION_ADD       "Добавить"
     IDS_EXCLUSION_HINT      "Имя процесса, например game.exe"
+    IDS_EXCLUSION_AUTO      "Автоматически"
+    IDS_EXCLUSION_MANUAL    "Вручную"
+    IDS_EXCLUSION_PICK      "Выбрать окно программы"
+    IDS_EXCLUSION_PICK_NOTE "Нажмите и за 5 секунд переключитесь в программу"
+    IDS_EXCLUSION_PICK_COUNT "Переключитесь в нужную программу… {0}"
+    IDS_EXCLUSION_ADDED     "Добавлено: {0}"
+    IDS_EXCLUSION_ALREADY   "Уже в списке: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Окно не выбрано"
     IDS_GROUP_DIAGNOSTICS   "Диагностика"
     IDS_LOG_ENABLED         "Вести журнал"
     IDS_LOG_OPEN            "Открыть папку журнала"
@@ -2059,6 +2104,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Remove"
     IDS_EXCLUSION_ADD       "Add"
     IDS_EXCLUSION_HINT      "Process name, for example game.exe"
+    IDS_EXCLUSION_AUTO      "Automatically"
+    IDS_EXCLUSION_MANUAL    "Manually"
+    IDS_EXCLUSION_PICK      "Pick a program window"
+    IDS_EXCLUSION_PICK_NOTE "Click, then switch to the program within 5 seconds"
+    IDS_EXCLUSION_PICK_COUNT "Switch to the program you need… {0}"
+    IDS_EXCLUSION_ADDED     "Added: {0}"
+    IDS_EXCLUSION_ALREADY   "Already in the list: {0}"
+    IDS_EXCLUSION_NOT_PICKED "No window picked"
     IDS_GROUP_DIAGNOSTICS   "Diagnostics"
     IDS_LOG_ENABLED         "Keep a journal"
     IDS_LOG_OPEN            "Open the journal folder"
@@ -2301,6 +2354,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Видалити"
     IDS_EXCLUSION_ADD       "Додати"
     IDS_EXCLUSION_HINT      "Ім'я процесу, наприклад game.exe"
+    IDS_EXCLUSION_AUTO      "Автоматично"
+    IDS_EXCLUSION_MANUAL    "Вручну"
+    IDS_EXCLUSION_PICK      "Вибрати вікно програми"
+    IDS_EXCLUSION_PICK_NOTE "Натисніть і за 5 секунд перейдіть у програму"
+    IDS_EXCLUSION_PICK_COUNT "Перейдіть у потрібну програму… {0}"
+    IDS_EXCLUSION_ADDED     "Додано: {0}"
+    IDS_EXCLUSION_ALREADY   "Уже в списку: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Вікно не вибрано"
     IDS_GROUP_DIAGNOSTICS   "Діагностика"
     IDS_LOG_ENABLED         "Вести журнал"
     IDS_LOG_OPEN            "Відкрити теку журналу"
@@ -2526,6 +2587,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Entfernen"
     IDS_EXCLUSION_ADD       "Hinzufügen"
     IDS_EXCLUSION_HINT      "Prozessname, zum Beispiel game.exe"
+    IDS_EXCLUSION_AUTO      "Automatisch"
+    IDS_EXCLUSION_MANUAL    "Manuell"
+    IDS_EXCLUSION_PICK      "Programmfenster wählen"
+    IDS_EXCLUSION_PICK_NOTE "Klicken und in 5 Sekunden zum Programm wechseln"
+    IDS_EXCLUSION_PICK_COUNT "Wechseln Sie zum gewünschten Programm… {0}"
+    IDS_EXCLUSION_ADDED     "Hinzugefügt: {0}"
+    IDS_EXCLUSION_ALREADY   "Bereits in der Liste: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Kein Fenster gewählt"
     IDS_GROUP_DIAGNOSTICS   "Diagnose"
     IDS_LOG_ENABLED         "Protokoll führen"
     IDS_LOG_OPEN            "Protokollordner öffnen"
@@ -2751,6 +2820,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Retirer"
     IDS_EXCLUSION_ADD       "Ajouter"
     IDS_EXCLUSION_HINT      "Nom du processus, par exemple game.exe"
+    IDS_EXCLUSION_AUTO      "Automatiquement"
+    IDS_EXCLUSION_MANUAL    "Manuellement"
+    IDS_EXCLUSION_PICK      "Choisir la fenêtre du programme"
+    IDS_EXCLUSION_PICK_NOTE "Cliquez puis passez au programme en 5 secondes"
+    IDS_EXCLUSION_PICK_COUNT "Passez dans le programme voulu… {0}"
+    IDS_EXCLUSION_ADDED     "Ajouté : {0}"
+    IDS_EXCLUSION_ALREADY   "Déjà dans la liste : {0}"
+    IDS_EXCLUSION_NOT_PICKED "Aucune fenêtre choisie"
     IDS_GROUP_DIAGNOSTICS   "Diagnostic"
     IDS_LOG_ENABLED         "Tenir un journal"
     // ⚠ Т-28-4: «Ouvrir le dossier du journal» demandait 160 px sur les 151 du bouton, et
@@ -2975,6 +3052,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Quitar"
     IDS_EXCLUSION_ADD       "Añadir"
     IDS_EXCLUSION_HINT      "Nombre del proceso, por ejemplo game.exe"
+    IDS_EXCLUSION_AUTO      "Automáticamente"
+    IDS_EXCLUSION_MANUAL    "Manualmente"
+    IDS_EXCLUSION_PICK      "Elegir la ventana del programa"
+    IDS_EXCLUSION_PICK_NOTE "Pulse y cambie al programa en 5 segundos"
+    IDS_EXCLUSION_PICK_COUNT "Cambie al programa que necesita… {0}"
+    IDS_EXCLUSION_ADDED     "Añadido: {0}"
+    IDS_EXCLUSION_ALREADY   "Ya está en la lista: {0}"
+    IDS_EXCLUSION_NOT_PICKED "No se eligió ninguna ventana"
     IDS_GROUP_DIAGNOSTICS   "Diagnóstico"
     IDS_LOG_ENABLED         "Llevar un registro"
     // ⚠ Т-28-4: «Abrir la carpeta del registro» pedía 163 px de los 151 del botón, y «Carpeta
@@ -3199,6 +3284,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Remover"
     IDS_EXCLUSION_ADD       "Adicionar"
     IDS_EXCLUSION_HINT      "Nome do processo, por exemplo game.exe"
+    IDS_EXCLUSION_AUTO      "Automaticamente"
+    IDS_EXCLUSION_MANUAL    "Manualmente"
+    IDS_EXCLUSION_PICK      "Escolher a janela do programa"
+    IDS_EXCLUSION_PICK_NOTE "Clique e passe para o programa em 5 segundos"
+    IDS_EXCLUSION_PICK_COUNT "Passe para o programa que precisa… {0}"
+    IDS_EXCLUSION_ADDED     "Adicionado: {0}"
+    IDS_EXCLUSION_ALREADY   "Já está na lista: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Nenhuma janela escolhida"
     IDS_GROUP_DIAGNOSTICS   "Diagnóstico"
     IDS_LOG_ENABLED         "Manter um registro"
     IDS_LOG_OPEN            "Abrir a pasta do registro"
@@ -3424,6 +3517,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Rimuovi"
     IDS_EXCLUSION_ADD       "Aggiungi"
     IDS_EXCLUSION_HINT      "Nome del processo, per esempio game.exe"
+    IDS_EXCLUSION_AUTO      "Automaticamente"
+    IDS_EXCLUSION_MANUAL    "Manualmente"
+    IDS_EXCLUSION_PICK      "Scegli la finestra del programma"
+    IDS_EXCLUSION_PICK_NOTE "Fai clic e passa al programma entro 5 secondi"
+    IDS_EXCLUSION_PICK_COUNT "Passa al programma che ti serve… {0}"
+    IDS_EXCLUSION_ADDED     "Aggiunto: {0}"
+    IDS_EXCLUSION_ALREADY   "Già nell'elenco: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Nessuna finestra scelta"
     IDS_GROUP_DIAGNOSTICS   "Diagnostica"
     IDS_LOG_ENABLED         "Tenere un registro"
     // ⚠ Т-28-4: «Apri la cartella del registro» chiedeva 156 px sui 151 del pulsante, e
@@ -3653,6 +3754,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Usuń"
     IDS_EXCLUSION_ADD       "Dodaj"
     IDS_EXCLUSION_HINT      "Nazwa procesu, na przykład game.exe"
+    IDS_EXCLUSION_AUTO      "Automatycznie"
+    IDS_EXCLUSION_MANUAL    "Ręcznie"
+    IDS_EXCLUSION_PICK      "Wybierz okno programu"
+    IDS_EXCLUSION_PICK_NOTE "Kliknij i w ciągu 5 sekund przejdź do programu"
+    IDS_EXCLUSION_PICK_COUNT "Przejdź do potrzebnego programu… {0}"
+    IDS_EXCLUSION_ADDED     "Dodano: {0}"
+    IDS_EXCLUSION_ALREADY   "Już na liście: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Nie wybrano okna"
     IDS_GROUP_DIAGNOSTICS   "Diagnostyka"
     IDS_LOG_ENABLED         "Prowadź dziennik"
     IDS_LOG_OPEN            "Otwórz folder dziennika"
@@ -3876,6 +3985,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Odebrat"
     IDS_EXCLUSION_ADD       "Přidat"
     IDS_EXCLUSION_HINT      "Název procesu, například game.exe"
+    IDS_EXCLUSION_AUTO      "Automaticky"
+    IDS_EXCLUSION_MANUAL    "Ručně"
+    IDS_EXCLUSION_PICK      "Vybrat okno programu"
+    IDS_EXCLUSION_PICK_NOTE "Klikněte a do 5 sekund přepněte do programu"
+    IDS_EXCLUSION_PICK_COUNT "Přepněte do potřebného programu… {0}"
+    IDS_EXCLUSION_ADDED     "Přidáno: {0}"
+    IDS_EXCLUSION_ALREADY   "Už je v seznamu: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Okno nebylo vybráno"
     IDS_GROUP_DIAGNOSTICS   "Diagnostika"
     IDS_LOG_ENABLED         "Vést protokol"
     IDS_LOG_OPEN            "Otevřít složku protokolu"
@@ -4102,6 +4219,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Kaldır"
     IDS_EXCLUSION_ADD       "Ekle"
     IDS_EXCLUSION_HINT      "İşlem adı, örneğin game.exe"
+    IDS_EXCLUSION_AUTO      "Otomatik"
+    IDS_EXCLUSION_MANUAL    "Elle"
+    IDS_EXCLUSION_PICK      "Program penceresini seç"
+    IDS_EXCLUSION_PICK_NOTE "Tıklayın ve 5 saniye içinde programa geçin"
+    IDS_EXCLUSION_PICK_COUNT "Gereken programa geçin… {0}"
+    IDS_EXCLUSION_ADDED     "Eklendi: {0}"
+    IDS_EXCLUSION_ALREADY   "Zaten listede: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Pencere seçilmedi"
     IDS_GROUP_DIAGNOSTICS   "Tanılama"
     IDS_LOG_ENABLED         "Günlük tut"
     IDS_LOG_OPEN            "Günlük klasörünü aç"
@@ -4330,6 +4455,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "Αφαίρεση"
     IDS_EXCLUSION_ADD       "Προσθήκη"
     IDS_EXCLUSION_HINT      "Όνομα διεργασίας, για παράδειγμα game.exe"
+    IDS_EXCLUSION_AUTO      "Αυτόματα"
+    IDS_EXCLUSION_MANUAL    "Χειροκίνητα"
+    IDS_EXCLUSION_PICK      "Επιλογή παραθύρου προγράμματος"
+    IDS_EXCLUSION_PICK_NOTE "Πατήστε και σε 5 δευτ. μεταβείτε στο πρόγραμμα"
+    IDS_EXCLUSION_PICK_COUNT "Μεταβείτε στο πρόγραμμα που θέλετε… {0}"
+    IDS_EXCLUSION_ADDED     "Προστέθηκε: {0}"
+    IDS_EXCLUSION_ALREADY   "Ήδη στη λίστα: {0}"
+    IDS_EXCLUSION_NOT_PICKED "Δεν επιλέχθηκε παράθυρο"
     IDS_GROUP_DIAGNOSTICS   "Διαγνωστικά"
     IDS_LOG_ENABLED         "Τήρηση καταγραφής"
     // ⚠ Т-28-4: «Άνοιγμα φακέλου καταγραφής» ζητούσε 181 px από τα 151 του κουμπιού, και
@@ -4564,6 +4697,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "הסר"
     IDS_EXCLUSION_ADD       "הוסף"
     IDS_EXCLUSION_HINT      "שם תהליך, למשל game.exe"
+    IDS_EXCLUSION_AUTO      "אוטומטית"
+    IDS_EXCLUSION_MANUAL    "ידנית"
+    IDS_EXCLUSION_PICK      "בחירת חלון תוכנית"
+    IDS_EXCLUSION_PICK_NOTE "לחצו ועברו לתוכנית תוך 5 שניות"
+    IDS_EXCLUSION_PICK_COUNT "עברו לתוכנית הדרושה… {0}"
+    IDS_EXCLUSION_ADDED     "נוסף: {0}"
+    IDS_EXCLUSION_ALREADY   "כבר ברשימה: {0}"
+    IDS_EXCLUSION_NOT_PICKED "לא נבחר חלון"
     IDS_GROUP_DIAGNOSTICS   "אבחון"
     IDS_LOG_ENABLED         "ניהול יומן"
     // ⚠ Э28 §4 и глоссарий Э30 §3.2: «פתיחת תיקיית היומן» длиннее кнопки. Какой именно папки —
@@ -4787,6 +4928,14 @@ BEGIN
     IDS_EXCLUSION_REMOVE    "إزالة"
     IDS_EXCLUSION_ADD       "إضافة"
     IDS_EXCLUSION_HINT      "اسم العملية، مثل game.exe"
+    IDS_EXCLUSION_AUTO      "تلقائيًا"
+    IDS_EXCLUSION_MANUAL    "يدويًا"
+    IDS_EXCLUSION_PICK      "اختيار نافذة البرنامج"
+    IDS_EXCLUSION_PICK_NOTE "انقر ثم انتقل إلى البرنامج خلال 5 ثوانٍ"
+    IDS_EXCLUSION_PICK_COUNT "انتقل إلى البرنامج المطلوب… {0}"
+    IDS_EXCLUSION_ADDED     "تمت الإضافة: {0}"
+    IDS_EXCLUSION_ALREADY   "موجود في القائمة: {0}"
+    IDS_EXCLUSION_NOT_PICKED "لم يتم اختيار نافذة"
     IDS_GROUP_DIAGNOSTICS   "التشخيص"
     IDS_LOG_ENABLED         "حفظ السجل"
     // ⚠ То же основание, что у иврита выше: «فتح مجلد السجل» длиннее кнопки.
