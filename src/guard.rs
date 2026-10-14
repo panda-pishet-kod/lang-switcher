@@ -242,15 +242,16 @@ use std::cell::RefCell;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::Accessibility::{CUIAutomation8, IUIAutomation, IUIAutomation2};
 use windows::Win32::UI::Controls::EM_GETPASSWORDCHAR;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
-    SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_APP,
+    FindWindowExW, GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
+    GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_APP,
 };
-use windows::core::{Interface, PWSTR, Result as WinResult};
+use windows::core::{Interface, PCWSTR, PWSTR, Result as WinResult, w};
 
 // ---------------------------------------------------------------------------------------
 // Public constants
@@ -1516,7 +1517,11 @@ fn determine() -> Probe {
     let process = process_name_of(window);
 
     // ---- FR-84: the exclusion list ---------------------------------------------------
-    if process.as_deref().is_some_and(is_excluded_name) {
+    //
+    // Решение 172.20: and for a frame of the Store, the program inside it — the one rule and the
+    // one look into a frame the capture of «Выбрать окно программы» takes. The look is made only
+    // for such a frame; every other window is answered from `process` alone, as before.
+    if program_is_excluded(process.as_deref(), || frame_content_name(window)) {
         return Probe {
             field: Field::Undetermined,
             excluded: true,
@@ -1676,6 +1681,163 @@ fn process_name_of(window: HWND) -> Option<String> {
     }
 
     process_file_name(pid)
+}
+
+// ---------------------------------------------------------------------------------------
+// The program a person brings forward — FR-104 and FR-84 (task T-100-2, решения 172.20, 172.21)
+// ---------------------------------------------------------------------------------------
+
+/// How long a person is given to bring the program forward before it is looked at — the five
+/// seconds of «Взять из активного окна» (FR-104) and of «Выбрать окно программы» (FR-84, task
+/// T-100-3). **One number for both**, task T-100-2: the two buttons ask the same thing of the same
+/// person, and two constants are two chances to drift apart.
+pub const CAPTURE_SECONDS: u32 = 5;
+
+/// Who asks the capture — and therefore which window in front is no answer at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Asker {
+    /// The wizard of FR-104, by its own window. That window is skipped and no other: a person who
+    /// presses the button and stays put must not be told that the program they write about is the
+    /// wizard — but another window of this program may well be what they are writing about.
+    Window(HWND),
+    /// The exclusions of FR-84. **Every** window of this process is skipped: the settings window,
+    /// the menu of the tray, a letter. This program is not a program to be excluded from itself,
+    /// and a person who did not switch anywhere is told «Окно не выбрано».
+    Process,
+}
+
+/// What the capture found in front — the two names it reads, and nothing else.
+///
+/// ⛔ **No title.** The title of a window carries the name of a document, of a message, of a page;
+/// FR-104 says it is not taken, and the same reason holds for the exclusions of FR-84, which keep
+/// only the executable name. [`capture_window`] asks the class and the process and nothing more.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Captured {
+    /// The executable name of the program — of the **content** of a Store frame, решение 172.20;
+    /// `None` when it could not be read.
+    pub process: Option<String>,
+    /// The class name of the window in front.
+    pub class: String,
+}
+
+/// The capture of the window in front, as [`capture_window`] makes it; `None` when no window is in
+/// front at all — the desktop switching, or the secure one.
+pub fn capture_foreground(asker: Asker) -> Option<Captured> {
+    capture_window(foreground_window()?, asker)
+}
+
+/// **The one body of the capture** — the wizard of FR-104 and «Выбрать окно программы» of FR-84,
+/// task T-100-2. Public so a test can hand it windows whose answer it knows.
+///
+/// Until this task the wizard carried the chain itself (`letters::capture_foreground`), and the
+/// exclusions panel would have been the second copy of it. The two askers differ in exactly one
+/// thing, which window is no answer — [`Asker`] — and in nothing else: the same process name, the
+/// same class, the same look into a Store frame.
+///
+/// # A Store program — решения 172.20 и 172.21
+///
+/// A program of the Microsoft Store is not in front by a window of its own: Windows shows it inside
+/// a frame (`ApplicationFrameWindow`) of one shared process, `ApplicationFrameHost.exe` — measured on
+/// the calculator, `scratchpad-E100\p1-p2-live.log`. Taking that name would name every Store program
+/// at once, and the owner chose to take the program instead: the process of the frame's content,
+/// [`frame_content_name`]. When the content cannot be found the host's own name stays — the wizard
+/// shows what it showed before, and the exclusions panel refuses it rather than exclude every Store
+/// program (`settings::exclusion_pick`).
+///
+/// SEC-01, SEC-07: two names go back to the one caller, and nothing here keeps or journals them.
+pub fn capture_window(window: HWND, asker: Asker) -> Option<Captured> {
+    let pid = process_id_of(window);
+
+    let mine = match asker {
+        Asker::Window(own) => window == own,
+        // SAFETY: `GetCurrentProcessId` takes no arguments and touches no memory.
+        Asker::Process => pid != 0 && pid == unsafe { GetCurrentProcessId() },
+    };
+
+    if mine {
+        return None;
+    }
+
+    let class = class_name(window);
+
+    let process = match (pid != 0).then(|| process_file_name(pid)).flatten() {
+        Some(host) if is_frame_host(&host) => frame_content_name(window).or(Some(host)),
+        other => other,
+    };
+
+    Some(Captured { process, class })
+}
+
+/// The id of the process that owns `window`, or zero when the window has gone.
+fn process_id_of(window: HWND) -> u32 {
+    let mut pid = 0u32;
+
+    // SAFETY: `window` is a window handle the caller holds; the call writes one `u32` through the
+    // out-pointer to a live local and dereferences nothing else. NFR-13: a window that died answers
+    // zero, and zero is what the callers read as «no process».
+    unsafe { GetWindowThreadProcessId(window, Some(&raw mut pid)) };
+
+    pid
+}
+
+/// The folded name of the process that shows the Store programs in its frames — решение 172.20.
+pub const FRAME_HOST: &str = "applicationframehost.exe";
+
+/// The class of the window a Store program draws its content in, inside the frame of
+/// [`FRAME_HOST`] — `Windows.UI.Core.CoreWindow`, measured as the child of the calculator's frame.
+const FRAME_CONTENT_CLASS: PCWSTR = w!("Windows.UI.Core.CoreWindow");
+
+/// Whether `name` is the shared host of the Store frames — решение 172.20. Folded the way FR-84
+/// folds every name: the last component of a path, lower case, no spaces around.
+pub fn is_frame_host(name: &str) -> bool {
+    fold_process_name(name) == FRAME_HOST
+}
+
+/// The executable name of the program inside a Store frame — решение 172.20, **the one look into a
+/// frame** both the capture and the verdict of FR-84 take.
+///
+/// The content is a direct child of the frame, of [`FRAME_CONTENT_CLASS`], owned by the program's
+/// own process (`CalculatorApp.exe` in the frame of `ApplicationFrameHost.exe`). `FindWindowExW` with
+/// a class and **no title** — a null window name is the documented «any», and no title is read.
+/// `None` when the frame holds no such child (a program still starting, or one Windows took the
+/// content away from while it was minimised) or its name cannot be read.
+fn frame_content_name(frame: HWND) -> Option<String> {
+    // SAFETY: `frame` is a window handle the caller holds; the class is a `'static` literal and the
+    // window name is null. The call searches the children of `frame` and keeps no pointer.
+    let content =
+        unsafe { FindWindowExW(Some(frame), None, FRAME_CONTENT_CLASS, PCWSTR::null()) }.ok()?;
+
+    match process_id_of(content) {
+        0 => None,
+        pid => process_file_name(pid),
+    }
+}
+
+/// **The verdict of FR-84 on the program behind a window** — решение 172.20, the rule [`determine`]
+/// applies.
+///
+/// `process` is the executable name of the window's own process. The window is excluded when that
+/// name is in the list — exactly as before this stage, so a list that names the host of the Store
+/// frames by hand keeps excluding every frame of it — **or**, for a frame of [`FRAME_HOST`] and for
+/// nothing else, when the program inside the frame is: excluding `CalculatorApp.exe` excludes the
+/// calculator and no other Store program.
+///
+/// `content` is asked only for a frame — the cost of the watcher thread stays where it was for
+/// every ordinary window. Public, and taking the content as a closure, so that a test can drive the
+/// whole rule without a frame on the screen.
+pub fn program_is_excluded(
+    process: Option<&str>,
+    content: impl FnOnce() -> Option<String>,
+) -> bool {
+    let Some(process) = process else {
+        return false;
+    };
+
+    if is_excluded_name(process) {
+        return true;
+    }
+
+    is_frame_host(process) && content().as_deref().is_some_and(is_excluded_name)
 }
 
 /// Whether a bare executable name is one of [`CREDENTIAL_PROCESSES`].

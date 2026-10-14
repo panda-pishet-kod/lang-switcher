@@ -1796,8 +1796,9 @@ const DEMO_TIMER: usize = 1;
 /// killed on the way out of either. A second timer of this program, and the last.
 const CAPTURE_TIMER: usize = 2;
 
-/// How many seconds the wizard waits before it looks at the foreground window — FR-104.
-const CAPTURE_SECONDS: u32 = 5;
+// ⚠ `CAPTURE_SECONDS` stood here until task T-100-2. The five seconds are one number for the wizard
+// and for «Выбрать окно программы» of the settings window, and that number is
+// `guard::CAPTURE_SECONDS`, beside the one body of the capture.
 
 /// Which of the five windows this is. One of each at a time; asking for one that is already up
 /// raises it instead of making a second.
@@ -9453,7 +9454,7 @@ fn wizard_start_capture(hwnd: HWND) {
                 return false;
             }
 
-            wizard.countdown = CAPTURE_SECONDS;
+            wizard.countdown = crate::guard::CAPTURE_SECONDS;
             true
         })
     };
@@ -9517,38 +9518,24 @@ fn wizard_tick(hwnd: HWND) {
 ///
 /// ⛔ **The window title is never read.** FR-104 says so in as many words and the reason is in
 /// the note beside the button: a title carries the name of a document, of a message, of a page,
-/// and none of that is any of this program's business. `GetWindowTextW` is not called here.
+/// and none of that is any of this program's business. The body that reads the window holds no
+/// call that could read a title, and a sweep of `tests\guard.rs` keeps it so.
 ///
 /// The wizard's own window is skipped: a person who presses the button and does not switch
 /// anywhere would otherwise be told that the program they have trouble with is this one.
+///
+/// ⭐ **The reading is not here since task T-100-2.** It is `guard::capture_window`, the one body
+/// the wizard and «Выбрать окно программы» of the settings window share; what stays here is the
+/// wizard's own half — which window is its own, and how the two names are written in the field.
+/// Решение 172.21: a Store program is named by the program inside its frame, as the settings window
+/// names it (`CalculatorApp.exe`, not `ApplicationFrameHost.exe`); every other window, as before.
 fn capture_foreground(mine: HWND) -> String {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-
-    // SAFETY: a plain query; the handle it answers is borrowed and not freed.
-    let front = unsafe { GetForegroundWindow() };
-
-    if front.is_invalid() || front == mine {
+    let Some(found) = crate::guard::capture_foreground(crate::guard::Asker::Window(mine)) else {
         return String::new();
-    }
-
-    // ⚠ **The name of a process is read by module `guard` and by nothing else** — the rule
-    // `tests\guard.rs` holds the whole program to, and it caught this function the first time
-    // it was written: the call that reads an image name had been spelled out here, in a module
-    // that has no business making it. The chain below is the one FR-84 already uses, borrowed
-    // rather than copied (§6.2). ⚠ The sweep reads **prose as well as code**, so the name of
-    // that call is deliberately not written in this comment either.
-    let class = crate::guard::class_name(front);
-
-    let mut pid: u32 = 0;
-
-    // SAFETY: `front` is the live window and `pid` a live local the call fills.
-    unsafe { GetWindowThreadProcessId(front, Some(&mut pid)) };
-
-    let name = if pid == 0 {
-        String::new()
-    } else {
-        crate::guard::process_file_name(pid).unwrap_or_default()
     };
+
+    let name = found.process.unwrap_or_default();
+    let class = found.class;
 
     match (name.is_empty(), class.is_empty()) {
         (true, true) => String::new(),

@@ -1921,3 +1921,272 @@ fn a_return_to_the_desktop_asks_for_a_probe_only_when_a_window_is_in_front() {
 
     stage::clear_probe_requests();
 }
+
+// ---------------------------------------------------------------------------------------
+// The program a person brings forward — FR-104 and FR-84 (task T-100-2, решения 172.20, 172.21)
+// ---------------------------------------------------------------------------------------
+
+/// The executable name of this test process, read the way module `guard` reads every name.
+fn own_executable_name() -> String {
+    guard::process_file_name(std::process::id()).expect("this process may read its own name")
+}
+
+/// The text of a top-level item of `source` — from `signature` to the closing brace at column
+/// zero. The sources of this file are normalised to `\n` ([`read_normalised`]).
+fn top_level_body<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source
+        .find(signature)
+        .unwrap_or_else(|| panic!("`{signature}` must be in the source"));
+    let end = source[start..]
+        .find("\n}\n")
+        .map_or(source.len(), |at| start + at + 3);
+
+    &source[start..end]
+}
+
+/// **Task T-100-2 — the one body of the capture skips its asker and names a foreign program.**
+///
+/// The capture is asked about windows whose answer is known without the screen: windows of this
+/// test process, and the task bar of the shell (`Shell_TrayWnd`, a window of `explorer.exe`).
+/// Nothing is brought forward and no input is made.
+///
+/// * the exclusions of FR-84 ask as [`guard::Asker::Process`]: a window of this process is no
+///   answer — the settings window, the menu of the tray, a letter in front are «Окно не выбрано»;
+/// * the wizard of FR-104 asks as [`guard::Asker::Window`]: its own window is no answer, and
+///   another window of this process is one, exactly as it always was;
+/// * a foreign window answers with the executable name of its process and its class — and there
+///   is no third field in [`guard::Captured`] for a title to travel in.
+///
+/// ⚠ «Красное до» (приём Э20): the new signature over the wizard's logic, which skipped no window
+/// for `Asker::Process`.
+#[test]
+fn the_capture_skips_its_asker_and_names_a_foreign_program() {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    use windows::core::PCWSTR;
+
+    let own = Editor::new(false);
+    let other = Editor::new(false);
+
+    let as_exclusions = guard::capture_window(own.0, guard::Asker::Process);
+    println!("a window of this process, asked by the exclusions: {as_exclusions:?}");
+    assert_eq!(
+        as_exclusions, None,
+        "T-100-2: a window of this program is no answer to the exclusions — «Окно не выбрано»"
+    );
+
+    assert_eq!(
+        guard::capture_window(own.0, guard::Asker::Window(own.0)),
+        None,
+        "FR-104: the wizard's own window is no answer"
+    );
+
+    let as_wizard = guard::capture_window(own.0, guard::Asker::Window(other.0));
+    assert!(
+        as_wizard.as_ref().is_some_and(|found| {
+            found.process.as_deref() == Some(own_executable_name().as_str())
+                && guard::class_is_edit(&found.class)
+        }),
+        "FR-104: the wizard skips its own window and no other — {as_wizard:?}"
+    );
+
+    // SAFETY: a class name and a null title — the documented way to ask by class alone; the call
+    // reads the window list of the desktop and keeps no pointer.
+    let tray = unsafe { FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) }
+        .expect("the task bar of the shell must be up on the desktop this test runs at");
+    let foreign = guard::capture_window(tray, guard::Asker::Process);
+    println!("the task bar of the shell answers {foreign:?}");
+
+    assert!(
+        foreign.as_ref().is_some_and(|found| {
+            found
+                .process
+                .as_deref()
+                .is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
+                && found.class == "Shell_TrayWnd"
+        }),
+        "a foreign window is named by its process and its class — {foreign:?}"
+    );
+}
+
+/// **Решение 172.20 — the host of the Store frames is known by its executable name**, folded the
+/// way FR-84 folds every name: case, a path in front, spaces around.
+///
+/// ⚠ «Красное до»: step one of the task knew no frame at all.
+#[test]
+fn the_host_of_the_store_frames_is_known_by_its_name() {
+    for host in [
+        "ApplicationFrameHost.exe",
+        "applicationframehost.exe",
+        r"C:\Windows\System32\ApplicationFrameHost.exe",
+        "  APPLICATIONFRAMEHOST.EXE  ",
+    ] {
+        assert!(
+            guard::is_frame_host(host),
+            "172.20: «{host}» is the host of the Store frames"
+        );
+    }
+
+    for other in [
+        "CalculatorApp.exe",
+        "explorer.exe",
+        "ApplicationFrameHost.exe.bak",
+        "ApplicationFrameHost",
+        "",
+    ] {
+        assert!(
+            !guard::is_frame_host(other),
+            "«{other}» is not the host of the Store frames"
+        );
+    }
+}
+
+/// **Решение 172.20 — the verdict of FR-84 knows a Store program by the content of its frame.**
+///
+/// [`guard::program_is_excluded`] is the rule `determine` applies: the window's own process, and —
+/// for a frame of the shared host, and for nothing else — the program inside it. So excluding
+/// `CalculatorApp.exe` excludes the calculator; a list naming the host itself (typed by hand
+/// before this stage) keeps excluding every frame it excluded; and the content is not even looked
+/// for behind an ordinary window, which is what keeps the watcher thread's cost where it was.
+///
+/// ⚠ «Красное до»: step one of the task answered from the window's own process alone.
+#[test]
+fn the_verdict_of_fr84_knows_a_store_program_by_the_content_of_its_frame() {
+    let _state = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let host = "ApplicationFrameHost.exe";
+    let calculator = || Some("CalculatorApp.exe".to_owned());
+    let unknown = || None;
+    let never = || -> Option<String> { panic!("the content of an ordinary window is looked for") };
+
+    guard::publish_exclusions(&["CalculatorApp.exe".to_owned()]);
+
+    assert!(
+        guard::program_is_excluded(Some(host), calculator),
+        "172.20: [CalculatorApp.exe] excludes the calculator in its frame"
+    );
+    assert!(
+        !guard::program_is_excluded(Some(host), || Some("SystemSettings.exe".to_owned())),
+        "…and not another Store program in a frame of the same host"
+    );
+    assert!(
+        !guard::program_is_excluded(Some(host), unknown),
+        "a frame whose program cannot be told is not excluded by the program's name"
+    );
+    assert!(
+        guard::program_is_excluded(Some("CalculatorApp.exe"), never),
+        "a window of the program itself is excluded without looking for a frame"
+    );
+    assert!(
+        !guard::program_is_excluded(Some("notepad.exe"), never),
+        "an ordinary window is answered from its own process, and nothing is looked for behind it"
+    );
+    assert!(
+        !guard::program_is_excluded(None, never),
+        "an unreadable name is «not excluded», as it always was"
+    );
+
+    guard::publish_exclusions(&[host.to_owned()]);
+
+    assert!(
+        guard::program_is_excluded(Some(host), calculator),
+        "a list that names the host keeps excluding every frame of it"
+    );
+
+    guard::publish_exclusions(&[]);
+}
+
+/// **Task T-100-2 — the capture is one body, in module `guard`, and it reads no title; the
+/// verdict of FR-84 asks the same rule.**
+///
+/// * the wizard of FR-104 no longer carries a chain of its own in `src\letters.rs` —
+///   `GetWindowThreadProcessId`, `process_file_name`, `class_name` — and asks
+///   `guard::capture_foreground` once;
+/// * one number of seconds: `src\letters.rs` declares no `CAPTURE_SECONDS` of its own;
+/// * the body in `guard` calls no reader of a window's title — FR-104;
+/// * `determine` answers FR-84 through [`guard::program_is_excluded`], with the content of a frame
+///   looked for by the same `frame_content_name` the capture uses — решение 172.20, one rule.
+///
+/// ⚠ Controls: the detector of a title reader finds one planted into the body, and the detector of
+/// a chain finds the wizard's chain of `e99` planted back.
+#[test]
+fn the_capture_is_one_body_in_guard_and_reads_no_title() {
+    const TITLE_READERS: [&str; 4] = [
+        "GetWindowTextW",
+        "GetWindowTextLengthW",
+        "WM_GETTEXT",
+        "InternalGetWindowText",
+    ];
+    const CHAIN: [&str; 3] = [
+        "GetWindowThreadProcessId(",
+        "process_file_name(",
+        "class_name(",
+    ];
+
+    let reads_a_title = |text: &str| {
+        TITLE_READERS
+            .iter()
+            .any(|reader| !code_lines_with(text, reader).is_empty())
+    };
+    let chain_in = |text: &str| -> Vec<String> {
+        CHAIN
+            .iter()
+            .flat_map(|link| code_lines_with(text, link))
+            .map(|(line, code)| format!("{line}: {code}"))
+            .collect()
+    };
+
+    // The wizard first: the move out of it is the substance of the task.
+    let letters = source_of("letters.rs");
+    let left_behind = chain_in(&letters);
+    assert!(
+        left_behind.is_empty(),
+        "T-100-2: src\\letters.rs carries a capture chain of its own: {left_behind:#?}"
+    );
+    assert_eq!(
+        code_lines_with(&letters, "guard::capture_foreground(").len(),
+        1,
+        "the wizard asks the one body, once"
+    );
+    assert!(
+        code_lines_with(&letters, "const CAPTURE_SECONDS").is_empty(),
+        "one number of seconds — guard::CAPTURE_SECONDS"
+    );
+
+    let guard_source = source_of("guard.rs");
+    let body = [
+        top_level_body(&guard_source, "pub fn capture_window("),
+        top_level_body(&guard_source, "fn frame_content_name("),
+    ]
+    .concat();
+    assert!(
+        !reads_a_title(&body),
+        "FR-104: the capture reads no title:\n{body}"
+    );
+    assert!(
+        !code_lines_with(&body, "frame_content_name(window)").is_empty(),
+        "172.20: the capture asks for the content of a frame"
+    );
+
+    let determine = top_level_body(&guard_source, "fn determine(");
+    assert!(
+        !code_lines_with(determine, "program_is_excluded(").is_empty()
+            && !code_lines_with(determine, "frame_content_name(window)").is_empty(),
+        "172.20: determine answers FR-84 through the one rule and the one look into a frame"
+    );
+
+    // Controls.
+    let planted =
+        format!("{body}\n    let _ = unsafe {{ GetWindowTextW(window, &mut buffer) }};\n");
+    assert!(
+        reads_a_title(&planted),
+        "the detector does not see a title reader — it cannot fail"
+    );
+    let chain_of_e99 = "    let class = crate::guard::class_name(front);\n    \
+                        unsafe { GetWindowThreadProcessId(front, Some(&mut pid)) };\n    \
+                        crate::guard::process_file_name(pid).unwrap_or_default()\n";
+    assert_eq!(
+        chain_in(chain_of_e99).len(),
+        3,
+        "the detector does not see the chain of e99 — it cannot fail"
+    );
+}
