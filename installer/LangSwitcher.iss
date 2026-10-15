@@ -67,14 +67,16 @@
 ; Decision 120.4 turned autostart on by default and made the program carry it
 ; out, so the task, its [Registry] entry and the knob are gone together.
 
+; One name, the name of the program, everywhere: the wizard, the properties of the installer file,
+; the Start menu folder, the entry in Apps & features, the shortcuts -- the heading of the program's
+; notifications is the name of its shortcut -- and the autostart value below (decision 173.1 of the
+; owner, stage E101).  From e90 to e100 the installer added the platform to the name where it stood
+; alone (decision 149.2, done by 153.4); 173.1 cancelled that.  AppId is not touched, so an update
+; is still the same application.
 #define AppName        "Lang Switcher"
-; The name with the platform, where the name stands alone and could be taken for a namesake
-; (decision 149.2, backlog Q-149-1, done in stage E90 by decision 153.4): the wizard, the
-; properties of the installer file, the Start menu folder and the entry in Apps & features.
-; AppName itself stays the short name of the PROGRAM: the shortcuts are named by it -- and the
-; heading of the program's notifications is the name of its shortcut -- and so is the autostart
-; value below.  AppId is not touched, so an update is still the same application.
-#define AppTitle       "Lang Switcher for Windows"
+; The name of the Start menu folder of e90...e100, with the platform: kept only for the cleanup in
+; [InstallDelete].  tests\installer_name.rs allows the old name on this line and on no other.
+#define GroupNameUntilE100 "Lang Switcher for Windows"
 #define AppVersion     "0.100.0"
 #define AppPublisher   "Panda Koder"
 #define AppExeName     "LangSwitcher.exe"
@@ -130,21 +132,39 @@
 ; found nor asked.  tests\installer_uninstall.rs keeps the two names together.
 #define ProductWindowClass "LangSwitcher.Hidden"
 
+; The files the program writes into %APPDATA%\Lang_Switcher, by the names the uninstaller removes
+; them (decisions 177.1 and 177.20.1, the end of this script).  EACH MUST MATCH THE PRODUCT
+; LITERALLY -- tests\installer_uninstall.rs reads both sides:
+;   DataFolder    src\lib.rs       CONFIG_DIR_NAME   = "Lang_Switcher"
+;   ConfigName    src\settings.rs  CONFIG_FILE_NAME  = "config.toml"
+;   BadSuffix     src\settings.rs  QUARANTINE_SUFFIX = ".bad"
+;   JournalName   src\diag.rs      LOG_FILE_NAME     = "diag.log"
+;   AppealStem,   src\letters.rs   report::file_name: an appeal saved from the wizard "Write to the
+;   AppealStemRu                   author" is <stem>-<date>.txt, its stem "report", or the Russian
+;                                  word for it when the interface is Russian -- written here as
+;                                  Pascal character codes, so that this file stays ASCII.
+#define DataFolder   "Lang_Switcher"
+#define ConfigName   "config.toml"
+#define BadSuffix    ".bad"
+#define JournalName  "diag.log"
+#define AppealStem   "report"
+#define AppealStemRu "#$043E#$0431#$0440#$0430#$0449#$0435#$043D#$0438#$0435"
+
 [Setup]
 ; AppId is the identity Windows matches an upgrade against.  It is a constant and
 ; must never change: a new AppId turns every future update into a second parallel
 ; installation with its own uninstall entry.
 AppId={{1A22BDD8-916A-490E-8269-66869A611388}
-AppName={#AppTitle}
+AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName={#AppTitle} {#AppVersion}
+AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
 VersionInfoVersion=0.100.0.0
 VersionInfoCompany={#AppPublisher}
-VersionInfoProductName={#AppTitle}
+VersionInfoProductName={#AppName}
 VersionInfoProductVersion=0.100.0.0
-VersionInfoDescription={#AppTitle} Setup
+VersionInfoDescription={#AppName} Setup
 VersionInfoCopyright={#AppCopyright}
 
 ; Section 8.4: install into %ProgramFiles% with a single elevation.  admin asks
@@ -166,10 +186,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; 64-bit Program Files even in a 32-bit install mode, so the path cannot drift.
 DefaultDirName={commonpf64}\Lang_Switcher
 DisableDirPage=yes
-DefaultGroupName={#AppTitle}
+DefaultGroupName={#AppName}
 ; Inno Setup would otherwise reuse the Start menu folder of the installed version on an update,
-; and the folder "Lang Switcher" of every installation before e90 would never get the new name.
-; The old folder itself is removed by [InstallDelete] below.
+; and the folder of e90...e100 (GroupNameUntilE100) would keep its name.  The old folder itself is
+; removed by [InstallDelete] below.
 UsePreviousGroup=no
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
@@ -187,7 +207,7 @@ CloseApplicationsFilter=*.exe
 RestartApplications=no
 
 Uninstallable=yes
-UninstallDisplayName={#AppTitle}
+UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupIconFile={#IconFile}
 
@@ -287,10 +307,17 @@ Source: "art\logo-dark-175.png"; Flags: dontcopy
 Source: "art\logo-dark-200.png"; Flags: dontcopy
 
 [InstallDelete]
-; The Start menu folder of the versions before e90 was named "Lang Switcher" (the short name);
-; since e90 it is "Lang Switcher for Windows".  Without this line an update would leave the old
-; folder and its two shortcuts behind, beside the new ones.  {autoprograms} is the all-users Start
-; menu here, because Setup runs elevated (PrivilegesRequired=admin).
+; The Start menu folder has had two names: "Lang Switcher" (AppName) before e90 and again since
+; e101 (decision 173.1), and the name with the platform, GroupNameUntilE100, from e90 to e100.
+; Both folders go here, whichever version is installed: without the first line an update from
+; e90...e100 would leave the folder of the old name and its two shortcuts behind, beside the new
+; ones.  The second line removes the folder this installer is about to fill -- on purpose: Inno
+; processes [InstallDelete] as the first step of the installation, before [Files] and [Icons] (the
+; help of Inno Setup 6.7, "Installation Order"), so [Icons] puts the folder back with its two
+; shortcuts, and an update from any version comes to one folder of the one name.
+; {autoprograms} is the all-users Start menu here, because Setup runs elevated
+; (PrivilegesRequired=admin).
+Type: filesandordirs; Name: "{autoprograms}\{#GroupNameUntilE100}"
 Type: filesandordirs; Name: "{autoprograms}\{#AppName}"
 
 [Icons]
@@ -303,7 +330,8 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 ; (settings.rs, remove_abandoned_temporaries), with one difference: an Inno mask cannot say
 ; "digits", so here the middle is any text -- nothing but this program writes names of that
 ; shape into its own folder.  config.toml.bad, the kept copy of an unreadable configuration,
-; does not match and stays; config.toml itself goes only on an explicit yes (the [Code] below).
+; does not match: it goes, with config.toml, only on an explicit yes, and the journal goes always
+; (the [Code] at the end of this script).
 ; {userappdata} is the profile of the account the uninstaller runs as -- the same caveat as the
 ; HKCU value in CurUninstallStepChanged.
 Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
@@ -762,7 +790,7 @@ begin
   Log('Lang Switcher: the program did not close by itself; the person is asked');
   while CheckForMutexes('{#ProductMutex}') do
   begin
-    if SuppressibleMsgBox(FmtMessage(SetupMessage(msgUninstallAppRunningError), ['{#AppTitle}']),
+    if SuppressibleMsgBox(FmtMessage(SetupMessage(msgUninstallAppRunningError), ['{#AppName}']),
          mbError, MB_OKCANCEL, IDCANCEL) <> IDOK then
     begin
       Log('Lang Switcher: the uninstall is cancelled while the program runs; nothing was removed');
@@ -828,8 +856,56 @@ begin
   end;
 end;
 
+(* ---------------------------------------------------------------------------
+  Uninstall: the files of the program in its folder of the profile (decisions
+  177.1 and 177.20.1 of the owner, backlog Q-171-1, stage E101).  A comment of
+  this kind and not in braces: the constants below carry braces.
+
+  The journal goes ALWAYS -- it is not a setting, nobody is asked about it, and a
+  silent uninstall removes it too -- and with it the temporaries of its write,
+  JournalName.<pid>.tmp, which a write interrupted before its rename leaves
+  behind and nothing else sweeps.  The settings, the kept copy of unreadable
+  settings and the appeals saved from the wizard "Write to the author" go only
+  on an explicit yes (CurUninstallStepChanged below), and then the folder goes
+  if nothing is left in it.  Until e100 the yes removed ConfigName alone, and
+  the folder stayed with the journal in it.
+
+  An implementation with an event attribute: Inno calls it BEFORE the main
+  CurUninstallStepChanged (the help, "Event Attributes"), so the journal is gone
+  by the time the main one asks about the settings and removes the folder.
+  --------------------------------------------------------------------------- *)
+procedure DeleteDataFile(const FileName, What: String);
+begin
+  if not FileExists(FileName) then
+    Log('Lang Switcher: ' + What + ': none (' + FileName + ')')
+  else if DeleteFile(FileName) then
+    Log('Lang Switcher: ' + What + ': deleted (' + FileName + ')')
+  else
+    Log('Lang Switcher: ' + What + ': could NOT be deleted (' + FileName + ')');
+end;
+
+procedure DeleteDataFiles(const Folder, Mask, What: String);
+begin
+  if DelTree(Folder + '\' + Mask, False, True, False) then
+    Log('Lang Switcher: ' + What + ' (' + Mask + '): every match deleted, if there was any')
+  else
+    Log('Lang Switcher: ' + What + ' (' + Mask + '): NOT every match could be deleted');
+end;
+
+<event('CurUninstallStepChanged')>
+procedure CurUninstallJournal(CurUninstallStep: TUninstallStep);
+var
+  Folder: String;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  Folder := ExpandConstant('{userappdata}\{#DataFolder}');
+  DeleteDataFile(Folder + '\{#JournalName}', 'the journal');
+  DeleteDataFiles(Folder, '{#JournalName}.*.tmp', 'the temporaries of the journal');
+end;
+
 { ---------------------------------------------------------------------------
-  Uninstall: leave nothing behind EXCEPT the user's configuration.
+  Uninstall: leave nothing behind EXCEPT the user's settings.
 
   1. The autostart value goes unconditionally.  Its one writer is the product
      itself (decision 120.4): every start makes HKCU\...\Run agree with the
@@ -841,20 +917,28 @@ end;
      scheduled task -- sees another HKCU and leaves the person's value alone;
      unticking autostart in the product before uninstalling removes it then.
 
-  2. %APPDATA%\Lang_Switcher\config.toml is DELETED ONLY ON AN EXPLICIT YES, AND
-     ONLY WHEN A HUMAN CAN ANSWER.  Section 8.4 says "removed on confirmation";
-     /VERYSILENT /SUPPRESSMSGBOXES cannot obtain confirmation, and the absence of
-     an answer is not consent.  Two independent guards, on purpose:
+  2. The settings in %APPDATA%\Lang_Switcher -- config.toml, the kept copy of
+     an unreadable one, config.toml.bad, and the appeals saved from the wizard
+     "Write to the author" -- are DELETED ONLY ON AN EXPLICIT YES, AND ONLY WHEN
+     A HUMAN CAN ANSWER (decision 177.20.1 adds the copy and the appeals).
+     Section 8.4 says "removed on confirmation"; /VERYSILENT /SUPPRESSMSGBOXES
+     cannot obtain confirmation, and the absence of an answer is not consent.
+     Two independent guards, on purpose:
        - UninstallSilent returns True for /SILENT and /VERYSILENT, and the question
          is not even asked;
        - SuppressibleMsgBox returns its DEFAULT answer, IDNO here, whenever
          /SUPPRESSMSGBOXES is in force.
-     Either guard alone keeps the file.  It takes a human clicking Yes to remove
-     it, which is what section 8.4 asked for.
+     Either guard alone keeps the files.  It takes a human clicking Yes to remove
+     them, which is what section 8.4 asked for.  The question is asked when
+     either settings file is there; the field shows the one that is.
+
+  3. Then the folder goes, if nothing is left in it: the journal is already gone
+     (CurUninstallJournal above), so after a yes, or with no settings at all,
+     nothing of the program stays in the profile.
   --------------------------------------------------------------------------- }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  ConfigFile: String;
+  Folder, ConfigFile, BadFile, Shown: String;
 #ifdef DIAG
   Probe: String;
 #endif
@@ -870,28 +954,37 @@ begin
       Log('DIAG post-uninstall HKCU = gone');
 #endif
 
-    ConfigFile := ExpandConstant('{userappdata}\Lang_Switcher\config.toml');
-    if not FileExists(ConfigFile) then
-      Log('Configuration file not present, nothing to ask about: ' + ConfigFile)
+    Folder := ExpandConstant('{userappdata}\{#DataFolder}');
+    ConfigFile := Folder + '\{#ConfigName}';
+    BadFile := ConfigFile + '{#BadSuffix}';
+    if FileExists(ConfigFile) then
+      Shown := ConfigFile
     else
+      Shown := BadFile;
+    if not (FileExists(ConfigFile) or FileExists(BadFile)) then
+      Log('No settings file present, nothing to ask about: ' + ConfigFile)
+    else if UninstallSilent() then
+      Log('Silent uninstall: the settings are KEPT. Silence is not consent.')
+    else if SuppressibleMsgBox(
+         CustomMessage('RemoveSettingsQuestion') + #13#10 + #13#10 +
+         Shown + #13#10 + #13#10 +
+         CustomMessage('RemoveSettingsKeep'),
+         mbConfirmation, MB_YESNO, IDNO) = IDYES then
     begin
-      if UninstallSilent() then
-        Log('Silent uninstall: the configuration file is KEPT. Silence is not consent.')
-      else
-      begin
-        if SuppressibleMsgBox(
-             CustomMessage('RemoveSettingsQuestion') + #13#10 + #13#10 +
-             ConfigFile + #13#10 + #13#10 +
-             CustomMessage('RemoveSettingsKeep'),
-             mbConfirmation, MB_YESNO, IDNO) = IDYES then
-        begin
-          DeleteFile(ConfigFile);
-          RemoveDir(ExpandConstant('{userappdata}\Lang_Switcher'));
-          Log('The user confirmed: the configuration file was deleted.');
-        end
-        else
-          Log('The user declined (or msgboxes are suppressed): the configuration file is KEPT.');
-      end;
-    end;
+      DeleteDataFile(ConfigFile, 'the settings');
+      DeleteDataFile(BadFile, 'the kept copy of unreadable settings');
+      DeleteDataFiles(Folder, '{#AppealStem}-*.txt', 'the saved appeals');
+      DeleteDataFiles(Folder, {#AppealStemRu} + '-*.txt', 'the saved appeals in Russian');
+      Log('The user confirmed: the settings and the saved appeals were deleted.');
+    end
+    else
+      Log('The user declined (or msgboxes are suppressed): the settings and the saved appeals are KEPT.');
+
+    if not DirExists(Folder) then
+      Log('Lang Switcher: no folder ' + Folder)
+    else if RemoveDir(Folder) then
+      Log('Lang Switcher: the folder ' + Folder + ' was empty and is removed')
+    else
+      Log('Lang Switcher: the folder ' + Folder + ' is kept: something is left in it');
   end;
 end;
