@@ -82,7 +82,8 @@
     Cert:\CurrentUser\My and NOT exportable, so there is no .pfx and none can be made. The
     command needs no administrator rights -- established by the setup stage, TOOLCHAIN.md
     section 5. Since stage E91 (decision 155.4) the signature also names the program and its
-    page: /d "Lang Switcher for Windows" and /du https://panda-pishet-kod.dev/langswitcher/ --
+    page: /d "Lang Switcher" and /du https://panda-pishet-kod.dev/langswitcher/ (the name
+    without the platform since stage E101, decision 173.1; the UAC prompt shows it) --
     the address is links::PROGRAM_URL of src\letters.rs, so gate 3 of verify-perimeter.ps1,
     which reads the signed file, finds it declared.
 
@@ -130,7 +131,7 @@ param(
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # What the signature says the file is and where it comes from (/d and /du of signtool,
     # decision 155.4). The address must be one src\letters.rs declares: see the header.
-    [string]$SignDescription = 'Lang Switcher for Windows',
+    [string]$SignDescription = 'Lang Switcher',
     [string]$SignUrl = 'https://panda-pishet-kod.dev/langswitcher/',
     # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
     # verify-perimeter.ps1, which turns it into the growth line decision 106.2 asks every

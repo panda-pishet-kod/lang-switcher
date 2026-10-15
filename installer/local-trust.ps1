@@ -19,12 +19,15 @@
                  signature is trusted here (the author's own machine, or a real certificate one
                  day), nothing is created.
       cleanup    a local certificate of an earlier installation is removed: the one named by
-                 LangSwitcher-local.cer in the program folder and any certificate with the
-                 local subject, from LocalMachine\Root and LocalMachine\My (with its key).
-                 Done in every branch: the base image or the author's signature needs none.
-      create     New-SelfSignedCertificate in LocalMachine\My: CN=Lang Switcher for Windows
-                 (local), code signing only, digital signature only, no basic constraints (not
-                 a certification authority), RSA 3072, SHA-256, 30 years, key not exportable.
+                 LangSwitcher-local.cer in the program folder and any certificate with either
+                 local subject -- the current one, or the one with the platform that e91...e100
+                 gave it (stage E101, decision 173.1) -- from LocalMachine\Root and
+                 LocalMachine\My (with its key); so an update over e91...e100 removes the old
+                 certificate even when its .cer is gone. Done in every branch: the base image or
+                 the author's signature needs none.
+      create     New-SelfSignedCertificate in LocalMachine\My: CN=Lang Switcher (local), code
+                 signing only, digital signature only, no basic constraints (not a certification
+                 authority), RSA 3072, SHA-256, 30 years, key not exportable.
       export     its public part, DER, to <program folder>\LangSwitcher-local.cer -- for the
                  uninstaller and for the curious; checked to carry no key.
       trust      the public part into LocalMachine\Root, and nowhere else.
@@ -77,7 +80,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$LocalSubject = 'CN=Lang Switcher for Windows (local)'
+$LocalSubject = 'CN=Lang Switcher (local)'
+# The subject e91...e100 gave the local certificate, with the platform in the name: kept only for the
+# cleanup (decision 173.1). tests\installer_name.rs allows the old name on this line and on no other.
+$LocalSubjectUntilE100 = 'CN=Lang Switcher for Windows (local)'
+$LocalSubjects = @($LocalSubject, $LocalSubjectUntilE100)
 $CodeSigning = '1.3.6.1.5.5.7.3.3'
 $CerName = 'LangSwitcher-local.cer'
 $CerPath = Join-Path $AppDir $CerName
@@ -113,7 +120,7 @@ function Get-MachineStore([string]$Name, [string]$Mode) {
     return $store
 }
 
-# Thumbprints of one machine store, by thumbprint or by the local subject. Returned unrolled, and
+# Thumbprints of one machine store, by thumbprint or by either local subject. Returned unrolled, and
 # every caller wraps the call in @(): measured on 5.1, @() around a function that returns an
 # array through the comma operator counts ONE element even when the array is empty.
 function Find-InStore([string]$StoreName, [string]$Thumbprint) {
@@ -121,7 +128,7 @@ function Find-InStore([string]$StoreName, [string]$Thumbprint) {
     $store = Get-MachineStore $StoreName 'ReadOnly'
     try {
         foreach ($c in $store.Certificates) {
-            if (($Thumbprint -and $c.Thumbprint -eq $Thumbprint) -or ((-not $Thumbprint) -and $c.Subject -eq $LocalSubject)) {
+            if (($Thumbprint -and $c.Thumbprint -eq $Thumbprint) -or ((-not $Thumbprint) -and ($LocalSubjects -contains $c.Subject))) {
                 $found += $c.Thumbprint
             }
         }
@@ -262,7 +269,7 @@ try {
     try {
         Enter-Step $step
         if (-not (Get-Command New-SelfSignedCertificate -ErrorAction SilentlyContinue)) { throw 'the cmdlet New-SelfSignedCertificate is not available' }
-        $cert = New-SelfSignedCertificate -Type Custom -Subject $LocalSubject -FriendlyName 'Lang Switcher for Windows (local)' `
+        $cert = New-SelfSignedCertificate -Type Custom -Subject $LocalSubject -FriendlyName 'Lang Switcher (local)' `
             -CertStoreLocation 'Cert:\LocalMachine\My' -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
             -KeyUsage DigitalSignature -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(30) `
             -TextExtension @('2.5.29.37={text}' + $CodeSigning)

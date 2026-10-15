@@ -104,8 +104,9 @@ param(
     [string]$SetupArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # What the signature of the installer says it is and where it comes from (/d and /du,
-    # decision 155.4) -- the same words as the signature of the program (release.ps1).
-    [string]$SignDescription = 'Lang Switcher for Windows',
+    # decision 155.4) -- the same words as the signature of the program (release.ps1): the name
+    # of the program alone, without the platform (decision 173.1, stage E101).
+    [string]$SignDescription = 'Lang Switcher',
     [string]$SignUrl = 'https://panda-pishet-kod.dev/langswitcher/',
     # The Inno Setup 6 compiler. Empty means LANGSW_ISCC, PATH, then Program Files.
     [string]$Iscc = '',
