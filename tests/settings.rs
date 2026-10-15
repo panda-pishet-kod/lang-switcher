@@ -28390,8 +28390,8 @@ struct PickPanel(windows::Win32::Foundation::HWND);
 impl PickPanel {
     fn new() -> Self {
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, HMENU, LBS_HASSTRINGS, LBS_NOTIFY, WINDOW_EX_STYLE, WINDOW_STYLE,
-            WS_CHILD, WS_POPUP,
+            CreateWindowExW, HMENU, LBS_HASSTRINGS, LBS_MULTIPLESEL, LBS_NOTIFY, WINDOW_EX_STYLE,
+            WINDOW_STYLE, WS_CHILD, WS_POPUP,
         };
         use windows::core::{PCWSTR, w};
 
@@ -28415,7 +28415,10 @@ impl PickPanel {
         .expect("a hidden popup must be creatable");
         let panel = Self(popup);
 
-        let list_style = WINDOW_STYLE(WS_CHILD.0 | LBS_HASSTRINGS as u32 | LBS_NOTIFY as u32);
+        // The list as the template has it since 172.24: several rows, each taken by a click.
+        let list_style = WINDOW_STYLE(
+            WS_CHILD.0 | LBS_HASSTRINGS as u32 | LBS_NOTIFY as u32 | LBS_MULTIPLESEL as u32,
+        );
 
         for (class, id, style) in [
             (w!("LISTBOX"), 1050, list_style),
@@ -28477,15 +28480,47 @@ impl PickPanel {
         }
     }
 
-    /// The selected row of the list, `-1` for none.
-    fn selected(&self) -> isize {
+    /// The selected rows of the list, in order — the list takes several since 172.24.
+    fn selected(&self) -> Vec<i32> {
         use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, LB_GETCURSEL, SendMessageW};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetDlgItem, LB_GETSELCOUNT, LB_GETSELITEMS, SendMessageW,
+        };
+
+        // SAFETY: as in `rows`; the array outlives the call and holds the count just asked.
+        unsafe {
+            let list = GetDlgItem(Some(self.0), 1050).expect("the list");
+            let count = SendMessageW(list, LB_GETSELCOUNT, Some(WPARAM(0)), Some(LPARAM(0))).0;
+            let mut rows = vec![0i32; usize::try_from(count).unwrap_or(0)];
+            let got = SendMessageW(
+                list,
+                LB_GETSELITEMS,
+                Some(WPARAM(rows.len())),
+                Some(LPARAM(rows.as_mut_ptr() as isize)),
+            )
+            .0;
+            rows.truncate(usize::try_from(got).unwrap_or(0));
+            rows
+        }
+    }
+
+    /// Marks `rows` of the list as a click on each of them would.
+    fn select(&self, rows: &[usize]) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, LB_SETSEL, SendMessageW};
 
         // SAFETY: as in `rows`.
         unsafe {
             let list = GetDlgItem(Some(self.0), 1050).expect("the list");
-            SendMessageW(list, LB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0))).0
+
+            for row in rows {
+                SendMessageW(
+                    list,
+                    LB_SETSEL,
+                    Some(WPARAM(1)),
+                    Some(LPARAM(isize::try_from(*row).unwrap_or(-1))),
+                );
+            }
         }
     }
 
@@ -28555,10 +28590,13 @@ fn the_answer_of_the_pick_goes_into_the_list_and_under_the_button() {
     let panel = PickPanel::new();
     let names = vec!["game.exe".to_owned(), "Setup.EXE".to_owned()];
     panel.fill(&names);
+    // 172.24: rows the person marked by hand before the capture — the answer selects its own row
+    // and nothing else, so «Удалить» right after it takes exactly the row the line names.
+    panel.select(&[1]);
 
     settings::apply_exclusion_pick(panel.0, &Pick::Added("Telegram.exe".to_owned()));
     println!(
-        "added: rows {:?}, selected {}, «{}»",
+        "added: rows {:?}, selected {:?}, «{}»",
         panel.rows(),
         panel.selected(),
         settings::text_of(panel.0, 1055)
@@ -28568,7 +28606,7 @@ fn the_answer_of_the_pick_goes_into_the_list_and_under_the_button() {
         ["game.exe", "Setup.EXE", "Telegram.exe"],
         "the program goes into the list"
     );
-    assert_eq!(panel.selected(), 2, "and its row is selected");
+    assert_eq!(panel.selected(), [2], "and its row alone is selected");
     assert_eq!(settings::text_of(panel.0, 1055), "Добавлено: Telegram.exe");
 
     settings::apply_exclusion_pick(panel.0, &Pick::AlreadyListed(0, "game.exe".to_owned()));
@@ -28577,7 +28615,7 @@ fn the_answer_of_the_pick_goes_into_the_list_and_under_the_button() {
         3,
         "a program already listed is not listed twice"
     );
-    assert_eq!(panel.selected(), 0, "its own row is selected");
+    assert_eq!(panel.selected(), [0], "its own row alone is selected");
     assert_eq!(settings::text_of(panel.0, 1055), "Уже в списке: game.exe");
 
     for nothing in [Pick::NotPicked, Pick::Refused] {
@@ -28864,4 +28902,85 @@ fn the_dialog_counts_and_captures_where_it_must() {
         ceiling.contains("IDC_EXCLUSION_PICK"),
         "the ceiling darkens the button of the automatic way"
     );
+}
+
+/// **Task T-100-6, решение 172.24 — several exclusions are marked by clicks and «Удалить» takes
+/// them all at once.** The owner at the acceptance of 0.100.0: «возможность выбрать несколько
+/// установленных исключений щелчком мыши, чтобы можно было удалить сразу несколько пунктов».
+///
+/// * the list of the built template carries `LBS_MULTIPLESEL` (0x0008) — a click marks a row or
+///   takes the mark off, no key held — and **not** `LBS_EXTENDEDSEL` (0x0800), the Explorer way
+///   with `Ctrl` and `Shift` the owner did not choose;
+/// * on a panel of the test's own, `settings::remove_exclusion` takes every marked row and keeps
+///   every other in its order; with nothing marked it takes nothing; and the ceiling lights again.
+///
+/// ⚠ «Красное до» (приём Э20): the function of `e99` asked `LB_GETCURSEL`, which a list of several
+/// answers with the row of the caret — one row went, and not the ones marked.
+#[test]
+fn several_exclusions_are_marked_by_clicks_and_removed_at_once() {
+    const LBS_MULTIPLESEL: u32 = 0x0008;
+    const LBS_EXTENDEDSEL: u32 = 0x0800;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
+    let style = template.style_of(1050, "the exclusion list");
+
+    println!("the exclusion list (1050): style {style:#010x}");
+    assert_ne!(
+        style & LBS_MULTIPLESEL,
+        0,
+        "172.24: a click marks a row of the exclusion list — LBS_MULTIPLESEL; {style:#010x}"
+    );
+    assert_eq!(
+        style & LBS_EXTENDEDSEL,
+        0,
+        "172.24: not the Explorer way with Ctrl and Shift — no LBS_EXTENDEDSEL; {style:#010x}"
+    );
+
+    let panel = PickPanel::new();
+    let names: Vec<String> = ["a.exe", "b.exe", "c.exe", "d.exe", "e.exe"]
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    panel.fill(&names);
+
+    settings::remove_exclusion(panel.0);
+    assert_eq!(
+        panel.rows().len(),
+        5,
+        "with nothing marked «Удалить» takes nothing"
+    );
+
+    panel.select(&[1, 3]);
+    assert_eq!(panel.selected(), [1, 3], "the premise: two rows are marked");
+
+    settings::remove_exclusion(panel.0);
+    println!("after «Удалить»: rows {:?}", panel.rows());
+    assert_eq!(
+        panel.rows(),
+        ["a.exe", "c.exe", "e.exe"],
+        "172.24: «Удалить» takes every marked row and keeps the others in their order"
+    );
+
+    // And the ceiling lights again however many rows went in one press.
+    let full: Vec<String> = (0..lang_switcher::guard::MAX_EXCLUSIONS)
+        .map(|n| format!("program{n}.exe"))
+        .collect();
+    panel.fill(&full);
+    settings::show_exclusion_ceiling(panel.0);
+    assert!(!panel.enabled(1054), "the premise: the list is full");
+
+    panel.select(&[0, 5, 31]);
+    settings::remove_exclusion(panel.0);
+    assert_eq!(
+        panel.rows().len(),
+        lang_switcher::guard::MAX_EXCLUSIONS - 3,
+        "three marked rows go in one press"
+    );
+    for id in [1051, 1052, 1054] {
+        assert!(
+            panel.enabled(id),
+            "control {id} is lit again under the ceiling"
+        );
+    }
 }

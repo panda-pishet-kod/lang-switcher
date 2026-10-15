@@ -457,6 +457,10 @@
 // src\settings.rs) keep working unchanged -- an owner-drawn list box without that flag stores
 // no strings at all and would break FR-84.
 #define LBS_OWNERDRAWFIXED     0x0010
+// LBS_MULTIPLESEL -- task T-100-6, решение 172.24: a click on a row of the exclusion list marks
+// it or takes the mark off, and «Удалить» takes every marked row. A flag like the three above;
+// the value is the one winuser.h gives.
+#define LBS_MULTIPLESEL        0x0008
 #define LVS_REPORT             0x0001
 #define LVS_SINGLESEL          0x0004
 #define LVS_SHOWSELALWAYS      0x0008
@@ -831,7 +835,10 @@ BEGIN
     // them the room: 106 units are 9.6 rows of EXCLUSION_ROW_HEIGHT_DLU (11), the «≈10 строк вместо
     // 15» of the mock-up. The group, «Удалить», the field and «Добавить» keep their sizes, and the
     // manual way keeps its very places — the field, «Добавить» and the hint have not moved.
-    LISTBOX         IDC_EXCLUSIONS, 230, 20, 120, 106, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
+    // ⭐ **LBS_MULTIPLESEL — task T-100-6, решение 172.24**: a click marks a row or takes the mark
+    // off, no key held (with the keyboard — Space), and «Удалить» takes every marked row at once.
+    // Not LBS_EXTENDEDSEL, the Explorer way with Ctrl and Shift: the owner chose the plain click.
+    LISTBOX         IDC_EXCLUSIONS, 230, 20, 120, 106, LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_MULTIPLESEL | WS_VSCROLL | WS_TABSTOP | NOT WS_BORDER
     PUSHBUTTON      "Удалить", IDC_EXCLUSION_REMOVE, 356, 19, 60, 14, BS_OWNERDRAW
     // -- «Автоматически»: the word, the button the width of the row of the field and «Добавить»,
     // and the line under it. Four units of the window's air under the list; two between a word

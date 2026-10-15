@@ -122,21 +122,22 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetMessageTime,
     GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND,
     IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCURSEL, LBN_SETFOCUS,
-    LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW,
-    PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP,
-    SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE,
-    SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    ScrollWindowEx, SendDlgItemMessageW, SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX,
-    WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT,
-    WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE,
-    WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS, WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
+    LB_GETSELCOUNT, LB_GETSELITEMS, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCARETINDEX,
+    LB_SETSEL, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW,
+    MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
+    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
+    SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE,
+    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
+    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
+    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
+    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
+    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
+    WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC,
+    WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -14455,18 +14456,12 @@ pub fn apply_exclusion_pick(hwnd: HWND, pick: &ExclusionPick) {
             list_add(hwnd, IDC_EXCLUSIONS, name);
 
             let last = send_to(hwnd, IDC_EXCLUSIONS, LB_GETCOUNT, 0, 0) - 1;
-            send_to(
-                hwnd,
-                IDC_EXCLUSIONS,
-                LB_SETCURSEL,
-                usize::try_from(last).unwrap_or(0),
-                0,
-            );
+            select_only_row(hwnd, usize::try_from(last).unwrap_or(0));
 
             format_text(IDS_EXCLUSION_ADDED, &[name.as_str()])
         }
         ExclusionPick::AlreadyListed(row, name) => {
-            send_to(hwnd, IDC_EXCLUSIONS, LB_SETCURSEL, *row, 0);
+            select_only_row(hwnd, *row);
 
             format_text(IDS_EXCLUSION_ALREADY, &[name.as_str()])
         }
@@ -14598,26 +14593,77 @@ fn show_pick_rest_note(hwnd: HWND) {
     widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK_NOTE);
 }
 
-/// Removes the selected name from the exclusion list.
-fn remove_exclusion(hwnd: HWND) {
-    let selected = send_to(hwnd, IDC_EXCLUSIONS, LB_GETCURSEL, 0, 0);
+/// Removes **every marked name** from the exclusion list — «Удалить».
+///
+/// ⭐ **Several at once since task T-100-6, решение 172.24.** The list carries `LBS_MULTIPLESEL`: a
+/// click marks a row or takes the mark off, and the owner asked for «удалить сразу несколько
+/// пунктов, а не удалять по одному». A list of several does not answer `LB_GETCURSEL` with a
+/// selection at all — it answers with the row of the caret, marked or not — so the marks are read
+/// with `LB_GETSELITEMS`, and the rows go **from the bottom up**: an index above a deleted row
+/// would otherwise name its neighbour. Nothing marked is nothing to do.
+///
+/// Public for `tests\settings.rs`, which stands a panel of its own in for the dialog.
+pub fn remove_exclusion(hwnd: HWND) {
+    let count = send_to(hwnd, IDC_EXCLUSIONS, LB_GETSELCOUNT, 0, 0);
 
-    // `LB_ERR` is -1 and means nothing is selected.
-    if selected < 0 {
+    // `LB_ERR` (−1) answers a list of one selection, which this list is not; zero is nothing
+    // marked.
+    let Ok(count) = usize::try_from(count) else {
+        return;
+    };
+
+    if count == 0 {
         return;
     }
 
-    send_to(
+    let mut rows = vec![0i32; count];
+
+    // The marked rows in ascending order, at most `count` of them, into a buffer of exactly that
+    // many `INT`s — the documented shape of the message; the pointer is not kept by the control.
+    let got = send_to(
         hwnd,
         IDC_EXCLUSIONS,
-        LB_DELETESTRING,
-        usize::try_from(selected).unwrap_or(0),
-        0,
+        LB_GETSELITEMS,
+        count,
+        rows.as_mut_ptr() as isize,
     );
+
+    rows.truncate(usize::try_from(got).unwrap_or(0).min(count));
+
+    for row in rows.iter().rev() {
+        send_to(
+            hwnd,
+            IDC_EXCLUSIONS,
+            LB_DELETESTRING,
+            usize::try_from(*row).unwrap_or(usize::MAX),
+            0,
+        );
+    }
 
     // The other end of the pair — task T-42-7: a name taken out lights the field and the button
     // again, whatever the list stood at before.
     show_exclusion_ceiling(hwnd);
+}
+
+/// Marks `row` of the exclusion list and **only** it, and brings it into view — task T-100-6.
+///
+/// The answer of «Выбрать окно программы» selects the row it names; in a list of several marks
+/// (решение 172.24) that is three steps — every mark off, this row's on, the caret and the view to
+/// it — because `LB_SETCURSEL`, the one step of a single-selection list, is refused by this one.
+/// Marks the person made by hand before the capture go: «Удалить» right after the answer takes
+/// exactly the row the line under the button names.
+fn select_only_row(hwnd: HWND, row: usize) {
+    // `wParam` FALSE with `lParam` −1: every row loses its mark.
+    send_to(hwnd, IDC_EXCLUSIONS, LB_SETSEL, 0, -1);
+    send_to(
+        hwnd,
+        IDC_EXCLUSIONS,
+        LB_SETSEL,
+        1,
+        isize::try_from(row).unwrap_or(-1),
+    );
+    // `lParam` FALSE: the row is scrolled until it is fully visible.
+    send_to(hwnd, IDC_EXCLUSIONS, LB_SETCARETINDEX, row, 0);
 }
 
 // ---------------------------------------------------------------------------------------
