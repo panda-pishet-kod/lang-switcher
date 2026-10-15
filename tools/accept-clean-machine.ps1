@@ -35,25 +35,47 @@
          WITHOUT stopping it -- the way a person uninstalls (decisions 155.24, 155.25; rounds 1-4
          stop the program first): the uninstaller closes the program by itself (WM_ENDSESSION,
          the product's own way out, FR-83) and says so in its log, nobody is asked, exit 0, the
-         program has ended, no LangSwitcher process, no local certificate, no program folder.
+         program has ended, no LangSwitcher process, no local certificate, no program folder;
+      6a an UPDATE over the previous release (-PreviousSetup, stage E101): the previous installer
+         silently -- THE POSITIVE CONTROL of the round: exactly one local certificate of the name
+         e91...e100 gave it (with the platform), its Start menu folder with two shortcuts, its
+         entry in Apps, so the rows below are shown to fail on a machine that still has them --
+         then this installer silently over it: no certificate of the old name in LocalMachine\Root
+         or \My, exactly one of the new name, the program file the FULL image signed by it; the
+         Start menu folder of the old name gone, the folder "Lang Switcher" with exactly its two
+         shortcuts; one entry in Apps, by the AppId, named "Lang Switcher", with the version of
+         this installer; then the silent uninstall: no local certificate of either name, no
+         program folder, no entry, no Start menu folder;
+      6b the same update, but the public part of the old certificate (LangSwitcher-local.cer) is
+         deleted from the program folder first: the old certificate goes all the same, found by
+         its name (decision 173.1, installer\local-trust.ps1);
+      7  the tail of an uninstall (decisions 177.1, 177.20.1): silent install, then the files the
+         program writes are put into %APPDATA%\Lang_Switcher -- the settings, their kept copy,
+         the journal, a temporary of the journal, two saved appeals -- THE POSITIVE CONTROL: all
+         of them are there; the silent uninstall: the journal and its temporary are gone, the
+         settings, the copy and the appeals stay (silence is not consent); this script removes
+         what stays. 7b: only the journal and its temporary -- the silent uninstall leaves no
+         folder at all. A folder of the person found there before round 7 is moved aside for the
+         round and put back after it.
       Then: the events of Microsoft Defender and of Code Integrity since the start, and the
       summary. Exit 0 only if every row is PASS.
 
     WHAT IT DOES NOT SEE -- the hand of the person, by the memo reports\ACCEPT-CLEAN-MACHINE-E91.md:
     the yellow UAC prompt of a double-click install, the language of the wizard, the line on the
     Ready page, "Launch Lang Switcher" without an error window, the word converted in Notepad and
-    in Notepad run as administrator, the start after signing in again, /LANG=hebrew, and the
-    running program leaving the tray by itself when it is uninstalled from Apps.
+    in Notepad run as administrator, the start after signing in again, /LANG=hebrew, the running
+    program leaving the tray by itself when it is uninstalled from Apps, and the answer Yes to the
+    question about the settings, which leaves no folder %APPDATA%\Lang_Switcher.
 
     -DryRun prints the plan and the read-only measurements of step 0 and installs nothing, starts
     nothing, writes no file. It is the only way to run this script on the author's machine.
 
-    Exit codes: 0 every row PASS; 1 a row FAIL; 2 cannot start (not elevated, no installer, the
-    author's certificate is trusted here and -DryRun was not given).
+    Exit codes: 0 every row PASS; 1 a row FAIL; 2 cannot start (not elevated, no installer, no
+    previous installer, the author's certificate is trusted here and -DryRun was not given).
 
     Not copied from anywhere; Windows PowerShell 5.1, ASCII (decision R-05).
 
-    Examples (elevated Windows PowerShell, in the folder of the two files):
+    Examples (elevated Windows PowerShell, in the folder of the three files):
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\accept-clean-machine.ps1
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\accept-clean-machine.ps1 -DryRun
 #>
@@ -61,6 +83,9 @@
 param(
     # The installer. Empty means LangSwitcher-setup.exe beside this script.
     [string]$Setup = '',
+    # The installer of the previous release, for the update of rounds 6a and 6b. Empty means
+    # LangSwitcher-setup-0.100.0.exe beside this script.
+    [string]$PreviousSetup = '',
     # The report. Empty means accept-report-<computer>-<yyyyMMdd-HHmmss>.txt beside this script.
     [string]$Report = '',
     [switch]$DryRun
@@ -69,6 +94,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Here = $PSScriptRoot
 if (-not $Setup) { $Setup = Join-Path $Here 'LangSwitcher-setup.exe' }
+if (-not $PreviousSetup) { $PreviousSetup = Join-Path $Here 'LangSwitcher-setup-0.100.0.exe' }
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 if (-not $Report) { $Report = Join-Path $Here ('accept-report-{0}-{1}.txt' -f $env:COMPUTERNAME, $Stamp) }
 $Work = Join-Path $env:TEMP ('langsw-accept-' + $Stamp)
@@ -77,7 +103,17 @@ $AppExe = Join-Path $AppDir 'LangSwitcher.exe'
 $AppCer = Join-Path $AppDir 'LangSwitcher-local.cer'
 $AppTmp = Join-Path $AppDir 'LangSwitcher-full.tmp'
 $Uninstaller = Join-Path $AppDir 'unins000.exe'
-$LocalSubject = 'CN=Lang Switcher for Windows (local)'
+# One name since stage E101 (decision 173.1): the program, its Start menu folder, its entry in Apps
+# and its local certificate. The name e90...e100 gave the folder, the entry and the certificate,
+# with the platform, is kept only to see that an update takes it away: tests\installer_name.rs
+# allows the old name on this line and on no other.
+$AppName = 'Lang Switcher'
+$NameUntilE100 = 'Lang Switcher for Windows'
+$LocalSubject = 'CN=' + $AppName + ' (local)'
+$LocalSubjectUntilE100 = 'CN=' + $NameUntilE100 + ' (local)'
+$AppId = '{1A22BDD8-916A-490E-8269-66869A611388}_is1'
+$StartMenu = [Environment]::GetFolderPath('CommonPrograms')
+$DataDir = Join-Path $env:APPDATA 'Lang_Switcher'
 $CodeSigning = '1.3.6.1.5.5.7.3.3'
 $Started = Get-Date
 
@@ -210,10 +246,42 @@ function Get-ImageKind([string]$Path) {
     return 'no manifest'
 }
 
-function Get-LocalCertificates([string]$StoreName) {
+# The local certificates of one machine store: of either name by default -- a local certificate of
+# any installation, the old one included -- or of the one subject given.
+function Get-LocalCertificates([string]$StoreName, [string]$Subject = '') {
+    $subjects = @($LocalSubject, $LocalSubjectUntilE100)
+    if ($Subject) { $subjects = @($Subject) }
     $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($StoreName, [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
     $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-    try { return @($store.Certificates | Where-Object { $_.Subject -eq $LocalSubject }) } finally { $store.Close() }
+    try { return @($store.Certificates | Where-Object { $subjects -contains $_.Subject }) } finally { $store.Close() }
+}
+
+# The entries of Apps & features whose name begins with the name of the program, in both views of
+# the registry, as "<key> = <DisplayName> <DisplayVersion>".
+function Get-AppEntries {
+    $found = @()
+    foreach ($root in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($key in @(Get-ChildItem -LiteralPath $root)) {
+            $p = Get-ItemProperty -LiteralPath $key.PSPath
+            if ([string]$p.DisplayName -like ($AppName + '*')) { $found += ('{0} = {1} {2}' -f $key.PSChildName, $p.DisplayName, $p.DisplayVersion) }
+        }
+    }
+    return $found
+}
+
+# One Start menu folder of all users, as one line: "absent", or "present: <shortcut> | <shortcut>".
+function Get-MenuFolder([string]$Name) {
+    $path = Join-Path $StartMenu $Name
+    if (-not (Test-Path -LiteralPath $path)) { return 'absent' }
+    return ('present: ' + (@(Get-ChildItem -LiteralPath $path -Force | ForEach-Object { $_.Name } | Sort-Object) -join ' | '))
+}
+$MenuOfOneName = 'present: ' + $AppName + '.lnk | Uninstall ' + $AppName + '.lnk'
+
+# "0.101.0" from the file version "0.101.0.0" of an installer.
+function Get-SetupVersion([string]$Path) {
+    $v = [version](Get-Item -LiteralPath $Path).VersionInfo.FileVersion
+    return ('{0}.{1}.{2}' -f $v.Major, $v.Minor, $v.Build)
 }
 
 function Describe-Certificate($c) {
@@ -238,15 +306,16 @@ function Add-Appendix([string]$Title, [string]$Path) {
     } else { $script:appendix.Add('(no such file)') }
 }
 
-function Invoke-Setup([string]$Name, [string[]]$Extra, [string]$FailAt) {
+function Invoke-Setup([string]$Name, [string[]]$Extra, [string]$FailAt, [string]$File = '') {
+    if (-not $File) { $File = $Setup }
     $log = Join-Path $Work ($Name + '.log')
     $args2 = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="' + $log + '"')) + $Extra
     [Environment]::SetEnvironmentVariable('LANGSW_TRUST_FAIL_AT', $FailAt, 'Process')
     try {
-        $p = Start-Process -FilePath $Setup -ArgumentList $args2 -Wait -PassThru
+        $p = Start-Process -FilePath $File -ArgumentList $args2 -Wait -PassThru
         $code = $p.ExitCode
     } finally { [Environment]::SetEnvironmentVariable('LANGSW_TRUST_FAIL_AT', $null, 'Process') }
-    Out-Line ('       setup {0}: exit {1}, log {2}' -f ($args2 -join ' '), $code, $log)
+    Out-Line ('       {0} {1}: exit {2}, log {3}' -f (Split-Path -Leaf $File), ($args2 -join ' '), $code, $log)
     Add-Appendix ('setup log, ' + $Name) $log
     $helper = -999
     foreach ($l in (Get-StatusLines $log)) {
@@ -393,6 +462,19 @@ $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadO
 $authorTrusted = @($rootStore.Certificates | Where-Object { $_.Thumbprint -eq $author }).Count -gt 0
 $rootStore.Close()
 Out-Row (-not $authorTrusted) 'the author''s certificate is NOT trusted here (a clean machine)' ('author {0} in LocalMachine\Root: {1}' -f $author, $authorTrusted)
+$NewVersion = Get-SetupVersion $Setup
+Out-Line ('INFO  installer version: {0}' -f $NewVersion)
+$previousThere = Test-Path -LiteralPath $PreviousSetup
+if ($previousThere) {
+    $prevSig = Get-AuthenticodeSignature -LiteralPath $PreviousSetup
+    $prevSigner = ''
+    if ($prevSig.SignerCertificate) { $prevSigner = $prevSig.SignerCertificate.Thumbprint }
+    $OldVersion = Get-SetupVersion $PreviousSetup
+    Out-Line ('INFO  previous installer (rounds 6a, 6b): {0}, {1} bytes, SHA-256 {2}, version {3}, signature {4}, signer {5}' -f $PreviousSetup, (Get-Item -LiteralPath $PreviousSetup).Length, (Get-FileHash -LiteralPath $PreviousSetup -Algorithm SHA256).Hash, $OldVersion, $prevSig.Status, $prevSigner)
+} else { Out-Line ('INFO  previous installer (rounds 6a, 6b): MISSING -- ' + $PreviousSetup) }
+Out-Line ('INFO  Start menu of all users: {0}; the folder "{1}": {2}; the folder of the old name: {3}' -f $StartMenu, $AppName, (Get-MenuFolder $AppName), (Get-MenuFolder $NameUntilE100))
+Out-Line ('INFO  entries in Apps named "{0}*": {1}' -f $AppName, (@(Get-AppEntries) -join '; '))
+Out-Line ('INFO  folder of the program''s data {0}: {1}' -f $DataDir, (Test-Path -LiteralPath $DataDir))
 
 # THE POSITIVE CONTROL: the rows of round 1, measured before anything is installed, must fail.
 $controlKind = Get-ImageKind $AppExe
@@ -408,12 +490,16 @@ if ($DryRun) {
     Out-Line '  3  two silent installs; Root holds exactly the second local certificate; uninstall'
     Out-Line '  4  silent install, LANGSW_TRUST_FAIL_AT=delete-key; helper 18; BASE image; Root 0, My 0; uninstall'
     Out-Line '  5  silent install; the program runs; silent uninstall closes it by itself and removes everything'
+    Out-Line '  6a previous installer silently (control: one certificate, folder and entry of the old name); this one over it: old certificate, folder, entry gone; one of the new name; uninstall'
+    Out-Line '  6b the same, the .cer of the previous installation deleted first: the old certificate goes all the same'
+    Out-Line '  7  silent install; settings, copy, journal, its temporary, two appeals put in the data folder; silent uninstall: journal and temporary gone, the rest stays; 7b: journal alone -- no folder left'
     Out-Line ('  report: {0}' -f $Report)
     Out-Line ('dry run: {0} PASS, {1} FAIL (step 0 only)' -f $script:pass, $script:fail)
     exit 0
 }
 if (-not $admin) { Out-Line 'STOP: run this from an elevated Windows PowerShell'; exit 2 }
 if ($authorTrusted) { Out-Line 'STOP: this machine trusts the author''s certificate -- it is not a clean machine; nothing was done'; exit 2 }
+if (-not $previousThere) { Out-Line ('STOP: the previous installer is missing: ' + $PreviousSetup + ' (put the installer of the previous release beside this script under that name); nothing was done'); exit 2 }
 if ((Test-Path -LiteralPath $AppDir) -or ($controlRoot -gt 0)) { Out-Line 'STOP: Lang Switcher or a local certificate is already here; uninstall it first (exit the program from its tray menu; delete the program folder if it stays); nothing was done'; exit 2 }
 New-Item -ItemType Directory -Path $Work | Out-Null
 Out-Line ('INFO  logs of this run: ' + $Work)
@@ -502,6 +588,117 @@ $my5 = @(Get-LocalCertificates 'My').Count
 Out-Row (($root5 + $my5) -eq 0) 'round 5: no local certificate is left' ('Root {0}, My {1}' -f $root5, $my5)
 Out-Row (-not (Test-Path -LiteralPath $AppDir)) 'round 5: the program folder is gone' $AppDir
 if (Test-Path -LiteralPath $Uninstaller) { Invoke-Uninstall 'round5-cleanup' }
+
+# --- 6. An update over the previous release (stage E101, decisions 173.1, 173.3) -----------------
+# The previous installer puts down a local certificate, a Start menu folder and an entry in Apps of
+# the old name; they are measured BEFORE the update -- the positive control: the rows that say
+# "gone" after it are shown to see them -- and then this installer goes over them.
+function Test-Update([string]$Round, [bool]$DeleteCer) {
+    $tag = $Round -replace ' ', ''
+    $r = Invoke-Setup ($tag + '-previous') @() '' $PreviousSetup
+    Out-Row ($r.Code -eq 0) ($Round + ': the previous installer succeeds') ('exit ' + $r.Code)
+    Out-Row ($r.Helper -eq 1) ($Round + ': the previous helper made its local certificate (1)') ('helper ' + $r.Helper)
+    $oldRoot = @(Get-LocalCertificates 'Root' $LocalSubjectUntilE100)
+    $newRoot = @(Get-LocalCertificates 'Root' $LocalSubject)
+    Out-Row (($oldRoot.Count -eq 1) -and ($newRoot.Count -eq 0)) ($Round + ': POSITIVE CONTROL -- before the update exactly one local certificate of the OLD name is in Root, none of the new (the row "no certificate of the old name" is FAIL here)') ('old name {0}, new name {1}: {2}' -f $oldRoot.Count, $newRoot.Count, (($oldRoot | ForEach-Object { Describe-Certificate $_ }) -join ' | '))
+    $oldMenu = Get-MenuFolder $NameUntilE100
+    Out-Row ($oldMenu -eq $MenuOfOneName) ($Round + ': POSITIVE CONTROL -- before the update the Start menu folder of the old name holds its two shortcuts') $oldMenu
+    $entries = @(Get-AppEntries)
+    Out-Row (($entries.Count -eq 1) -and ($entries[0] -eq ('{0} = {1} {2}' -f $AppId, $NameUntilE100, $OldVersion))) ($Round + ': POSITIVE CONTROL -- before the update the one entry in Apps carries the old name and version') ($entries -join '; ')
+    if ($DeleteCer) {
+        $had = Test-Path -LiteralPath $AppCer
+        if ($had) { Remove-Item -LiteralPath $AppCer -Force }
+        Out-Row ($had -and -not (Test-Path -LiteralPath $AppCer)) ($Round + ': the public part of the old certificate is deleted from the program folder before the update') ($AppCer + ' was there: ' + $had)
+    }
+    $r = Invoke-Setup ($tag + '-update') @() ''
+    Out-Row ($r.Code -eq 0) ($Round + ': the update succeeds') ('exit ' + $r.Code)
+    Out-Row ($r.Helper -eq 1) ($Round + ': the helper made the new local certificate and signed the full image (1)') ('helper ' + $r.Helper)
+    $null = Test-Installed $Round 'FULL (uiAccess=true)' $true
+    $oldRootLeft = @(Get-LocalCertificates 'Root' $LocalSubjectUntilE100).Count
+    $oldMyLeft = @(Get-LocalCertificates 'My' $LocalSubjectUntilE100).Count
+    $newRootNow = @(Get-LocalCertificates 'Root' $LocalSubject).Count
+    Out-Row (($oldRootLeft + $oldMyLeft) -eq 0) ($Round + ': no local certificate of the old name in LocalMachine\Root or \My') ('Root {0}, My {1}' -f $oldRootLeft, $oldMyLeft)
+    Out-Row ($newRootNow -eq 1) ($Round + ': exactly one local certificate of the new name in LocalMachine\Root') ('{0}' -f $newRootNow)
+    $oldMenu = Get-MenuFolder $NameUntilE100
+    Out-Row ($oldMenu -eq 'absent') ($Round + ': the Start menu folder of the old name is gone') $oldMenu
+    $newMenu = Get-MenuFolder $AppName
+    Out-Row ($newMenu -eq $MenuOfOneName) ($Round + (': the Start menu folder "{0}" holds exactly its two shortcuts' -f $AppName)) $newMenu
+    $entries = @(Get-AppEntries)
+    Out-Row (($entries.Count -eq 1) -and ($entries[0] -eq ('{0} = {1} {2}' -f $AppId, $AppName, $NewVersion))) ($Round + (': one entry in Apps, by the AppId, "{0}" {1}' -f $AppName, $NewVersion)) ($entries -join '; ')
+    Invoke-Uninstall ($tag + '-uninstall')
+    $entries = @(Get-AppEntries)
+    Out-Row ($entries.Count -eq 0) ($Round + ': after the uninstall no entry in Apps') ('{0} entries {1}' -f $entries.Count, ($entries -join '; '))
+    $menus = '{0}; old name: {1}' -f (Get-MenuFolder $AppName), (Get-MenuFolder $NameUntilE100)
+    Out-Row ($menus -eq 'absent; old name: absent') ($Round + ': after the uninstall no Start menu folder of either name') $menus
+}
+
+Out-Line ''
+Out-Line ('--- 6a. Update over {0} with the public part of its certificate in place' -f $OldVersion)
+Test-Update 'round 6a' $false
+
+Out-Line ''
+Out-Line ('--- 6b. Update over {0} after its LangSwitcher-local.cer is deleted: the old certificate is found by its name' -f $OldVersion)
+Test-Update 'round 6b' $true
+
+# --- 7. The tail of an uninstall (decisions 177.1, 177.20.1 of the owner, backlog Q-171-1) ----------
+# The files the program writes into its data folder are put there by this script -- the settings
+# and their kept copy, the journal and a temporary of it, the two names of a saved appeal (the
+# Russian stem is written as character codes: this file stays ASCII). A silent uninstall must take
+# the journal and its temporary and keep the rest: silence is not consent.
+Out-Line ''
+Out-Line '--- 7. The tail of a silent uninstall: the journal goes, the settings stay'
+$aside = ''
+if (Test-Path -LiteralPath $DataDir) {
+    $aside = $DataDir + '.before-round7-' + $Stamp
+    Rename-Item -LiteralPath $DataDir -NewName (Split-Path -Leaf $aside)
+    Out-Line ('INFO  the data folder found before round 7 is moved aside for the round: ' + $aside)
+}
+$appealRu = (-join ([char[]](0x043E, 0x0431, 0x0440, 0x0430, 0x0449, 0x0435, 0x043D, 0x0438, 0x0435))) + '-2026-10-15.txt'
+$journalFiles = @('diag.log', 'diag.log.4242.tmp')
+$settingsFiles = @('config.toml', 'config.toml.bad', 'report-2026-10-15.txt', $appealRu)
+
+function Set-DataFiles([string[]]$Names) {
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    foreach ($n in $Names) { [System.IO.File]::WriteAllText((Join-Path $DataDir $n), ('put here by round 7 of accept-clean-machine.ps1: ' + $n)) }
+}
+
+function Get-DataFiles {
+    if (-not (Test-Path -LiteralPath $DataDir)) { return 'no folder' }
+    return (@(Get-ChildItem -LiteralPath $DataDir -Force | ForEach-Object { $_.Name } | Sort-Object) -join ' | ')
+}
+
+$r = Invoke-Setup 'round7-setup' @() ''
+Out-Row ($r.Code -eq 0) 'round 7: Setup succeeds' ('exit ' + $r.Code)
+Set-DataFiles ($journalFiles + $settingsFiles)
+$present = @(($journalFiles + $settingsFiles) | Where-Object { Test-Path -LiteralPath (Join-Path $DataDir $_) }).Count
+Out-Row ($present -eq 6) 'round 7: POSITIVE CONTROL -- before the uninstall all six files are in the data folder (the rows "the journal is deleted" are FAIL here)' (ConvertFrom-Escaped (Get-DataFiles))
+Invoke-Uninstall 'round7-uninstall'
+foreach ($n in $journalFiles) {
+    Out-Row (-not (Test-Path -LiteralPath (Join-Path $DataDir $n))) ('round 7: the silent uninstall deleted ' + $n + ' (the journal goes always)') (Get-DataFiles)
+}
+foreach ($n in $settingsFiles) {
+    Out-Row (Test-Path -LiteralPath (Join-Path $DataDir $n)) ('round 7: the silent uninstall kept ' + $n + ' (silence is not consent)') (Get-DataFiles)
+}
+$log7 = Join-Path $Work 'round7-uninstall.log'
+$said = @()
+if (Test-Path -LiteralPath $log7) { $said = @(Get-Content -LiteralPath $log7 | Where-Object { $_ -match 'the journal: deleted|Silent uninstall: the settings are KEPT|is kept: something is left' }) }
+Out-Row ($said.Count -eq 3) 'round 7: the uninstall log says the journal was deleted, the settings kept, the folder kept' ($said.Count.ToString() + ' of 3 lines')
+Remove-Item -LiteralPath $DataDir -Recurse -Force
+Out-Line ('       removed what the uninstall kept: ' + $DataDir + ' exists: ' + (Test-Path -LiteralPath $DataDir))
+
+Out-Line ''
+Out-Line '--- 7b. The journal alone: the silent uninstall leaves no data folder'
+$r = Invoke-Setup 'round7b-setup' @() ''
+Out-Row ($r.Code -eq 0) 'round 7b: Setup succeeds' ('exit ' + $r.Code)
+Set-DataFiles $journalFiles
+Out-Row ((Get-DataFiles) -eq ($journalFiles -join ' | ')) 'round 7b: POSITIVE CONTROL -- before the uninstall the data folder holds the journal and its temporary' (Get-DataFiles)
+Invoke-Uninstall 'round7b-uninstall'
+Out-Row (-not (Test-Path -LiteralPath $DataDir)) 'round 7b: the silent uninstall left no data folder' (Get-DataFiles)
+if (Test-Path -LiteralPath $DataDir) { Remove-Item -LiteralPath $DataDir -Recurse -Force }
+if ($aside) {
+    Rename-Item -LiteralPath $aside -NewName (Split-Path -Leaf $DataDir)
+    Out-Line ('INFO  the data folder found before round 7 is back: ' + $DataDir + ' exists: ' + (Test-Path -LiteralPath $DataDir))
+}
 
 # --- Defender and Code Integrity since the start ---------------------------------------------------
 Out-Line ''

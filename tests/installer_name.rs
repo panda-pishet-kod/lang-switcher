@@ -39,10 +39,7 @@ const NOT_OF_THE_TREE: [&str; 2] = ["tools/local.ps1", "installer/Output"];
 const KEPT: [(&str, &str); 3] = [
     ("installer/LangSwitcher.iss", "#define GroupNameUntilE100 "),
     ("installer/local-trust.ps1", "$LocalSubjectUntilE100 = "),
-    (
-        "tools/accept-clean-machine.ps1",
-        "$LocalSubjectUntilE100 = ",
-    ),
+    ("tools/accept-clean-machine.ps1", "$NameUntilE100 = "),
 ];
 
 /// A line of the tree that carries an old name: the file, its number, its text.
