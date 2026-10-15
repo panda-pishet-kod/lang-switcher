@@ -1,10 +1,14 @@
 # Lang Switcher
 
-**Lang Switcher for Windows** fixes text typed in the wrong keyboard layout. Type `ghbdtn` with
+**Lang Switcher** fixes text typed in the wrong keyboard layout. Type `ghbdtn` with
 the English layout on, press `Pause/Break`, and the word becomes `привет` while the active window
 switches to the Russian layout; press again and the original comes back. It is a small tray program
 for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
 [Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
+
+[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/)
+
+Report a problem — in English or Russian: [Issues](../../issues).
 
 **If the browser or Windows warns you.** The program is signed with the author's own certificate,
 not with one from a certification authority, and a new release is still rarely downloaded, so you
@@ -18,6 +22,8 @@ The rest of this README and all other documents of the project are in Russian.
 Резидентная утилита для Windows, исправляющая текст, набранный в неверной раскладке клавиатуры.
 По нажатию `Pause/Break` последнее набранное слово перекодируется в другую раскладку,
 а раскладка активного окна переключается на соответствующую.
+
+[Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/)
 
 Программа делает одну вещь. «Лёгкость» здесь означает отсутствие постороннего функционала,
 а не упрощение инженерной реализации.
@@ -103,12 +109,12 @@ PowerShell 5.1, и в `cmd`, туда и обратно, с заглавными
 могут, — с мёртвой клавишей или `AltGr`, — не заменяется: слово остаётся как набрано, и звучит
 отказ.
 
-Модульных и интеграционных тестов — **1235** обычным `cargo test` и **1339** с фичей
-`testing`, красных ноль. Всего в дереве **1377** функций `#[test]`. Разница до 1339 — ровно
+Модульных и интеграционных тестов — **1242** обычным `cargo test` и **1346** с фичей
+`testing`, красных ноль. Всего в дереве **1384** функции `#[test]`. Разница до 1346 — ровно
 **38** тестов с `#[ignore]`: они трогают настоящий буфер обмена или клавиатуру машины и
 запускаются отдельно (`--ignored --test-threads=1`) при выключенной программе. Без фичи
 `testing` не собираются, сверх того, **106** тестов — отладочного канала SEC-04a, сквозного
-стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1235 + 36 = 1271.
+стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1242 + 36 = 1278.
 
 ⚠ **Тесты привязаны к конфигурации машины разработчика** (ровно две раскладки, именно
 русская и US) и на произвольной машине не воспроизводятся без правки. Это осознанное
@@ -254,7 +260,7 @@ cargo test
 ## Что установщик делает с сертификатом
 
 Сертификату автора чужая Windows не доверяет, поэтому установщик, работающий с правами администратора,
-создаёт на этой машине свой сертификат «Lang Switcher for Windows (local)»: годен **только для подписи
+создаёт на этой машине свой сертификат «Lang Switcher (local)»: годен **только для подписи
 кода**, не удостоверяющий центр, без метки времени и без сети, на 30 лет. Им подписывается полный образ,
 **закрытый ключ сразу уничтожается**, публичная часть кладётся в «Доверенные корневые центры
 сертификации» компьютера и копией — в `C:\Program Files\Lang_Switcher\LangSwitcher-local.cer`.
