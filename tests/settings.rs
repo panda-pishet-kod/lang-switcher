@@ -16036,7 +16036,8 @@ fn the_hotkey_section_warns_about_a_text_key_and_about_a_name_nobody_knows() {
     let unknown_en = product.string(settings::Language::En, unknown);
     println!("unknown -> {unknown} -> ru: {unknown_ru}\n               -> en: {unknown_en}");
     assert!(unknown_ru.contains("не распознано"));
-    assert!(unknown_en.contains("not recognised"));
+    // Q-176-2, задача T-102-3: the English table is in American spelling.
+    assert!(unknown_en.contains("not recognized"));
 
     // The classification itself, at the two edges that matter.
     assert!(settings::is_text_key(0x41), "A is a text key");
@@ -17159,7 +17160,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 228] = [
     (
         settings::IDS_NOTE_UNKNOWN_KEY,
         "Имя клавиши не распознано — действует клавиша по умолчанию, Pause.",
-        "The key name is not recognised — the default key, Pause, is in force.",
+        "The key name is not recognized — the default key, Pause, is in force.",
     ),
     (
         // ⚠ Task Т-23-5: the invitation moved into the **field** and lost its second half.
@@ -17407,7 +17408,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 228] = [
         settings::IDS_HELLO_DEMO_CAP,
         "Набрали «ghbdtn», нажали {0}: получили «привет», раскладка переключилась на русскую. \
          Ещё раз — и как было.",
-        "You typed «ghbdtn», pressed {0} and got «привет», with the layout switched to Russian. \
+        "You typed «руддщ», pressed {0} and got «hello», with the layout switched to English. \
          Press it again and it is back as it was.",
     ),
     (
@@ -17526,7 +17527,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 228] = [
     (
         settings::IDS_WHATSNEW_3,
         "Журнал надёжнее: неудачная запись не портит прежний файл, галка «Вести журнал» действует сразу в этом сеансе, а серый пункт «Возобновить» говорит, почему он серый.",
-        "The journal is more reliable: a failed write does not damage the previous file, «Keep a journal» acts at once in this session, and the greyed «Resume» says why it is grey.",
+        "The journal is more reliable: a failed write does not damage the previous file, «Keep a journal» acts at once in this session, and the grayed «Resume» says why it is gray.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
@@ -17805,7 +17806,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 228] = [
         settings::IDS_WIZARD_WHERE_NOTE,
         "Поведение зависит от окна: консоль, браузер и редактор получают текст по-разному. \
          Переключитесь в то окно, и мастер запишет имя программы сам.",
-        "The behaviour depends on the window: a console, a browser and an editor take text in \
+        "The behavior depends on the window: a console, a browser and an editor take text in \
          different ways. Switch to that window and the wizard writes the program's name itself.",
     ),
     (settings::IDS_WIZARD_PROGRAM, "Программа:", "Program:"),
@@ -18206,6 +18207,64 @@ fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
             "{letter:?}: and no pair"
         );
     }
+}
+
+/// **Задача T-102-3, сторож (2), решение 178.6 — the caption under the demonstration names the pair
+/// of its own language.** Each of the fourteen `IDS_HELLO_DEMO_CAP` carries, in quotation marks,
+/// the word typed and the word it becomes of [`letters::demo_pair`] of its language — the pair the
+/// demonstration above it draws — and «ghbdtn» and «привет» are the Russian caption's alone.
+///
+/// A word counts inside the guillemets the captions write it in, with a space on the inside or
+/// without one: the French caption writes « sqlut ». Under the gate of [`LOCALE`].
+///
+/// ⚠ Control: the caption of one language held against the pair of another is caught.
+#[test]
+fn the_caption_of_hello_names_the_pair_of_its_own_language() {
+    let _guard = with_product_strings();
+
+    let quoted = |caption: &str, word: &str| {
+        caption.contains(&format!("«{word}»")) || caption.contains(&format!("« {word} »"))
+    };
+    let russian = letters::demo_pair(Language::Ru);
+    let mut captions = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+        let caption = settings::text(settings::IDS_HELLO_DEMO_CAP);
+        let pair = letters::demo_pair(language);
+
+        assert!(
+            quoted(&caption, pair.typed) && quoted(&caption, pair.fixed),
+            "{language:?}: the caption names «{}» and «{}» of its own pair: {caption}",
+            pair.typed,
+            pair.fixed
+        );
+
+        if language != Language::Ru {
+            assert!(
+                !caption.contains(russian.typed) && !caption.contains(russian.fixed),
+                "{language:?}: «{}» and «{}» are the Russian caption's alone: {caption}",
+                russian.typed,
+                russian.fixed
+            );
+        }
+
+        captions.push((language, caption));
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    let german = captions
+        .iter()
+        .find(|(language, _)| *language == Language::De)
+        .map(|(_, caption)| caption.as_str())
+        .expect("the German caption was read");
+    let french = letters::demo_pair(Language::Fr);
+
+    assert!(
+        !(quoted(german, french.typed) && quoted(german, french.fixed)),
+        "the control: a caption held against the pair of another language must be caught"
+    );
 }
 
 /// **Task T-34-5, findings Н80, Н84 and С1 — the red «before».** The first line of «Состояние»

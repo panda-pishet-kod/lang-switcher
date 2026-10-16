@@ -6133,8 +6133,8 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 #[cfg(feature = "testing")]
 pub mod testing {
     use super::{
-        AuthorView, Entry, HWND, Kind, Letter, author_state, fresh_state, open_window, show_letter,
-        window_of,
+        AuthorView, Entry, HWND, Kind, Letter, ThemeSetting, author_state, fresh_state,
+        open_window, show_letter, window_of, with_state,
     };
     use std::cell::Cell;
     use windows::Win32::Foundation::HMODULE;
@@ -6262,6 +6262,21 @@ pub mod testing {
         TEMPLATES.with(|templates| templates.set(0));
 
         shown.then(|| window_of(Kind::Letter)).flatten()
+    }
+
+    /// **The door of task T-102-3** — gives the open window `hwnd` the theme setting `setting`, the
+    /// way `[general].theme` of the configuration gives it to a window of the running program.
+    ///
+    /// A test binary has no tray to read the configuration from, so its windows follow the theme of
+    /// the system. The snapshots of «Привет» in both palettes (вопрос 178) set the setting here and
+    /// then post `settings::WM_APP_SYSTEM_THEME`: the window resolves its palette afresh and repaints
+    /// by its own answer to a moved theme — nothing of the drawing is the door's.
+    ///
+    /// `hwnd` is a window of this module on the caller's thread.
+    pub fn set_theme(hwnd: HWND, setting: ThemeSetting) {
+        // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
+        // this door — and the borrow of its state ends with the call.
+        let _ = unsafe { with_state(hwnd, |state| state.setting = setting) };
     }
 }
 
