@@ -13,7 +13,7 @@
 use lang_switcher::letters::{
     self, Date, FeedItem, FeedView, Letter, REMINDERS_PER_NEWS, Thanks, links,
 };
-use lang_switcher::settings::{self, Letters};
+use lang_switcher::settings::{self, Language, Letters};
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -1286,43 +1286,247 @@ fn only_https_at_a_host_of_this_program_reaches_the_shell() {
 
 /// The whole animation is a table: typed letter by letter, the key flashes, the word is fixed,
 /// the key flashes again, the word comes back — and it repeats exactly.
+///
+/// ⭐ **Решение 178.6, задача T-102-2: the canon of six letters moved.** Until `e101` every
+/// language showed the one word «ghbdtn», six letters typed in frames 0…5. Each language has a
+/// pair of its own now, four to eight letters long, so the typing is walked for every pair and
+/// takes as many frames as its word has letters; the rest of the turn is what it was.
 #[test]
 fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
-    // The typing: one more character every frame, and nothing else moves.
-    for frame in 0..6 {
-        let shown = letters::demo_frame(frame);
+    for language in Language::ALL {
+        let pair = letters::demo_pair(language);
+        let letters_typed = pair.typed.chars().count() as u32;
 
-        assert_eq!(shown.shown, frame as usize + 1, "frame {frame}");
-        assert!(!shown.pressed, "the key is not down while a word is typed");
-        assert!(!shown.converted, "and the layout has not switched yet");
-    }
+        // The typing: one more character every frame, and nothing else moves.
+        for frame in 0..letters_typed {
+            let shown = letters::demo_frame(frame, pair);
 
-    // The key goes down, and only then does the word change.
-    assert!(letters::demo_frame(14).pressed);
-    assert!(!letters::demo_frame(14).converted, "the press comes first");
-    assert!(letters::demo_frame(16).converted, "and the word after it");
-    assert_ne!(
-        letters::demo_frame(16).text,
-        letters::demo_frame(14).text,
-        "the word really changes — that is the whole picture"
-    );
+            assert_eq!(
+                shown.shown,
+                frame as usize + 1,
+                "{language:?}, frame {frame}"
+            );
+            assert!(!shown.pressed, "the key is not down while a word is typed");
+            assert!(!shown.converted, "and the layout has not switched yet");
+        }
 
-    // The second press puts it back, letter for letter (FR-05).
-    assert!(letters::demo_frame(30).pressed);
-    assert_eq!(
-        letters::demo_frame(40).text,
-        letters::demo_frame(0).text,
-        "and the word comes back exactly as it was"
-    );
+        // The key goes down, and only then does the word change.
+        assert!(letters::demo_frame(14, pair).pressed);
+        assert!(
+            !letters::demo_frame(14, pair).converted,
+            "the press comes first"
+        );
+        assert!(
+            letters::demo_frame(16, pair).converted,
+            "and the word after it"
+        );
+        assert_ne!(
+            letters::demo_frame(16, pair).text,
+            letters::demo_frame(14, pair).text,
+            "{language:?}: the word really changes — that is the whole picture"
+        );
 
-    // And the turn repeats: frame `n` and frame `n + DEMO_FRAMES` are the same picture.
-    for frame in 0..letters::DEMO_FRAMES {
+        // The second press puts it back, letter for letter (FR-05).
+        assert!(letters::demo_frame(30, pair).pressed);
         assert_eq!(
-            letters::demo_frame(frame),
-            letters::demo_frame(frame + letters::DEMO_FRAMES),
-            "the turn must repeat exactly at frame {frame}"
+            letters::demo_frame(40, pair).text,
+            letters::demo_frame(0, pair).text,
+            "{language:?}: and the word comes back exactly as it was"
+        );
+
+        // And the turn repeats: frame `n` and frame `n + DEMO_FRAMES` are the same picture.
+        for frame in 0..letters::DEMO_FRAMES {
+            assert_eq!(
+                letters::demo_frame(frame, pair),
+                letters::demo_frame(frame + letters::DEMO_FRAMES, pair),
+                "{language:?}: the turn must repeat exactly at frame {frame}"
+            );
+        }
+    }
+}
+
+/// **The pairs of решение 178.6, written down here apart from the code** — `(language, typed,
+/// fixed, [badge before the press, after it])`.
+///
+/// ⛔ Not read out of `letters::demo_pair`: a canon derived from the table it guards cannot fail
+/// (the lesson of Э53а). Every word was taken off the keys of the Windows layouts, not out of
+/// memory — the lesson of Э87, «цреф» is not «what» — and the instrument
+/// `scratchpad-E102\pairs\pairs-e102.ps1 -Canon` reads this very array and holds it against the
+/// keys again.
+const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 14] = [
+    (Language::Ru, "ghbdtn", "привет", ["EN", "RU"]),
+    (Language::En, "руддщ", "hello", ["RU", "EN"]),
+    (Language::Uk, "ghbdsn", "привіт", ["EN", "UK"]),
+    (Language::De, "Gr[-e", "Grüße", ["EN", "DE"]),
+    (Language::Fr, "sqlut", "salut", ["EN", "FR"]),
+    (Language::Es, "ma;ana", "mañana", ["EN", "ES"]),
+    (Language::Pt, "for;a", "força", ["EN", "PT"]),
+    (Language::It, "caff[", "caffè", ["EN", "IT"]),
+    (Language::Pl, "руддщ", "hello", ["RU", "EN"]),
+    (Language::Cs, "d2kuji", "děkuji", ["EN", "CS"]),
+    (Language::Tr, "g]naydin", "günaydın", ["EN", "TR"]),
+    (Language::El, "geia", "γεια", ["EN", "EL"]),
+    (Language::He, "akuo", "שלום", ["EN", "HE"]),
+    (Language::Ar, "lvpfh", "مرحبا", ["EN", "AR"]),
+];
+
+/// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение
+/// 178.6.** A word in the reader's own language typed with the English layout on, and the word it
+/// becomes; Russian keeps «ghbdtn» → «привет», English and Polish show «руддщ» → «hello».
+///
+/// ⚠ Control: the canon with the pairs of two languages swapped is caught — the comparison is made
+/// language by language, not as a set of pairs.
+#[test]
+fn every_language_shows_the_pair_of_decision_178_6() {
+    for language in Language::ALL {
+        assert_eq!(
+            PAIRS_OF_DECISION_178_6
+                .iter()
+                .filter(|(of, ..)| *of == language)
+                .count(),
+            1,
+            "{language:?}: the canon names every language of the interface exactly once"
         );
     }
+
+    let pair_of =
+        |(_, typed, fixed, badge): (Language, &'static str, &'static str, [&'static str; 2])| {
+            letters::DemoPair {
+                typed,
+                fixed,
+                badge,
+            }
+        };
+
+    for entry in PAIRS_OF_DECISION_178_6 {
+        assert_eq!(
+            letters::demo_pair(entry.0),
+            pair_of(entry),
+            "{:?}: the pair of решение 178.6",
+            entry.0
+        );
+    }
+
+    let mut swapped = PAIRS_OF_DECISION_178_6;
+    let german = (swapped[3].1, swapped[3].2, swapped[3].3);
+    (swapped[3].1, swapped[3].2, swapped[3].3) = (swapped[4].1, swapped[4].2, swapped[4].3);
+    (swapped[4].1, swapped[4].2, swapped[4].3) = german;
+
+    assert!(
+        swapped
+            .into_iter()
+            .any(|entry| letters::demo_pair(entry.0) != pair_of(entry)),
+        "the control: the pairs of two languages swapped must be caught"
+    );
+}
+
+/// **Задача T-102-2, сторож (3) — the typing takes exactly as many frames as the word has
+/// letters, one a frame, and then the word waits.** The words of решение 178.6 are four to eight
+/// letters long; the six frames of `e101` would show a five-letter word one letter past its end.
+/// The rest of the turn does not move: the press at 14, the fixed word at 16, the press again at
+/// 30, the word back from 32, and the turn repeats every 48 frames.
+///
+/// ⚠ A five-letter word of the test's own goes through the same table: the rule is about the
+/// length of a word, not about the fourteen that happen to be in the program.
+#[test]
+fn the_demonstration_types_as_many_frames_as_the_word_has_letters() {
+    let five = letters::DemoPair {
+        typed: "abcde",
+        fixed: "vwxyz",
+        badge: ["AB", "CD"],
+    };
+
+    for pair in Language::ALL
+        .map(letters::demo_pair)
+        .into_iter()
+        .chain([five])
+    {
+        let typed = pair.typed.chars().count();
+        let fixed = pair.fixed.chars().count();
+
+        assert!(
+            typed < 14,
+            "«{}»: the word must be typed before the press at frame 14",
+            pair.typed
+        );
+
+        for frame in 0..letters::DEMO_FRAMES {
+            let shown = letters::demo_frame(frame, pair);
+            let at = frame as usize;
+            let expected = match frame {
+                _ if at < typed => (pair.typed, at + 1, false, false),
+                0..=13 => (pair.typed, typed, false, false),
+                14..=15 => (pair.typed, typed, true, false),
+                16..=29 => (pair.fixed, fixed, false, true),
+                30..=31 => (pair.fixed, fixed, true, true),
+                _ => (pair.typed, typed, false, false),
+            };
+
+            assert_eq!(
+                (shown.text, shown.shown, shown.pressed, shown.converted),
+                expected,
+                "«{}», frame {frame}",
+                pair.typed
+            );
+            assert_eq!(
+                shown,
+                letters::demo_frame(frame + letters::DEMO_FRAMES, pair),
+                "«{}»: the turn repeats at frame {frame}",
+                pair.typed
+            );
+        }
+    }
+}
+
+/// **Решение 178.6 — the demonstration draws the pair of its plan.** `plan_for` chooses the pair for
+/// the language the plan is built in and puts it into the plan; `draw_demo` takes it from there,
+/// so a plan rebuilt in another language (`refresh_plan`) brings its pair along with its caption.
+/// The constants of the one pair of `e101` are gone from the module.
+///
+/// ⚠ Controls: a body that asks the language for itself, and a body that draws without the plan's
+/// pair, are caught.
+#[test]
+fn the_demonstration_draws_the_pair_of_its_plan() {
+    let source = letters_module_source();
+    let body = letters_function_body(&source, "unsafe fn draw_demo(")
+        .expect("src\\letters.rs must still declare `draw_demo`");
+    let takes_the_plan = |body: &str| {
+        let code = squeezed_code(body);
+
+        code.contains("let pair = state.plan.demo_pair;")
+            && code.contains("demo_frame(state.tick, pair)")
+            && code.contains("pair.badge[usize::from(frame.converted)]")
+            && !code.contains("demo_pair(")
+    };
+
+    assert!(
+        takes_the_plan(body),
+        "178.6: draw_demo must take the pair out of its plan:\n{body}"
+    );
+
+    for gone in ["const DEMO_TYPED", "const DEMO_FIXED", "const DEMO_BADGE"] {
+        assert!(
+            !source.contains(gone),
+            "the one pair of e101 is gone from the module: `{gone}`"
+        );
+    }
+
+    let asks_itself = body.replace(
+        "let pair = state.plan.demo_pair;",
+        "let pair = demo_pair(settings::ui_language());",
+    );
+    assert_ne!(asks_itself, body, "the control must change the body");
+    assert!(
+        !takes_the_plan(&asks_itself),
+        "the sweep does not see a body that asks the language for itself"
+    );
+
+    let unpaired = body.replace("pair.badge[", "DEMO_BADGE[");
+    assert_ne!(unpaired, body, "the control must change the body");
+    assert!(
+        !takes_the_plan(&unpaired),
+        "the sweep does not see a badge drawn past the plan"
+    );
 }
 
 // =========================================================================================

@@ -18145,6 +18145,69 @@ fn the_two_tables_hold_exactly_the_identifiers_the_crate_publishes() {
     );
 }
 
+/// **Задача T-102-2, сторож (4), решение 178.6 — the plan of «Привет» carries the pair of the
+/// language it is built in, and a plan built again after the language changed carries the new
+/// one.** On a change of the language on the fly (решение 99) `refresh_plan` builds the plan of an
+/// open window again through `plan_for`, and `draw_demo` draws the pair of the plan — so the pair
+/// arrives together with the caption, exactly as in a window built anew (вопрос 178, П3).
+///
+/// Under the gate of [`LOCALE`]: the language is the process's (see [`with_product_strings`]).
+///
+/// ⚠ Control: the pairs of Russian and English differ — a plan that kept the pair of the language
+/// it was first built in is caught.
+#[test]
+fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
+    let _guard = with_product_strings();
+
+    let context = letters::PlanContext {
+        version: "0.102.0".to_owned(),
+        previous_version: String::new(),
+        hotkey: "Pause".to_owned(),
+        snooze_offered: true,
+        item: None,
+    };
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+        let plan = letters::plan_for(letters::Letter::Welcome, &context);
+
+        assert!(plan.demo, "{language:?}: «Привет» shows the demonstration");
+        assert_eq!(
+            plan.demo_pair,
+            letters::demo_pair(language),
+            "{language:?}: the plan carries the pair of its own language"
+        );
+    }
+
+    // The window refilled on the fly: its plan built in Russian, then built again in English.
+    settings::set_ui_language(Language::Ru);
+    let russian = letters::plan_for(letters::Letter::Welcome, &context);
+    settings::set_ui_language(Language::En);
+    let english = letters::plan_for(letters::Letter::Welcome, &context);
+    settings::set_ui_language(Language::Ru);
+
+    assert_ne!(
+        russian.demo_pair, english.demo_pair,
+        "178.6: a plan built again in another language carries another pair"
+    );
+    assert_ne!(
+        russian.demo_caption, english.demo_caption,
+        "and another caption with it"
+    );
+
+    // The letters without a demonstration carry no pair to draw.
+    for letter in [letters::Letter::Thanks, letters::Letter::WhatsNew] {
+        let plan = letters::plan_for(letter, &context);
+
+        assert!(!plan.demo, "{letter:?} has no demonstration");
+        assert_eq!(
+            plan.demo_pair,
+            letters::DemoPair::default(),
+            "{letter:?}: and no pair"
+        );
+    }
+}
+
 /// **Task T-34-5, findings Н80, Н84 and С1 — the red «before».** The first line of «Состояние»
 /// spoke of the hook to a developer: «восстановлений хука» counted the ticks of the FR-80 timer
 /// (finding С1 — `RECOVERIES` moves on every successful reinstallation, the thirty-second one

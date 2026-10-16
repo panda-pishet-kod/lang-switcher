@@ -1430,6 +1430,8 @@ pub struct LetterPlan {
     pub para: String,
     /// Whether the demonstration of «Привет» is shown.
     pub demo: bool,
+    /// The pair the demonstration shows — [`demo_pair`] of the language the plan is built in.
+    pub demo_pair: DemoPair,
     /// The caption under the demonstration.
     pub demo_caption: String,
     /// The caption of the panel; empty means the letter has no panel.
@@ -1490,6 +1492,7 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
             title: text(IDS_HELLO_TITLE),
             lead: text(IDS_HELLO_LEAD),
             demo: true,
+            demo_pair: demo_pair(settings::ui_language()),
             demo_caption: text(IDS_HELLO_DEMO_CAP),
             panel: text(IDS_HELLO_PANEL),
             rows: vec![
@@ -1674,12 +1677,113 @@ const DEMO_TICK_MS: u32 = 130;
 /// How many frames one turn of the demonstration takes.
 pub const DEMO_FRAMES: u32 = 48;
 
-/// The word typed in the wrong layout, and the word it becomes. Latin and Cyrillic literals
-/// rather than strings of the tables: they are **the example itself** — the very keys a person
-/// presses — and translating them would destroy what the picture shows.
-const DEMO_TYPED: &str = "ghbdtn";
-/// What [`DEMO_TYPED`] becomes.
-const DEMO_FIXED: &str = "привет";
+/// One pair of the demonstration — the word as the wrong layout typed it, the word it becomes, and
+/// the two names of the layout indicator.
+///
+/// Literals of the code rather than strings of the tables: they are **the example itself** — the
+/// very keys a person presses — and translating them would destroy what the picture shows. So are
+/// the names of the indicator: they are the names of the layouts in the picture, and a layout is
+/// named in its own language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DemoPair {
+    /// The word typed in the wrong layout — what stands in the field before the press.
+    pub typed: &'static str,
+    /// What [`Self::typed`] becomes after the press.
+    pub fixed: &'static str,
+    /// The layout indicator: `[before the press, after it]`.
+    pub badge: [&'static str; 2],
+}
+
+/// **The pair of the demonstration in one language of the interface — решение 178.6** (вопрос 178,
+/// the mock-up of version 2, задача T-102-2): a word in the reader's own language typed with the
+/// English layout on, and the word it becomes. Russian keeps the pair it always had. English has
+/// no layout of its own to be typed in by mistake, and the Polish layout of the programmers is the
+/// English one with `AltGr` (178.5), so both show the pair the other way round, «руддщ» → «hello».
+///
+/// ⛔ Every word was taken off the keys of the Windows layouts — the tables of their own DLLs,
+/// character → key → the same key in the other layout, and back (178.4, 178.5) — and not out of
+/// memory: the lesson of Э87, «цреф» is not «what». A word changed here goes through that
+/// instrument again, and through the canon of `tests\letters.rs`, written apart from this table.
+///
+/// A `match` without a wildcard on purpose: a language added to [`Language`] does not compile
+/// until it has a pair. The typed words are four to eight letters long — [`demo_frame`] types one
+/// a frame and must be done before the press at frame 14. Hebrew and Arabic: the field is not
+/// mirrored (`unmirror_control` below), so their row reads left to right as everyone's does — the
+/// Latin letters typed, then the word itself after the press (§0 п. 6 of TZ-E102).
+pub fn demo_pair(language: Language) -> DemoPair {
+    match language {
+        Language::Ru => DemoPair {
+            typed: "ghbdtn",
+            fixed: "привет",
+            badge: ["EN", "RU"],
+        },
+        Language::En => DemoPair {
+            typed: "руддщ",
+            fixed: "hello",
+            badge: ["RU", "EN"],
+        },
+        Language::Uk => DemoPair {
+            typed: "ghbdsn",
+            fixed: "привіт",
+            badge: ["EN", "UK"],
+        },
+        Language::De => DemoPair {
+            typed: "Gr[-e",
+            fixed: "Grüße",
+            badge: ["EN", "DE"],
+        },
+        Language::Fr => DemoPair {
+            typed: "sqlut",
+            fixed: "salut",
+            badge: ["EN", "FR"],
+        },
+        Language::Es => DemoPair {
+            typed: "ma;ana",
+            fixed: "mañana",
+            badge: ["EN", "ES"],
+        },
+        Language::Pt => DemoPair {
+            typed: "for;a",
+            fixed: "força",
+            badge: ["EN", "PT"],
+        },
+        Language::It => DemoPair {
+            typed: "caff[",
+            fixed: "caffè",
+            badge: ["EN", "IT"],
+        },
+        Language::Pl => DemoPair {
+            typed: "руддщ",
+            fixed: "hello",
+            badge: ["RU", "EN"],
+        },
+        Language::Cs => DemoPair {
+            typed: "d2kuji",
+            fixed: "děkuji",
+            badge: ["EN", "CS"],
+        },
+        Language::Tr => DemoPair {
+            typed: "g]naydin",
+            fixed: "günaydın",
+            badge: ["EN", "TR"],
+        },
+        Language::El => DemoPair {
+            typed: "geia",
+            fixed: "γεια",
+            badge: ["EN", "EL"],
+        },
+        Language::He => DemoPair {
+            typed: "akuo",
+            fixed: "שלום",
+            badge: ["EN", "HE"],
+        },
+        Language::Ar => DemoPair {
+            typed: "lvpfh",
+            fixed: "مرحبا",
+            badge: ["EN", "AR"],
+        },
+    }
+}
 
 /// One frame of the demonstration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1694,62 +1798,66 @@ pub struct DemoFrame {
     pub converted: bool,
 }
 
-/// What the demonstration shows at frame `tick` — **pure**, so the whole animation is a table a
-/// test can walk without a window, a timer or a clock.
+/// What the demonstration of `pair` shows at frame `tick` — **pure**, so the whole animation is a
+/// table a test can walk without a window, a timer or a clock.
 ///
 /// One turn: the word is typed letter by letter, the key flashes, the word is fixed and the
 /// indicator flips, the key flashes again, the word comes back, and it starts over. That is
 /// FR-01 to FR-06 in eight seconds and no words at all.
-pub fn demo_frame(tick: u32) -> DemoFrame {
+///
+/// ⭐ **Задача T-102-2, решение 178.6: the typing takes as many frames as the word has letters**,
+/// one a frame — four to eight since every language has a pair of its own; until `e101` the one
+/// word was «ghbdtn» and the typing was frames 0…5. The rest of the turn is what it was: the word
+/// waits until frame 13, the key is down at 14–15, the fixed word stands 16–29, the key is down
+/// again at 30–31, and the typed word is back for 32–47.
+pub fn demo_frame(tick: u32, pair: DemoPair) -> DemoFrame {
+    let typed = pair.typed.chars().count();
+
     match tick % DEMO_FRAMES {
         // Typing, one character a frame.
-        frame @ 0..=5 => DemoFrame {
-            text: DEMO_TYPED,
+        frame if (frame as usize) < typed => DemoFrame {
+            text: pair.typed,
             shown: frame as usize + 1,
             pressed: false,
             converted: false,
         },
         // The typed word, waiting.
-        6..=13 => DemoFrame {
-            text: DEMO_TYPED,
-            shown: DEMO_TYPED.chars().count(),
+        0..=13 => DemoFrame {
+            text: pair.typed,
+            shown: typed,
             pressed: false,
             converted: false,
         },
         // The key goes down.
         14..=15 => DemoFrame {
-            text: DEMO_TYPED,
-            shown: DEMO_TYPED.chars().count(),
+            text: pair.typed,
+            shown: typed,
             pressed: true,
             converted: false,
         },
         // The word is fixed and the layout has switched.
         16..=29 => DemoFrame {
-            text: DEMO_FIXED,
-            shown: DEMO_FIXED.chars().count(),
+            text: pair.fixed,
+            shown: pair.fixed.chars().count(),
             pressed: false,
             converted: true,
         },
         // The key goes down again.
         30..=31 => DemoFrame {
-            text: DEMO_FIXED,
-            shown: DEMO_FIXED.chars().count(),
+            text: pair.fixed,
+            shown: pair.fixed.chars().count(),
             pressed: true,
             converted: true,
         },
         // And the word is back, letter for letter — FR-05.
         _ => DemoFrame {
-            text: DEMO_TYPED,
-            shown: DEMO_TYPED.chars().count(),
+            text: pair.typed,
+            shown: typed,
             pressed: false,
             converted: false,
         },
     }
 }
-
-/// The two words of the layout indicator. Not translated, for the reason [`DEMO_TYPED`] is not:
-/// they are the names of the layouts in the picture, and a layout is named in its own language.
-const DEMO_BADGE: [&str; 2] = ["EN", "RU"];
 
 // =========================================================================================
 // 11. The window itself — FR-101 and FR-103, task Т-32-3
@@ -3088,8 +3196,10 @@ fn fill_letter(hwnd: HWND, state: &WindowState) {
         settings::set_text(hwnd, control, button.map_or("", |button| &button.label));
     }
 
-    // Решение 97.2, ИТОГ-Э30 §9.4: the demonstration is an **island** — Latin letters and two
-    // Latin layout names — and an island in a mirrored window keeps its own reading order.
+    // Решение 97.2, ИТОГ-Э30 §9.4: the demonstration is an **island** — a typed word, the word it
+    // becomes and two Latin layout names — and an island in a mirrored window keeps its own
+    // reading order. Решение 178.6 keeps it so in Hebrew and Arabic: the Latin letters typed, then
+    // the word of the reader's script, whole, after the press.
     // The control is owner-drawn, so what the island needs is not this call but the reading
     // order its painting asks for; the call is here for the same reason the about window makes
     // it for its logo — the *place* stays mirrored and only the inside is straightened.
@@ -3496,8 +3606,11 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
 ///
 /// A field with the word being typed, the key chip that lights up when it is pressed, and the
 /// layout indicator that flips when the word is fixed. Everything in it is an **island**
-/// (решение 97.2): Latin letters, a Latin key name and two Latin layout names, so the whole
-/// rectangle is laid left to right even in a mirrored window.
+/// (решение 97.2): the typed word, the word it becomes, a key name and two Latin layout names, so
+/// the whole rectangle is laid left to right even in a mirrored window. The pair is the plan's —
+/// [`demo_pair`] of the language the plan was built in (решение 178.6) — and each word of the row
+/// is one run of `TextOutW`, so Windows orders and joins the letters of a Hebrew or an Arabic word
+/// itself (вопрос 178, П4).
 ///
 /// # Safety
 ///
@@ -3509,7 +3622,8 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
 
     let dpi = theme::drawing_dpi(dc);
     let palette = state.palette;
-    let frame = demo_frame(state.tick);
+    let pair = state.plan.demo_pair;
+    let frame = demo_frame(state.tick, pair);
 
     // ⭐ **Один кадр вместо череды — задача T-92-1, решение 156.10 (находка владельца Д2: «в
     // приветственном окне после установки мигает текст»).** Тело ниже кладёт заливку цветом окна,
@@ -3575,7 +3689,7 @@ unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
     let template = format!(
         "{typed}   {}   {}",
         theme::KEY_PLACEHOLDER,
-        DEMO_BADGE[usize::from(frame.converted)]
+        pair.badge[usize::from(frame.converted)]
     );
 
     // SAFETY: `target` is this frame's buffer or, on a refusal of GDI, the DC of the message, and
