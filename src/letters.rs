@@ -854,17 +854,18 @@ pub mod links {
     /// copy of it.
     pub const MAIL_ADDRESS: &str = "send.me@panda-pishet-kod.dev";
 
-    /// **Where a person writes to the author, by the language they read the program in** —
-    /// решение 181.1: Russian and Ukrainian go to the topic of the group, the other twelve to the
-    /// issues on GitHub.
+    /// **Which side of the author's places a person reads, by the language they read the program
+    /// in** — решения 181.1 и 181.33: Russian and Ukrainian read the Russian side (the topic of the
+    /// group, the pages of the site without `/en/`), the other twelve the English one (GitHub
+    /// Issues, the pages under `/en/`).
     ///
-    /// The one place that choice is made — the wizard of FR-104 and the letter «Спасибо» both ask
-    /// here, with the language of their own window. A `match` without a wildcard on purpose: a
-    /// language added to [`Language`] does not compile until somebody has said where its readers
-    /// write.
-    pub fn feedback_url(language: Language) -> &'static str {
+    /// The one place the line is drawn — [`feedback_url`], [`download_url`] and [`program_url`]
+    /// all ask here, so a person is never sent to write on one side and to read on the other. A
+    /// `match` without a wildcard on purpose: a language added to [`Language`] does not compile
+    /// until somebody has said which side its readers are on.
+    fn reads_the_russian_side(language: Language) -> bool {
         match language {
-            Language::Ru | Language::Uk => GROUP_URL,
+            Language::Ru | Language::Uk => true,
             Language::En
             | Language::De
             | Language::Fr
@@ -876,7 +877,21 @@ pub mod links {
             | Language::Tr
             | Language::El
             | Language::He
-            | Language::Ar => ISSUES_URL,
+            | Language::Ar => false,
+        }
+    }
+
+    /// **Where a person writes to the author, by the language they read the program in** —
+    /// решение 181.1: Russian and Ukrainian go to the topic of the group, the other twelve to the
+    /// issues on GitHub ([`reads_the_russian_side`]).
+    ///
+    /// The one place that choice is made — the wizard of FR-104 and the letter «Спасибо» both ask
+    /// here, with the language of their own window.
+    pub fn feedback_url(language: Language) -> &'static str {
+        if reads_the_russian_side(language) {
+            GROUP_URL
+        } else {
+            ISSUES_URL
         }
     }
 
@@ -897,7 +912,31 @@ pub mod links {
     ///
     /// The `link` field stays in the feed format — it is the format's, not ours — and this
     /// program simply no longer reads it for this button.
+    ///
+    /// ⭐ **The Russian page** — since решение 181.33 the button opens [`download_url`] of the
+    /// language of its window, and this is the page of the Russian side.
     pub const DOWNLOAD_URL: &str = "https://panda-pishet-kod.dev/langswitcher/download/";
+
+    /// The English download page — the pair of [`DOWNLOAD_URL`] under `/en/`, решение 181.33: what
+    /// «Open the download page» opens for a person who reads the program in any of the twelve
+    /// languages of the English side.
+    pub const DOWNLOAD_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/download/";
+
+    /// **The download page in the language a person reads the program in** — решение 181.33
+    /// ([`reads_the_russian_side`]): «Открыть страницу загрузки» of «От автора» and of the letter
+    /// about an update.
+    ///
+    /// ⚠ The site may still move a person on: its script of the language of a page (П-179 of the
+    /// site) follows the choice the person made with the site's own language button, or else the
+    /// language of the browser. That is the site's rule and stays as it is (181.33 п. 3) — what
+    /// this program answers for is the address it gives.
+    pub fn download_url(language: Language) -> &'static str {
+        if reads_the_russian_side(language) {
+            DOWNLOAD_URL
+        } else {
+            DOWNLOAD_URL_EN
+        }
+    }
 
     /// The program's own page — the target of a click on the name «Lang Switcher» in «О
     /// программе», task T-78-3.
@@ -905,7 +944,24 @@ pub mod links {
     /// The only address of the five with no button of its own: it is opened by a click on the
     /// name itself, which is a push button without a border and looks like the label it used to
     /// be until the pointer is over it.
+    ///
+    /// ⭐ **The Russian page** — since решение 181.33 the name opens [`program_url`] of the
+    /// language of its window.
     pub const PROGRAM_URL: &str = "https://panda-pishet-kod.dev/langswitcher/";
+
+    /// The English page of the program — the pair of [`PROGRAM_URL`] under `/en/`, решение 181.33.
+    pub const PROGRAM_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/";
+
+    /// **The program's page in the language a person reads the program in** — решение 181.33
+    /// ([`reads_the_russian_side`]): the name in «О программе» and in «От автора». The site's own
+    /// choice of language may still move a person on, as for [`download_url`].
+    pub fn program_url(language: Language) -> &'static str {
+        if reads_the_russian_side(language) {
+            PROGRAM_URL
+        } else {
+            PROGRAM_URL_EN
+        }
+    }
 
     /// Whether this address is one of the placeholders — the one test every button that opens
     /// a link is behind.
@@ -971,7 +1027,9 @@ pub mod links {
                 ISSUES_URL,
                 SUPPORT_URL,
                 DOWNLOAD_URL,
+                DOWNLOAD_URL_EN,
                 PROGRAM_URL,
+                PROGRAM_URL_EN,
             ])
             .filter_map(host_of)
     }
@@ -2278,6 +2336,18 @@ impl WindowState {
     /// «Спасибо».
     fn feedback_url(&self) -> &'static str {
         links::feedback_url(self.language)
+    }
+
+    /// The download page this window's «Открыть страницу загрузки» opens — [`links::download_url`]
+    /// of the language of the window (решение 181.33), for the reason [`Self::feedback_url`] gives.
+    fn download_url(&self) -> &'static str {
+        links::download_url(self.language)
+    }
+
+    /// The page the name of the program in this window opens — [`links::program_url`] of the
+    /// language of the window (решение 181.33).
+    fn program_url(&self) -> &'static str {
+        links::program_url(self.language)
     }
 
     /// Where the appeal of this wizard goes — [`destination`] of its kind and of the language of
@@ -5868,11 +5938,13 @@ fn perform(hwnd: HWND, action: Action) {
                 state.link.clone(),
                 state.kind,
                 state.feedback_url(),
+                state.download_url(),
+                state.program_url(),
             )
         })
     };
 
-    let Some((owner, news, link, _kind, feedback)) = taken else {
+    let Some((owner, news, link, _kind, feedback, download, program)) = taken else {
         return;
     };
 
@@ -5913,12 +5985,16 @@ fn perform(hwnd: HWND, action: Action) {
         // is built by [`open_author`], which never fills `state.link`, so the click reached
         // `open_link("")` and returned having done nothing. The button was never laid out, so
         // nobody could press it to find out.
-        Action::OpenDownload => open_link(links::DOWNLOAD_URL),
+        //
+        // Решение 181.33: the page in the language of this window — Russian for the Russian side,
+        // under `/en/` for the twelve of the English one.
+        Action::OpenDownload => open_link(download),
 
         // Задача T-81-3: щелчок по имени программы в шапке «От автора». Адрес — тот же, что
         // открывает имя в «О программе», и той же дверью `open_link`, которая **и есть** ворота
-        // С52: только https и только на хосте, объявленном этой сборкой.
-        Action::OpenProgram => open_link(links::PROGRAM_URL),
+        // С52: только https и только на хосте, объявленном этой сборкой. С решения 181.33 —
+        // страница на языке окна.
+        Action::OpenProgram => open_link(program),
 
         Action::OpenLink => open_link(&link),
 
@@ -6438,6 +6514,17 @@ pub mod testing {
         // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
         // this door — and the borrow of its state ends with the call.
         unsafe { with_state(hwnd, |state| state.feedback_url()) }
+    }
+
+    /// **The door of task T-103-9** — the two pages of the site the open window `hwnd` would take
+    /// a person to: `(download, program)`, what «Открыть страницу загрузки» and the name of the
+    /// program hand to the shell, read by the very calls `perform` reads them by
+    /// (решение 181.33). Nothing is opened.
+    ///
+    /// `hwnd` is a window of this module on the caller's thread.
+    pub fn site_pages(hwnd: HWND) -> Option<(&'static str, &'static str)> {
+        // SAFETY: as for `feedback_url` above.
+        unsafe { with_state(hwnd, |state| (state.download_url(), state.program_url())) }
     }
 }
 

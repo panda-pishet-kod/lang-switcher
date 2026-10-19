@@ -1110,6 +1110,9 @@ fn every_address_in_the_program_is_https_and_named_here() {
 /// where the wizard of FR-104 and the letter «Спасибо» send a person to write. Both are written
 /// down here a second time, apart from the code, as the feed's is: an address that drifted to a
 /// placeholder or to another host would still pass the two checks of the loop.
+///
+/// ⭐ **Nine since task T-103-9** — решение 181.33: the English pairs of the download page and of
+/// the program's page; their values are held by `every_language_opens_the_pages_of_the_site_on_its_own_side`.
 #[test]
 fn the_hard_wired_addresses_are_real_and_so_is_the_feed() {
     for (what, url) in [
@@ -1118,7 +1121,9 @@ fn the_hard_wired_addresses_are_real_and_so_is_the_feed() {
         ("ISSUES_URL", links::ISSUES_URL),
         ("SUPPORT_URL", links::SUPPORT_URL),
         ("DOWNLOAD_URL", links::DOWNLOAD_URL),
+        ("DOWNLOAD_URL_EN", links::DOWNLOAD_URL_EN),
         ("PROGRAM_URL", links::PROGRAM_URL),
+        ("PROGRAM_URL_EN", links::PROGRAM_URL_EN),
     ]
     .into_iter()
     .chain(links::FEED_URLS.map(|url| ("FEED_URLS", url)))
@@ -1409,6 +1414,173 @@ fn every_language_writes_to_the_author_where_decision_181_1_says() {
         feedback_mismatches(&spoilt),
         [Language::Uk],
         "the control: a canon that sends Ukrainian to GitHub Issues must be caught there"
+    );
+}
+
+/// The two pages of the site — `(download, program)` — on the Russian side, written down apart from
+/// the code (решение 181.33).
+const RUSSIAN_PAGES: (&str, &str) = (
+    "https://panda-pishet-kod.dev/langswitcher/download/",
+    "https://panda-pishet-kod.dev/langswitcher/",
+);
+
+/// The same two pages on the English side — their pairs under `/en/` (решение 181.33).
+const ENGLISH_PAGES: (&str, &str) = (
+    "https://panda-pishet-kod.dev/en/langswitcher/download/",
+    "https://panda-pishet-kod.dev/en/langswitcher/",
+);
+
+/// The pages решение 181.33 gives `language`: the Russian ones in Russian and Ukrainian, the
+/// English ones in the other twelve.
+fn pages_of_decision_181_33(language: Language) -> (&'static str, &'static str) {
+    match language {
+        Language::Ru | Language::Uk => RUSSIAN_PAGES,
+        _ => ENGLISH_PAGES,
+    }
+}
+
+/// The languages whose pages by `rule` are not the ones решение 181.33 gives them.
+fn pages_mismatches(rule: impl Fn(Language) -> (&'static str, &'static str)) -> Vec<Language> {
+    Language::ALL
+        .into_iter()
+        .filter(|language| rule(*language) != pages_of_decision_181_33(*language))
+        .collect()
+}
+
+/// **Задача T-103-9, сторож (1), решение 181.33 — the two pages of the site open in the language a
+/// person reads the program in**: «Открыть страницу загрузки» and the name of the program open the
+/// Russian pages in Russian and Ukrainian and their pairs under `/en/` in the other twelve — the
+/// same side as where the person writes (181.1). Until the third build of `e103` both opened the
+/// Russian pages in all fourteen languages (находка 181.32).
+///
+/// ⚠ Control: the rule of the third build — the Russian pages for every language — is caught on
+/// exactly the twelve of the English side.
+#[test]
+fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
+    assert_eq!(
+        pages_mismatches(|language| (links::download_url(language), links::program_url(language))),
+        Vec::<Language>::new(),
+        "181.33: the pages of these languages are not the ones the decision gives them"
+    );
+
+    // One side for writing and for reading: the pages follow the line 181.1 drew.
+    let off_the_side_of_181_1: Vec<Language> = Language::ALL
+        .into_iter()
+        .filter(|language| {
+            let russian = links::feedback_url(*language) == links::GROUP_URL;
+            (links::download_url(*language) == links::DOWNLOAD_URL) != russian
+                || (links::program_url(*language) == links::PROGRAM_URL) != russian
+        })
+        .collect();
+
+    assert_eq!(
+        off_the_side_of_181_1,
+        Vec::<Language>::new(),
+        "a person reads the site on the side they write to the author on"
+    );
+
+    // The constants are the pages, and the English one is the Russian one under `/en/` — the pair
+    // the site makes.
+    assert_eq!((links::DOWNLOAD_URL, links::PROGRAM_URL), RUSSIAN_PAGES);
+    assert_eq!(
+        (links::DOWNLOAD_URL_EN, links::PROGRAM_URL_EN),
+        ENGLISH_PAGES
+    );
+
+    for (russian, english) in [
+        (RUSSIAN_PAGES.0, ENGLISH_PAGES.0),
+        (RUSSIAN_PAGES.1, ENGLISH_PAGES.1),
+    ] {
+        assert_eq!(
+            russian.replacen("panda-pishet-kod.dev/", "panda-pishet-kod.dev/en/", 1),
+            english,
+            "the English page is the pair of the Russian one under /en/"
+        );
+        assert!(links::is_allowed(english), "{english} must reach the shell");
+    }
+
+    let twelve: Vec<Language> = Language::ALL
+        .into_iter()
+        .filter(|language| !matches!(language, Language::Ru | Language::Uk))
+        .collect();
+
+    assert_eq!(
+        pages_mismatches(|_| RUSSIAN_PAGES),
+        twelve,
+        "the control: the Russian pages for every language must be caught on the twelve"
+    );
+}
+
+/// **Задача T-103-9, сторож (3), решение 181.33 — every road to the two pages opens the page of its
+/// own language.** `perform` hands the shell what its window answers by [`letters::links`] for the
+/// language of the window; «О программе» asks the rule with the language of the interface; and no
+/// code line opens either Russian constant straight any more — the shape of the third build.
+///
+/// ⚠ Control: the same predicate refuses the two lines of `perform` and the one of «О программе»
+/// as the third build carried them.
+#[test]
+fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
+    fn opens_by_the_window(perform: &str) -> bool {
+        perform.contains("state.download_url(), state.program_url(),")
+            && perform.contains("Action::OpenDownload => open_link(download),")
+            && perform.contains("Action::OpenProgram => open_link(program),")
+    }
+    fn opens_by_the_interface(about: &str) -> bool {
+        about.contains("open_link(crate::letters::links::program_url(ui_language()));")
+    }
+    fn opens_a_constant_straight(code: &str) -> bool {
+        code.contains("open_link(links::DOWNLOAD_URL)")
+            || code.contains("open_link(links::PROGRAM_URL)")
+            || code.contains("open_link(crate::letters::links::PROGRAM_URL)")
+    }
+
+    let source = letters_source();
+    let settings_source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("settings.rs"),
+    )
+    .expect("src\\settings.rs must be readable");
+    let perform = squeezed_code(
+        letters_function_body(&source, "fn perform(")
+            .expect("src\\letters.rs must still declare `perform`"),
+    );
+    let about = squeezed_code(&settings_source);
+
+    assert!(
+        opens_by_the_window(&perform),
+        "181.33: «Открыть страницу загрузки» and the name must open the pages of their window:\n\
+         {perform}"
+    );
+    assert!(
+        opens_by_the_interface(&about),
+        "181.33: the name in «О программе» must open the page of the language of the interface"
+    );
+    assert!(
+        !opens_a_constant_straight(&squeezed_code(&source)) && !opens_a_constant_straight(&about),
+        "no road may open the Russian page straight, whatever the language"
+    );
+
+    // The controls: the three lines as the third build carried them.
+    let third_build = perform
+        .replace(
+            "Action::OpenDownload => open_link(download),",
+            "Action::OpenDownload => open_link(links::DOWNLOAD_URL),",
+        )
+        .replace(
+            "Action::OpenProgram => open_link(program),",
+            "Action::OpenProgram => open_link(links::PROGRAM_URL),",
+        );
+    assert_ne!(third_build, perform, "the control must change the body");
+    assert!(
+        !opens_by_the_window(&third_build) && opens_a_constant_straight(&third_build),
+        "the control: `perform` of the third build must be refused"
+    );
+
+    let third_about = "open_link(crate::letters::links::PROGRAM_URL);";
+    assert!(
+        !opens_by_the_interface(third_about) && opens_a_constant_straight(third_about),
+        "the control: «О программе» of the third build must be refused"
     );
 }
 

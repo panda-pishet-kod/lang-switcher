@@ -17951,8 +17951,11 @@ unsafe extern "system" fn about_proc(
             // that function **is** the gate of С52 — https only, and only at a host this build
             // declares. A window that reached the door past it would be exactly the caller that
             // gate was written to stop.
+            //
+            // Решение 181.33: the page in the language of the interface at the click — Russian
+            // for the Russian side, under `/en/` for the twelve of the English one.
             if control == IDC_ABOUT_NAME {
-                crate::letters::open_link(crate::letters::links::PROGRAM_URL);
+                crate::letters::open_link(crate::letters::links::program_url(ui_language()));
             }
 
             0

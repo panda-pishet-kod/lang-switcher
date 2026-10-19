@@ -7398,6 +7398,64 @@ fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
     );
 }
 
+/// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
+/// pages of the site too.** «От автора» opened hidden out of the templates of the built product and
+/// asked by the door of the task which pages «Открыть страницу загрузки» and the name of the program
+/// would open — the very calls `perform` reads them by. Built in Russian, the Russian pages; the
+/// language moved to English and [`letters::language_changed`] told the window, the pages under
+/// `/en/`; Ukrainian, the Russian ones again (181.33 п. 2).
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
+    let _guard = with_product_strings();
+
+    settings::set_ui_language(Language::Ru);
+
+    let author = HiddenWindow::open("0.83.0");
+    let pages = |window: &HiddenWindow| {
+        letters::testing::site_pages(window.window).expect("a window of `letters`")
+    };
+
+    let mut seen = Vec::new();
+
+    seen.push(("built in Ru", pages(&author)));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", pages(&author)));
+
+    letters::language_changed(author.owner);
+    seen.push(("En, told", pages(&author)));
+
+    settings::set_ui_language(Language::Uk);
+    letters::language_changed(author.owner);
+    seen.push(("Uk, told", pages(&author)));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let russian = (letters::links::DOWNLOAD_URL, letters::links::PROGRAM_URL);
+    let english = (
+        letters::links::DOWNLOAD_URL_EN,
+        letters::links::PROGRAM_URL_EN,
+    );
+
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", russian),
+            ("En, not told", russian),
+            ("En, told", english),
+            ("Uk, told", russian),
+        ],
+        "181.33: the pages follow the language of the window, and move when it moves"
+    );
+}
+
 #[cfg(feature = "testing")]
 impl Drop for HiddenWindow {
     fn drop(&mut self) {
