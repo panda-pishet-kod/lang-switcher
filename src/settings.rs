@@ -3356,6 +3356,21 @@ pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
 /// «Открыть группу» / «Open GitHub Issues» — the panel of «Спасибо», `letters::links::feedback_url`
 /// of the language of the letter. `IDS_CHANNEL_OPEN` stays with «Что нового» and FR-103.
 pub const IDS_FEEDBACK_OPEN: u16 = 3242;
+// Task T-103-7, решение 181.6: the last step of an appeal about a trouble — a letter to the author.
+// 3243…3247 close the block 3232…3247, 3248 opens the next. The address is `{0}` in every one of
+// them: the tables of fourteen languages hold no copy of `letters::links::MAIL_ADDRESS`.
+/// The note of the last step of a trouble: the journal and the computer go by letter.
+pub const IDS_WIZARD_MAIL_NOTE: u16 = 3243;
+/// «Адрес для письма: {0}» — the line of the address.
+pub const IDS_WIZARD_MAIL_ADDRESS: u16 = 3244;
+/// «Скопировать текст» — the clipboard and nothing else.
+pub const IDS_WIZARD_COPY_TEXT: u16 = 3245;
+/// «Скопировать адрес».
+pub const IDS_WIZARD_COPY_ADDRESS: u16 = 3246;
+/// «Текст скопирован. Вставьте его в письмо на {0}.» — the answer to «Скопировать текст».
+pub const IDS_WIZARD_TEXT_COPIED: u16 = 3247;
+/// «Адрес скопирован: {0}.» — the answer to «Скопировать адрес».
+pub const IDS_WIZARD_ADDRESS_COPIED: u16 = 3248;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3577,7 +3592,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and twenty-nine since task T-103-2** — вопрос 181, решение 181.1: «Спасибо» sends
 /// a person where they can write, and its button got a word of its own, [`IDS_FEEDBACK_OPEN`]
 /// (3242).
-pub const INTERFACE_STRINGS: [u16; 229] = [
+///
+/// ⚠ **Two hundred and thirty-five since task T-103-7** — решение 181.6: an appeal about a trouble goes
+/// to the author by letter, and its last step got six words of its own, [`IDS_WIZARD_MAIL_NOTE`] …
+/// [`IDS_WIZARD_ADDRESS_COPIED`] (3243…3248).
+pub const INTERFACE_STRINGS: [u16; 235] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3815,6 +3834,12 @@ pub const INTERFACE_STRINGS: [u16; 229] = [
     IDS_EXCLUSION_ALREADY,
     IDS_EXCLUSION_NOT_PICKED,
     IDS_FEEDBACK_OPEN,
+    IDS_WIZARD_MAIL_NOTE,
+    IDS_WIZARD_MAIL_ADDRESS,
+    IDS_WIZARD_COPY_TEXT,
+    IDS_WIZARD_COPY_ADDRESS,
+    IDS_WIZARD_TEXT_COPIED,
+    IDS_WIZARD_ADDRESS_COPIED,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

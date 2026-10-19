@@ -1528,6 +1528,112 @@ fn the_two_that_ask_a_person_to_write_go_where_they_can_and_the_news_stays_on_th
     );
 }
 
+/// Whether a body of the wizard writes the clipboard and opens nothing — no page, no shell, no
+/// `mailto:`.
+fn copies_and_opens_nothing(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    code.contains("write_unicode_text(")
+        && !code.contains("open_link(")
+        && !code.contains("open_in_the_shell(")
+        && !code.contains("mailto")
+}
+
+/// **Задача T-103-7, сторож (2), решение 181.6 — an appeal about a trouble is copied and nothing is
+/// opened; an idea still opens its page.** «Скопировать текст» and «Скопировать адрес» write the
+/// clipboard and go no further: the person writes the letter. The one button `IDC_WZ_COPY` asks
+/// [`letters::destination`] which of the two ways it is, and the way of an idea is the body of
+/// 0.103.0. Not a line of the module's code says `mailto`.
+///
+/// ⚠ Control: «Скопировать текст» that opens the group as well is caught.
+#[test]
+fn a_trouble_copies_its_text_and_opens_nothing_and_an_idea_opens_its_page() {
+    let source = letters_module_source();
+    let text = letters_function_body(&source, "fn wizard_copy_text(")
+        .expect("src\\letters.rs must declare `wizard_copy_text`");
+    let address = letters_function_body(&source, "fn wizard_copy_address(")
+        .expect("src\\letters.rs must declare `wizard_copy_address`");
+    let page = letters_function_body(&source, "fn wizard_copy(")
+        .expect("src\\letters.rs must still declare `wizard_copy`");
+    let button = squeezed_code(plan_arm(&source, "IDC_WZ_COPY => {", "return true;"));
+
+    assert!(
+        copies_and_opens_nothing(text),
+        "181.6: «Скопировать текст» must copy and open nothing:\n{text}"
+    );
+    assert!(
+        copies_and_opens_nothing(address),
+        "181.6: «Скопировать адрес» must copy and open nothing:\n{address}"
+    );
+    assert!(
+        the_copy_opens_the_feedback_of_its_window(page),
+        "181.1: the button of an idea still opens the page of its window:\n{page}"
+    );
+    assert!(
+        button.contains("state.wizard_destination()")
+            && button.contains("Some(Destination::Mail(address)) => wizard_copy_text(")
+            && button.contains("wizard_copy_text(hwnd, address),")
+            && button.contains("Some(Destination::Page(_)) => wizard_copy(hwnd),"),
+        "the one button asks the rule which way it is:\n{button}"
+    );
+    assert!(
+        code_lines(&source).all(|line| !line.contains("mailto")),
+        "SEC-03: no line of the module's code may hand the shell a mailto"
+    );
+
+    let opening = text.replace(
+        "wizard_say(hwnd, said);",
+        "open_link(links::GROUP_URL);\n    wizard_say(hwnd, said);",
+    );
+    assert_ne!(opening, text, "the control must change the body");
+    assert!(
+        !copies_and_opens_nothing(&opening),
+        "the sweep does not see «Скопировать текст» that opens a page as well"
+    );
+}
+
+/// **Задача T-103-7, сторож (3), решение 181.6 — the address of the letter is the site's, it is not
+/// a link, and no string table carries it.** The address is written down here apart from the code;
+/// the gate of С52 does not let it through (nothing may open it); and `app.rc` names it nowhere —
+/// the fourteen tables carry `{0}`, so a fifteenth language cannot hold a stale copy.
+///
+/// ⚠ Control: the Russian line of the address with the address written into it is caught.
+#[test]
+fn the_address_of_the_letter_is_the_sites_and_no_table_carries_it() {
+    assert_eq!(links::MAIL_ADDRESS, "send.me@panda-pishet-kod.dev");
+    assert!(
+        !links::is_allowed(links::MAIL_ADDRESS),
+        "the address is not a link: nothing may hand it to the shell"
+    );
+
+    let rc = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
+        .expect("app.rc must be readable")
+        .replace("\r\n", "\n");
+    let carrying = |text: &str| {
+        text.lines()
+            .filter(|line| line.contains(links::MAIL_ADDRESS))
+            .count()
+    };
+
+    assert_eq!(
+        carrying(&rc),
+        0,
+        "181.6: no line of app.rc may carry the address — the tables hold it as {{0}}"
+    );
+
+    let spoilt = rc.replacen(
+        "Адрес для письма: {0}",
+        &format!("Адрес для письма: {}", links::MAIL_ADDRESS),
+        1,
+    );
+    assert_ne!(spoilt, rc, "the control must change the file");
+    assert_eq!(
+        carrying(&spoilt),
+        1,
+        "the control: the address written into the Russian line must be caught"
+    );
+}
+
 // =========================================================================================
 // The demonstration of «Привет» — FR-101
 // =========================================================================================

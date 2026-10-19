@@ -379,6 +379,10 @@
 // abolished window already had, and the button is IDS_CHANNEL_OPEN.
 #define IDC_WZ_THANKS          1353
 #define IDC_WZ_CHANNEL         1354
+// Task T-103-7, decision 181.6: the last step of an appeal about a trouble -- the line of the
+// author's email and the button that copies it. Laid out at run time like every slot of the pool.
+#define IDC_WZ_ADDRESS         1355
+#define IDC_WZ_COPY_ADDRESS    1356
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -1405,6 +1409,9 @@ BEGIN
     PUSHBUTTON      "", IDC_WZ_COPY, 12, 196, 130, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_SAVE, 146, 196, 98, 14, BS_OWNERDRAW
     LTEXT           "", IDC_WZ_STATUS, 12, 213, 232, 10, SS_OWNERDRAW
+    // Task T-103-7: the address of the letter and its button -- a trouble's step only.
+    LTEXT           "", IDC_WZ_ADDRESS, 12, 196, 232, 10, SS_OWNERDRAW
+    PUSHBUTTON      "", IDC_WZ_COPY_ADDRESS, 146, 196, 98, 14, BS_OWNERDRAW
     // Step «Готово» — задача Т-33-3. The paragraph and the one button of the thanks; both are
     // laid out at run time like every other slot of this pool.
     LTEXT           "", IDC_WZ_THANKS, 12, 72, 232, 60, SS_OWNERDRAW
@@ -1819,6 +1826,14 @@ END
 // can write -- the group for ru and uk, GitHub Issues for the other twelve. 3242 continues the
 // block 3232...3247; IDS_CHANNEL_OPEN stays with the news and the author window.
 #define IDS_FEEDBACK_OPEN       3242
+// Task T-103-7, decision 181.6: the last step of an appeal about a trouble goes to the author by
+// letter. 3243...3247 close the block 3232...3247, 3248 opens the next. The address is {0}.
+#define IDS_WIZARD_MAIL_NOTE    3243
+#define IDS_WIZARD_MAIL_ADDRESS 3244
+#define IDS_WIZARD_COPY_TEXT    3245
+#define IDS_WIZARD_COPY_ADDRESS 3246
+#define IDS_WIZARD_TEXT_COPIED  3247
+#define IDS_WIZARD_ADDRESS_COPIED 3248
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -2073,6 +2088,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Сохранить в папку журнала"
     IDS_WIZARD_COPIED_ONLY  "Скопировано. Адрес группы появится в следующей версии."
     IDS_WIZARD_COPIED       "Скопировано, группа открыта."
+    IDS_WIZARD_MAIL_NOTE    "Это весь текст обращения. Правьте что угодно. В нём журнал программы и сведения о компьютере, поэтому отправьте его автору письмом — не в открытое обсуждение."
+    IDS_WIZARD_MAIL_ADDRESS "Адрес для письма: {0}"
+    IDS_WIZARD_COPY_TEXT    "Скопировать текст"
+    IDS_WIZARD_COPY_ADDRESS "Скопировать адрес"
+    IDS_WIZARD_TEXT_COPIED  "Текст скопирован. Вставьте его в письмо на {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Адрес скопирован: {0}."
     IDS_WIZARD_SAVED        "Сохранено: {0}"
     IDS_WIZARD_FAILED       "Не получилось. Текст остался в окне — скопируйте его вручную."
     IDS_THANKYOU_BUG_TITLE  "Спасибо за сообщение об ошибке"
@@ -2311,6 +2332,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Save to the journal folder"
     IDS_WIZARD_COPIED_ONLY  "Copied. The address of GitHub Issues will appear in the next version."
     IDS_WIZARD_COPIED       "Copied, GitHub Issues is open."
+    IDS_WIZARD_MAIL_NOTE    "This is the whole text of the appeal. Edit anything you like. It holds the program's journal and details of your computer, so send it to the author by email rather than to a public discussion."
+    IDS_WIZARD_MAIL_ADDRESS "Email address: {0}"
+    IDS_WIZARD_COPY_TEXT    "Copy the text"
+    IDS_WIZARD_COPY_ADDRESS "Copy the address"
+    IDS_WIZARD_TEXT_COPIED  "Text copied. Paste it into an email to {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Address copied: {0}."
     IDS_WIZARD_SAVED        "Saved: {0}"
     IDS_WIZARD_FAILED       "It did not work. The text is still in the window — copy it by hand."
     IDS_THANKYOU_BUG_TITLE  "Thank you for the bug report"
@@ -2562,6 +2589,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Зберегти в папку журналу"
     IDS_WIZARD_COPIED_ONLY  "Скопійовано. Адреса групи з'явиться в наступній версії."
     IDS_WIZARD_COPIED       "Скопійовано, групу відкрито."
+    IDS_WIZARD_MAIL_NOTE    "Це весь текст звернення. Правте що завгодно. У ньому журнал програми й відомості про комп'ютер, тож надішліть його авторові листом — не у відкрите обговорення."
+    IDS_WIZARD_MAIL_ADDRESS "Адреса для листа: {0}"
+    IDS_WIZARD_COPY_TEXT    "Скопіювати текст"
+    IDS_WIZARD_COPY_ADDRESS "Скопіювати адресу"
+    IDS_WIZARD_TEXT_COPIED  "Текст скопійовано. Вставте його в лист на {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Адресу скопійовано: {0}."
     IDS_WIZARD_SAVED        "Збережено: {0}"
     IDS_WIZARD_FAILED       "Не вийшло. Текст лишився у вікні — скопіюйте його вручну."
     IDS_THANKYOU_BUG_TITLE  "Дякую за повідомлення про помилку"
@@ -2796,6 +2829,12 @@ BEGIN
     IDS_WIZARD_SAVE         "In den Journalordner speichern"
     IDS_WIZARD_COPIED_ONLY  "Kopiert. Die Adresse von GitHub Issues kommt in der nächsten Version."
     IDS_WIZARD_COPIED       "Kopiert, GitHub Issues ist offen."
+    IDS_WIZARD_MAIL_NOTE    "Das ist der ganze Text der Meldung. Ändern Sie, was Sie möchten. Er enthält das Programmjournal und Angaben zu Ihrem Computer, senden Sie ihn dem Autor deshalb per E-Mail — nicht in eine öffentliche Diskussion."
+    IDS_WIZARD_MAIL_ADDRESS "E-Mail-Adresse: {0}"
+    IDS_WIZARD_COPY_TEXT    "Text kopieren"
+    IDS_WIZARD_COPY_ADDRESS "Adresse kopieren"
+    IDS_WIZARD_TEXT_COPIED  "Text kopiert. Fügen Sie ihn in eine E-Mail an {0} ein."
+    IDS_WIZARD_ADDRESS_COPIED "Adresse kopiert: {0}."
     IDS_WIZARD_SAVED        "Gespeichert: {0}"
     IDS_WIZARD_FAILED       "Es hat nicht geklappt. Der Text steht noch im Fenster — kopieren Sie ihn von Hand."
     IDS_THANKYOU_BUG_TITLE  "Danke für die Fehlermeldung"
@@ -3032,6 +3071,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Enregistrer dans le dossier du journal"
     IDS_WIZARD_COPIED_ONLY  "Copié. L'adresse de GitHub Issues arrivera dans la prochaine version."
     IDS_WIZARD_COPIED       "Copié, GitHub Issues est ouvert."
+    IDS_WIZARD_MAIL_NOTE    "Voici tout le texte du message. Modifiez ce que vous voulez. Il contient le journal du programme et des informations sur votre ordinateur : envoyez-le donc à l'auteur par e-mail, pas dans une discussion publique."
+    IDS_WIZARD_MAIL_ADDRESS "Adresse e-mail : {0}"
+    IDS_WIZARD_COPY_TEXT    "Copier le texte"
+    IDS_WIZARD_COPY_ADDRESS "Copier l'adresse"
+    IDS_WIZARD_TEXT_COPIED  "Texte copié. Collez-le dans un e-mail à {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Adresse copiée : {0}."
     IDS_WIZARD_SAVED        "Enregistré : {0}"
     IDS_WIZARD_FAILED       "Cela n'a pas marché. Le texte est resté dans la fenêtre — copiez-le à la main."
     IDS_THANKYOU_BUG_TITLE  "Merci pour le signalement"
@@ -3265,6 +3310,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Guardar en la carpeta del registro"
     IDS_WIZARD_COPIED_ONLY  "Copiado. La dirección de GitHub Issues llegará en la próxima versión."
     IDS_WIZARD_COPIED       "Copiado, GitHub Issues está abierto."
+    IDS_WIZARD_MAIL_NOTE    "Este es todo el texto del mensaje. Edite lo que quiera. Contiene el registro del programa y datos de su equipo, así que envíelo al autor por correo electrónico, no a un debate público."
+    IDS_WIZARD_MAIL_ADDRESS "Dirección de correo: {0}"
+    IDS_WIZARD_COPY_TEXT    "Copiar el texto"
+    IDS_WIZARD_COPY_ADDRESS "Copiar la dirección"
+    IDS_WIZARD_TEXT_COPIED  "Texto copiado. Péguelo en un correo a {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Dirección copiada: {0}."
     IDS_WIZARD_SAVED        "Guardado: {0}"
     IDS_WIZARD_FAILED       "No funcionó. El texto sigue en la ventana: cópielo a mano."
     IDS_THANKYOU_BUG_TITLE  "Gracias por avisar del error"
@@ -3496,6 +3547,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Guardar na pasta do registo"
     IDS_WIZARD_COPIED_ONLY  "Copiado. O endereço do GitHub Issues chega na próxima versão."
     IDS_WIZARD_COPIED       "Copiado, o GitHub Issues está aberto."
+    IDS_WIZARD_MAIL_NOTE    "Este é todo o texto da mensagem. Edite o que quiser. Contém o registo do programa e dados do seu computador, por isso envie-o ao autor por e-mail — não para uma discussão pública."
+    IDS_WIZARD_MAIL_ADDRESS "Endereço de e-mail: {0}"
+    IDS_WIZARD_COPY_TEXT    "Copiar o texto"
+    IDS_WIZARD_COPY_ADDRESS "Copiar o endereço"
+    IDS_WIZARD_TEXT_COPIED  "Texto copiado. Cole-o num e-mail para {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Endereço copiado: {0}."
     IDS_WIZARD_SAVED        "Guardado: {0}"
     IDS_WIZARD_FAILED       "Não resultou. O texto ficou na janela — copie-o à mão."
     IDS_THANKYOU_BUG_TITLE  "Obrigado pelo relato do erro"
@@ -3732,6 +3789,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Salva nella cartella del registro"
     IDS_WIZARD_COPIED_ONLY  "Copiato. L'indirizzo di GitHub Issues arriverà nella prossima versione."
     IDS_WIZARD_COPIED       "Copiato, GitHub Issues è aperto."
+    IDS_WIZARD_MAIL_NOTE    "Questo è tutto il testo del messaggio. Modifica quello che vuoi. Contiene il registro del programma e i dati del tuo computer, quindi invialo all'autore per e-mail, non in una discussione pubblica."
+    IDS_WIZARD_MAIL_ADDRESS "Indirizzo e-mail: {0}"
+    IDS_WIZARD_COPY_TEXT    "Copia il testo"
+    IDS_WIZARD_COPY_ADDRESS "Copia l'indirizzo"
+    IDS_WIZARD_TEXT_COPIED  "Testo copiato. Incollalo in un'e-mail a {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Indirizzo copiato: {0}."
     IDS_WIZARD_SAVED        "Salvato: {0}"
     IDS_WIZARD_FAILED       "Non ha funzionato. Il testo è rimasto nella finestra — copialo a mano."
     IDS_THANKYOU_BUG_TITLE  "Grazie per la segnalazione"
@@ -3968,6 +4031,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Zapisz w folderze dziennika"
     IDS_WIZARD_COPIED_ONLY  "Skopiowano. Adres GitHub Issues pojawi się w następnej wersji."
     IDS_WIZARD_COPIED       "Skopiowano, strona GitHub Issues otwarta."
+    IDS_WIZARD_MAIL_NOTE    "To cały tekst zgłoszenia. Popraw, co chcesz. Zawiera dziennik programu i dane o twoim komputerze, więc wyślij go autorowi e-mailem — nie do otwartej dyskusji."
+    IDS_WIZARD_MAIL_ADDRESS "Adres e-mail: {0}"
+    IDS_WIZARD_COPY_TEXT    "Skopiuj tekst"
+    IDS_WIZARD_COPY_ADDRESS "Skopiuj adres"
+    IDS_WIZARD_TEXT_COPIED  "Skopiowano tekst. Wklej go do e-maila na adres {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Skopiowano adres: {0}."
     IDS_WIZARD_SAVED        "Zapisano: {0}"
     IDS_WIZARD_FAILED       "Nie udało się. Tekst został w oknie — skopiuj go ręcznie."
     IDS_THANKYOU_BUG_TITLE  "Dziękuję za zgłoszenie błędu"
@@ -4200,6 +4269,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Uložit do složky deníku"
     IDS_WIZARD_COPIED_ONLY  "Zkopírováno. Adresa GitHub Issues přijde v příští verzi."
     IDS_WIZARD_COPIED       "Zkopírováno, stránka GitHub Issues je otevřená."
+    IDS_WIZARD_MAIL_NOTE    "Toto je celý text hlášení. Upravte cokoli chcete. Obsahuje deník programu a údaje o vašem počítači, proto ho pošlete autorovi e-mailem — ne do veřejné diskuse."
+    IDS_WIZARD_MAIL_ADDRESS "E-mailová adresa: {0}"
+    IDS_WIZARD_COPY_TEXT    "Zkopírovat text"
+    IDS_WIZARD_COPY_ADDRESS "Zkopírovat adresu"
+    IDS_WIZARD_TEXT_COPIED  "Text zkopírován. Vložte ho do e-mailu na {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Adresa zkopírována: {0}."
     IDS_WIZARD_SAVED        "Uloženo: {0}"
     IDS_WIZARD_FAILED       "Nepovedlo se. Text zůstal v okně — zkopírujte ho ručně."
     IDS_THANKYOU_BUG_TITLE  "Děkuji za hlášení chyby"
@@ -4435,6 +4510,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Günlük klasörüne kaydet"
     IDS_WIZARD_COPIED_ONLY  "Kopyalandı. GitHub Issues adresi bir sonraki sürümde gelecek."
     IDS_WIZARD_COPIED       "Kopyalandı, GitHub Issues açıldı."
+    IDS_WIZARD_MAIL_NOTE    "Bu, bildirimin tüm metnidir. İstediğinizi değiştirin. Programın günlüğünü ve bilgisayarınızla ilgili bilgileri içerir; bu yüzden onu yazara e-postayla gönderin, herkese açık bir tartışmaya değil."
+    IDS_WIZARD_MAIL_ADDRESS "E-posta adresi: {0}"
+    IDS_WIZARD_COPY_TEXT    "Metni kopyala"
+    IDS_WIZARD_COPY_ADDRESS "Adresi kopyala"
+    IDS_WIZARD_TEXT_COPIED  "Metin kopyalandı. {0} adresine yazacağınız e-postaya yapıştırın."
+    IDS_WIZARD_ADDRESS_COPIED "Adres kopyalandı: {0}."
     IDS_WIZARD_SAVED        "Kaydedildi: {0}"
     IDS_WIZARD_FAILED       "Olmadı. Metin pencerede duruyor — elle kopyalayın."
     IDS_THANKYOU_BUG_TITLE  "Hata bildirimi için teşekkürler"
@@ -4674,6 +4755,12 @@ BEGIN
     IDS_WIZARD_SAVE         "Αποθήκευση στον φάκελο του ημερολογίου"
     IDS_WIZARD_COPIED_ONLY  "Αντιγράφηκε. Η διεύθυνση του GitHub Issues θα έρθει στην επόμενη έκδοση."
     IDS_WIZARD_COPIED       "Αντιγράφηκε, το GitHub Issues άνοιξε."
+    IDS_WIZARD_MAIL_NOTE    "Αυτό είναι όλο το κείμενο του μηνύματος. Αλλάξτε ό,τι θέλετε. Περιέχει το ημερολόγιο του προγράμματος και στοιχεία του υπολογιστή σας, γι' αυτό στείλτε το στον δημιουργό με email — όχι σε δημόσια συζήτηση."
+    IDS_WIZARD_MAIL_ADDRESS "Διεύθυνση email: {0}"
+    IDS_WIZARD_COPY_TEXT    "Αντιγραφή κειμένου"
+    IDS_WIZARD_COPY_ADDRESS "Αντιγραφή διεύθυνσης"
+    IDS_WIZARD_TEXT_COPIED  "Το κείμενο αντιγράφηκε. Επικολλήστε το σε email προς {0}."
+    IDS_WIZARD_ADDRESS_COPIED "Η διεύθυνση αντιγράφηκε: {0}."
     IDS_WIZARD_SAVED        "Αποθηκεύτηκε: {0}"
     IDS_WIZARD_FAILED       "Δεν έγινε. Το κείμενο έμεινε στο παράθυρο — αντιγράψτε το με το χέρι."
     IDS_THANKYOU_BUG_TITLE  "Ευχαριστώ για την αναφορά σφάλματος"
@@ -4920,6 +5007,12 @@ BEGIN
     IDS_WIZARD_SAVE         "שמירה לתיקיית היומן"
     IDS_WIZARD_COPIED_ONLY  "הועתק. הכתובת של GitHub Issues תגיע בגרסה הבאה."
     IDS_WIZARD_COPIED       "הועתק, דף GitHub Issues נפתח."
+    IDS_WIZARD_MAIL_NOTE    "זה כל הטקסט של הפנייה. ערכו מה שתרצו. יש בו את יומן התוכנה ופרטים על המחשב שלכם, לכן שלחו אותו למפתח במייל — לא לדיון פתוח."
+    IDS_WIZARD_MAIL_ADDRESS "כתובת מייל: {0}"
+    IDS_WIZARD_COPY_TEXT    "העתקת הטקסט"
+    IDS_WIZARD_COPY_ADDRESS "העתקת הכתובת"
+    IDS_WIZARD_TEXT_COPIED  "הטקסט הועתק. הדביקו אותו במייל אל {0}."
+    IDS_WIZARD_ADDRESS_COPIED "הכתובת הועתקה: {0}."
     IDS_WIZARD_SAVED        "נשמר: {0}"
     IDS_WIZARD_FAILED       "לא הצליח. הטקסט נשאר בחלון — העתיקו אותו ידנית."
     IDS_THANKYOU_BUG_TITLE  "תודה על הדיווח על התקלה"
@@ -5151,6 +5244,12 @@ BEGIN
     IDS_WIZARD_SAVE         "الحفظ في مجلد السجل"
     IDS_WIZARD_COPIED_ONLY  "نُسخ. سيأتي عنوان GitHub Issues في الإصدار القادم."
     IDS_WIZARD_COPIED       "نُسخ، وفُتحت صفحة GitHub Issues."
+    IDS_WIZARD_MAIL_NOTE    "هذا نص الرسالة كله. عدّل ما تشاء. فيه سجل البرنامج ومعلومات عن حاسوبك، لذا أرسله إلى المؤلف بالبريد الإلكتروني — لا إلى نقاش عام."
+    IDS_WIZARD_MAIL_ADDRESS "عنوان البريد: {0}"
+    IDS_WIZARD_COPY_TEXT    "نسخ النص"
+    IDS_WIZARD_COPY_ADDRESS "نسخ العنوان"
+    IDS_WIZARD_TEXT_COPIED  "نُسخ النص. الصقه في رسالة بريد إلى {0}."
+    IDS_WIZARD_ADDRESS_COPIED "نُسخ العنوان: {0}."
     IDS_WIZARD_SAVED        "حُفظ: {0}"
     IDS_WIZARD_FAILED       "لم ينجح الأمر. بقي النص في النافذة — انسخه يدويًا."
     IDS_THANKYOU_BUG_TITLE  "شكرًا على الإبلاغ عن الخطأ"

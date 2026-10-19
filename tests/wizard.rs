@@ -111,6 +111,80 @@ fn no_slot_of_the_pool_belongs_to_two_steps() {
 }
 
 // =========================================================================================
+// Where an appeal goes — решения 181.1 и 181.6, задача T-103-7
+// =========================================================================================
+
+/// The address of решение 181.6, written down apart from the code: the email the site names.
+const MAIL_OF_DECISION_181_6: &str = "send.me@panda-pishet-kod.dev";
+
+/// The page of решение 181.1 for an idea, by language, written down apart from the code: the topic
+/// of the group for Russian and Ukrainian, the issues on GitHub for the other twelve.
+fn page_of_decision_181_1(language: settings::Language) -> &'static str {
+    use settings::Language;
+
+    match language {
+        Language::Ru | Language::Uk => "https://t.me/panda_koding/45",
+        _ => "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    }
+}
+
+/// What `canon` says against what [`letters::destination`] answers — the pairs that disagree.
+fn destination_mismatches(
+    canon: impl Fn(Trouble, settings::Language) -> letters::Destination,
+) -> Vec<(Trouble, settings::Language)> {
+    let mut wrong = Vec::new();
+
+    for trouble in [
+        Trouble::WrongResult,
+        Trouble::NothingHappened,
+        Trouble::Idea,
+    ] {
+        for language in settings::Language::ALL {
+            if letters::destination(trouble, language) != canon(trouble, language) {
+                wrong.push((trouble, language));
+            }
+        }
+    }
+
+    wrong
+}
+
+/// **Задача T-103-7, сторож (1), решение 181.6 — an appeal about a trouble goes to the author by
+/// letter, an idea goes to the page of its language.** The two troubles carry the journal and the
+/// details of the computer, so they go to the email of the author in every one of the fourteen
+/// languages; an idea goes to the group or to GitHub Issues as in 0.103.0 (решение 181.1).
+///
+/// ⚠ Control: a canon that sends a trouble to the group is caught on all fourteen languages of the
+/// trouble it names.
+#[test]
+fn every_appeal_goes_where_decisions_181_1_and_181_6_say() {
+    let canon = |trouble: Trouble, language| match trouble {
+        Trouble::WrongResult | Trouble::NothingHappened => {
+            letters::Destination::Mail(MAIL_OF_DECISION_181_6)
+        }
+        Trouble::Idea => letters::Destination::Page(page_of_decision_181_1(language)),
+    };
+
+    assert_eq!(
+        destination_mismatches(canon),
+        Vec::new(),
+        "181.6: these appeals do not go where the decisions send them"
+    );
+
+    let spoilt = |trouble: Trouble, language| match trouble {
+        Trouble::NothingHappened => letters::Destination::Page(page_of_decision_181_1(language)),
+        other => canon(other, language),
+    };
+
+    assert_eq!(
+        destination_mismatches(spoilt).len(),
+        14,
+        "the control: a canon that sends «Ничего не произошло» to a page must be caught in every \
+         language"
+    );
+}
+
+// =========================================================================================
 // The text of an appeal
 // =========================================================================================
 

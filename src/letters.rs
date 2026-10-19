@@ -843,6 +843,17 @@ pub mod links {
     /// and one that does not depend on the templates of the repository.
     pub const ISSUES_URL: &str = "https://github.com/panda-pishet-kod/lang-switcher/issues";
 
+    /// The author's email — where an appeal about **a trouble** goes, решение 181.6: it holds the
+    /// journal of the program and the details of the computer, and that belongs in a letter to
+    /// the author and not in an open discussion. The address the site names.
+    ///
+    /// ⚠ **Not a link, and not in [`allowed_hosts`].** Nothing opens it: there is no `mailto:`, the
+    /// program sends nothing and starts no mail program (SEC-03). It is shown on the last step of
+    /// the wizard and copied to the clipboard by a button, and the person writes the letter
+    /// themselves. The tables of FR-94 carry it only as `{0}`, so the fourteen translations hold no
+    /// copy of it.
+    pub const MAIL_ADDRESS: &str = "send.me@panda-pishet-kod.dev";
+
     /// **Where a person writes to the author, by the language they read the program in** —
     /// решение 181.1: Russian and Ukrainian go to the topic of the group, the other twelve to the
     /// issues on GitHub.
@@ -945,7 +956,8 @@ pub mod links {
     /// second place to forget, and when the author's real addresses replaced the placeholders
     /// (task T-78-1) this gate followed them with no edit but the two new names below.
     ///
-    /// ⚠ Every constant of this module belongs in this chain, and being on a host some other
+    /// ⚠ Every **address** of this module belongs in this chain — [`MAIL_ADDRESS`] is not one: it
+    /// is shown and copied, never opened — and being on a host some other
     /// constant already names is **not** a reason to leave one out: that is an accident of where
     /// the author happens to host the pages today, and the day one of them moves, the address
     /// would stop opening for a reason nobody could see from the line that changed.
@@ -1195,11 +1207,15 @@ const IDC_WZ_BACK: i32 = 1351;
 const IDC_WZ_NEXT: i32 = 1352;
 const IDC_WZ_THANKS: i32 = 1353;
 const IDC_WZ_CHANNEL: i32 = 1354;
+/// «Адрес для письма: …» — the last step of a trouble, задача T-103-7 (решение 181.6).
+const IDC_WZ_ADDRESS: i32 = 1355;
+/// «Скопировать адрес» — the same step.
+const IDC_WZ_COPY_ADDRESS: i32 = 1356;
 
 /// Every owner-drawn **static** of the wizard — the gate of `WM_DRAWITEM`, and it is written
 /// out in full for the reason [`LETTER_LABELS`] carries in its own comment: a run written short
 /// is a row that never gets painted, and the screenshot is what finds it.
-const WIZARD_LABELS: [i32; 23] = [
+const WIZARD_LABELS: [i32; 24] = [
     IDC_WZ_STEP,
     IDC_WZ_PROGRESS,
     IDC_WZ_TITLE,
@@ -1223,6 +1239,7 @@ const WIZARD_LABELS: [i32; 23] = [
     IDC_WZ_HELPS_LABEL,
     IDC_WZ_STATUS,
     IDC_WZ_THANKS,
+    IDC_WZ_ADDRESS,
 ];
 
 /// The four labels that stand beside the four boxes of «Что приложить?» — a run, and the
@@ -1236,8 +1253,8 @@ const WIZARD_ATTACH_LABELS: [i32; 5] = [
 ];
 
 /// Every owner-drawn **button** of the wizard: the three cards, the two radio runs, the four
-/// boxes and the five push buttons.
-const WIZARD_BUTTONS: [i32; 20] = [
+/// boxes and the six push buttons.
+const WIZARD_BUTTONS: [i32; 21] = [
     IDC_WZ_CHANNEL,
     IDC_WZ_CARD_1,
     IDC_WZ_CARD_1 + 1,
@@ -1254,6 +1271,7 @@ const WIZARD_BUTTONS: [i32; 20] = [
     IDC_WZ_ATTACH_1 + 2,
     IDC_WZ_ATTACH_1 + 3,
     IDC_WZ_COPY,
+    IDC_WZ_COPY_ADDRESS,
     IDC_WZ_SAVE,
     IDC_WZ_CANCEL,
     IDC_WZ_BACK,
@@ -2070,6 +2088,34 @@ impl Wizard {
     }
 }
 
+/// Where an appeal of the wizard goes — the two ways out of its last step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Destination {
+    /// **A letter to the author** (решение 181.6): the address is shown and copied, the text is
+    /// copied, and nothing is opened — no `mailto:`, no mail program, the program sends nothing.
+    Mail(&'static str),
+    /// **A page the shell opens** (решение 181.1): the topic of the group or GitHub Issues, by
+    /// the language of the window — [`links::feedback_url`].
+    Page(&'static str),
+}
+
+/// **Where an appeal goes, by what it is about and the language it is written in** — решения
+/// 181.1 и 181.6, задача T-103-7.
+///
+/// The two troubles carry the journal of the program and the details of the computer, so they go
+/// to the author by email and not to an open discussion; an idea goes where the readers of its
+/// language discuss the program. One pure rule, asked by the words of the last step, by its
+/// layout and by its button, so the three cannot disagree. A `match` without a wildcard on
+/// purpose: a fourth kind of appeal does not compile until somebody has said where it goes.
+pub fn destination(trouble: report::Trouble, language: Language) -> Destination {
+    match trouble {
+        report::Trouble::WrongResult | report::Trouble::NothingHappened => {
+            Destination::Mail(links::MAIL_ADDRESS)
+        }
+        report::Trouble::Idea => Destination::Page(links::feedback_url(language)),
+    }
+}
+
 /// The six faces one of these windows draws in.
 ///
 /// The **derivations** are shared with the about window — `settings::caption_logfont`,
@@ -2232,6 +2278,14 @@ impl WindowState {
     /// «Спасибо».
     fn feedback_url(&self) -> &'static str {
         links::feedback_url(self.language)
+    }
+
+    /// Where the appeal of this wizard goes — [`destination`] of its kind and of the language of
+    /// the window; `None` for every window that is not the wizard.
+    fn wizard_destination(&self) -> Option<Destination> {
+        self.wizard
+            .as_deref()
+            .map(|wizard| destination(wizard.draft.trouble, self.language))
     }
 
     /// The `SS_ICON` static this window's logo goes into.
@@ -7517,7 +7571,16 @@ pub fn controls_of(step: Step) -> &'static [i32] {
             IDC_WZ_ATTACH_V1 + 3,
             IDC_WZ_ATTACH_FOOT,
         ],
-        Step::Preview => &[IDC_WZ_PREVIEW, IDC_WZ_COPY, IDC_WZ_SAVE, IDC_WZ_STATUS],
+        // Задача T-103-7: the address and its button are slots of this same step — the trouble
+        // shows them, the idea hides them in `layout_wizard` ([`destination`] decides which).
+        Step::Preview => &[
+            IDC_WZ_PREVIEW,
+            IDC_WZ_ADDRESS,
+            IDC_WZ_COPY,
+            IDC_WZ_COPY_ADDRESS,
+            IDC_WZ_SAVE,
+            IDC_WZ_STATUS,
+        ],
         Step::Done => &[IDC_WZ_THANKS, IDC_WZ_CHANNEL],
     }
 }
@@ -7580,13 +7643,16 @@ const WIZARD_SLOTS_TAIL: [i32; 18] = [
 /// the three at the bottom, and the eye reads them as chrome — but they are chrome of **one
 /// step**, and a slot missing from the pool is a control that never gets hidden: «Скопировать
 /// и открыть канал» would have stood on every step of the wizard.
-const WIZARD_SLOTS_VALUES: [i32; 8] = [
+const WIZARD_SLOTS_VALUES: [i32; 10] = [
     IDC_WZ_ATTACH_V1 + 1,
     IDC_WZ_ATTACH_V1 + 2,
     IDC_WZ_ATTACH_V1 + 3,
     IDC_WZ_STATUS,
     IDC_WZ_COPY,
     IDC_WZ_SAVE,
+    // The address of the letter and its button — задача T-103-7.
+    IDC_WZ_ADDRESS,
+    IDC_WZ_COPY_ADDRESS,
     // The two slots of «Готово» — задача Т-33-3. They belong to the pool for the same reason
     // the two buttons above it do: a slot missing from the pool is a control that never gets
     // hidden, and the thanks would then stand on every step of the wizard.
@@ -7643,6 +7709,11 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
         IDS_WIZARD_WHAT_NOTE, IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHERE_NOTE, IDS_WIZARD_WHERE_TITLE,
         format_text, text,
     };
+    // The words of the letter to the author — задача T-103-7, решение 181.6.
+    use crate::settings::{
+        IDS_WIZARD_COPY_ADDRESS, IDS_WIZARD_COPY_TEXT, IDS_WIZARD_MAIL_ADDRESS,
+        IDS_WIZARD_MAIL_NOTE,
+    };
     // The words of «Готово» — every one of them a string the abolished window of thanks already
     // had (задача Т-33-3): not one row was added to the tables of FR-94.
     use crate::settings::{
@@ -7665,6 +7736,8 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
     let road = wizard.road();
 
     let idea = wizard.draft.trouble.is_idea();
+    // Задача T-103-7, решение 181.6: a trouble goes by letter, an idea to a page — the one rule.
+    let mail = matches!(state.wizard_destination(), Some(Destination::Mail(_)));
 
     let (title, note) = match step {
         Step::What => (IDS_WIZARD_WHAT_TITLE, Some(IDS_WIZARD_WHAT_NOTE)),
@@ -7672,7 +7745,14 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
         Step::Did => (IDS_WIZARD_DID_TITLE, Some(IDS_WIZARD_DID_NOTE)),
         Step::Idea => (IDS_WIZARD_IDEA_TITLE, Some(IDS_WIZARD_IDEA_NOTE)),
         Step::Attach => (IDS_WIZARD_ATTACH_TITLE, Some(IDS_WIZARD_ATTACH_NOTE)),
-        Step::Preview => (IDS_WIZARD_PREVIEW_TITLE, Some(IDS_WIZARD_PREVIEW_NOTE)),
+        Step::Preview => (
+            IDS_WIZARD_PREVIEW_TITLE,
+            Some(if mail {
+                IDS_WIZARD_MAIL_NOTE
+            } else {
+                IDS_WIZARD_PREVIEW_NOTE
+            }),
+        ),
         // «Готово» — задача Т-33-3: the heading is the one the abolished window carried, and
         // there is no explanation line, because the thanks is a paragraph of its own and a
         // muted sentence above it would be a second voice saying the same thing.
@@ -7757,7 +7837,19 @@ fn fill_wizard(hwnd: HWND, state: &WindowState) {
             format_text(IDS_WIZARD_ATTACH_JOURNAL_SUB, &[&entries]),
         ),
         (IDC_WZ_ATTACH_FOOT, text(IDS_WIZARD_ATTACH_FOOT)),
-        (IDC_WZ_COPY, text(IDS_WIZARD_COPY)),
+        (
+            IDC_WZ_COPY,
+            text(if mail {
+                IDS_WIZARD_COPY_TEXT
+            } else {
+                IDS_WIZARD_COPY
+            }),
+        ),
+        (
+            IDC_WZ_ADDRESS,
+            format_text(IDS_WIZARD_MAIL_ADDRESS, &[links::MAIL_ADDRESS]),
+        ),
+        (IDC_WZ_COPY_ADDRESS, text(IDS_WIZARD_COPY_ADDRESS)),
         (IDC_WZ_SAVE, text(IDS_WIZARD_SAVE)),
         (IDC_WZ_STATUS, wizard.status.clone()),
         (IDC_WZ_CANCEL, text(IDS_WIZARD_CANCEL)),
@@ -8239,59 +8331,104 @@ unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
         }
 
         Step::Preview => {
-            // SAFETY: as above.
-            let copy_width = unsafe {
-                button_width(
-                    dc,
-                    faces.text,
-                    metrics,
-                    &settings::get_text(hwnd, IDC_WZ_COPY),
-                )
-            };
-            // SAFETY: as above.
-            let save_width = unsafe {
-                button_width(
-                    dc,
-                    faces.text,
-                    metrics,
-                    &settings::get_text(hwnd, IDC_WZ_SAVE),
-                )
+            use crate::settings::{
+                IDS_WIZARD_ADDRESS_COPIED, IDS_WIZARD_FAILED, IDS_WIZARD_TEXT_COPIED, format_text,
+                text,
             };
 
-            // ⚠ **The two buttons wrap when they do not fit side by side**, and that is not a
+            // Задача T-103-7, решение 181.6: a trouble goes by letter — the line of the address
+            // and three buttons; an idea goes to a page — the two buttons it always had.
+            let mail = matches!(state.wizard_destination(), Some(Destination::Mail(_)));
+            let row: &[i32] = if mail {
+                &[IDC_WZ_COPY, IDC_WZ_COPY_ADDRESS, IDC_WZ_SAVE]
+            } else {
+                &[IDC_WZ_COPY, IDC_WZ_SAVE]
+            };
+
+            let widths: Vec<i32> = row
+                .iter()
+                .map(|&control| {
+                    // SAFETY: as above.
+                    unsafe {
+                        button_width(dc, faces.text, metrics, &settings::get_text(hwnd, control))
+                    }
+                })
+                .collect();
+
+            // ⚠ **The buttons wrap when they do not fit side by side**, and that is not a
             // precaution: in Greek «Αποθήκευση στον φάκελο του ημερολογίου» took the second
             // button 86 px past the right edge of the window (`влезание-В.log`, control 1348
-            // «вне клиента»). The two rows cost the preview one button of height and nothing
-            // else.
-            let side_by_side = copy_width + metrics.x(air::BUTTON_GAP) + save_width <= width;
-            let rows = if side_by_side { 1 } else { 2 };
+            // «вне клиента»). Every row costs the preview one button of height and nothing else.
+            let at = wrap_row(&widths, metrics.x(air::BUTTON_GAP), width);
+            let rows = at
+                .last()
+                .map_or(1, |&(_, line)| i32::try_from(line).unwrap_or(0) + 1);
 
+            let address = if mail {
+                // SAFETY: as above.
+                unsafe {
+                    measure(
+                        dc,
+                        faces.text,
+                        width,
+                        &settings::get_text(hwnd, IDC_WZ_ADDRESS),
+                        None,
+                    )
+                }
+            } else {
+                0
+            };
+
+            // The line under the buttons: one line for an idea, as it always was; for a letter as
+            // tall as the longest thing it can say, because two of those carry the address.
+            let status = if mail {
+                [
+                    format_text(IDS_WIZARD_TEXT_COPIED, &[links::MAIL_ADDRESS]),
+                    format_text(IDS_WIZARD_ADDRESS_COPIED, &[links::MAIL_ADDRESS]),
+                    text(IDS_WIZARD_FAILED),
+                ]
+                .iter()
+                .map(|said| {
+                    // SAFETY: as above.
+                    unsafe { measure(dc, faces.text, width, said, None) }
+                })
+                .fold(step_height, i32::max)
+            } else {
+                step_height
+            };
+
+            let address_block = if mail { address + tight } else { 0 };
             let bottom = bottom_of_body(client, metrics);
-            let room =
-                (bottom - y - button * rows - step_height - tight * (rows + 1)).max(metrics.y(40));
+            let room = (bottom - y - address_block - button * rows - status - tight * (rows + 1))
+                .max(metrics.y(40));
 
             place(hwnd, IDC_WZ_PREVIEW, pad, y, width, room);
             inset_area(hwnd, metrics, IDC_WZ_PREVIEW);
             y += room + tight;
 
-            place(hwnd, IDC_WZ_COPY, pad, y, copy_width, button);
-
-            if side_by_side {
-                place(
-                    hwnd,
-                    IDC_WZ_SAVE,
-                    pad + copy_width + metrics.x(air::BUTTON_GAP),
-                    y,
-                    save_width,
-                    button,
-                );
+            if mail {
+                place(hwnd, IDC_WZ_ADDRESS, pad, y, width, address);
+                y += address + tight;
             } else {
-                y += button + tight;
-                place(hwnd, IDC_WZ_SAVE, pad, y, save_width.min(width), button);
+                hide(hwnd, IDC_WZ_ADDRESS);
+                hide(hwnd, IDC_WZ_COPY_ADDRESS);
             }
 
-            y += button + tight;
-            place(hwnd, IDC_WZ_STATUS, pad, y, width, step_height);
+            for (&control, (&wide, &(x, line))) in row.iter().zip(widths.iter().zip(at.iter())) {
+                let line = i32::try_from(line).unwrap_or(0);
+
+                place(
+                    hwnd,
+                    control,
+                    pad + x,
+                    y + line * (button + tight),
+                    wide.min(width),
+                    button,
+                );
+            }
+
+            y += rows * (button + tight);
+            place(hwnd, IDC_WZ_STATUS, pad, y, width, status);
         }
 
         // «Готово» — задача Т-33-3. The paragraph gets the height its own words need, and the
@@ -9159,8 +9296,21 @@ fn wizard_command(hwnd: HWND, control: i32, notification: u16) -> bool {
             wizard_start_capture(hwnd);
             return true;
         }
+        // Задача T-103-7, решение 181.6: one button, two ways — a letter copies the text and
+        // opens nothing, an idea copies it and opens its page. [`destination`] says which.
         IDC_WZ_COPY => {
-            wizard_copy(hwnd);
+            // SAFETY: the state pointer is live for the length of the window.
+            let way = unsafe { with_state(hwnd, |state| state.wizard_destination()) }.flatten();
+
+            match way {
+                Some(Destination::Mail(address)) => wizard_copy_text(hwnd, address),
+                Some(Destination::Page(_)) => wizard_copy(hwnd),
+                None => {}
+            }
+            return true;
+        }
+        IDC_WZ_COPY_ADDRESS => {
+            wizard_copy_address(hwnd);
             return true;
         }
         IDC_WZ_SAVE => {
@@ -9374,6 +9524,7 @@ fn wizard_after_choice(hwnd: HWND, touched: Touched) {
 /// Слова берутся теми же строками, что и в [`fill_wizard`], — второй таблицы не заводится:
 /// одна и та же строка ресурса читается там и здесь.
 fn wizard_choice_words(wizard: &Wizard) -> [(i32, String); 4] {
+    use crate::settings::IDS_WIZARD_MAIL_NOTE;
     use crate::settings::{
         IDS_CLOSE, IDS_THANKYOU_BUG_TITLE, IDS_THANKYOU_IDEA_TITLE, IDS_WIZARD_ATTACH_NOTE,
         IDS_WIZARD_ATTACH_TITLE, IDS_WIZARD_DID_NOTE, IDS_WIZARD_DID_TITLE, IDS_WIZARD_DONE,
@@ -9385,6 +9536,12 @@ fn wizard_choice_words(wizard: &Wizard) -> [(i32, String); 4] {
     let step = wizard.current();
     let road = wizard.road();
     let idea = wizard.draft.trouble.is_idea();
+    // The same rule as `fill_wizard` asks: whether this appeal goes by letter (решение 181.6). The
+    // language only picks the page of an idea, so the one in force answers that much as well.
+    let mail = matches!(
+        destination(wizard.draft.trouble, settings::ui_language()),
+        Destination::Mail(_)
+    );
 
     let (title, note) = match step {
         Step::What => (IDS_WIZARD_WHAT_TITLE, Some(IDS_WIZARD_WHAT_NOTE)),
@@ -9392,7 +9549,14 @@ fn wizard_choice_words(wizard: &Wizard) -> [(i32, String); 4] {
         Step::Did => (IDS_WIZARD_DID_TITLE, Some(IDS_WIZARD_DID_NOTE)),
         Step::Idea => (IDS_WIZARD_IDEA_TITLE, Some(IDS_WIZARD_IDEA_NOTE)),
         Step::Attach => (IDS_WIZARD_ATTACH_TITLE, Some(IDS_WIZARD_ATTACH_NOTE)),
-        Step::Preview => (IDS_WIZARD_PREVIEW_TITLE, Some(IDS_WIZARD_PREVIEW_NOTE)),
+        Step::Preview => (
+            IDS_WIZARD_PREVIEW_TITLE,
+            Some(if mail {
+                IDS_WIZARD_MAIL_NOTE
+            } else {
+                IDS_WIZARD_PREVIEW_NOTE
+            }),
+        ),
         Step::Done => (
             if idea {
                 IDS_THANKYOU_IDEA_TITLE
@@ -9842,6 +10006,54 @@ fn wizard_copy(hwnd: HWND) {
     wizard_say(hwnd, said);
 }
 
+/// «Скопировать текст» — the appeal about a trouble, задача T-103-7 (решение 181.6).
+///
+/// **The clipboard and nothing else.** The appeal carries the journal and the details of the
+/// computer, so it goes to the author by a letter the person writes: no page is opened, no mail
+/// program is started, nothing is sent. The line under the buttons says where to paste it.
+fn wizard_copy_text(hwnd: HWND, address: &str) {
+    use crate::settings::{IDS_WIZARD_FAILED, IDS_WIZARD_TEXT_COPIED, format_text, text};
+
+    wizard_harvest(hwnd);
+
+    // SAFETY: the state pointer is live for the length of the window.
+    let appeal = unsafe {
+        with_state(hwnd, |state| {
+            state.wizard.as_deref().map(|wizard| wizard.text.clone())
+        })
+    }
+    .flatten()
+    .unwrap_or_default();
+
+    if appeal.is_empty() {
+        return;
+    }
+
+    let said = if crate::selection::write_unicode_text(hwnd, &appeal).is_ok() {
+        format_text(IDS_WIZARD_TEXT_COPIED, &[address])
+    } else {
+        text(IDS_WIZARD_FAILED)
+    };
+
+    wizard_say(hwnd, said);
+}
+
+/// «Скопировать адрес» — the author's email to the clipboard, задача T-103-7 (решение 181.6).
+///
+/// The address stands on the screen as well; the button is there because an owner-drawn line
+/// cannot be selected, and a typed address is an address with a typo in it.
+fn wizard_copy_address(hwnd: HWND) {
+    use crate::settings::{IDS_WIZARD_ADDRESS_COPIED, IDS_WIZARD_FAILED, format_text, text};
+
+    let said = if crate::selection::write_unicode_text(hwnd, links::MAIL_ADDRESS).is_ok() {
+        format_text(IDS_WIZARD_ADDRESS_COPIED, &[links::MAIL_ADDRESS])
+    } else {
+        text(IDS_WIZARD_FAILED)
+    };
+
+    wizard_say(hwnd, said);
+}
+
 /// «Сохранить в папку журнала» — FR-104: a file beside the journal, and the folder opened after
 /// it so that the person can see what was written.
 fn wizard_save(hwnd: HWND) {
@@ -9934,6 +10146,29 @@ fn glyph_height(metrics: Metrics, faces: &Faces) -> i32 {
 /// Where the body of the wizard has to stop — the top of the button row, less the air above it.
 fn bottom_of_body(client: RECT, metrics: Metrics) -> i32 {
     client.bottom - metrics.y(air::PAD) - metrics.y(air::BUTTON) - metrics.y(air::GAP)
+}
+
+/// Where each button of a row stands when the row wraps — its offset from the left edge of the
+/// row and the line it is on, for buttons `widths` wide and `gap` apart in a row `width` wide.
+///
+/// A button that is not the first on its line and would run past the edge starts the next line;
+/// nothing is narrowed here. Two buttons answer exactly what the last step of the wizard answered
+/// before задача T-103-7 gave it a third: side by side when the two and the gap fit, else two lines.
+fn wrap_row(widths: &[i32], gap: i32, width: i32) -> Vec<(i32, usize)> {
+    let mut at = Vec::with_capacity(widths.len());
+    let (mut x, mut line) = (0, 0);
+
+    for &wide in widths {
+        if x > 0 && x + wide > width {
+            x = 0;
+            line += 1;
+        }
+
+        at.push((x, line));
+        x += wide + gap;
+    }
+
+    at
 }
 
 // =========================================================================================

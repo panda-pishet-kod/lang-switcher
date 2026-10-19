@@ -17159,7 +17159,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **229 since task T-103-2** — вопрос 181: the button of «Спасибо» that sends a person where they
 /// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row.
-const FR_94_STRINGS: [(u16, &str, &str); 229] = [
+///
+/// ⚠ **235 since task T-103-7** — решение 181.6: the six words of the last step of a trouble, which
+/// goes to the author by letter — 229 + 6, row for row.
+const FR_94_STRINGS: [(u16, &str, &str); 235] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18187,6 +18190,41 @@ const FR_94_STRINGS: [(u16, &str, &str); 229] = [
         "Открыть группу",
         "Open GitHub Issues",
     ),
+    // Task T-103-7, решение 181.6: an appeal about a trouble goes to the author by letter — the
+    // table of the addendum to TZ-E103, word for word; the address is `{0}`.
+    (
+        settings::IDS_WIZARD_MAIL_NOTE,
+        "Это весь текст обращения. Правьте что угодно. В нём журнал программы и сведения о \
+         компьютере, поэтому отправьте его автору письмом — не в открытое обсуждение.",
+        "This is the whole text of the appeal. Edit anything you like. It holds the program's \
+         journal and details of your computer, so send it to the author by email rather than to \
+         a public discussion.",
+    ),
+    (
+        settings::IDS_WIZARD_MAIL_ADDRESS,
+        "Адрес для письма: {0}",
+        "Email address: {0}",
+    ),
+    (
+        settings::IDS_WIZARD_COPY_TEXT,
+        "Скопировать текст",
+        "Copy the text",
+    ),
+    (
+        settings::IDS_WIZARD_COPY_ADDRESS,
+        "Скопировать адрес",
+        "Copy the address",
+    ),
+    (
+        settings::IDS_WIZARD_TEXT_COPIED,
+        "Текст скопирован. Вставьте его в письмо на {0}.",
+        "Text copied. Paste it into an email to {0}.",
+    ),
+    (
+        settings::IDS_WIZARD_ADDRESS_COPIED,
+        "Адрес скопирован: {0}.",
+        "Address copied: {0}.",
+    ),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -18365,6 +18403,103 @@ fn the_caption_of_hello_names_the_pair_of_its_own_language() {
     assert!(
         !(quoted(german, french.typed) && quoted(german, french.fixed)),
         "the control: a caption held against the pair of another language must be caught"
+    );
+}
+
+/// Whether `text` holds the address as one slot — exactly one `{0}` and no address of its own.
+fn holds_the_address_as_a_slot(text: &str) -> bool {
+    text.matches("{0}").count() == 1 && !text.contains('@')
+}
+
+/// **Задача T-103-7, сторож (4), решение 181.6 — the six words of the letter are in every language,
+/// and the address in them is a slot.** The line of the address and the two answers carry `{0}`
+/// once and no `@` of their own; the note and the two buttons carry neither; the note of a letter
+/// is not the note of a page. Ukrainian is word for word the table of the addendum (Russian and
+/// English are, through `FR_94_STRINGS`). Under the gate of [`LOCALE`].
+///
+/// ⚠ Control: a button, which has no slot, is not taken for a line that holds one.
+#[test]
+fn the_six_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
+    const WITH_SLOT: [u16; 3] = [
+        settings::IDS_WIZARD_MAIL_ADDRESS,
+        settings::IDS_WIZARD_TEXT_COPIED,
+        settings::IDS_WIZARD_ADDRESS_COPIED,
+    ];
+    const WITHOUT: [u16; 3] = [
+        settings::IDS_WIZARD_MAIL_NOTE,
+        settings::IDS_WIZARD_COPY_TEXT,
+        settings::IDS_WIZARD_COPY_ADDRESS,
+    ];
+    const UKRAINIAN: [(u16, &str); 6] = [
+        (
+            settings::IDS_WIZARD_MAIL_NOTE,
+            "Це весь текст звернення. Правте що завгодно. У ньому журнал програми й відомості про \
+             комп'ютер, тож надішліть його авторові листом — не у відкрите обговорення.",
+        ),
+        (settings::IDS_WIZARD_MAIL_ADDRESS, "Адреса для листа: {0}"),
+        (settings::IDS_WIZARD_COPY_TEXT, "Скопіювати текст"),
+        (settings::IDS_WIZARD_COPY_ADDRESS, "Скопіювати адресу"),
+        (
+            settings::IDS_WIZARD_TEXT_COPIED,
+            "Текст скопійовано. Вставте його в лист на {0}.",
+        ),
+        (
+            settings::IDS_WIZARD_ADDRESS_COPIED,
+            "Адресу скопійовано: {0}.",
+        ),
+    ];
+
+    let _guard = with_product_strings();
+    let mut wrong = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for id in WITH_SLOT {
+            let text = settings::text(id);
+            if !holds_the_address_as_a_slot(&text) {
+                wrong.push(format!("{language:?} {id}: no single slot — «{text}»"));
+            }
+        }
+
+        for id in WITHOUT {
+            let text = settings::text(id);
+            if text.trim().is_empty() || text.contains("{0}") || text.contains('@') {
+                wrong.push(format!("{language:?} {id}: «{text}»"));
+            }
+        }
+
+        if settings::text(settings::IDS_WIZARD_MAIL_NOTE)
+            == settings::text(settings::IDS_WIZARD_PREVIEW_NOTE)
+        {
+            wrong.push(format!(
+                "{language:?}: the note of a letter is the note of a page"
+            ));
+        }
+
+        if language == Language::Uk {
+            for (id, want) in UKRAINIAN {
+                let text = settings::text(id);
+                if text != want {
+                    wrong.push(format!("Uk {id}: «{text}», the addendum says «{want}»"));
+                }
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::En);
+    let button = settings::text(settings::IDS_WIZARD_COPY_TEXT);
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        !holds_the_address_as_a_slot(&button),
+        "the control: «{button}» has no slot and must not pass for a line that holds one"
+    );
+    assert!(
+        wrong.is_empty(),
+        "181.6: {} words of the letter are not as they must be:\n{}",
+        wrong.len(),
+        wrong.join("\n")
     );
 }
 
@@ -25195,8 +25330,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        229,
-        "two hundred and TWENTY-NINE identifiers in use since task T-103-2 (вопрос 181, решение \
+        235,
+        "two hundred and THIRTY-FIVE identifiers in use since task T-103-7 (решение 181.6): an \
+         appeal about a trouble goes to the author by letter, and its last step got six words of \
+         its own (3243…3248). Two hundred and twenty-nine since task T-103-2 (вопрос 181, решение \
          181.1): «Спасибо» sends a person where they can write, and its button got a word of its \
          own (3242). Two hundred and twenty-eight since task T-100-3 (вопрос 172, \
          вариант В): the eight strings of the two ways of «Исключения» arrived (3234…3241) — \
