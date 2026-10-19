@@ -3716,14 +3716,19 @@ fn total_pause(log: &[Step], delay_ms: u32) -> std::time::Duration {
 ///
 /// `backspace` (FR-41): six characters are six `Backspace` down+up pairs and six code units as
 /// down+up pairs — twenty-four events, one portion each, and a pause **between** portions, so
-/// twenty-three of them. At [`inject::MAX_INTER_EVENT_DELAY_MS`] that is twenty-three seconds.
-/// `selection` (FR-42) adds the two `Shift` events of the bracket: twenty-six events, twenty-five
-/// pauses, twenty-five seconds.
+/// twenty-three of them. At [`inject::MAX_INTER_EVENT_DELAY_MS`] that is 23 × 250 ms — five and
+/// three-quarter seconds. `selection` (FR-42) adds the two `Shift` events of the bracket:
+/// twenty-six events, twenty-five pauses, six and a quarter seconds.
+///
+/// ⚠ **Two hundred and fifty since task T-103-4** — решение 180.1: the reference of Microsoft
+/// gives a low-level hook no more than 1000 ms since Windows 10 1709, and a ceiling of a thousand
+/// was one gap equal to the whole of it. Until then the ceiling was the thousand of ТЗ-Э13 and the
+/// totals twenty-three and twenty-five seconds.
 ///
 /// # Why the total is modelled and one run is real
 ///
-/// A test that really slept twenty-three seconds would prove twenty-three seconds and cost every
-/// future run of the battery twenty-three seconds to re-prove arithmetic. So the count and the
+/// A test that really slept six seconds would prove six seconds and cost every future run of the
+/// battery six seconds to re-prove arithmetic. So the count and the
 /// value of every pause come off the log of [`Bench`] — the seam FR-44 was built against — and a
 /// second run of the very same packet through [`SleepingBench`], at a fraction of the ceiling,
 /// pays the pauses for real and shows that the model and the machine agree about how many there
@@ -3733,8 +3738,9 @@ fn a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks() {
     let ceiling = inject::MAX_INTER_EVENT_DELAY_MS;
 
     assert_eq!(
-        ceiling, 1_000,
-        "ТЗ-Э13 fixes the ceiling of inter_event_delay_ms at a thousand milliseconds"
+        ceiling, 250,
+        "решение 180.1 fixes the ceiling of inter_event_delay_ms at two hundred and fifty \
+         milliseconds — a quarter of the 1000 ms the system allows a hook since Windows 10 1709"
     );
 
     // FR-41, the `backspace` packet.
@@ -3775,7 +3781,18 @@ fn a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks() {
 
     // **Seconds.** Not thirty milliseconds — a pause above zero is the explicit trade of NFR-09
     // that FR-44 exists to offer — but a wait a person sits through rather than a machine they
-    // restart, which is the whole of what the ceiling buys.
+    // restart, which is the whole of what the ceiling buys. The arithmetic of решение 180.1:
+    // twenty-three and twenty-five gaps of a quarter of a second each.
+    assert_eq!(
+        backspace,
+        std::time::Duration::from_millis(23 * 250),
+        "backspace: twenty-three pauses at the ceiling"
+    );
+    assert_eq!(
+        selection,
+        std::time::Duration::from_millis(25 * 250),
+        "selection: twenty-five pauses at the ceiling"
+    );
     assert!(
         backspace <= std::time::Duration::from_secs(30)
             && selection <= std::time::Duration::from_secs(30),
@@ -3795,9 +3812,9 @@ fn a_six_letter_word_at_the_ceiling_of_fr44_costs_seconds_and_not_weeks() {
     );
 
     // The calibration: the same packet, the same count of pauses, actually slept through — at a
-    // two-hundredth of the ceiling, so that the battery pays milliseconds to check a model that
-    // answers in seconds.
-    let sampled = ceiling / 200;
+    // two-hundred-and-fiftieth of the ceiling, one millisecond, so that the battery pays
+    // milliseconds to check a model that answers in seconds.
+    let sampled = ceiling / 250;
     let mut sleeper = SleepingBench { pauses: 0 };
     let started = std::time::Instant::now();
     inject::replace_in(&mut sleeper, &ghbdtn(), &russian(), sampled).expect("sized");

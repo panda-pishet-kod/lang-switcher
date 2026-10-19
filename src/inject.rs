@@ -1582,32 +1582,37 @@ pub fn send_mismatches() -> (u32, u32) {
 /// publication. The constant lives here because the field lives here; the decision lives where
 /// the file crosses into the program.
 ///
-/// # Why a thousand and not the `u32` a hand-edited file can hold
+/// # Why two hundred and fifty and not the `u32` a hand-edited file can hold
 ///
 /// The pause of FR-44 becomes `sleep_ms` — `thread::sleep` — on the **input thread**, which is the
 /// thread section 6.1 puts the `WH_KEYBOARD_LL` hook and the watchdog timer on. A sleeping thread
 /// pumps no messages and answers no callback, so every millisecond of this field is a millisecond
 /// in which the hook callback of every keystroke **of the whole machine** goes unanswered. FR-80
 /// names the consequence: the system removes a hook that overruns `LowLevelHooksTimeout`
-/// (`HKCU\Control Panel\Desktop`, about five seconds by default) and it removes it **silently** —
-/// the watchdog that would put it back is on the same sleeping thread, and the fail-safe of FR-96
-/// lives inside the callback of a hook that is no longer installed. So the field a file can set to
-/// `u32::MAX` (4 294 967 295 ms, about forty-nine days) is a field one slipped zero can use to
-/// freeze the keyboard of the session on the first press of the hotkey. That is the finding of the
-/// audit of 2026-08-24 this constant answers.
+/// (`HKCU\Control Panel\Desktop`; since Windows 10 1709 no more than 1000 ms, and the reference of
+/// Microsoft names no default) and it removes it **silently** — the watchdog that would put it back
+/// is on the same sleeping thread, and the fail-safe of FR-96 lives inside the callback of a hook
+/// that is no longer installed. So the field a file can set to `u32::MAX` (4 294 967 295 ms, about
+/// forty-nine days) is a field one slipped zero can use to freeze the keyboard of the session on
+/// the first press of the hotkey. That is the finding of the audit of 2026-08-24 this constant
+/// answers.
 ///
-/// A thousand milliseconds keeps a **single** gap inside that `LowLevelHooksTimeout` budget with
-/// room to spare, and turns the worst case of a whole replacement from tens of days into tens of
-/// seconds: six characters replaced by the `backspace` path are twenty-four events and therefore
-/// twenty-three pauses — twenty-three seconds, something a person waits out rather than a machine
-/// they restart. It is still far outside the thirty milliseconds NFR-09 gives the whole path, and
-/// deliberately so: a pause above zero **is** the explicit trade of that budget for compatibility,
-/// which is the only reason FR-44 exists, and this bounds the trade instead of forbidding it.
+/// Two hundred and fifty milliseconds is **a quarter** of the most the system allows a hook since
+/// Windows 10 1709, so a **single** gap stays inside it with room to spare, and the worst case of a
+/// whole replacement is a few seconds and not tens of days: six characters replaced by the
+/// `backspace` path are twenty-four events and therefore twenty-three pauses — about five and
+/// three-quarter seconds, something a person waits out rather than a machine they restart. It is
+/// still far outside the thirty milliseconds NFR-09 gives the whole path, and deliberately so: a
+/// pause above zero **is** the explicit trade of that budget for compatibility, which is the only
+/// reason FR-44 exists, and this bounds the trade instead of forbidding it.
 ///
-/// The number is not derived here. It is the one the stage-13 repair specification fixes
-/// (`reports\ТЗ-Э13-ремонт.md`, task T-13-13), together with the two of [`crate::selection`], so
-/// that its origin does not get lost the next time somebody asks where a thousand came from.
-pub const MAX_INTER_EVENT_DELAY_MS: u32 = 1_000;
+/// The number is not derived here. It was the thousand of the stage-13 repair specification
+/// (`reports\ТЗ-Э13-ремонт.md`, task T-13-13), cut «with room inside about five seconds» — a
+/// default the reference does not name — and so **equal** to the limit of the system; решение
+/// 180.1 (task T-103-4) made it two hundred and fifty, so that its origin does not get lost the
+/// next time somebody asks where a quarter of a second came from. A larger number in the file is
+/// not rewritten: the smaller of the two acts (`crate::app::publish_configuration`).
+pub const MAX_INTER_EVENT_DELAY_MS: u32 = 250;
 
 /// Publishes `[replacement] inter_event_delay_ms` — FR-44.
 ///

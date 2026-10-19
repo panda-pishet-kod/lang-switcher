@@ -19,8 +19,8 @@
 //! # The shape of the callback
 //!
 //! [`keyboard_hook_proc`] is the most dangerous function in the program, for a reason that
-//! is not obvious: when it takes longer than `LowLevelHooksTimeout`
-//! (`HKCU\Control Panel\Desktop`, about five seconds by default) the system removes the hook
+//! is not obvious: when it takes longer than `LowLevelHooksTimeout` (`HKCU\Control Panel\Desktop`;
+//! since Windows 10 1709 no more than 1000 ms, no default named) the system removes the hook
 //! **silently, without telling anybody** — FR-80. A slow callback does not produce a slow
 //! program, it produces a quietly dead one. That is why NFR-01 to NFR-05 are absolute here
 //! and why the body is built out of three layers that can be read separately:

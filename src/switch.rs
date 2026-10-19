@@ -159,9 +159,10 @@ use crate::layouts::LayoutId;
 ///
 /// Section 6.1 gives the input thread the low-level hook, and FR-80 records what happens to a
 /// thread that stops being available: the system removes the hook **silently** once
-/// `LowLevelHooksTimeout` is exceeded — `HKCU\Control Panel\Desktop`, about **5000 ms** by
-/// default. Every millisecond spent here is a millisecond the input thread is not pumping
-/// messages, so the wait is a hard ceiling and not a "usually short" hope.
+/// `LowLevelHooksTimeout` is exceeded — `HKCU\Control Panel\Desktop`, and since Windows 10 1709
+/// **no more than 1000 ms**; the reference of Microsoft names no default. Every millisecond spent
+/// here is a millisecond the input thread is not pumping messages, so the wait is a hard ceiling
+/// and not a "usually short" hope.
 ///
 /// `20` was chosen against a measurement rather than a feeling. On the machine this was
 /// developed on, a `WM_INPUTLANGCHANGEREQUEST` posted to a window of this very process takes a
@@ -172,8 +173,9 @@ use crate::layouts::LayoutId;
 /// ⭐ **The worst case of the whole module is now this one number**, and task Т-14-4 is what made
 /// it so. While FR-50 was a chain of three the worst case on the input thread was two budgets end
 /// to end, and in a classic console window it was three — about 95 ms per press, measured by
-/// Т-14-2, spent on methods that could not help. One budget of 20 ms is **one part in 250** of
-/// `LowLevelHooksTimeout`, and in a console window not even that is spent: no verdict is possible
+/// Т-14-2, spent on methods that could not help. One budget of 20 ms is **one part in fifty** of
+/// the 1000 ms `LowLevelHooksTimeout` may be at most, and in a console window not even that is
+/// spent: no verdict is possible
 /// there, so no wait is performed at all (see [`Outcome::Sent`]).
 ///
 /// The ceiling is enforced on the time actually slept, not on the number of slices: see

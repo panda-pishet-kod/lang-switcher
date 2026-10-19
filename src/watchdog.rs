@@ -102,8 +102,9 @@
 //! # FR-80 — the watchdog, and why it cannot ask whether the hook is alive
 //!
 //! FR-80 names four ways the system takes a low-level hook away **without saying so**: the
-//! callback overrunning `LowLevelHooksTimeout` (`HKCU\Control Panel\Desktop`, about five
-//! seconds by default), a switch to a secure desktop (a UAC prompt, `Ctrl+Alt+Del`), a session
+//! callback overrunning `LowLevelHooksTimeout` (`HKCU\Control Panel\Desktop`; since Windows 10
+//! 1709 no more than 1000 ms, no default named), a switch to a secure desktop (a UAC prompt,
+//! `Ctrl+Alt+Del`), a session
 //! change, and a resume from sleep. In every one of them the program keeps running, the tray
 //! icon keeps sitting there, [`crate::hook::is_installed`] keeps answering `true` — and not one
 //! keystroke reaches the callback ever again.

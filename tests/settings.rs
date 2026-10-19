@@ -16312,8 +16312,10 @@ fn a_file_asking_for_u32_max_publishes_the_ceilings_and_is_left_byte_for_byte() 
         selection::published_restore_delay()
     );
 
-    // The ceilings, as numbers — the ones `reports\ТЗ-Э13-ремонт.md` fixes for this task.
-    assert_eq!(inject::MAX_INTER_EVENT_DELAY_MS, 1_000);
+    // The ceilings, as numbers — the ones `reports\ТЗ-Э13-ремонт.md` fixes for this task; the
+    // pause of FR-44 at a quarter of a second since решение 180.1 (task T-103-4), a thousand until
+    // then.
+    assert_eq!(inject::MAX_INTER_EVENT_DELAY_MS, 250);
     assert_eq!(selection::MAX_CLIPBOARD_TIMEOUT_MS, 5_000);
     assert_eq!(selection::MAX_CLIPBOARD_RESTORE_DELAY_MS, 5_000);
 

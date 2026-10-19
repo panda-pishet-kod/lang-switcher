@@ -717,7 +717,8 @@ fn a_reading_that_goes_blind_during_the_wait_is_not_a_confirmation() {
 /// ceiling, and the ceiling is on the time really waited.
 ///
 /// The input thread holds the low-level hook, and a thread that stops being available for
-/// longer than `LowLevelHooksTimeout` — about 5000 ms — loses the hook silently.
+/// longer than `LowLevelHooksTimeout` loses the hook silently — since Windows 10 1709 that is no
+/// more than 1000 ms, and the reference of Microsoft names no default (решение 180.1).
 ///
 /// ⭐ **Task Т-14-4 divided this ceiling by two.** While FR-50 was a chain the worst case was two
 /// budgets on the input thread, and in a console window three (about 95 ms per press, measured by
@@ -739,10 +740,13 @@ fn the_wait_between_the_attempt_and_its_check_is_bounded() {
         fake.waited_ms
     );
 
-    // And the ceiling itself is far below the timeout that costs the program its hook.
+    // And the ceiling itself is far below the timeout that costs the program its hook — counted,
+    // since решение 180.1, from the 1000 ms the system allows a hook at most and not from a
+    // default of about five seconds the reference does not name.
     assert!(
-        u64::from(ceiling) * 200 < 5000,
-        "the whole switch must stay at least two orders of magnitude inside LowLevelHooksTimeout"
+        u64::from(ceiling) * 10 < 1000,
+        "the whole switch must stay ten times inside the 1000 ms LowLevelHooksTimeout may be at \
+         most since Windows 10 1709: {ceiling} ms"
     );
 }
 

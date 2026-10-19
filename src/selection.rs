@@ -2444,12 +2444,19 @@ pub fn restore_delay_of(selection: &Selection) -> Duration {
 /// answer a click and the dialog does not repaint, and the user's only remaining move is to kill
 /// the process.
 ///
-/// Five seconds is the same order as the default `LowLevelHooksTimeout` of FR-80 — the budget the
-/// neighbouring ceiling of [`crate::inject::MAX_INTER_EVENT_DELAY_MS`] is cut against, so that the
-/// three numbers of this repair are read against one measure rather than three — and it is longer
-/// than any application takes to answer a `Ctrl+C` while still being a wait a person recognises as
-/// a wait. NFR-09's thirty milliseconds are the *typing-buffer* path and do not reach here; this
-/// path is the one that waits for another process by design.
+/// Five seconds is **not** cut against the `LowLevelHooksTimeout` of FR-80, and need not be: this
+/// wait is on the UI thread and not on the thread of the hook (the paragraph above), so the measure
+/// of this number is the interface, not the hook. It is longer than any application takes to
+/// answer a `Ctrl+C` while still being a wait a person recognises as a wait. NFR-09's thirty
+/// milliseconds are the *typing-buffer* path and do not reach here; this path is the one that waits
+/// for another process by design.
+///
+/// ⚠ Until решение 180.1 (task T-103-4) this paragraph read the number against «the default
+/// `LowLevelHooksTimeout`» of about five seconds, the measure the neighbouring ceiling of
+/// [`crate::inject::MAX_INTER_EVENT_DELAY_MS`] was cut against. The reference of Microsoft names no
+/// default and allows a hook no more than 1000 ms since Windows 10 1709; the pause of FR-44, which
+/// **is** on the thread of the hook, went down to a quarter of that, and this number, which is not,
+/// stayed where it was with its own argument.
 ///
 /// The number is not derived here: it is the one `reports\ТЗ-Э13-ремонт.md` fixes for task
 /// T-13-13, so that its origin does not get lost.
