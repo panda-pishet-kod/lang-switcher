@@ -83,9 +83,11 @@
     command needs no administrator rights -- established by the setup stage, TOOLCHAIN.md
     section 5. Since stage E91 (decision 155.4) the signature also names the program and its
     page: /d "Lang Switcher" and /du https://panda-pishet-kod.dev/langswitcher/ (the name
-    without the platform since stage E101, decision 173.1; the UAC prompt shows it) --
-    the address is links::PROGRAM_URL of src\letters.rs, so gate 3 of verify-perimeter.ps1,
-    which reads the signed file, finds it declared.
+    without the platform since stage E101, decision 173.1; the UAC prompt shows it). Gate 3
+    of verify-perimeter.ps1 reads the signed file and judges its certificate table against
+    this address, passed to it as -SignUrl (decision 181.37, stage E103): until then the
+    address was accepted because it was also links::PROGRAM_URL of src\letters.rs, and that
+    stopped when the program's address took its mark ?lang=ru (decision 181.35).
 
     The timestamp countersignature needs the network. If the service cannot be reached the
     signature is still worth having locally, so this script falls back to signing without
@@ -130,7 +132,8 @@ param(
     [string]$BaseArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # What the signature says the file is and where it comes from (/d and /du of signtool,
-    # decision 155.4). The address must be one src\letters.rs declares: see the header.
+    # decision 155.4). Gate 3 of verify-perimeter.ps1 judges the certificate table against this
+    # address (decision 181.37): see the header.
     [string]$SignDescription = 'Lang Switcher',
     [string]$SignUrl = 'https://panda-pishet-kod.dev/langswitcher/',
     # Size in bytes of the artifact of the PREVIOUS delivery. Passed straight to
@@ -407,7 +410,7 @@ if ($SkipSign) {
     Write-Host '  NOTE: -SkipSign was given, so the file measured below is UNSIGNED and is'
     Write-Host '  smaller than the product will be. The size below is not the shipping one.'
 }
-& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $Artifact -Previous $PreviousSize
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $Artifact -Previous $PreviousSize -SignUrl $SignUrl
 $perimeter = $LASTEXITCODE
 if ($perimeter -ne 0) {
     Write-Host ''
@@ -469,7 +472,7 @@ if ($SkipSign) {
 
 # --- 10. The perimeter over the base image ------------------------------------------------------
 Write-Section 'Step 10: the perimeter over the base image'
-& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $BaseArtifact
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $BaseArtifact -SignUrl $SignUrl
 $basePerimeter = $LASTEXITCODE
 if ($basePerimeter -ne 0) {
     Write-Host ''

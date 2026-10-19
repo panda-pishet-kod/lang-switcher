@@ -67,6 +67,17 @@
     byte for byte, in UTF-8 and UTF-16LE, without regard to case. Positive control:
     -ExtraPathNeedles '/rustc/' -- every Rust image carries that prefix, so the gate must FAIL.
 
+    GATE 3 (task T-22-11; split by decision 181.37, stage E103) -- SEC-03, every https:// in the
+    file is one it may carry. The file is TWO texts: the image the compiler made, and the
+    certificate table signtool appended (the PE security directory). The image is judged against
+    the addresses src\letters.rs declares; the certificate table against the one address the
+    signature names, /du of signtool. Until stage E103 the whole file was judged against
+    letters.rs alone, and the /du address passed only because it happened to be the program's own
+    page (links::PROGRAM_URL); when that address took its mark ?lang=ru (decision 181.35), the
+    signature's address was left unexplained and the gate failed on a string the program does
+    not carry. Positive control: -SignUrlControl 'https://example.invalid/' -- the signature is
+    then judged against an address it does not name, so on a signed file the gate must FAIL.
+
     Exit code: 0 only if the artifact could be measured and gates 2, 3 and 4 pass -- or, under
     a control, only if the gate under control really failed.
 
@@ -76,6 +87,7 @@
       .\verify-perimeter.ps1 -Previous 1413240              # prints the growth over e44
       .\verify-perimeter.ps1 -ExtraMarkers serde            # crate control: must PASS
       .\verify-perimeter.ps1 -ExtraPathNeedles '/rustc/'    # path control: must PASS
+      .\verify-perimeter.ps1 -SignUrlControl 'https://example.invalid/'   # signature control: must PASS
 #>
 [CmdletBinding()]
 param(
@@ -90,7 +102,14 @@ param(
     [string[]]$ExtraMarkers = @(),
     # Strings added to the folders gate 4 looks for. '/rustc/' is the positive control: every
     # Rust image carries it, so the gate has to fire on it.
-    [string[]]$ExtraPathNeedles = @()
+    [string[]]$ExtraPathNeedles = @(),
+    # The address the signature carries (/du of signtool) -- the one https:// gate 3 accepts in
+    # the certificate table (decision 181.37). Empty means the default of release.ps1, read out
+    # of that script rather than typed here a second time.
+    [string]$SignUrl = '',
+    # Gate 3's control of the certificate table: the signature is judged against THIS address
+    # instead, so the real /du of a signed file becomes stray and the gate has to FAIL.
+    [string]$SignUrlControl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -259,49 +278,115 @@ foreach ($url in $declared) { Write-Host ("    {0}" -f $url) }
 
 $bytes = [System.IO.File]::ReadAllBytes($Artifact)
 
-# Both encodings in one pass: the raw bytes, and the same bytes with every zero dropped.
-$ascii = -join ($bytes | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
-$wide  = -join ($bytes | Where-Object { $_ -ne 0 } | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
+# The address of the signature (decision 181.37): given, or the default of release.ps1, which
+# is the script that signs this file.
+if (-not $SignUrl) {
+    $releaseScript = Join-Path $ScriptDir 'release.ps1'
+    if (Test-Path $releaseScript) {
+        $releaseText = Get-Content -LiteralPath $releaseScript -Raw
+        $signMatch = [regex]::Match($releaseText, '\[string\]\$SignUrl\s*=\s*''(https://[^'']+)''')
+        if ($signMatch.Success) { $SignUrl = $signMatch.Groups[1].Value }
+    }
+}
+$signControl = ($SignUrlControl -ne '')
+$signJudge = $SignUrl
+if ($signControl) { $signJudge = $SignUrlControl }
 
+# The certificate table: the PE security directory, the fifth of the data directories -- a FILE
+# offset and a length (unlike the other directories, which are addresses in memory). Zero
+# length means an unsigned file: then the whole file is the image.
+$certOffset = 0
+$certLength = 0
+$peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+$optionalHeader = $peOffset + 24
+$directories = $optionalHeader + 96
+if ([BitConverter]::ToUInt16($bytes, $optionalHeader) -eq 0x20B) { $directories = $optionalHeader + 112 }
+$certOffset = [long][BitConverter]::ToUInt32($bytes, $directories + 32)
+$certLength = [long][BitConverter]::ToUInt32($bytes, $directories + 36)
+$tableFailed = $false
+if ($certLength -gt 0 -and ($certOffset -le 0 -or $certOffset + $certLength -gt $bytes.Length)) {
+    Write-Host ("  FAIL: the certificate table ({0} bytes at {1}) lies outside the file of {2} bytes" -f $certLength, $certOffset, $bytes.Length)
+    $tableFailed = $true
+    $certLength = 0
+}
+
+$imageBytes = $bytes
+$signatureBytes = New-Object byte[] 0
+if ($certLength -gt 0) {
+    $signatureBytes = New-Object byte[] ([int]$certLength)
+    [Array]::Copy($bytes, $certOffset, $signatureBytes, 0, $certLength)
+    $after = $bytes.Length - ($certOffset + $certLength)
+    $imageBytes = New-Object byte[] ([int]($certOffset + $after))
+    [Array]::Copy($bytes, 0, $imageBytes, 0, $certOffset)
+    if ($after -gt 0) { [Array]::Copy($bytes, $certOffset + $certLength, $imageBytes, $certOffset, $after) }
+}
+
+# The https:// runs of a span of bytes, in both encodings in one pass: the raw bytes, and the
+# same bytes with every zero dropped.
+#
 # ⚠ Rust string constants sit next to one another in `.rdata` with NO terminator between them,
 # so two addresses come out of the file as ONE run: «https://a/onehttps://b/two». A pattern that
 # stopped at the first «https://» would then find one address, and a stray one glued to a known
 # one would be «explained» by it. Each run is therefore cut at every further «https://».
-$found = @()
-foreach ($haystack in @($ascii, $wide)) {
-    foreach ($match in [regex]::Matches($haystack, 'https://(?:(?!https://)[A-Za-z0-9\.\-/_%~:@\?=&\+])*')) {
-        $found += $match.Value
+function Get-HttpsRuns([byte[]]$span) {
+    $ascii = -join ($span | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
+    $wide  = -join ($span | Where-Object { $_ -ne 0 } | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
+    $runs = @()
+    foreach ($haystack in @($ascii, $wide)) {
+        foreach ($match in [regex]::Matches($haystack, 'https://(?:(?!https://)[A-Za-z0-9\.\-/_%~:@\?=&\+])*')) {
+            $runs += $match.Value
+        }
     }
+    return @($runs | Sort-Object -Unique)
 }
 
-$found = $found | Sort-Object -Unique
-$strayAddresses = @()
-
-foreach ($url in $found) {
-    # A run is explained when a declared address is a PREFIX of it -- the linker stores strings
-    # side by side with no terminator, so «<the feed address>example.invalid» is one run and two
-    # constants -- or when the run is a prefix of a declared one.
-    #
-    # ⚠ This is safe ONLY because the runs above are cut at every further «https://»: a stray
-    # address glued behind a known one is a run of its own and is judged on its own. Measured
-    # both ways -- the control below appends `https://evil.example.org/collect` to a copy of the
-    # binary and the gate must fail on it.
-    $explained = $false
-    foreach ($known in $declared) {
-        if ($url.StartsWith($known) -or $known.StartsWith($url)) { $explained = $true; break }
+# The runs of `$runs` that no address of `$known` explains. A run is explained when a known
+# address is a PREFIX of it -- the linker stores strings side by side with no terminator, so
+# «<the feed address>example.invalid» is one run and two constants, and in the certificate table
+# the ASN.1 tag after the /du address (0x30) reads as a '0' glued to it -- or when the run is a
+# prefix of a known one.
+#
+# ⚠ This is safe ONLY because the runs are cut at every further «https://»: a stray address glued
+# behind a known one is a run of its own and is judged on its own.
+function Get-StrayRuns($runs, $known) {
+    $stray = @()
+    foreach ($url in $runs) {
+        $explained = $false
+        foreach ($address in $known) {
+            if ($address -and ($url.StartsWith($address) -or $address.StartsWith($url))) { $explained = $true; break }
+        }
+        if (-not $explained) { $stray += $url }
     }
-    if (-not $explained) { $strayAddresses += $url }
+    return @($stray)
 }
 
-Write-Host ("  https:// runs in the binary: {0}" -f $found.Count)
+$imageRuns = Get-HttpsRuns $imageBytes
+$imageStray = Get-StrayRuns $imageRuns $declared
+Write-Host ("  the image ({0} bytes): https:// runs {1}, against src\letters.rs" -f $imageBytes.Length, $imageRuns.Count)
+foreach ($url in $imageStray) { Write-Host ("  FOUND   {0}  (in the image)" -f $url) }
 
-$addressFailed = $strayAddresses.Count -gt 0
+$signatureStray = @()
+if ($signatureBytes.Length -gt 0) {
+    $signatureRuns = Get-HttpsRuns $signatureBytes
+    if ($signControl) { Write-Host ("  *** POSITIVE CONTROL: the signature is judged against {0}; the gate must FAIL ***" -f $signJudge) }
+    if (-not $signJudge) {
+        Write-Host '  FAIL: the address of the signature is not known -- neither -SignUrl nor release.ps1 gives it'
+        $tableFailed = $true
+    }
+    $signatureStray = Get-StrayRuns $signatureRuns @($signJudge)
+    Write-Host ("  the certificate table ({0} bytes at {1}): https:// runs {2}, against the signature's {3}" -f $signatureBytes.Length, $certOffset, $signatureRuns.Count, $signJudge)
+    foreach ($url in $signatureStray) { Write-Host ("  FOUND   {0}  (in the certificate table)" -f $url) }
+} else {
+    Write-Host '  the file carries no certificate table: the whole file is the image'
+}
+
+$signatureFailed = ($signatureStray.Count -gt 0)
+$addressFailed = ($imageStray.Count -gt 0) -or $signatureFailed -or $tableFailed
 
 if ($addressFailed) {
-    foreach ($url in $strayAddresses) { Write-Host ("  FOUND   {0}" -f $url) }
-    Write-Host '  RESULT: FAIL -- the binary carries an address the program does not declare'
+    Write-Host '  RESULT: FAIL -- the file carries an address neither the program nor its signature declares'
 } else {
-    Write-Host '  every address in the binary is one the program declares'
+    Write-Host '  every address in the image is one the program declares, and the signature names only its own'
     Write-Host '  RESULT: pass'
 }
 
@@ -390,6 +475,18 @@ if ($pathControl) {
     }
 
     Write-Host ' POSITIVE CONTROL FAILED: the path gate missed a string that is in every Rust image'
+    Write-Host '======================================================================'
+    exit 1
+}
+
+if ($signControl) {
+    if ($signatureFailed) {
+        Write-Host ' POSITIVE CONTROL PASSED: the signature gate really failed'
+        Write-Host '======================================================================'
+        exit 0
+    }
+
+    Write-Host ' POSITIVE CONTROL FAILED: the signature gate did not fail -- the file has no certificate table, or its /du passed under a foreign address'
     Write-Host '======================================================================'
     exit 1
 }
