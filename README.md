@@ -10,6 +10,8 @@ for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are publ
 
 Step-by-step install: [Edge](https://panda-pishet-kod.dev/en/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/en/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/en/langswitcher/download/opera/) · [Yandex Browser](https://panda-pishet-kod.dev/en/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/en/langswitcher/download/firefox/)
 
+Documentation: [questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [no Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
+
 Report a problem — in English or Russian: [Issues](../../issues).
 
 **If the browser or Windows warns you.** The program is signed with the author's own certificate,
@@ -29,6 +31,8 @@ The rest of this README and all other documents of the project are in Russian.
 [Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/) · [Конвертер раскладки](https://panda-pishet-kod.dev/raskladka/)
 
 Пошаговая установка: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/)
+
+Документация: [вопросы и ответы](https://panda-pishet-kod.dev/langswitcher/docs/) · [горячая клавиша — если нет Pause/Break](https://panda-pishet-kod.dev/langswitcher/docs/goryachaya-klavisha/)
 
 Программа делает одну вещь. «Лёгкость» здесь означает отсутствие постороннего функционала,
 а не упрощение инженерной реализации.
