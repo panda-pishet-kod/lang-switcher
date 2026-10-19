@@ -17545,10 +17545,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 229] = [
     ),
     (
         settings::IDS_THANKS_PARA,
-        "Если понравилось, расскажите об этом в канале. Если что-то не так, напишите мне: \
+        "Если понравилось, расскажите об этом в группе. Если что-то не так, напишите мне: \
          негатив тоже важен, только узнав о проблеме, её можно починить. Мастер обращения есть \
          в меню значка, пункт «Написать автору…».",
-        "If you liked it, say so in the channel. If something is wrong, write to me: criticism \
+        "If you liked it, say so in GitHub Issues. If something is wrong, write to me: criticism \
          matters too — a problem can only be fixed once somebody knows about it. The wizard is \
          in the tray menu, under «Write to the author…».",
     ),
@@ -18051,14 +18051,14 @@ const FR_94_STRINGS: [(u16, &str, &str); 229] = [
     (
         settings::IDS_WIZARD_PREVIEW_NOTE,
         "Это весь текст обращения. Правьте что угодно. Отправляете вы сами: текст попадёт в \
-         буфер обмена, а канал откроется в браузере.",
+         буфер обмена, а тема программы в группе откроется в браузере.",
         "This is the whole text of the appeal. Edit anything you like. You send it yourself: \
-         the text goes to the clipboard and the channel opens in the browser.",
+         the text goes to the clipboard and GitHub Issues opens in the browser.",
     ),
     (
         settings::IDS_WIZARD_COPY,
-        "Скопировать и открыть канал",
-        "Copy and open the channel",
+        "Скопировать и открыть группу",
+        "Copy and open GitHub Issues",
     ),
     (
         settings::IDS_WIZARD_SAVE,
@@ -18067,13 +18067,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 229] = [
     ),
     (
         settings::IDS_WIZARD_COPIED_ONLY,
-        "Скопировано. Адрес канала появится в следующей версии.",
-        "Copied. The address of the channel will appear in the next version.",
+        "Скопировано. Адрес группы появится в следующей версии.",
+        "Copied. The address of GitHub Issues will appear in the next version.",
     ),
     (
         settings::IDS_WIZARD_COPIED,
-        "Скопировано, канал открыт.",
-        "Copied, the channel is open.",
+        "Скопировано, группа открыта.",
+        "Copied, GitHub Issues is open.",
     ),
     (settings::IDS_WIZARD_SAVED, "Сохранено: {0}", "Saved: {0}"),
     (
@@ -18363,6 +18363,92 @@ fn the_caption_of_hello_names_the_pair_of_its_own_language() {
     assert!(
         !(quoted(german, french.typed) && quoted(german, french.fixed)),
         "the control: a caption held against the pair of another language must be caught"
+    );
+}
+
+/// The six strings that say where a person is sent to write — решение 181.1, §0 п. 4 of TZ-E103.
+const STRINGS_OF_THE_PLACE: [(u16, &str); 6] = [
+    (settings::IDS_WIZARD_COPY, "IDS_WIZARD_COPY"),
+    (settings::IDS_WIZARD_PREVIEW_NOTE, "IDS_WIZARD_PREVIEW_NOTE"),
+    (settings::IDS_WIZARD_COPIED, "IDS_WIZARD_COPIED"),
+    (settings::IDS_WIZARD_COPIED_ONLY, "IDS_WIZARD_COPIED_ONLY"),
+    (settings::IDS_THANKS_PARA, "IDS_THANKS_PARA"),
+    (settings::IDS_FEEDBACK_OPEN, "IDS_FEEDBACK_OPEN"),
+];
+
+/// The word each language called the channel by until `e102` — what none of the six may say now.
+fn the_channel_in(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Ru | Language::Uk => &["канал"],
+        Language::En => &["channel"],
+        Language::De => &["kanal"],
+        Language::Fr => &["chaîne"],
+        Language::Es | Language::Pt | Language::It => &["canal"],
+        Language::Pl => &["kanał", "kanal"],
+        Language::Cs => &["kanál"],
+        Language::Tr => &["kanal"],
+        Language::El => &["κανάλ", "καναλ"],
+        Language::He => &["ערוץ"],
+        Language::Ar => &["قناة"],
+    }
+}
+
+/// Whether `text` in `language` names the place of решение 181.1 and not the channel: the group in
+/// Russian («групп…») and Ukrainian («груп…»), «GitHub Issues» — untranslated — in the other twelve.
+fn names_its_place(language: Language, text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let place = match language {
+        Language::Ru | Language::Uk => lower.contains("груп") && !text.contains("GitHub"),
+        _ => text.contains("GitHub Issues"),
+    };
+
+    place
+        && the_channel_in(language)
+            .iter()
+            .all(|word| !lower.contains(word))
+}
+
+/// **Задача T-103-3, решение 181.1 — each of the six strings names the place of its own language.**
+/// The button of the wizard, the note above the field, the two lines after the copy, the paragraph
+/// of «Спасибо» and its new button: in Russian and Ukrainian the group and not a word of the
+/// channel, in the other twelve «GitHub Issues» — the name is not translated — and not their word
+/// for the channel either. Under the gate of [`LOCALE`].
+///
+/// ⚠ Control: «Открыть канал» of «Что нового», which stays, names the channel in every language
+/// and is caught in every one of them.
+#[test]
+fn each_of_the_six_strings_names_the_place_of_its_own_language() {
+    let _guard = with_product_strings();
+    let mut wrong = Vec::new();
+    let mut control_caught = 0;
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for (id, name) in STRINGS_OF_THE_PLACE {
+            let text = settings::text(id);
+
+            if !names_its_place(language, &text) {
+                wrong.push(format!("{language:?} {name}: «{text}»"));
+            }
+        }
+
+        if !names_its_place(language, &settings::text(settings::IDS_CHANNEL_OPEN)) {
+            control_caught += 1;
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert_eq!(
+        control_caught, 14,
+        "the control: «Открыть канал» must be caught in every language"
+    );
+    assert!(
+        wrong.is_empty(),
+        "181.1: {} strings do not name the place of their language:\n{}",
+        wrong.len(),
+        wrong.join("\n")
     );
 }
 

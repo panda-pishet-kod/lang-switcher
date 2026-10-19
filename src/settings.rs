@@ -3507,11 +3507,12 @@ pub const IDS_WIZARD_ATTACH_FOOT: u16 = 3199;
 pub const IDS_WIZARD_PREVIEW_TITLE: u16 = 3200;
 /// Its note — nothing leaves the machine until the person pastes it.
 pub const IDS_WIZARD_PREVIEW_NOTE: u16 = 3201;
-/// «Скопировать и открыть канал».
+/// «Скопировать и открыть группу» / «Copy and open GitHub Issues» — the place of решение 181.1,
+/// `letters::links::feedback_url` of the language of the window (until `e102`, the channel).
 pub const IDS_WIZARD_COPY: u16 = 3202;
 /// «Сохранить в папку журнала».
 pub const IDS_WIZARD_SAVE: u16 = 3203;
-/// What the status line says when the address of the channel is still a placeholder (П7).
+/// What the status line says when the address that button opens is still a placeholder (П7).
 pub const IDS_WIZARD_COPIED_ONLY: u16 = 3204;
 /// And when it is not.
 pub const IDS_WIZARD_COPIED: u16 = 3205;
