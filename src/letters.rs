@@ -914,22 +914,26 @@ pub mod links {
     /// program simply no longer reads it for this button.
     ///
     /// ⭐ **The Russian page** — since решение 181.33 the button opens [`download_url`] of the
-    /// language of its window, and this is the page of the Russian side.
-    pub const DOWNLOAD_URL: &str = "https://panda-pishet-kod.dev/langswitcher/download/";
+    /// language of its window, and this is the page of the Russian side, marked `?lang=ru` for the
+    /// site (решение 181.35, see [`download_url`]).
+    pub const DOWNLOAD_URL: &str = "https://panda-pishet-kod.dev/langswitcher/download/?lang=ru";
 
-    /// The English download page — the pair of [`DOWNLOAD_URL`] under `/en/`, решение 181.33: what
-    /// «Open the download page» opens for a person who reads the program in any of the twelve
-    /// languages of the English side.
-    pub const DOWNLOAD_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/download/";
+    /// The English download page — the pair of [`DOWNLOAD_URL`] under `/en/`, решение 181.33, marked
+    /// `?lang=en` (решение 181.35): what «Open the download page» opens for a person who reads the
+    /// program in any of the twelve languages of the English side.
+    pub const DOWNLOAD_URL_EN: &str =
+        "https://panda-pishet-kod.dev/en/langswitcher/download/?lang=en";
 
     /// **The download page in the language a person reads the program in** — решение 181.33
     /// ([`reads_the_russian_side`]): «Открыть страницу загрузки» of «От автора» and of the letter
     /// about an update.
     ///
-    /// ⚠ The site may still move a person on: its script of the language of a page (П-179 of the
-    /// site) follows the choice the person made with the site's own language button, or else the
-    /// language of the browser. That is the site's rule and stays as it is (181.33 п. 3) — what
-    /// this program answers for is the address it gives.
+    /// ⚠ **Why each address carries `?lang=`** — решение 181.35. The page alone does not decide the
+    /// language a person sees: the script of the language of a page on the site (П-179 of the site)
+    /// moves a person to the choice they made with the site's own language button, or else to the
+    /// language of the browser (поправка 181.34). The mark tells the site the language of the
+    /// program; the name `lang` and the values `ru` / `en` are the ones the site already gives that
+    /// word. A site that does not read the mark yet simply ignores it.
     pub fn download_url(language: Language) -> &'static str {
         if reads_the_russian_side(language) {
             DOWNLOAD_URL
@@ -946,15 +950,16 @@ pub mod links {
     /// be until the pointer is over it.
     ///
     /// ⭐ **The Russian page** — since решение 181.33 the name opens [`program_url`] of the
-    /// language of its window.
-    pub const PROGRAM_URL: &str = "https://panda-pishet-kod.dev/langswitcher/";
+    /// language of its window; marked `?lang=ru` for the site (решение 181.35).
+    pub const PROGRAM_URL: &str = "https://panda-pishet-kod.dev/langswitcher/?lang=ru";
 
-    /// The English page of the program — the pair of [`PROGRAM_URL`] under `/en/`, решение 181.33.
-    pub const PROGRAM_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/";
+    /// The English page of the program — the pair of [`PROGRAM_URL`] under `/en/`, решение 181.33,
+    /// marked `?lang=en` (решение 181.35).
+    pub const PROGRAM_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/?lang=en";
 
     /// **The program's page in the language a person reads the program in** — решение 181.33
-    /// ([`reads_the_russian_side`]): the name in «О программе» and in «От автора». The site's own
-    /// choice of language may still move a person on, as for [`download_url`].
+    /// ([`reads_the_russian_side`]): the name in «О программе» and in «От автора». The mark of the
+    /// language is there for the reason [`download_url`] gives.
     pub fn program_url(language: Language) -> &'static str {
         if reads_the_russian_side(language) {
             PROGRAM_URL

@@ -1418,17 +1418,23 @@ fn every_language_writes_to_the_author_where_decision_181_1_says() {
 }
 
 /// The two pages of the site — `(download, program)` — on the Russian side, written down apart from
-/// the code (решение 181.33).
+/// the code (решение 181.33), each with the mark of its language for the site (решение 181.35).
 const RUSSIAN_PAGES: (&str, &str) = (
-    "https://panda-pishet-kod.dev/langswitcher/download/",
-    "https://panda-pishet-kod.dev/langswitcher/",
+    "https://panda-pishet-kod.dev/langswitcher/download/?lang=ru",
+    "https://panda-pishet-kod.dev/langswitcher/?lang=ru",
 );
 
-/// The same two pages on the English side — their pairs under `/en/` (решение 181.33).
+/// The same two pages on the English side — their pairs under `/en/` (решение 181.33), marked
+/// `en` (решение 181.35).
 const ENGLISH_PAGES: (&str, &str) = (
-    "https://panda-pishet-kod.dev/en/langswitcher/download/",
-    "https://panda-pishet-kod.dev/en/langswitcher/",
+    "https://panda-pishet-kod.dev/en/langswitcher/download/?lang=en",
+    "https://panda-pishet-kod.dev/en/langswitcher/?lang=en",
 );
+
+/// `url` without its query — the page the site serves, whatever the mark says.
+fn page_of(url: &str) -> &str {
+    url.split_once('?').map_or(url, |(page, _)| page)
+}
 
 /// The pages решение 181.33 gives `language`: the Russian ones in Russian and Ukrainian, the
 /// English ones in the other twelve.
@@ -1453,8 +1459,14 @@ fn pages_mismatches(rule: impl Fn(Language) -> (&'static str, &'static str)) -> 
 /// same side as where the person writes (181.1). Until the third build of `e103` both opened the
 /// Russian pages in all fourteen languages (находка 181.32).
 ///
-/// ⚠ Control: the rule of the third build — the Russian pages for every language — is caught on
-/// exactly the twelve of the English side.
+/// ⭐ **And each address tells the site its language** — решение 181.35: the site picks the language
+/// of a page by the choice made with its own button, or else by the language of the browser
+/// (поправка 181.34), so the page alone would not decide it. `?lang=ru` on the Russian side,
+/// `?lang=en` on the English one — the name and the values the site already uses for that word.
+///
+/// ⚠ Controls: the rule of the third build — the Russian pages for every language — is caught on
+/// exactly the twelve of the English side; the addresses of the fourth build — the right pages with
+/// no mark — are caught in all fourteen.
 #[test]
 fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
     assert_eq!(
@@ -1492,10 +1504,15 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         (RUSSIAN_PAGES.1, ENGLISH_PAGES.1),
     ] {
         assert_eq!(
-            russian.replacen("panda-pishet-kod.dev/", "panda-pishet-kod.dev/en/", 1),
-            english,
+            page_of(russian).replacen("panda-pishet-kod.dev/", "panda-pishet-kod.dev/en/", 1),
+            page_of(english),
             "the English page is the pair of the Russian one under /en/"
         );
+        assert!(
+            russian.ends_with("/?lang=ru") && english.ends_with("/?lang=en"),
+            "181.35: each address carries the mark of its own side and nothing after it"
+        );
+        assert!(links::is_allowed(russian), "{russian} must reach the shell");
         assert!(links::is_allowed(english), "{english} must reach the shell");
     }
 
@@ -1508,6 +1525,14 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         pages_mismatches(|_| RUSSIAN_PAGES),
         twelve,
         "the control: the Russian pages for every language must be caught on the twelve"
+    );
+    assert_eq!(
+        pages_mismatches(|language| {
+            let (download, program) = pages_of_decision_181_33(language);
+            (page_of(download), page_of(program))
+        }),
+        Language::ALL,
+        "the control: the right pages with no mark must be caught in every language"
     );
 }
 
