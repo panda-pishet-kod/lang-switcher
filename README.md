@@ -6,7 +6,9 @@ switches to the Russian layout; press again and the original comes back. It is a
 for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
 [Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
 
-[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/)
+[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/)
+
+Step-by-step install: [Edge](https://panda-pishet-kod.dev/en/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/en/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/en/langswitcher/download/opera/) · [Yandex Browser](https://panda-pishet-kod.dev/en/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/en/langswitcher/download/firefox/)
 
 Report a problem — in English or Russian: [Issues](../../issues).
 
@@ -15,7 +17,8 @@ not with one from a certification authority, and a new release is still rarely d
 will see warnings before installing — this is expected. Edge: in Downloads, "…" → "Keep" → in the
 dialog, "Delete ▾" → "Keep anyway". Chrome: "Download suspicious file". When you run it, Windows
 may show "Windows protected your PC" — "More info" → "Run anyway". Then the yellow UAC prompt —
-"Yes". You can check the file against the SHA-256 on its release page.
+"Yes". You can check the file against the SHA-256 on its release page. The step-by-step page of
+your browser above shows every window.
 
 The rest of this README and all other documents of the project are in Russian.
 
@@ -23,7 +26,9 @@ The rest of this README and all other documents of the project are in Russian.
 По нажатию `Pause/Break` последнее набранное слово перекодируется в другую раскладку,
 а раскладка активного окна переключается на соответствующую.
 
-[Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/)
+[Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/) · [Конвертер раскладки](https://panda-pishet-kod.dev/raskladka/)
+
+Пошаговая установка: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/)
 
 Программа делает одну вещь. «Лёгкость» здесь означает отсутствие постороннего функционала,
 а не упрощение инженерной реализации.
@@ -117,12 +122,12 @@ PowerShell 5.1, и в `cmd`, туда и обратно, с заглавными
 могут, — с мёртвой клавишей или `AltGr`, — не заменяется: слово остаётся как набрано, и звучит
 отказ.
 
-Модульных и интеграционных тестов — **1247** обычным `cargo test` и **1351** с фичей
-`testing`, красных ноль. Всего в дереве **1389** функций `#[test]`. Разница до 1351 — ровно
+Модульных и интеграционных тестов — **1250** обычным `cargo test` и **1355** с фичей
+`testing`, красных ноль. Всего в дереве **1393** функции `#[test]`. Разница до 1355 — ровно
 **38** тестов с `#[ignore]`: они трогают настоящий буфер обмена или клавиатуру машины и
 запускаются отдельно (`--ignored --test-threads=1`) при выключенной программе. Без фичи
-`testing` не собираются, сверх того, **106** тестов — отладочного канала SEC-04a, сквозного
-стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1247 + 36 = 1283.
+`testing` не собираются, сверх того, **107** тестов — отладочного канала SEC-04a, сквозного
+стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1250 + 36 = 1286.
 
 ⚠ **Тесты привязаны к конфигурации машины разработчика** (ровно две раскладки, именно
 русская и US) и на произвольной машине не воспроизводятся без правки. Это осознанное
@@ -141,6 +146,8 @@ PowerShell 5.1, и в `cmd`, туда и обратно, с заглавными
 - **Windows** при запуске может показать «Система Windows защитила ваш компьютер» — «Подробнее» →
   «Выполнить в любом случае».
 - Затем жёлтый запрос UAC — «Да».
+
+Все окна по шагам, со снимками, — на странице своего браузера: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/).
 
 Сверить скачанный файл можно по SHA-256 на странице его выпуска в разделе
 [Releases](../../releases). Что установщик делает с сертификатом на вашем компьютере — в разделе
