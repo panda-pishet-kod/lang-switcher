@@ -17691,7 +17691,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 235] = [
     (
         settings::IDS_NEWS_FILE_ONLY,
         "Отключается в файле настроек: [letters] feed = false.",
-        "Turned off in the settings file: [letters] feed = false.",
+        "Can be turned off in the settings file: [letters] feed = false.",
     ),
     (
         settings::IDS_NEWS_SWITCH,
@@ -18587,6 +18587,46 @@ fn each_of_the_six_strings_names_the_place_of_its_own_language() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// **Задача T-103-8, решение 183.1 — the line about the file says where the feed can be turned
+/// off, not that it is off.** `IDS_NEWS_FILE_ONLY` stands in «От автора» while the feed is **on**;
+/// the English «Turned off in the settings file» and the Hebrew «מכובה בקובץ ההגדרות» read as a
+/// state — «off». The words of the owner, letter for letter, out of the built binary.
+///
+/// ⚠ Control: the Russian line, which stays, is read out of the same binary as it is — the reading
+/// is live.
+#[test]
+fn the_line_about_the_file_says_the_feed_can_be_turned_off_and_not_that_it_is_off() {
+    const WORDS_OF_183_1: [(Language, &str); 2] = [
+        (
+            Language::En,
+            "Can be turned off in the settings file: [letters] feed = false.",
+        ),
+        (
+            Language::He,
+            "ניתן לכבות בקובץ ההגדרות: [letters] feed = false.",
+        ),
+    ];
+
+    let product = ProductImage::shared();
+
+    assert_eq!(
+        product.string(Language::Ru, settings::IDS_NEWS_FILE_ONLY),
+        "Отключается в файле настроек: [letters] feed = false.",
+        "the control: the Russian line stays and is read as it is"
+    );
+
+    let wrong: Vec<String> = WORDS_OF_183_1
+        .iter()
+        .filter_map(|&(language, words)| {
+            let text = product.string(language, settings::IDS_NEWS_FILE_ONLY);
+
+            (text != words).then(|| format!("{language:?}: «{text}», not «{words}»"))
+        })
+        .collect();
+
+    assert!(wrong.is_empty(), "183.1: {}", wrong.join("; "));
 }
 
 /// **Task T-34-5, findings Н80, Н84 and С1 — the red «before».** The first line of «Состояние»
