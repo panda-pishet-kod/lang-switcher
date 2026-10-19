@@ -7108,7 +7108,22 @@ pub mod report {
             line(&mut out, &text(settings::IDS_HOTKEY_LABEL), &draft.hotkey);
         }
 
-        if draft.attach.machine {
+        // ⭐ **Решение 181.28: an idea carries what the person wrote and the version in the heading,
+        // and nothing of the machine.** It goes to an open discussion (решение 181.1), and its road
+        // has no step «Что приложить?» — the four boxes it never showed must not fill it. A trouble
+        // goes by letter (решение 181.6) and carries what its boxes say.
+        let attach = if draft.trouble.is_idea() {
+            Attach {
+                machine: false,
+                layouts: false,
+                settings: false,
+                journal: false,
+            }
+        } else {
+            draft.attach
+        };
+
+        if attach.machine {
             line(
                 &mut out,
                 &text(IDS_WIZARD_ATTACH_MACHINE),
@@ -7116,15 +7131,15 @@ pub mod report {
             );
         }
 
-        if draft.attach.layouts {
+        if attach.layouts {
             line(&mut out, &text(IDS_WIZARD_ATTACH_LAYOUTS), &facts.layouts);
         }
 
-        if draft.attach.settings {
+        if attach.settings {
             line(&mut out, &text(IDS_WIZARD_ATTACH_SETTINGS), &facts.settings);
         }
 
-        if draft.attach.journal && !facts.journal.trim().is_empty() {
+        if attach.journal && !facts.journal.trim().is_empty() {
             out.push('\n');
             out.push_str(&text(IDS_WIZARD_ATTACH_JOURNAL));
             out.push('\n');

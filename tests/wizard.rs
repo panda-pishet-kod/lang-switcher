@@ -252,6 +252,61 @@ fn an_idea_carries_two_answers_and_no_layout() {
 }
 
 /// **Every box that is off takes its own line out and no other** — the promise the step makes.
+/// **Решение 181.28 — an idea carries what the person wrote and the version in its heading, and
+/// nothing of the machine.** An idea goes to an open discussion (решение 181.1) and its road has no
+/// step «Что приложить?», so the four boxes it never saw must not fill it: no line of Windows, of
+/// the layouts, of the settings, no journal — with every box of the draft at its default, which is
+/// ticked. A trouble, which goes by letter (решение 181.6), carries all four as before.
+///
+/// ⚠ Control: the same draft and facts as a trouble carry the journal — the facts are not empty.
+#[test]
+fn an_idea_carries_what_was_written_and_the_version_and_nothing_of_the_machine() {
+    with_product_strings();
+
+    let idea = Draft {
+        trouble: Trouble::Idea,
+        idea: "Хочу тёмную тему в мастере".to_owned(),
+        helps: "Ночью глаза целее".to_owned(),
+        ..full_draft()
+    };
+    let facts = full_facts();
+
+    assert_eq!(idea.attach, Attach::default(), "every box at its default");
+    assert!(
+        idea.attach.machine && idea.attach.journal,
+        "and the default is ticked"
+    );
+
+    let appeal = build(&idea, &facts);
+
+    assert!(
+        appeal.starts_with("Lang Switcher 0.41.0\r\n"),
+        "the version is in the heading:\n{appeal}"
+    );
+    assert!(appeal.contains("Хочу тёмную тему в мастере") && appeal.contains("Ночью глаза целее"));
+
+    // The needles are the facts themselves and not the labels before them: this binary reads no
+    // string table, and an empty label would be «found» in any text at all.
+    for unwanted in [
+        facts.windows.as_str(),
+        facts.layouts.as_str(),
+        facts.settings.as_str(),
+        "journal started",
+    ] {
+        assert!(
+            !appeal.contains(unwanted),
+            "181.28: an idea must not carry «{unwanted}»:\n{appeal}"
+        );
+    }
+
+    let trouble = build(&full_draft(), &facts);
+
+    assert!(
+        trouble.contains("journal started") && trouble.contains(facts.windows.as_str()),
+        "the control: a trouble carries the journal and the machine:\n{trouble}"
+    );
+}
+
 #[test]
 fn each_box_of_the_attachment_step_answers_for_its_own_line() {
     with_product_strings();
