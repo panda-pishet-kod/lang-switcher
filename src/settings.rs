@@ -3351,6 +3351,11 @@ pub const IDS_EXCLUSION_ALREADY: u16 = 3240;
 /// «Окно не выбрано» — the same line when there was nothing to take: no window in front, a window
 /// of this program, or a name that cannot be an exclusion.
 pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
+// Task T-103-2, решение 181.1: the button of «Спасибо» that sends a person where they can write —
+// the first free number when the task wrote it, in the block 3232…3247.
+/// «Открыть группу» / «Open GitHub Issues» — the panel of «Спасибо», `letters::links::feedback_url`
+/// of the language of the letter. `IDS_CHANNEL_OPEN` stays with «Что нового» and FR-103.
+pub const IDS_FEEDBACK_OPEN: u16 = 3242;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3567,7 +3572,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 ///
 /// ⚠ **Two hundred and twenty-eight since task T-100-3** — вопрос 172: the two ways of «Исключения»
 /// brought eight, [`IDS_EXCLUSION_AUTO`] … [`IDS_EXCLUSION_NOT_PICKED`] (3234…3241).
-pub const INTERFACE_STRINGS: [u16; 228] = [
+///
+/// ⚠ **Two hundred and twenty-nine since task T-103-2** — вопрос 181, решение 181.1: «Спасибо» sends
+/// a person where they can write, and its button got a word of its own, [`IDS_FEEDBACK_OPEN`]
+/// (3242).
+pub const INTERFACE_STRINGS: [u16; 229] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3804,6 +3813,7 @@ pub const INTERFACE_STRINGS: [u16; 228] = [
     IDS_EXCLUSION_ADDED,
     IDS_EXCLUSION_ALREADY,
     IDS_EXCLUSION_NOT_PICKED,
+    IDS_FEEDBACK_OPEN,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

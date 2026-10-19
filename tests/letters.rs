@@ -1105,10 +1105,17 @@ fn every_address_in_the_program_is_https_and_named_here() {
 /// as forgetfulness. The user named the address on 2026-09-25 (147.3, 148.1) and the guard
 /// turned over with it: all five are real, the program has a feed to read, and the feed's host
 /// is one the gate of С52 lets through.
+///
+/// ⭐ **Seven since task T-103-2** — решение 181.1: the topic of the group and the issues on GitHub,
+/// where the wizard of FR-104 and the letter «Спасибо» send a person to write. Both are written
+/// down here a second time, apart from the code, as the feed's is: an address that drifted to a
+/// placeholder or to another host would still pass the two checks of the loop.
 #[test]
 fn the_hard_wired_addresses_are_real_and_so_is_the_feed() {
     for (what, url) in [
         ("CHANNEL_URL", links::CHANNEL_URL),
+        ("GROUP_URL", links::GROUP_URL),
+        ("ISSUES_URL", links::ISSUES_URL),
         ("SUPPORT_URL", links::SUPPORT_URL),
         ("DOWNLOAD_URL", links::DOWNLOAD_URL),
         ("PROGRAM_URL", links::PROGRAM_URL),
@@ -1133,8 +1140,18 @@ fn the_hard_wired_addresses_are_real_and_so_is_the_feed() {
         "the program has a real feed address to read from"
     );
 
-    // And the gate did not open on the way: a foreign host is refused as it always was.
+    // Решение 181.1: the topic of Lang Switcher in the group, and the list of the issues — the
+    // address the site and README name.
+    assert_eq!(links::GROUP_URL, "https://t.me/panda_koding/45");
+    assert_eq!(
+        links::ISSUES_URL,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues"
+    );
+
+    // And the gate did not open on the way: a foreign host is refused as it always was — and so
+    // is another host under the name of the one the issues are on: the gate compares hosts whole.
     assert!(!links::is_allowed("https://evil.example/news.toml"));
+    assert!(!links::is_allowed("https://gist.github.com/"));
 }
 
 /// The code lines of `text` that name the reserved domain, each with its line number.
@@ -1278,6 +1295,237 @@ fn only_https_at_a_host_of_this_program_reaches_the_shell() {
             "{url} is an address of this program"
         );
     }
+}
+
+// =========================================================================================
+// Where a person writes to the author — решение 181.1, задача T-103-2
+// =========================================================================================
+
+/// The address of решение 181.1 for every language of the interface, written down **apart from
+/// the code**: the topic of the group for Russian and Ukrainian, the issues on GitHub for the other
+/// twelve.
+const FEEDBACK_OF_DECISION_181_1: [(Language, &str); 14] = [
+    (Language::Ru, "https://t.me/panda_koding/45"),
+    (
+        Language::En,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (Language::Uk, "https://t.me/panda_koding/45"),
+    (
+        Language::De,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Fr,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Es,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Pt,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::It,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Pl,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Cs,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Tr,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::El,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::He,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+    (
+        Language::Ar,
+        "https://github.com/panda-pishet-kod/lang-switcher/issues",
+    ),
+];
+
+/// The languages whose address in `canon` is not the one [`links::feedback_url`] answers.
+fn feedback_mismatches(canon: &[(Language, &str)]) -> Vec<Language> {
+    canon
+        .iter()
+        .filter(|(language, url)| links::feedback_url(*language) != *url)
+        .map(|(language, _)| *language)
+        .collect()
+}
+
+/// **Задача T-103-2, сторож (1), решение 181.1 — a person writes to the author where the
+/// language they read the program in says**: the topic of the group in Russian and Ukrainian, the
+/// issues on GitHub in the other twelve. Until `e102` both the wizard and «Спасибо» sent everybody
+/// to the channel, where there is nowhere to write (вопрос 181).
+///
+/// ⚠ Control: the canon with Ukrainian sent to GitHub Issues is caught, and only on Ukrainian.
+#[test]
+fn every_language_writes_to_the_author_where_decision_181_1_says() {
+    let languages: Vec<Language> = FEEDBACK_OF_DECISION_181_1
+        .iter()
+        .map(|(language, _)| *language)
+        .collect();
+
+    assert_eq!(
+        languages,
+        Language::ALL,
+        "the canon names every language once, in the order of the combo box"
+    );
+
+    assert_eq!(
+        feedback_mismatches(&FEEDBACK_OF_DECISION_181_1),
+        Vec::<Language>::new(),
+        "181.1: the address of these languages is not the one the decision gives them"
+    );
+
+    let to_the_group: Vec<Language> = Language::ALL
+        .into_iter()
+        .filter(|language| links::feedback_url(*language) == links::GROUP_URL)
+        .collect();
+
+    assert_eq!(
+        to_the_group,
+        [Language::Ru, Language::Uk],
+        "the group is for the two languages that read it and for no other"
+    );
+
+    let mut spoilt = FEEDBACK_OF_DECISION_181_1;
+    spoilt[2].1 = links::ISSUES_URL;
+
+    assert_eq!(
+        feedback_mismatches(&spoilt),
+        [Language::Uk],
+        "the control: a canon that sends Ukrainian to GitHub Issues must be caught there"
+    );
+}
+
+/// The code of the arm of [`letters::plan_for`] that builds `letter`, from its head to the head of
+/// the arm after it.
+fn plan_arm<'a>(source: &'a str, head: &str, next: &str) -> &'a str {
+    let start = source
+        .find(head)
+        .unwrap_or_else(|| panic!("src\\letters.rs must still build «{head}»"));
+    let length = source[start..]
+        .find(next)
+        .unwrap_or_else(|| panic!("«{next}» must follow «{head}»"));
+
+    &source[start..start + length]
+}
+
+/// Whether the body of «Скопировать и открыть…» opens the address of its window and not the channel.
+fn the_copy_opens_the_feedback_of_its_window(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    code.contains("state.feedback_url()")
+        && code.contains("open_link(url)")
+        && !code.contains("CHANNEL_URL")
+}
+
+/// Whether the arm of «Спасибо» gives its button the action and the address of решение 181.1.
+fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
+    let code = squeezed_code(arm);
+
+    code.contains("text(IDS_FEEDBACK_OPEN), Action::OpenFeedback,")
+        && code.contains("Action::OpenFeedback, links::feedback_url(settings::ui_language()),")
+        && !code.contains("CHANNEL_URL")
+        && !code.contains("Action::OpenChannel")
+        && !code.contains("IDS_CHANNEL_OPEN")
+}
+
+/// **Задача T-103-2, сторож (3), решение 181.1 — the two that ask a person to write go where they
+/// can, and the three that are about the news stay on the channel.**
+///
+/// The half a pure function cannot show: which address the window's own code hands the shell. So
+/// the bodies are read — «Скопировать и открыть…» of the wizard and the arm of «Спасибо» in
+/// [`letters::plan_for`] must name [`links::feedback_url`] and not `CHANNEL_URL`; the action of
+/// «Спасибо» must open the address of its window; and «Что нового», the «От автора» of FR-103 and the
+/// thanks of the wizard (`IDC_WZ_CHANNEL`) are on the channel as before.
+///
+/// ⚠ Controls: the copy back on the channel, and «Спасибо» back on «Открыть канал», are caught.
+#[test]
+fn the_two_that_ask_a_person_to_write_go_where_they_can_and_the_news_stays_on_the_channel() {
+    let source = letters_module_source();
+
+    let copy = letters_function_body(&source, "fn wizard_copy(")
+        .expect("src\\letters.rs must still declare `wizard_copy`");
+    let thanks = plan_arm(
+        &source,
+        "Letter::Thanks => LetterPlan {",
+        "Letter::WhatsNew => LetterPlan {",
+    );
+    let whats_new = plan_arm(
+        &source,
+        "Letter::WhatsNew => LetterPlan {",
+        "Letter::Update | Letter::News(_) =>",
+    );
+    let perform = squeezed_code(
+        letters_function_body(&source, "fn perform(")
+            .expect("src\\letters.rs must still declare `perform`"),
+    );
+    let wizard_thanks = plan_arm(&source, "IDC_WZ_CHANNEL => {", "return true;");
+
+    assert!(
+        the_copy_opens_the_feedback_of_its_window(copy),
+        "181.1: «Скопировать и открыть…» must open the address of its window:\n{copy}"
+    );
+    assert!(
+        the_thanks_sends_a_person_to_write(thanks),
+        "181.1: the button of «Спасибо» must send a person where they can write:\n{thanks}"
+    );
+    assert!(
+        perform.contains("Action::OpenFeedback => open_link(feedback)")
+            && perform.contains("state.feedback_url(),"),
+        "the action of «Спасибо» must open the address of its window:\n{perform}"
+    );
+
+    // The news stays where the news is.
+    assert!(
+        squeezed_code(whats_new)
+            .contains("text(IDS_CHANNEL_OPEN), Action::OpenChannel, links::CHANNEL_URL,"),
+        "«Что нового» opens the channel as before:\n{whats_new}"
+    );
+    assert!(
+        perform.contains("Action::OpenChannel => open_link(links::CHANNEL_URL)"),
+        "«Открыть канал» opens the channel as before"
+    );
+    assert!(
+        source.contains("IDC_AUTHOR_CHANNEL => Some(Action::OpenChannel),"),
+        "«Открыть канал» of «От автора» (FR-103) is the channel as before"
+    );
+    assert!(
+        squeezed_code(wizard_thanks).contains("open_link(links::CHANNEL_URL);"),
+        "the thanks of the wizard opens the channel as before:\n{wizard_thanks}"
+    );
+
+    // The controls.
+    let on_the_channel = copy.replace("state.feedback_url()", "links::CHANNEL_URL");
+    assert_ne!(on_the_channel, copy, "the control must change the body");
+    assert!(
+        !the_copy_opens_the_feedback_of_its_window(&on_the_channel),
+        "the sweep does not see a copy that opens the channel again"
+    );
+
+    let channel_again = thanks
+        .replace("IDS_FEEDBACK_OPEN", "IDS_CHANNEL_OPEN")
+        .replace("Action::OpenFeedback", "Action::OpenChannel");
+    assert_ne!(channel_again, thanks, "the control must change the arm");
+    assert!(
+        !the_thanks_sends_a_person_to_write(&channel_again),
+        "the sweep does not see «Спасибо» back on «Открыть канал»"
+    );
 }
 
 // =========================================================================================

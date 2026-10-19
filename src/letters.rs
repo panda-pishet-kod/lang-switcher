@@ -800,19 +800,21 @@ pub fn forget_expired(state: &mut Letters, feed: FeedView<'_>) {
 /// # ⚠ Two different things, and the difference matters
 ///
 /// **The network surface of this program is [`FEED_URLS`] and nothing else** — that is the one
-/// address the program itself goes out and *fetches*, unasked, on a timer. The four below are
+/// address the program itself goes out and *fetches*, unasked, on a timer. The six below are
 /// never fetched by this program at all: they are handed to the shell, one at a time, because a
 /// person clicked a button, and it is the browser that goes to them. Ворота 3 of
 /// `tools\verify-perimeter.ps1` reads the strings of the Release binary and refuses any
-/// `https://` that is not one of the five, which is why every one of them lives here.
+/// `https://` that is not one of the seven, which is why every one of them lives here.
 pub mod links {
+    use crate::settings::Language;
+
     /// The reserved domain every placeholder address is under.
     const PLACEHOLDER_HOST: &str = "example.invalid";
 
     /// Where the feed is read from — FR-102, in order, the first good answer winning.
     ///
     /// ⚠ **The whole of the network surface of this program is this array** — see the module's
-    /// own doc for what that does and does not mean about the four addresses below.
+    /// own doc for what that does and does not mean about the six addresses below.
     ///
     /// The author's own address since `e88` — word of the user, 2026-09-25 (решения 147.3 и
     /// 148.1): the host of the other four, and **one** address, with no second road behind it.
@@ -820,8 +822,52 @@ pub mod links {
     /// the test `the_hard_wired_addresses_are_real_and_so_is_the_feed`.
     pub const FEED_URLS: [&str; 1] = ["https://panda-pishet-kod.dev/langswitcher/news.toml"];
 
-    /// The author's channel — FR-103, and the «Открыть канал» buttons of three letters.
+    /// The author's channel — FR-103, «Что нового» and the thanks of the wizard: the «Открыть
+    /// канал» buttons, the road to the news.
+    ///
+    /// ⚠ **A channel is read, not written to** — there is nowhere in it for a reader to write
+    /// (вопрос 181). So the two places that ask a person to write go to [`feedback_url`] since
+    /// решение 181.1: «Скопировать и открыть…» of the wizard of FR-104 and the letter «Спасибо».
     pub const CHANNEL_URL: &str = "https://t.me/panda_pishet_kod";
+
+    /// The topic of Lang Switcher in the author's group — where a person who reads this program
+    /// in Russian or Ukrainian writes to the author (решение 181.1). The topic the site sends the
+    /// questions about the program to.
+    pub const GROUP_URL: &str = "https://t.me/panda_koding/45";
+
+    /// The issues of the program on GitHub — where a person who reads this program in any of the
+    /// other twelve languages writes to the author (решение 181.1), as the English pages of the
+    /// site send them.
+    ///
+    /// The list of the issues and not the form of a new one: the address the site and README name,
+    /// and one that does not depend on the templates of the repository.
+    pub const ISSUES_URL: &str = "https://github.com/panda-pishet-kod/lang-switcher/issues";
+
+    /// **Where a person writes to the author, by the language they read the program in** —
+    /// решение 181.1: Russian and Ukrainian go to the topic of the group, the other twelve to the
+    /// issues on GitHub.
+    ///
+    /// The one place that choice is made — the wizard of FR-104 and the letter «Спасибо» both ask
+    /// here, with the language of their own window. A `match` without a wildcard on purpose: a
+    /// language added to [`Language`] does not compile until somebody has said where its readers
+    /// write.
+    pub fn feedback_url(language: Language) -> &'static str {
+        match language {
+            Language::Ru | Language::Uk => GROUP_URL,
+            Language::En
+            | Language::De
+            | Language::Fr
+            | Language::Es
+            | Language::Pt
+            | Language::It
+            | Language::Pl
+            | Language::Cs
+            | Language::Tr
+            | Language::El
+            | Language::He
+            | Language::Ar => ISSUES_URL,
+        }
+    }
 
     /// The support page — FR-103, one link and no payment details of any kind in the program
     /// (вопрос 101 п. 6).
@@ -875,7 +921,7 @@ pub mod links {
     ///
     /// `:` and `@` in what is left make the answer `None` rather than a shorter host — a port
     /// and a set of credentials are both ways of writing a host that is not the host it looks
-    /// like, and none of the five addresses of this program has either. The same two
+    /// like, and none of the seven addresses of this program has either. The same two
     /// characters are refused for the same reason by [`super::feed::split_https`].
     fn host_of(url: &str) -> Option<&str> {
         if !url
@@ -907,7 +953,14 @@ pub mod links {
         FEED_URLS
             .iter()
             .copied()
-            .chain([CHANNEL_URL, SUPPORT_URL, DOWNLOAD_URL, PROGRAM_URL])
+            .chain([
+                CHANNEL_URL,
+                GROUP_URL,
+                ISSUES_URL,
+                SUPPORT_URL,
+                DOWNLOAD_URL,
+                PROGRAM_URL,
+            ])
             .filter_map(host_of)
     }
 
@@ -1334,6 +1387,9 @@ pub enum Action {
     OpenSettings,
     /// «Открыть канал» — `links::CHANNEL_URL` through the shell.
     OpenChannel,
+    /// «Открыть группу» / «Open GitHub Issues» of «Спасибо» — [`links::feedback_url`] of the
+    /// language the window is built in, where a person can write (решение 181.1).
+    OpenFeedback,
     /// «Открыть страницу поддержки» — `links::SUPPORT_URL`.
     OpenSupport,
     /// «Открыть страницу загрузки» — the link the `update` entry of the feed carries.
@@ -1473,14 +1529,14 @@ pub struct PlanContext<'a> {
 /// string tables, the state and the feed.
 pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
-        IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK,
-        IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS,
-        IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
-        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
-        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_PARA,
-        IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1,
-        IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, IDS_WHATSNEW_1, IDS_WHATSNEW_2,
-        IDS_WHATSNEW_3, IDS_WHATSNEW_FROM, IDS_WHATSNEW_FULL, IDS_WHATSNEW_PANEL,
+        IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD,
+        IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3,
+        IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT,
+        IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON,
+        IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD,
+        IDS_THANKS_PARA, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW,
+        IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, IDS_WHATSNEW_1,
+        IDS_WHATSNEW_2, IDS_WHATSNEW_3, IDS_WHATSNEW_FROM, IDS_WHATSNEW_FULL, IDS_WHATSNEW_PANEL,
         IDS_WHATSNEW_TITLE, IDS_WHATSNEW_TODAY, format_text, text,
     };
 
@@ -1527,10 +1583,12 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                     Action::OpenSupport,
                     links::SUPPORT_URL,
                 ),
+                // Решение 181.1: «Если понравилось, расскажите об этом» — and the channel has
+                // nowhere to say it, so the button goes where a person can write, by language.
                 Button::link(
-                    text(IDS_CHANNEL_OPEN),
-                    Action::OpenChannel,
-                    links::CHANNEL_URL,
+                    text(IDS_FEEDBACK_OPEN),
+                    Action::OpenFeedback,
+                    links::feedback_url(settings::ui_language()),
                 ),
             ],
             // FR-101: the snooze is offered once, and the second showing has no button where
@@ -2162,6 +2220,18 @@ impl WindowState {
             // which is what a wizard is for.
             Kind::Wizard => IDC_WZ_NEXT,
         }
+    }
+
+    /// Where a person writes to the author from this window — [`links::feedback_url`] of the
+    /// language the window is built in (решение 181.1).
+    ///
+    /// The language of the **window** and not the one asked of `settings` at the click: it is the
+    /// language its words are in, and [`language_changed`] moves it together with them, so a
+    /// button that says «группу» opens the group and one that says «GitHub Issues» opens those.
+    /// One place, because two ask — «Скопировать и открыть…» of the wizard and «Открыть группу» of
+    /// «Спасибо».
+    fn feedback_url(&self) -> &'static str {
+        links::feedback_url(self.language)
     }
 
     /// The `SS_ICON` static this window's logo goes into.
@@ -5738,11 +5808,17 @@ fn perform(hwnd: HWND, action: Action) {
     // runs while the state is borrowed.
     let taken = unsafe {
         with_state(hwnd, |state| {
-            (state.owner, state.news, state.link.clone(), state.kind)
+            (
+                state.owner,
+                state.news,
+                state.link.clone(),
+                state.kind,
+                state.feedback_url(),
+            )
         })
     };
 
-    let Some((owner, news, link, _kind)) = taken else {
+    let Some((owner, news, link, _kind, feedback)) = taken else {
         return;
     };
 
@@ -5771,6 +5847,8 @@ fn perform(hwnd: HWND, action: Action) {
         Action::OpenSettings => crate::tray::dispatch_command(owner, crate::tray::CMD_SETTINGS),
 
         Action::OpenChannel => open_link(links::CHANNEL_URL),
+        // Решение 181.1: where this window's reader can write — the group or GitHub Issues.
+        Action::OpenFeedback => open_link(feedback),
         Action::OpenSupport => open_link(links::SUPPORT_URL),
 
         // ⭐ Task T-78-2: the download page of **this build**, never the `link` of the feed
@@ -6134,7 +6212,7 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 pub mod testing {
     use super::{
         AuthorView, Entry, HWND, Kind, Letter, ThemeSetting, author_state, fresh_state,
-        open_window, show_letter, window_of, with_state,
+        open_window, show_letter, window_of, with_state, wizard_state,
     };
     use std::cell::Cell;
     use windows::Win32::Foundation::HMODULE;
@@ -6277,6 +6355,35 @@ pub mod testing {
         // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
         // this door — and the borrow of its state ends with the call.
         let _ = unsafe { with_state(hwnd, |state| state.setting = setting) };
+    }
+
+    /// **The door of task T-103-2** — opens the wizard of FR-104 on `owner` out of the templates of
+    /// `module` by the product's own [`wizard_state`], and never shows it.
+    ///
+    /// The window answered is the caller's to destroy. A caller that stands on a desktop of its
+    /// own may show it itself, for the snapshots.
+    pub fn open_wizard_hidden(owner: HWND, module: HMODULE) -> Option<HWND> {
+        HIDDEN.with(|hidden| hidden.set(true));
+        TEMPLATES.with(|templates| templates.set(module.0 as usize));
+
+        let window = open_window(owner, wizard_state(owner), false);
+
+        HIDDEN.with(|hidden| hidden.set(false));
+        TEMPLATES.with(|templates| templates.set(0));
+
+        window
+    }
+
+    /// **The door of task T-103-2** — where the button of the open window `hwnd` that sends a
+    /// person to write would take them: the address «Скопировать и открыть…» of the wizard and
+    /// «Открыть группу» of «Спасибо» hand to the shell, read by the very call they read it by
+    /// (решение 181.1). Nothing is opened.
+    ///
+    /// `hwnd` is a window of this module on the caller's thread.
+    pub fn feedback_url(hwnd: HWND) -> Option<&'static str> {
+        // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
+        // this door — and the borrow of its state ends with the call.
+        unsafe { with_state(hwnd, |state| state.feedback_url()) }
     }
 }
 
@@ -7306,6 +7413,14 @@ pub mod report {
 /// The facts are read here, once: a machine that changed its scale between the first step and
 /// the last would otherwise write two different things into one appeal.
 pub fn open_wizard(owner: HWND) {
+    open_window(owner, wizard_state(owner), true);
+}
+
+/// The state the wizard opens with — the facts of the machine and an empty draft.
+///
+/// Split out of [`open_wizard`] by задача T-103-2 so that the measuring door of the tests opens the
+/// very same wizard ([`testing::open_wizard_hidden`]) and not a copy of it.
+fn wizard_state(owner: HWND) -> WindowState {
     let mut state = fresh_state(owner, Kind::Wizard);
 
     let layouts = crate::layouts::enumerate_all()
@@ -7334,7 +7449,7 @@ pub fn open_wizard(owner: HWND) {
         done: false,
     }));
 
-    open_window(owner, state, true);
+    state
 }
 
 // ⛔ **`open_thanks` is gone — задача Т-33-3, решение 103.3.** «Готово» used to close the
@@ -9674,34 +9789,48 @@ fn capture_foreground(mine: HWND) -> String {
     }
 }
 
-/// «Скопировать и открыть канал» — FR-104.
+/// «Скопировать и открыть группу» / «Copy and open GitHub Issues» — FR-104.
 ///
-/// The clipboard, and then the shell, and **only** in that order: a person whose channel does
-/// not open still has the text. While the address is a placeholder (П7) the second half does
-/// not happen at all, and the status line says so.
+/// The clipboard, and then the shell, and **only** in that order: a person whose page does not
+/// open still has the text. While the address is a placeholder (П7) the second half does not
+/// happen at all, and the status line says so.
+///
+/// ⭐ **Where, since решение 181.1:** the place this window's reader can write — the topic of the
+/// group for Russian and Ukrainian, GitHub Issues for the other twelve ([`links::feedback_url`],
+/// by the language of the window). Until `e102` it was the channel, where there is nowhere to
+/// write (вопрос 181).
 fn wizard_copy(hwnd: HWND) {
     use crate::settings::{IDS_WIZARD_COPIED, IDS_WIZARD_COPIED_ONLY, IDS_WIZARD_FAILED, text};
 
     wizard_harvest(hwnd);
 
     // SAFETY: the state pointer is live for the length of the window.
-    let appeal = unsafe {
+    let taken = unsafe {
         with_state(hwnd, |state| {
-            state.wizard.as_deref().map(|wizard| wizard.text.clone())
+            (
+                state
+                    .wizard
+                    .as_deref()
+                    .map(|wizard| wizard.text.clone())
+                    .unwrap_or_default(),
+                state.feedback_url(),
+            )
         })
-    }
-    .flatten()
-    .unwrap_or_default();
+    };
+
+    let Some((appeal, url)) = taken else {
+        return;
+    };
 
     if appeal.is_empty() {
         return;
     }
 
     let written = crate::selection::write_unicode_text(hwnd, &appeal).is_ok();
-    let live = !links::is_placeholder(links::CHANNEL_URL);
+    let live = !links::is_placeholder(url);
 
     if written && live {
-        open_link(links::CHANNEL_URL);
+        open_link(url);
     }
 
     let said = match (written, live) {

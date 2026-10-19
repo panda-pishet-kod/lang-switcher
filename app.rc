@@ -1815,6 +1815,10 @@ END
 #define IDS_EXCLUSION_ADDED     3239
 #define IDS_EXCLUSION_ALREADY   3240
 #define IDS_EXCLUSION_NOT_PICKED 3241
+// Task T-103-2, decision 181.1: the button of the letter of thanks that sends a person where they
+// can write -- the group for ru and uk, GitHub Issues for the other twelve. 3242 continues the
+// block 3232...3247; IDS_CHANNEL_OPEN stays with the news and the author window.
+#define IDS_FEEDBACK_OPEN       3242
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
@@ -1947,6 +1951,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Письмо от автора"
     IDS_CLOSE               "Закрыть"
     IDS_CHANNEL_OPEN        "Открыть канал"
+    IDS_FEEDBACK_OPEN       "Открыть группу"
     IDS_SUPPORT_OPEN        "Поддержать автора"
     IDS_HELLO_TITLE         "Здравствуйте! Меня зовут Панда."
     IDS_HELLO_LEAD          "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: чинит слово, набранное не в той раскладке. Вот как это выглядит:"
@@ -2184,6 +2189,7 @@ BEGIN
     IDS_LETTER_CAPTION      "A letter from the author"
     IDS_CLOSE               "Close"
     IDS_CHANNEL_OPEN        "Open the channel"
+    IDS_FEEDBACK_OPEN       "Open GitHub Issues"
     IDS_SUPPORT_OPEN        "Support the author"
     IDS_HELLO_TITLE         "Hello! My name is Panda."
     IDS_HELLO_LEAD          "I made Lang Switcher and I am glad you installed it. The program does one thing: it fixes a word typed in the wrong layout. Here is what that looks like:"
@@ -2434,6 +2440,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Лист від автора"
     IDS_CLOSE               "Закрити"
     IDS_CHANNEL_OPEN        "Відкрити канал"
+    IDS_FEEDBACK_OPEN       "Відкрити групу"
     IDS_SUPPORT_OPEN        "Підтримати автора"
     IDS_HELLO_TITLE         "Вітаю! Мене звати Панда."
     IDS_HELLO_LEAD          "Я зробив Lang Switcher і радий, що ви його встановили. Програма робить одну річ: виправляє слово, набране не в тій розкладці. Ось як це виглядає:"
@@ -2667,6 +2674,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Ein Brief vom Autor"
     IDS_CLOSE               "Schließen"
     IDS_CHANNEL_OPEN        "Kanal öffnen"
+    IDS_FEEDBACK_OPEN       "GitHub Issues öffnen"
     IDS_SUPPORT_OPEN        "Den Autor unterstützen"
     IDS_HELLO_TITLE         "Hallo! Ich heiße Panda."
     IDS_HELLO_LEAD          "Ich habe Lang Switcher gemacht und freue mich, dass Sie es installiert haben. Das Programm macht eine Sache: Es repariert ein Wort, das im falschen Tastaturlayout getippt wurde. So sieht das aus:"
@@ -2902,6 +2910,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Une lettre de l'auteur"
     IDS_CLOSE               "Fermer"
     IDS_CHANNEL_OPEN        "Ouvrir la chaîne"
+    IDS_FEEDBACK_OPEN       "Ouvrir GitHub Issues"
     IDS_SUPPORT_OPEN        "Soutenir l'auteur"
     IDS_HELLO_TITLE         "Bonjour ! Je m'appelle Panda."
     IDS_HELLO_LEAD          "J'ai fait Lang Switcher et je suis heureux que vous l'ayez installé. Le programme fait une seule chose : il répare un mot tapé dans la mauvaise disposition. Voici à quoi cela ressemble :"
@@ -3134,6 +3143,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Una carta del autor"
     IDS_CLOSE               "Cerrar"
     IDS_CHANNEL_OPEN        "Abrir el canal"
+    IDS_FEEDBACK_OPEN       "Abrir GitHub Issues"
     IDS_SUPPORT_OPEN        "Apoyar al autor"
     IDS_HELLO_TITLE         "¡Hola! Me llamo Panda."
     IDS_HELLO_LEAD          "Hice Lang Switcher y me alegra que lo haya instalado. El programa hace una sola cosa: arregla una palabra escrita en la distribución equivocada. Así se ve:"
@@ -3364,6 +3374,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Uma carta do autor"
     IDS_CLOSE               "Fechar"
     IDS_CHANNEL_OPEN        "Abrir o canal"
+    IDS_FEEDBACK_OPEN       "Abrir o GitHub Issues"
     IDS_SUPPORT_OPEN        "Apoiar o autor"
     IDS_HELLO_TITLE         "Olá! Meu nome é Panda."
     IDS_HELLO_LEAD          "Eu fiz o Lang Switcher e fico feliz que você o tenha instalado. O programa faz uma coisa só: conserta uma palavra digitada no layout errado. Veja como é:"
@@ -3599,6 +3610,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Una lettera dall'autore"
     IDS_CLOSE               "Chiudi"
     IDS_CHANNEL_OPEN        "Apri il canale"
+    IDS_FEEDBACK_OPEN       "Apri GitHub Issues"
     IDS_SUPPORT_OPEN        "Sostieni l'autore"
     IDS_HELLO_TITLE         "Ciao! Mi chiamo Panda."
     IDS_HELLO_LEAD          "Ho fatto io Lang Switcher e sono contento che tu lo abbia installato. Il programma fa una cosa sola: ripara una parola digitata con il layout sbagliato. Ecco come appare:"
@@ -3834,6 +3846,7 @@ BEGIN
     IDS_LETTER_CAPTION      "List od autora"
     IDS_CLOSE               "Zamknij"
     IDS_CHANNEL_OPEN        "Otwórz kanał"
+    IDS_FEEDBACK_OPEN       "Otwórz GitHub Issues"
     IDS_SUPPORT_OPEN        "Wesprzyj autora"
     IDS_HELLO_TITLE         "Cześć! Nazywam się Panda."
     IDS_HELLO_LEAD          "Zrobiłem Lang Switcher i cieszę się, że go zainstalowałeś. Program robi jedną rzecz: naprawia słowo napisane w złym układzie klawiatury. Wygląda to tak:"
@@ -4065,6 +4078,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Dopis od autora"
     IDS_CLOSE               "Zavřít"
     IDS_CHANNEL_OPEN        "Otevřít kanál"
+    IDS_FEEDBACK_OPEN       "Otevřít GitHub Issues"
     IDS_SUPPORT_OPEN        "Podpořit autora"
     IDS_HELLO_TITLE         "Dobrý den! Jmenuji se Panda."
     IDS_HELLO_LEAD          "Udělal jsem Lang Switcher a mám radost, že jste si ho nainstalovali. Program dělá jednu věc: opraví slovo napsané ve špatném rozložení klávesnice. Vypadá to takto:"
@@ -4299,6 +4313,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Yazardan bir mektup"
     IDS_CLOSE               "Kapat"
     IDS_CHANNEL_OPEN        "Kanalı aç"
+    IDS_FEEDBACK_OPEN       "GitHub Issues'u aç"
     IDS_SUPPORT_OPEN        "Yazarı destekle"
     IDS_HELLO_TITLE         "Merhaba! Adım Panda."
     IDS_HELLO_LEAD          "Lang Switcher'ı ben yaptım ve kurduğunuza sevindim. Program tek bir şey yapar: yanlış klavye düzeninde yazılmış bir kelimeyi düzeltir. Şöyle görünüyor:"
@@ -4537,6 +4552,7 @@ BEGIN
     IDS_LETTER_CAPTION      "Ένα γράμμα από τον δημιουργό"
     IDS_CLOSE               "Κλείσιμο"
     IDS_CHANNEL_OPEN        "Άνοιγμα του καναλιού"
+    IDS_FEEDBACK_OPEN       "Άνοιγμα του GitHub Issues"
     IDS_SUPPORT_OPEN        "Στηρίξτε τον δημιουργό"
     IDS_HELLO_TITLE         "Γεια σας! Με λένε Πάντα."
     IDS_HELLO_LEAD          "Έφτιαξα το Lang Switcher και χαίρομαι που το εγκαταστήσατε. Το πρόγραμμα κάνει ένα πράγμα: διορθώνει μια λέξη γραμμένη σε λάθος διάταξη. Έτσι φαίνεται:"
@@ -4782,6 +4798,7 @@ BEGIN
     IDS_LETTER_CAPTION      "מכתב מהמפתח"
     IDS_CLOSE               "סגירה"
     IDS_CHANNEL_OPEN        "פתיחת הערוץ"
+    IDS_FEEDBACK_OPEN       "פתיחת GitHub Issues"
     IDS_SUPPORT_OPEN        "תמיכה במפתח"
     IDS_HELLO_TITLE         "שלום! קוראים לי פנדה."
     IDS_HELLO_LEAD          "אני עשיתי את Lang Switcher ואני שמח שהתקנתם אותו. התוכנה עושה דבר אחד: מתקנת מילה שהוקלדה בפריסה הלא נכונה. כך זה נראה:"
@@ -5012,6 +5029,7 @@ BEGIN
     IDS_LETTER_CAPTION      "رسالة من المؤلف"
     IDS_CLOSE               "إغلاق"
     IDS_CHANNEL_OPEN        "فتح القناة"
+    IDS_FEEDBACK_OPEN       "فتح GitHub Issues"
     IDS_SUPPORT_OPEN        "دعم المؤلف"
     IDS_HELLO_TITLE         "مرحبًا! اسمي باندا."
     IDS_HELLO_LEAD          "أنا صنعت Lang Switcher ويسعدني أنك ثبّته. يقوم البرنامج بشيء واحد: يصلح كلمة كُتبت بتخطيط خاطئ. هكذا يبدو الأمر:"

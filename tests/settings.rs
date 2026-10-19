@@ -7307,6 +7307,95 @@ impl HiddenWindow {
         unsafe { GetClientRect(self.window, &mut client) }.expect("the client rectangle");
         client.bottom - client.top
     }
+
+    /// The text of one control of the window, read at the length the control says it holds.
+    fn control_text(&self, control: i32) -> String {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetDlgItem, GetWindowTextLengthW, GetWindowTextW,
+        };
+
+        // SAFETY: the window is live until `Drop`; the buffer is a local as long as the text.
+        unsafe {
+            let child = GetDlgItem(Some(self.window), control).expect("the control must exist");
+            let length = usize::try_from(GetWindowTextLengthW(child)).unwrap_or(0);
+            let mut buffer = vec![0_u16; length + 1];
+            let read = usize::try_from(GetWindowTextW(child, &mut buffer)).unwrap_or(0);
+            String::from_utf16_lossy(&buffer[..read])
+        }
+    }
+}
+
+/// **Задача T-103-2, сторож (4), решение 181.1 — a change of language on the fly moves where a
+/// person is sent to write, together with the words that say where.**
+///
+/// The two windows that send a person to write — «Спасибо» and the wizard of FR-104 — opened hidden
+/// out of the templates of the built product, and asked by the door of the task where their button
+/// would take them: the very call «Открыть группу» and «Скопировать и открыть…» read the address
+/// by. Built in Russian, the group; the language moved and [`letters::language_changed`] told the
+/// windows, GitHub Issues — and the button of «Спасибо» says so; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the windows** — the address stays with the words
+/// the window shows. Without it a test that read the language in force at the click would pass for
+/// one that follows the window.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
+    const IDC_LETTER_PANEL_BTN_2: i32 = 1219;
+
+    let _guard = with_product_strings();
+    let module = ProductImage::shared().module;
+
+    settings::set_ui_language(Language::Ru);
+
+    let thanks = HiddenWindow::on_owner(|owner| {
+        letters::testing::open_letter_activated_hidden(owner, module, letters::Letter::Thanks)
+    });
+    let wizard =
+        HiddenWindow::on_owner(|owner| letters::testing::open_wizard_hidden(owner, module));
+    let address = |window: &HiddenWindow| {
+        letters::testing::feedback_url(window.window).expect("a window of `letters`")
+    };
+
+    let mut seen = Vec::new();
+
+    seen.push(("built in Ru", address(&thanks), address(&wizard)));
+
+    // The control: the language moved and nobody told the windows.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", address(&thanks), address(&wizard)));
+
+    // The road of FR-94: the language changed while the windows were open.
+    letters::language_changed(thanks.owner);
+    seen.push(("En, told", address(&thanks), address(&wizard)));
+    let english_button = thanks.control_text(IDC_LETTER_PANEL_BTN_2);
+
+    settings::set_ui_language(Language::Uk);
+    letters::language_changed(thanks.owner);
+    seen.push(("Uk, told", address(&thanks), address(&wizard)));
+
+    settings::set_ui_language(Language::En);
+    let english_word = settings::text(settings::IDS_FEEDBACK_OPEN);
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}\nthe button of «Спасибо» in English: «{english_button}»");
+
+    let group = letters::links::GROUP_URL;
+    let issues = letters::links::ISSUES_URL;
+
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group, group),
+            ("En, not told", group, group),
+            ("En, told", issues, issues),
+            ("Uk, told", group, group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_eq!(
+        english_button, english_word,
+        "and the button of «Спасибо» says where it now sends a person"
+    );
 }
 
 #[cfg(feature = "testing")]
@@ -17065,7 +17154,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **220 since task T-95-2** — вопрос 159: the line while the capture waits for the second
 /// `Shift` and the line after the double press — 218 + 2, row for row.
-const FR_94_STRINGS: [(u16, &str, &str); 228] = [
+///
+/// ⚠ **229 since task T-103-2** — вопрос 181: the button of «Спасибо» that sends a person where they
+/// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row.
+const FR_94_STRINGS: [(u16, &str, &str); 229] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18085,6 +18177,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 228] = [
         settings::IDS_EXCLUSION_NOT_PICKED,
         "Окно не выбрано",
         "No window picked",
+    ),
+    // Task T-103-2, решение 181.1: where «Спасибо» sends a person to write — the group, GitHub
+    // Issues. `IDS_CHANNEL_OPEN` above stays with «Что нового» and FR-103.
+    (
+        settings::IDS_FEEDBACK_OPEN,
+        "Открыть группу",
+        "Open GitHub Issues",
     ),
 ];
 
@@ -25008,8 +25107,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        228,
-        "two hundred and TWENTY-EIGHT identifiers in use since task T-100-3 (вопрос 172, \
+        229,
+        "two hundred and TWENTY-NINE identifiers in use since task T-103-2 (вопрос 181, решение \
+         181.1): «Спасибо» sends a person where they can write, and its button got a word of its \
+         own (3242). Two hundred and twenty-eight since task T-100-3 (вопрос 172, \
          вариант В): the eight strings of the two ways of «Исключения» arrived (3234…3241) — \
          the two words, the button at rest and counting, the line under it at rest, «Добавлено», \
          «Уже в списке», «Окно не выбрано». Two hundred and twenty since task T-95-2 (вопрос \
