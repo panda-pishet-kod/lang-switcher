@@ -17221,7 +17221,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **235 since task T-103-7** — решение 181.6: the six words of the last step of a trouble, which
 /// goes to the author by letter — 229 + 6, row for row.
-const FR_94_STRINGS: [(u16, &str, &str); 235] = [
+///
+/// ⚠ **237 since task T-104-7** — TZ E104 §0 п. 5 и 12: the two words of the balloon after an
+/// update — 235 + 2.
+const FR_94_STRINGS: [(u16, &str, &str); 237] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18285,6 +18288,18 @@ const FR_94_STRINGS: [(u16, &str, &str); 235] = [
         settings::IDS_WIZARD_ADDRESS_COPIED,
         "Адрес скопирован: {0}.",
         "Address copied: {0}.",
+    ),
+    // Task T-104-7 — the balloon after an update, решение 189.12 word for word in Russian (TZ E104
+    // §0 п. 12), the English in natural English of its own.
+    (
+        settings::IDS_TOAST_UPDATED_TITLE,
+        "Lang Switcher обновлён до {0}",
+        "Lang Switcher has been updated to {0}",
+    ),
+    (
+        settings::IDS_TOAST_UPDATED,
+        "Щёлкните, чтобы узнать, что нового.",
+        "Click to see what's new.",
     ),
 ];
 
@@ -25388,6 +25403,42 @@ fn every_locale_carries_every_interface_string() {
     );
 }
 
+/// **The balloon after an update fits the balloon in all fourteen languages** — task T-104-7,
+/// the stand of fit of TZ E104 §0 п. 12 for the notification: `szInfoTitle` holds 63 UTF-16 units
+/// and `szInfo` 255 (the tray truncates rather than refuses — a title cut in the middle is the
+/// defect this catches), with the longest version a build of this numbering can carry, and the
+/// title carries the version itself.
+///
+/// ⚠ Control: the same check with a ceiling of 20 units must find titles that do not fit — the
+/// check reads the real strings and is able to fail.
+#[test]
+fn the_balloon_after_an_update_fits_in_every_language() {
+    let product = ProductImage::shared();
+    let version = "0.999.99";
+    let mut too_long: Vec<String> = Vec::new();
+    let mut short_ceiling = 0;
+
+    for (tag, langid, _) in ALL_LOCALES {
+        let title = product
+            .string_of_langid(langid, settings::IDS_TOAST_UPDATED_TITLE)
+            .replace("{0}", version);
+        let text = product.string_of_langid(langid, settings::IDS_TOAST_UPDATED);
+        let title_units = title.encode_utf16().count();
+        let text_units = text.encode_utf16().count();
+
+        if !title.contains(version) || title_units > 63 || text_units > 255 || text.trim().is_empty() {
+            too_long.push(format!("{tag}: title {title_units} «{title}», text {text_units}"));
+        }
+
+        if title_units > 20 {
+            short_ceiling += 1;
+        }
+    }
+
+    assert!(too_long.is_empty(), "{}", too_long.join("\n"));
+    assert!(short_ceiling > 0, "control: a ceiling of 20 units must be exceeded somewhere");
+}
+
 /// **Task Т-31-3 — the retired number 3004 is a hole, and a hole costs nothing.**
 ///
 /// Решение 99.4 took `IDS_LANGUAGE_RESTART` out of all fourteen tables and left its number
@@ -25431,8 +25482,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        235,
-        "two hundred and THIRTY-FIVE identifiers in use since task T-103-7 (решение 181.6): an \
+        237,
+        "two hundred and THIRTY-SEVEN identifiers in use since task T-104-7 (TZ E104 §0 п. 5 и \
+         12): the program updates itself, and the balloon after an update got its two words \
+         (3249, 3250). Two hundred and thirty-five since task T-103-7 (решение 181.6): an \
          appeal about a trouble goes to the author by letter, and its last step got six words of \
          its own (3243…3248). Two hundred and twenty-nine since task T-103-2 (вопрос 181, решение \
          181.1): «Спасибо» sends a person where they can write, and its button got a word of its \

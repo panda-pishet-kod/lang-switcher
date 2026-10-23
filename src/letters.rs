@@ -513,7 +513,10 @@ pub fn due(
     // каждом старте. Без этого отметка застыла бы на версии закрытия ворот, и человек,
     // которому письмо однажды вернут, получил бы его за все пропущенные версии разом.
 
-    if update_is_due(state, version, feed) {
+    // ⭐ TZ E104 §0 п. 20 (решение 189.18): since stage Э104 the updater installs a new version by
+    // itself, and «Обновление» is its fallback — due only once the feed has named the newer version
+    // for three days and this build is still the old one.
+    if update_is_due(state, version, feed) && update_fallback_is_open(state, today) {
         return Some(Letter::Update);
     }
 
@@ -526,6 +529,46 @@ pub fn due(
     }
 
     None
+}
+
+/// Days the feed must have named a version newer than this build before the letter «Обновление»
+/// and the entry «Доступна версия X…» of FR-91 come — TZ E104 §0 п. 20, решение 189.18.
+///
+/// The updater reads the same feed once a day and installs in the next idle moment (§0 п. 14);
+/// three days of a newer version that is still not here is three days of an updater that could
+/// not, and only then does the program say so by itself.
+pub const UPDATE_FALLBACK_DAYS: i64 = 3;
+
+/// **Whether the fallback of an update is open** — §0 п. 20: the feed has named a version newer
+/// than this build ([`notice_update`]) for at least [`UPDATE_FALLBACK_DAYS`] days.
+pub fn update_fallback_is_open(state: &Letters, today: Date) -> bool {
+    state
+        .update_noticed
+        .is_some_and(|noticed| today.days_since(noticed) >= UPDATE_FALLBACK_DAYS)
+}
+
+/// Keeps `[letters] update_noticed` — the day the feed **first** named a version newer than this
+/// build — on every good read of the feed (§0 п. 20): set on the first such read, kept while the
+/// feed goes on naming a newer one, cleared by a read that names nothing newer. Answers whether it
+/// moved.
+pub fn notice_update(state: &mut Letters, version: &str, feed: FeedView<'_>, today: Date) -> bool {
+    let before = state.update_noticed;
+
+    state.update_noticed = if update_is_pending(version, feed).is_some() {
+        before.or(Some(today))
+    } else {
+        None
+    };
+
+    state.update_noticed != before
+}
+
+/// **Whether this start is the first after an update** — TZ E104 §0 п. 21: the version last seen
+/// on this machine is not empty and is older than this build's. Not on the first run (nothing was
+/// seen), not after going back to an older build, and once per version — [`initialise`] moves the
+/// version seen on the same tick.
+pub fn was_updated(state: &Letters, version: &str) -> bool {
+    !state.last_seen_version.is_empty() && version_is_newer(version, &state.last_seen_version)
 }
 
 /// Whether the feed named a version newer than this one that has not been announced yet —
@@ -5881,11 +5924,16 @@ pub fn publish_feed(update: Option<FeedItem>, news: Vec<FeedItem>) {
 pub fn pending() -> (bool, Option<String>) {
     let stored = state_now();
     let version = version_string();
+    // TZ E104 §0 п. 20: the entry «Доступна версия X…» is the fallback of the updater, as the
+    // letter is — there only once the feed has named the newer version for three days.
+    let fallback = today().is_some_and(|today| update_fallback_is_open(&stored, today));
 
     with_feed(|feed| {
         (
             has_unread_news(&stored, feed),
-            update_is_pending(&version, feed).and_then(|item| item.version.clone()),
+            update_is_pending(&version, feed)
+                .filter(|_| fallback)
+                .and_then(|item| item.version.clone()),
         )
     })
 }
@@ -6586,6 +6634,10 @@ thread_local! {
     /// Cleared when the letter is shown, however it is shown: by the click on the balloon, or
     /// by itself at the next quiet moment.
     static ANNOUNCED: RefCell<Option<Letter>> = const { RefCell::new(None) };
+
+    /// Whether the balloon on the icon now is «Lang Switcher обновлён до X» — TZ E104 §0 п. 5:
+    /// its click opens the page «Что нового», not a letter.
+    static UPDATED_ANNOUNCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // -----------------------------------------------------------------------------------------
@@ -6686,8 +6738,12 @@ pub fn take_feed() {
         news: &fresh.news,
     };
 
+    let version = version_string();
+
     update_state(|state| {
         state.feed_last_read = Some(today);
+        // TZ E104 §0 п. 20: the day the feed first named a newer version, for the fallback.
+        notice_update(state, &version, view, today);
         forget_expired(state, view);
     });
 
@@ -6733,6 +6789,10 @@ pub fn tick(owner: HWND) {
     let version = version_string();
     let mut stored = state_now();
 
+    // TZ E104 §0 п. 21: asked BEFORE `initialise`, which moves the version seen to this build's
+    // on the same tick — and that move is what makes the notification one per version.
+    let updated = was_updated(&stored, &version);
+
     if initialise(&mut stored, today, &version) {
         let fresh = stored.clone();
 
@@ -6749,6 +6809,14 @@ pub fn tick(owner: HWND) {
     if feed_read_is_due(&stored, today) {
         update_state(|state| state.feed_last_try = Some(today));
         start_feed_read(owner, settings::ui_language().tag().to_owned());
+    }
+
+    // TZ E104 §0 п. 5, 21: the first tick after an update knocks with «Lang Switcher обновлён до
+    // X» and with nothing else — **not a letter**: the rule of one letter a day does not count it,
+    // and the letters wait for the next tick.
+    if updated {
+        announce_updated(&version);
+        return;
     }
 
     let announced = ANNOUNCED.with_borrow(|announced| *announced);
@@ -6775,12 +6843,33 @@ pub fn tick(owner: HWND) {
     // is actually on the screen.
     announce(letter, &version);
     ANNOUNCED.with_borrow_mut(|slot| *slot = Some(letter));
+    UPDATED_ANNOUNCED.set(false);
+}
+
+/// Knocks with «Lang Switcher обновлён до X» — TZ E104 §0 п. 5, 21, task T-104-7. A click on it
+/// opens the page «Что нового» of the language of the interface ([`open_announced`]).
+fn announce_updated(version: &str) {
+    use crate::settings::{IDS_TOAST_UPDATED, IDS_TOAST_UPDATED_TITLE, format_text, text};
+
+    crate::tray::announce_letter(
+        &format_text(IDS_TOAST_UPDATED_TITLE, &[version]),
+        &text(IDS_TOAST_UPDATED),
+    );
+    ANNOUNCED.with_borrow_mut(|slot| *slot = None);
+    UPDATED_ANNOUNCED.set(true);
 }
 
 /// Opens the letter the balloon announced — FR-101, the click on the balloon.
 ///
-/// The person asked for it, so the window comes up with the focus.
+/// The person asked for it, so the window comes up with the focus. The balloon «обновлён до X»
+/// (TZ E104 §0 п. 5) opens no letter: it opens the page «Что нового» in the browser, by the one
+/// door of the program ([`open_link`]).
 pub fn open_announced(owner: HWND) {
+    if UPDATED_ANNOUNCED.replace(false) {
+        open_link(links::changelog_url(settings::ui_language()));
+        return;
+    }
+
     let Some(letter) = ANNOUNCED.with_borrow(|announced| *announced) else {
         return;
     };

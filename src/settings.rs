@@ -1171,6 +1171,18 @@ pub struct Letters {
     #[serde(default)]
     pub latest_known: String,
 
+    /// The day a read of the feed first named a version newer than this build — TZ E104 §0
+    /// п. 20, task T-104-7: since stage Э104 the updater installs a new version by itself, and
+    /// the letter «Обновление» with the entry «Доступна версия X…» are its **fallback**, shown
+    /// only when the feed has named the newer version for [`letters::UPDATE_FALLBACK_DAYS`] days
+    /// and this build is still the old one. Cleared by the first read that names nothing newer.
+    ///
+    /// ⚠ Not in the печать of section 7 and **no schema of its own**, as `feed_last_try` before
+    /// it: there is no `deny_unknown_fields` here, an older build reads the file past this key,
+    /// and if it drops the key on a write the cost is three more days of the fallback's wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_noticed: Option<letters::Date>,
+
     /// The identifiers of the news items that have been read — FR-101, and «Прочитано» is the
     /// only thing that ever puts one here.
     #[serde(default)]
@@ -1203,6 +1215,7 @@ impl Default for Letters {
             feed_last_try: None,
             first_feed_letter: None,
             latest_known: String::new(),
+            update_noticed: None,
             read_ids: Vec::new(),
             reminders: BTreeMap::new(),
             first_shown: BTreeMap::new(),
@@ -3371,6 +3384,11 @@ pub const IDS_WIZARD_COPY_ADDRESS: u16 = 3246;
 pub const IDS_WIZARD_TEXT_COPIED: u16 = 3247;
 /// «Адрес скопирован: {0}.» — the answer to «Скопировать адрес».
 pub const IDS_WIZARD_ADDRESS_COPIED: u16 = 3248;
+/// «Lang Switcher обновлён до {0}» — the title of the balloon after an update, TZ E104 §0 п. 5 и
+/// 12 (task T-104-7); `{0}` is the version of the running build.
+pub const IDS_TOAST_UPDATED_TITLE: u16 = 3249;
+/// «Щёлкните, чтобы узнать, что нового.» — its text; the click opens the page «Что нового».
+pub const IDS_TOAST_UPDATED: u16 = 3250;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3596,7 +3614,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and thirty-five since task T-103-7** — решение 181.6: an appeal about a trouble goes
 /// to the author by letter, and its last step got six words of its own, [`IDS_WIZARD_MAIL_NOTE`] …
 /// [`IDS_WIZARD_ADDRESS_COPIED`] (3243…3248).
-pub const INTERFACE_STRINGS: [u16; 235] = [
+///
+/// ⚠ **Two hundred and thirty-seven since task T-104-7** — TZ E104 §0 п. 5 и 12 (решения 189.3,
+/// 189.18): the program updates itself, and the balloon after an update got its two words,
+/// [`IDS_TOAST_UPDATED_TITLE`] and [`IDS_TOAST_UPDATED`] (3249, 3250).
+pub const INTERFACE_STRINGS: [u16; 237] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3840,6 +3862,9 @@ pub const INTERFACE_STRINGS: [u16; 235] = [
     IDS_WIZARD_COPY_ADDRESS,
     IDS_WIZARD_TEXT_COPIED,
     IDS_WIZARD_ADDRESS_COPIED,
+    // Task T-104-7, TZ E104 §0 п. 5 и 12 — the balloon after an update.
+    IDS_TOAST_UPDATED_TITLE,
+    IDS_TOAST_UPDATED,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

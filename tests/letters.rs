@@ -500,6 +500,9 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
     let mut state = settled("0.38.0");
     state.thanks_due = Some(day(2026, 9, 1));
     let today = day(2026, 9, 3);
+    // TZ E104 §0 п. 20: «Обновление» is the fallback of the updater, due once the feed has named
+    // the newer version for three days — the order of the letters is what this test is about.
+    state.update_noticed = Some(today.plus_days(-letters::UPDATE_FALLBACK_DAYS));
     let items = [news(12)];
     let announced = update("0.40.0");
     let feed = FeedView {
@@ -683,6 +686,8 @@ fn a_newer_version_is_newer_by_number_and_not_by_spelling() {
 fn the_update_letter_is_shown_once_for_each_announced_version() {
     let mut state = settled("0.39.0");
     let today = day(2026, 9, 3);
+    // The fallback of TZ E104 §0 п. 20 is open: the feed named 0.40.0 three days ago.
+    state.update_noticed = Some(today.plus_days(-letters::UPDATE_FALLBACK_DAYS));
     let announced = update("0.40.0");
     let feed = FeedView {
         update: Some(&announced),
@@ -725,6 +730,108 @@ fn an_update_that_is_not_newer_is_not_a_letter() {
 
     assert_eq!(letters::due(&state, today, "0.39.0", feed, true), None);
     assert!(!letters::update_is_due(&state, "0.39.0", feed));
+}
+
+// =========================================================================================
+// The updater's fallback and the balloon after an update — TZ E104 §0 п. 20, 21 (T-104-7)
+// =========================================================================================
+
+/// **No letter «Обновление» until the feed has named the newer version for three days** — §0
+/// п. 20: the updater installs in the next idle moment, and the letter is its fallback. The day
+/// is the first read that named it ([`letters::notice_update`]), kept while the feed goes on
+/// naming it and cleared by a read that does not.
+#[test]
+fn the_update_letter_waits_three_days_for_the_updater() {
+    let mut state = settled("0.103.0");
+    let first = day(2026, 10, 24);
+    let announced = update("0.104.0");
+    let feed = FeedView {
+        update: Some(&announced),
+        news: &[],
+    };
+
+    assert!(letters::notice_update(&mut state, "0.103.0", feed, first));
+    assert_eq!(state.update_noticed, Some(first), "the first read that named it");
+    assert!(
+        !letters::notice_update(&mut state, "0.103.0", feed, first.plus_days(1)),
+        "a later read keeps the day of the first"
+    );
+    assert_eq!(state.update_noticed, Some(first));
+
+    // ⚠ The days are written out and not taken from the constant: the first mutant «zero days»
+    // passed a loop over `0..UPDATE_FALLBACK_DAYS` (scratchpad-E104\t7-mutants.log). Three is the
+    // number of §0 п. 20, and the test holds it.
+    assert_eq!(letters::UPDATE_FALLBACK_DAYS, 3, "§0 п. 20: three days");
+
+    for offset in 0..3 {
+        assert_ne!(
+            letters::due(&state, first.plus_days(offset), "0.103.0", feed, true),
+            Some(Letter::Update),
+            "day {offset}: the updater still has its chance"
+        );
+        assert!(!letters::update_fallback_is_open(&state, first.plus_days(offset)));
+    }
+
+    let third = first.plus_days(3);
+
+    assert!(letters::update_fallback_is_open(&state, third));
+    assert_eq!(
+        letters::due(&state, third, "0.103.0", feed, true),
+        Some(Letter::Update),
+        "three days and still the old build — the fallback"
+    );
+
+    // The updater did its work: the build is the version the feed names, and nothing is pending.
+    assert!(letters::notice_update(&mut state, "0.104.0", feed, third));
+    assert_eq!(state.update_noticed, None, "a read that names nothing newer clears it");
+    assert!(!letters::update_fallback_is_open(&state, third.plus_days(10)));
+}
+
+/// **The balloon «обновлён до X» comes once per version, after an update and only then** — §0
+/// п. 21: not on the first run (nothing was seen), not on a start of the same version, not after
+/// going back to an older build, and not twice — `initialise` moves the version seen.
+#[test]
+fn the_balloon_after_an_update_comes_once_per_version() {
+    let today = day(2026, 10, 25);
+
+    let fresh = Letters::default();
+    assert!(
+        !letters::was_updated(&fresh, "0.104.0"),
+        "the first run is not an update"
+    );
+
+    let mut state = settled("0.103.0");
+    assert!(letters::was_updated(&state, "0.104.0"), "0.103.0 → 0.104.0 is an update");
+    assert!(!letters::was_updated(&state, "0.103.0"), "the same version is not");
+    assert!(
+        !letters::was_updated(&state, "0.102.0"),
+        "a rollback to an older build is not an update"
+    );
+
+    letters::initialise(&mut state, today, "0.104.0");
+    assert!(
+        !letters::was_updated(&state, "0.104.0"),
+        "once per version: the tick that knocked has moved the version seen"
+    );
+}
+
+/// **The tick asks whether it was an update before `initialise` moves the version, and knocks
+/// with the balloon of the update, not a letter** — the order of the code lines of `tick`, as
+/// `the_attempt_is_written_before_the_read` holds the feed's.
+#[test]
+fn the_tick_asks_about_the_update_before_it_moves_the_version_and_knocks_once() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/letters.rs"),
+    )
+    .expect("src/letters.rs must be readable");
+
+    let start = source.find("pub fn tick(owner: HWND) {").expect("the tick");
+    let body = &source[start..start + source[start..].find("\n}\n").or_else(|| source[start..].find("\n}\r\n")).expect("its end")];
+    let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("tick has no «{needle}»"));
+
+    assert!(at("let updated = was_updated(&stored, &version);") < at("if initialise(&mut stored, today, &version)"));
+    assert!(at("if updated {") < at("let due = with_feed("), "the balloon of the update comes before any letter");
+    assert!(at("announce_updated(&version);") < at("let due = with_feed("));
 }
 
 // =========================================================================================
