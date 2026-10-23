@@ -78,7 +78,17 @@
     not carry. Positive control: -SignUrlControl 'https://example.invalid/' -- the signature is
     then judged against an address it does not name, so on a signed file the gate must FAIL.
 
-    Exit code: 0 only if the artifact could be measured and gates 2, 3 and 4 pass -- or, under
+    GATE 5 (stage E104, question 190) -- the C runtime of MSVC is inside the image. Until 0.103.0
+    every image imported VCRUNTIME140.dll and five api-ms-win-crt-* libraries and did not start on
+    a Windows without the Visual C++ package (finding 188.25). The gate reads the import table and
+    the delay-import table of the PE header itself and refuses VCRUNTIME*.dll, MSVCP*.dll and
+    api-ms-win-crt-*.dll. Positive control: -ExtraImportNeedles KERNEL32.dll -- every image
+    imports it, so the gate must FAIL.
+    GATE 6 (stage E104, TZ E104 p. 22) -- the test doors of the updater (a feed on the loopback, a
+    key and a folder of the stand) compile only under the `testing` feature; the gate refuses an
+    image that names localhost, 127.0.0.1, update-doors.toml or LANGSW_UPDATE_, in ASCII and
+    UTF-16LE. Positive control: -ExtraDoorNeedles LangSwitcher -- every image names itself.
+    Exit code: 0 only if the artifact could be measured and gates 2 to 6 pass -- or, under
     a control, only if the gate under control really failed.
 
     Examples:
@@ -88,6 +98,8 @@
       .\verify-perimeter.ps1 -ExtraMarkers serde            # crate control: must PASS
       .\verify-perimeter.ps1 -ExtraPathNeedles '/rustc/'    # path control: must PASS
       .\verify-perimeter.ps1 -SignUrlControl 'https://example.invalid/'   # signature control: must PASS
+      .\verify-perimeter.ps1 -ExtraImportNeedles KERNEL32.dll   # import control: must PASS
+      .\verify-perimeter.ps1 -ExtraDoorNeedles LangSwitcher     # door control: must PASS
 #>
 [CmdletBinding()]
 param(
@@ -109,7 +121,13 @@ param(
     [string]$SignUrl = '',
     # Gate 3's control of the certificate table: the signature is judged against THIS address
     # instead, so the real /du of a signed file becomes stray and the gate has to FAIL.
-    [string]$SignUrlControl = ''
+    [string]$SignUrlControl = '',
+    # Names added to the libraries gate 5 refuses. 'KERNEL32.dll' is the positive control: every
+    # image imports it, so the gate has to fire on it.
+    [string[]]$ExtraImportNeedles = @(),
+    # Strings added to the test doors gate 6 looks for. 'LangSwitcher' is the positive control:
+    # every image names itself, so the gate has to fire on it.
+    [string[]]$ExtraDoorNeedles = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -451,6 +469,147 @@ if ($pathNeedles.Count -eq 0) {
     Write-Host '  RESULT: pass'
 }
 
+# --- Gate 5: the C runtime is inside the image (stage E104, question 190) -----------------------
+#
+# Until 0.103.0 every image imported VCRUNTIME140.dll and five api-ms-win-crt-* libraries, and on a
+# Windows without the Visual C++ package the program did not start at all (finding 188.25). Since
+# T-104-2 the runtime is linked in (+crt-static, .cargo\config.toml and release.ps1), and this gate
+# reads the IMPORT TABLE of the file -- the import directory and the delay-import directory of the
+# PE header, the names the loader will look for -- and refuses any name of the C runtime of MSVC.
+# The table is read by this script, not by dumpbin: the gate must mean the same on a machine
+# without Build Tools.
+Write-Host ''
+Write-Host '--- Gate 5: the C runtime of MSVC is inside the image (no CRT imports) ---'
+
+$importControl = ($ExtraImportNeedles.Count -gt 0)
+$importNeedles = @('VCRUNTIME*.dll', 'MSVCP*.dll', 'api-ms-win-crt-*.dll') + $ExtraImportNeedles
+if ($importControl) { Write-Host ("  + {0}  *** POSITIVE CONTROL: the import gate must FAIL ***" -f ($ExtraImportNeedles -join ', ')) }
+
+function Get-PeSectionOffset([byte[]]$b, [int]$secBase, [int]$count, [uint32]$rva) {
+    for ($i = 0; $i -lt $count; $i++) {
+        $s = $secBase + 40 * $i
+        $vsize = [BitConverter]::ToUInt32($b, $s + 8)
+        $va = [BitConverter]::ToUInt32($b, $s + 12)
+        $rawSize = [BitConverter]::ToUInt32($b, $s + 16)
+        $raw = [BitConverter]::ToUInt32($b, $s + 20)
+        $span = [Math]::Max($vsize, $rawSize)
+        if (($rva -ge $va) -and ($rva -lt ($va + $span))) { return [int]($raw + ($rva - $va)) }
+    }
+    return -1
+}
+
+function Get-PeAsciiz([byte[]]$b, [int]$at) {
+    $end = $at
+    while (($end -lt $b.Length) -and ($b[$end] -ne 0)) { $end++ }
+    return [System.Text.Encoding]::ASCII.GetString($b, $at, $end - $at)
+}
+
+# The names of the DLLs the file imports, plain and delayed. Throws on a file that is not a PE32+
+# image or whose directories do not resolve: a table that cannot be read is not an empty table.
+function Get-PeImports([byte[]]$b) {
+    $e = [BitConverter]::ToInt32($b, 0x3C)
+    if ([BitConverter]::ToUInt32($b, $e) -ne 0x00004550) { throw 'not a PE file' }
+    $coff = $e + 4
+    $count = [BitConverter]::ToUInt16($b, $coff + 2)
+    $optSize = [BitConverter]::ToUInt16($b, $coff + 16)
+    $opt = $coff + 20
+    if ([BitConverter]::ToUInt16($b, $opt) -ne 0x20B) { throw 'not a PE32+ image' }
+    $dd = $opt + 112
+    $secBase = $opt + $optSize
+    $names = @()
+    # Data directory 1: IMAGE_IMPORT_DESCRIPTOR, 20 bytes each, Name at +12, ended by zeros.
+    $impRva = [BitConverter]::ToUInt32($b, $dd + 8)
+    if ($impRva -ne 0) {
+        $at = Get-PeSectionOffset $b $secBase $count $impRva
+        if ($at -lt 0) { throw 'the import directory does not resolve' }
+        while ($true) {
+            $nameRva = [BitConverter]::ToUInt32($b, $at + 12)
+            $thunk = [BitConverter]::ToUInt32($b, $at + 16)
+            if (($nameRva -eq 0) -and ($thunk -eq 0)) { break }
+            $nameAt = Get-PeSectionOffset $b $secBase $count $nameRva
+            if ($nameAt -lt 0) { throw 'an import name does not resolve' }
+            $names += Get-PeAsciiz $b $nameAt
+            $at += 20
+        }
+    }
+    # Data directory 13: the delay-load descriptors, 32 bytes each, DllNameRVA at +4.
+    $delayRva = [BitConverter]::ToUInt32($b, $dd + 8 * 13)
+    if ($delayRva -ne 0) {
+        $at = Get-PeSectionOffset $b $secBase $count $delayRva
+        if ($at -lt 0) { throw 'the delay-import directory does not resolve' }
+        while ($true) {
+            $nameRva = [BitConverter]::ToUInt32($b, $at + 4)
+            if ($nameRva -eq 0) { break }
+            $nameAt = Get-PeSectionOffset $b $secBase $count $nameRva
+            if ($nameAt -lt 0) { throw 'a delay-import name does not resolve' }
+            $names += Get-PeAsciiz $b $nameAt
+            $at += 32
+        }
+    }
+    return @($names)
+}
+
+$peBytes = [System.IO.File]::ReadAllBytes($Artifact)
+$importFailed = $false
+try {
+    $imports = @(Get-PeImports $peBytes)
+} catch {
+    Write-Host ("  FAIL: the import table could not be read: {0}" -f $_.Exception.Message)
+    $imports = @()
+    $importFailed = $true
+}
+if ((-not $importFailed) -and ($imports.Count -eq 0)) {
+    Write-Host '  FAIL: not one import was read -- every Windows image imports something; the gate measured nothing.'
+    $importFailed = $true
+}
+$crtHits = @()
+foreach ($dll in $imports) {
+    foreach ($needle in $importNeedles) {
+        if ($dll -like $needle) { $crtHits += $dll; break }
+    }
+}
+if ($imports.Count -gt 0) {
+    Write-Host ("  imports read: {0} ({1})" -f $imports.Count, (($imports | Sort-Object -Unique) -join ', '))
+    foreach ($dll in $crtHits) { Write-Host ("  FOUND   {0}" -f $dll) }
+    if ($crtHits.Count -gt 0) {
+        $importFailed = $true
+        Write-Host ("  RESULT: FAIL -- the image imports {0} library(ies) of the C runtime" -f $crtHits.Count)
+    } elseif (-not $importFailed) {
+        Write-Host '  no library of the C runtime of MSVC is imported'
+        Write-Host '  RESULT: pass'
+    }
+}
+
+# --- Gate 6: no test door of the updater is in the image (stage E104, TZ E104 p. 22) ------------
+#
+# The updater has doors for the stand -- a feed on the guest's own loopback, a key of the stand and
+# a folder of its own -- and they compile only under the `testing` feature. This gate reads the
+# whole file, byte for byte, in ASCII and UTF-16LE, without regard to case, and refuses it if it
+# names one of them. Positive control: -ExtraDoorNeedles 'LangSwitcher' -- every image names itself.
+Write-Host ''
+Write-Host '--- Gate 6: the test doors of the updater are not in the image --------'
+
+$doorControl = ($ExtraDoorNeedles.Count -gt 0)
+$doorNeedles = @('localhost', '127.0.0.1', 'update-doors.toml', 'LANGSW_UPDATE_') + $ExtraDoorNeedles
+if ($doorControl) { Write-Host ("  + {0}  *** POSITIVE CONTROL: the door gate must FAIL ***" -f ($ExtraDoorNeedles -join ', ')) }
+$folded = [System.Text.Encoding]::GetEncoding(28591).GetString($peBytes).ToLowerInvariant()
+$doorHits = 0
+foreach ($needle in $doorNeedles) {
+    $low = $needle.ToLowerInvariant()
+    $wide = (($low.ToCharArray() | ForEach-Object { [string]$_ + [char]0 }) -join '')
+    $a = ([regex]::Matches($folded, [regex]::Escape($low))).Count
+    $w = ([regex]::Matches($folded, [regex]::Escape($wide))).Count
+    $verdict = 'absent'
+    if (($a + $w) -gt 0) { $verdict = 'FOUND'; $doorHits += $a + $w }
+    Write-Host ("  {0,-7} {1,-30} ASCII {2,3}  UTF-16LE {3,3}" -f $verdict, $needle, $a, $w)
+}
+$doorFailed = ($doorHits -gt 0)
+if ($doorFailed) {
+    Write-Host ("  RESULT: FAIL -- the image names a test door {0} time(s)" -f $doorHits)
+} else {
+    Write-Host '  RESULT: pass'
+}
+
 # --- Verdict ------------------------------------------------------------------------------------
 Write-Host ''
 Write-Host '======================================================================'
@@ -491,12 +650,36 @@ if ($signControl) {
     exit 1
 }
 
-if ($crateFailed -or $addressFailed -or $pathFailed) {
+if ($importControl) {
+    if ($importFailed) {
+        Write-Host ' POSITIVE CONTROL PASSED: the import gate really failed'
+        Write-Host '======================================================================'
+        exit 0
+    }
+
+    Write-Host ' POSITIVE CONTROL FAILED: the import gate missed a library the image imports'
+    Write-Host '======================================================================'
+    exit 1
+}
+
+if ($doorControl) {
+    if ($doorFailed) {
+        Write-Host ' POSITIVE CONTROL PASSED: the door gate really failed'
+        Write-Host '======================================================================'
+        exit 0
+    }
+
+    Write-Host ' POSITIVE CONTROL FAILED: the door gate missed a string that is in every image'
+    Write-Host '======================================================================'
+    exit 1
+}
+
+if ($crateFailed -or $addressFailed -or $pathFailed -or $importFailed -or $doorFailed) {
     Write-Host ' RESULT: FAIL'
     Write-Host '======================================================================'
     exit 1
 }
 
-Write-Host ' RESULT: PASS -- criterion 4, SEC-03 addresses and the build folders hold; NFR-07 measured above'
+Write-Host ' RESULT: PASS -- criterion 4, SEC-03 addresses, the build folders, the C runtime and the test doors hold; NFR-07 measured above'
 Write-Host '======================================================================'
 exit 0

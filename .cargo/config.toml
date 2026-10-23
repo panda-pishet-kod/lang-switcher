@@ -1,0 +1,13 @@
+# The C runtime of MSVC is linked INTO the image -- вопрос 190, решение 190.1, task T-104-2.
+#
+# Until 0.103.0 every build imported VCRUNTIME140.dll and five api-ms-win-crt-* libraries, and on a
+# Windows without the Visual C++ package the program did not start at all ("System Error", 188.25).
+# With +crt-static the image carries the runtime itself and imports none of them; ворота 11 of
+# tools\verify-perimeter.ps1 refuse an image that does.
+#
+# ⚠ The same flag is ALSO in $flags of tools\release.ps1, and it has to be: cargo reads the
+# rustflags of this file only when CARGO_ENCODED_RUSTFLAGS is not set, and release.ps1 always sets
+# it (посылка П1 of TZ E104, measured). This file covers every other build -- tests, the bench,
+# a plain `cargo build`.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

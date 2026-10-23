@@ -198,7 +198,7 @@ if (-not $SignTool) {
 }
 
 # The build machine's folders out of the image -- see the header. Flags already set are kept;
-# the two of this script are added once, so a second run in the same process changes nothing.
+# the flags of this script are added once, so a second run in the same process changes nothing.
 $cargoHome = $env:CARGO_HOME
 if (-not $cargoHome) { $cargoHome = Join-Path $env:USERPROFILE '.cargo' }
 $sysroot = (& rustc --print sysroot | Out-String).Trim()
@@ -221,6 +221,13 @@ if ($env:CARGO_ENCODED_RUSTFLAGS) {
 foreach ($flag in $Remap) {
     if ($flags -notcontains $flag) { $flags += $flag }
 }
+# The C runtime of MSVC inside the image (stage E104, question 190, decision 190.1): without it
+# every image imported VCRUNTIME140.dll and did not start on a Windows without the Visual C++
+# package. The same flag is in .cargo\config.toml -- and has to be here too, because cargo reads
+# the rustflags of that file only when CARGO_ENCODED_RUSTFLAGS is NOT set, and this script always
+# sets it (premise P1 of TZ E104, measured). Gate 5 of verify-perimeter.ps1 refuses an image that
+# still imports the runtime.
+if ($flags -notcontains 'target-feature=+crt-static') { $flags += @('-C', 'target-feature=+crt-static') }
 $env:CARGO_ENCODED_RUSTFLAGS = $flags -join $unit
 
 # Where cargo builds: CARGO_TARGET_DIR when a caller set it -- an isolated acceptance run keeps
