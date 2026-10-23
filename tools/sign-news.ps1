@@ -12,6 +12,12 @@
       * an entry without BOTH `ru` and `en`   -- FR-102 makes the two obligatory
       * identifiers that repeat or descend    -- «прочитано» is remembered BY NUMBER
       * a body over 192 KB                    -- the program reads at most 256 KB
+    and since stage E104 (TZ E104 p. 16), about the two tables only the updater reads:
+      * a [download] without the update entry of the same version, or more than one [download]
+      * a [download] url not under https://panda-pishet-kod.dev/langswitcher/files/
+      * a sha256 that is not 64 hexadecimal digits; a size that is not 1 byte to 16 MB
+      * a field of [download] or [stop] missing, given twice or unknown; [[download]], [[stop]]
+      * a [stop] in a file not signed with -Reserve -- the updater honours it only from the reserve
 
     A refusal writes nothing: the file on disk is left exactly as it was, and the exit code is
     non-zero.
@@ -103,11 +109,22 @@ Write-Host '--- checks ---------------------------------------------------------
 # installed but PowerShell, and a TOML parser is not something PowerShell has. What it needs to
 # know is the shape, and the shape is flat: `[[item]]` starts an entry, `[item.xx]` starts a
 # language, `key = value` at the top of an entry is a field of it.
+#
+# STAGE E104 (TZ E104 p. 16): two more top-level tables, read by the updater only -- [download] (the
+# installer of the version of the update entry: version, url, sha256, size) and [stop] (versions
+# no updater installs, and the word that the working key is revoked). So the parse now knows WHICH
+# table a line is in: until E104 a key after any other header still went to the last entry, and a
+# `version =` of [download] written after the entries would have become the entry's version.
 $lines = $text -split "`n"
 $items = @()
 $current = $null
 $language = $null
 $schema = $null
+$section = 'top'
+$downloads = 0
+$stops = 0
+$download = [ordered]@{}
+$stop = [ordered]@{}
 
 foreach ($line in $lines) {
     $trimmed = $line.Trim()
@@ -118,6 +135,7 @@ foreach ($line in $lines) {
         if ($current) { $items += $current }
         $current = [pscustomobject]@{ Id = $null; Type = $null; Version = $null; Languages = @() }
         $language = $null
+        $section = 'item'
         continue
     }
 
@@ -125,18 +143,43 @@ foreach ($line in $lines) {
         if (-not $current) { Fail 'a language table before the first [[item]]' }
         $language = $Matches[1]
         $current.Languages += $language
+        $section = 'language'
         continue
     }
 
-    if ($trimmed -match '^\[') { $language = $null; continue }
+    if ($trimmed -match '^\[\[\s*(download|stop)\s*\]\]') {
+        Fail ("[[{0}]] is an array of tables -- the format has one [{0}] table and no more" -f $Matches[1])
+    }
+    if ($trimmed -match '^\[\s*download\s*\]') {
+        $downloads++
+        if ($downloads -gt 1) { Fail ("{0} [download] tables -- the format has one" -f $downloads) }
+        $section = 'download'; $language = $null; continue
+    }
+    if ($trimmed -match '^\[\s*stop\s*\]') {
+        $stops++
+        if ($stops -gt 1) { Fail ("{0} [stop] tables -- the format has one" -f $stops) }
+        $section = 'stop'; $language = $null; continue
+    }
 
-    if ($language) { continue }
+    if ($trimmed -match '^\[') { $language = $null; $section = 'other'; continue }
 
-    if ($trimmed -match '^schema\s*=\s*(\d+)') { $schema = [int]$Matches[1]; continue }
+    if ($section -eq 'download' -or $section -eq 'stop') {
+        if ($trimmed -match '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$') {
+            $table = $download
+            if ($section -eq 'stop') { $table = $stop }
+            if ($table.Contains($Matches[1])) { Fail ("[{0}] gives {1} twice" -f $section, $Matches[1]) }
+            $table[$Matches[1]] = $Matches[2]
+        }
+        continue
+    }
 
-    if ($current -and $trimmed -match '^id\s*=\s*(\d+)') { $current.Id = [int]$Matches[1]; continue }
-    if ($current -and $trimmed -match '^type\s*=\s*"([a-z]+)"') { $current.Type = $Matches[1]; continue }
-    if ($current -and $trimmed -match '^version\s*=\s*"([^"]+)"') { $current.Version = $Matches[1]; continue }
+    if ($section -eq 'language' -or $section -eq 'other') { continue }
+
+    if ($section -eq 'top' -and $trimmed -match '^schema\s*=\s*(\d+)') { $schema = [int]$Matches[1]; continue }
+
+    if ($section -eq 'item' -and $trimmed -match '^id\s*=\s*(\d+)') { $current.Id = [int]$Matches[1]; continue }
+    if ($section -eq 'item' -and $trimmed -match '^type\s*=\s*"([a-z]+)"') { $current.Type = $Matches[1]; continue }
+    if ($section -eq 'item' -and $trimmed -match '^version\s*=\s*"([^"]+)"') { $current.Version = $Matches[1]; continue }
 }
 
 if ($current) { $items += $current }
@@ -179,6 +222,59 @@ foreach ($item in $items) {
 
 Write-Host '  every entry has ru and en     ok'
 Write-Host '  identifiers unique, ascending ok'
+
+# --- 2b. The tables of the updater (stage E104, TZ E104 p. 16) --------------------------------------
+# What the updater installs is what this script lets through, so every rule of p. 16 is a refusal
+# here, before the file is signed: the updater refuses the same things, but only after the file has
+# reached every machine.
+$FilesPrefix = 'https://panda-pishet-kod.dev/langswitcher/files/'
+$MaxInstaller = 16 * 1024 * 1024
+
+if ($downloads -gt 1) { Fail ("{0} [download] tables -- the format has one" -f $downloads) }
+if ($downloads -eq 1) {
+    foreach ($field in @('version', 'url', 'sha256', 'size')) {
+        if (-not $download.Contains($field)) { Fail ("[download] has no {0}" -f $field) }
+    }
+    foreach ($field in $download.Keys) {
+        if (@('version', 'url', 'sha256', 'size') -notcontains $field) { Fail ("[download] has an unknown field {0}" -f $field) }
+    }
+    if ($download['version'] -notmatch '^"(\d+\.\d+\.\d+)"$') { Fail ("[download] version must be a quoted X.Y.Z, found {0}" -f $download['version']) }
+    $downloadVersion = $Matches[1]
+    if (($updates.Count -ne 1) -or ($updates[0].Version -ne $downloadVersion)) {
+        Fail ("[download] is for {0}, and the file has no update entry of that version -- the two go together" -f $downloadVersion)
+    }
+    if ($download['url'] -notmatch '^"([^"]*)"$') { Fail '[download] url must be a quoted string' }
+    $url = $Matches[1]
+    if (-not $url.StartsWith($FilesPrefix, [System.StringComparison]::Ordinal)) {
+        Fail ("[download] url must start with {0} -- the updater takes the installer from that folder of that host and from nowhere else; found {1}" -f $FilesPrefix, $url)
+    }
+    $rest = $url.Substring($FilesPrefix.Length)
+    if (($rest -notmatch '^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$') -or (@($rest -split '/') -contains '..') -or (@($rest -split '/') -contains '.')) {
+        Fail ("[download] url must name a file under {0} by plain path segments; found {1}" -f $FilesPrefix, $url)
+    }
+    if ($download['sha256'] -notmatch '^"([0-9A-Fa-f]{64})"$') { Fail ("[download] sha256 must be 64 hexadecimal digits in quotes, found {0}" -f $download['sha256']) }
+    if ($download['size'] -notmatch '^\d+$') { Fail ("[download] size must be a whole number of bytes, found {0}" -f $download['size']) }
+    $size = [long]$download['size']
+    if (($size -le 0) -or ($size -gt $MaxInstaller)) { Fail ("[download] size {0} is out of 1...{1} bytes -- the updater refuses an installer over 16 MB" -f $size, $MaxInstaller) }
+    Write-Host ("  [download] {0}, {1} bytes  ok" -f $downloadVersion, $size)
+}
+
+if ($stops -gt 1) { Fail ("{0} [stop] tables -- the format has one" -f $stops) }
+if ($stops -eq 1) {
+    if (-not $Reserve) {
+        Fail '[stop] counts only in a feed signed with the RESERVE key -- sign this file with -Reserve'
+    }
+    if ($stop.Contains('versions') -and ($stop['versions'] -notmatch '^\[\s*("\d+\.\d+\.\d+"\s*(,\s*"\d+\.\d+\.\d+"\s*)*,?\s*)?\]$')) {
+        Fail ("[stop] versions must be a list of quoted X.Y.Z, found {0}" -f $stop['versions'])
+    }
+    if ($stop.Contains('revoke_working') -and ($stop['revoke_working'] -notmatch '^(true|false)$')) {
+        Fail ("[stop] revoke_working must be true or false, found {0}" -f $stop['revoke_working'])
+    }
+    foreach ($field in $stop.Keys) {
+        if (@('versions', 'revoke_working') -notcontains $field) { Fail ("[stop] has an unknown field {0}" -f $field) }
+    }
+    Write-Host '  [stop] signed with the reserve key  ok'
+}
 
 if ($Check) {
     Write-Host ''

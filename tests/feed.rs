@@ -627,6 +627,161 @@ fn the_journal_says_whether_a_request_was_made_at_all() {
     );
 }
 
+// =========================================================================================
+// The tables of the updater — `[download]` and `[stop]`, task T-104-4 (TZ E104 §0 п. 16)
+// =========================================================================================
+
+/// A `[download]` of the shape §0 п. 16 prints, for the version of the vector's `update` entry.
+const DOWNLOAD_TABLE: &str = "\n[download]\n\
+version = \"0.41.0\"\n\
+url = \"https://panda-pishet-kod.dev/langswitcher/files/e41/LangSwitcher-setup.exe\"\n\
+sha256 = \"00112233445566778899AABBCCDDEEFF00112233445566778899aabbccddeeff\"\n\
+size = 3500000\n";
+
+/// A `[stop]` of the shape §0 п. 16 prints.
+const STOP_TABLE: &str = "\n[stop]\n\
+versions = [\"0.42.0\", \"0.43.0\"]\n\
+revoke_working = true\n";
+
+/// The SHA-256 of [`DOWNLOAD_TABLE`], as bytes — upper and lower case both read as hex.
+const DOWNLOAD_SHA: [u8; 32] = [
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+];
+
+/// **The two tables are read, and they change nothing else of the feed** — посылка П3 kept in
+/// the code of this build: the letters of a file with `[download]` and `[stop]` are the letters
+/// of the same file without them.
+#[test]
+fn the_download_and_stop_tables_are_read_and_change_nothing_else() {
+    let plain = feed::parse_body(BODY, "ru").expect("the vector parses");
+    let full = feed::parse_body(&format!("{BODY}{DOWNLOAD_TABLE}{STOP_TABLE}"), "ru")
+        .expect("the vector with the two tables parses");
+
+    assert_eq!(full.update, plain.update, "the update entry is the same");
+    assert_eq!(full.news, plain.news, "the news are the same");
+    assert_eq!(plain.download, feed::Table::Absent);
+    assert_eq!(plain.stop, feed::Table::Absent);
+
+    assert_eq!(
+        full.download,
+        feed::Table::Read(feed::Download {
+            version: "0.41.0".to_owned(),
+            url: "https://panda-pishet-kod.dev/langswitcher/files/e41/LangSwitcher-setup.exe"
+                .to_owned(),
+            sha256: DOWNLOAD_SHA,
+            size: 3_500_000,
+        })
+    );
+    assert_eq!(
+        full.stop,
+        feed::Table::Read(feed::Stop {
+            versions: vec!["0.42.0".to_owned(), "0.43.0".to_owned()],
+            revoke_working: true,
+        })
+    );
+
+    // Where the tables stand in the file does not matter to TOML, and must not matter here.
+    let first = BODY.replacen(
+        "schema = 1\n",
+        &format!("schema = 1\n{DOWNLOAD_TABLE}{STOP_TABLE}"),
+        1,
+    );
+    let early = feed::parse_body(&first, "ru").expect("the tables before the entries parse");
+
+    assert_eq!(early, full);
+}
+
+/// **A table of the wrong shape costs that table, not the letters** — every rule of the shape,
+/// one at a time: a sum that is not 64 hex digits, a size of zero, a field missing, a table that
+/// is an array, a `[stop]` whose versions are not strings.
+#[test]
+fn a_table_of_the_wrong_shape_is_malformed_and_the_letters_stay() {
+    let plain = feed::parse_body(BODY, "en").expect("the vector parses");
+    let good_sha = "00112233445566778899AABBCCDDEEFF00112233445566778899aabbccddeeff";
+
+    let downloads = [
+        ("63 digits", DOWNLOAD_TABLE.replace(good_sha, &good_sha[1..])),
+        ("65 digits", DOWNLOAD_TABLE.replace(good_sha, &format!("{good_sha}0"))),
+        ("not hex", DOWNLOAD_TABLE.replace(good_sha, &good_sha.replace('a', "g"))),
+        ("size zero", DOWNLOAD_TABLE.replace("size = 3500000", "size = 0")),
+        ("size negative", DOWNLOAD_TABLE.replace("size = 3500000", "size = -1")),
+        ("no url", DOWNLOAD_TABLE.replace("url = ", "address = ")),
+        ("no version", DOWNLOAD_TABLE.replace("version = ", "release = ")),
+        ("an array", DOWNLOAD_TABLE.replace("[download]", "[[download]]")),
+    ];
+
+    for (what, table) in &downloads {
+        assert_ne!(table, DOWNLOAD_TABLE, "the bait «{what}» must change the table");
+
+        let read = feed::parse_body(&format!("{BODY}{table}"), "en")
+            .unwrap_or_else(|refusal| panic!("«{what}»: the file must still parse, got {refusal:?}"));
+
+        assert_eq!(read.download, feed::Table::Malformed, "«{what}»");
+        assert_eq!(read.update, plain.update, "«{what}»: the update entry stays");
+        assert_eq!(read.news, plain.news, "«{what}»: the news stay");
+    }
+
+    let stops = [
+        ("versions not strings", STOP_TABLE.replace("[\"0.42.0\", \"0.43.0\"]", "[42, 43]")),
+        ("revoke not a boolean", STOP_TABLE.replace("= true", "= \"yes\"")),
+        ("an array", STOP_TABLE.replace("[stop]", "[[stop]]")),
+    ];
+
+    for (what, table) in &stops {
+        assert_ne!(table, STOP_TABLE, "the bait «{what}» must change the table");
+
+        let read = feed::parse_body(&format!("{BODY}{table}"), "en")
+            .unwrap_or_else(|refusal| panic!("«{what}»: the file must still parse, got {refusal:?}"));
+
+        assert_eq!(read.stop, feed::Table::Malformed, "«{what}»");
+        assert_eq!(read.news, plain.news, "«{what}»: the news stay");
+    }
+
+    // A `[stop]` with nothing but the word about the key, and one with nothing at all, are
+    // both of the shape: the two fields default to «nothing stopped».
+    let bare = feed::parse_body(&format!("{BODY}\n[stop]\nrevoke_working = true\n"), "en")
+        .expect("parses");
+
+    assert_eq!(
+        bare.stop,
+        feed::Table::Read(feed::Stop {
+            versions: Vec::new(),
+            revoke_working: true,
+        })
+    );
+}
+
+/// **Which key signed — the updater's question** (TZ E104 §0 п. 15): the index of the key the
+/// signature checked out against, `None` when neither did.
+#[test]
+fn the_reader_says_which_key_signed() {
+    let signature = decode(TEST_SIGNATURE);
+    let other = feed::FEED_KEYS[0];
+
+    assert_eq!(
+        feed::verify_which(BODY.as_bytes(), &signature, &[TEST_KEY, other]),
+        Some(0)
+    );
+    assert_eq!(
+        feed::verify_which(BODY.as_bytes(), &signature, &[other, TEST_KEY]),
+        Some(1),
+        "the vector was signed with the second key of this pair"
+    );
+    assert_eq!(
+        feed::verify_which(BODY.as_bytes(), &signature, &[other]),
+        None
+    );
+
+    let (read, key) = feed::read_document_by(&signed(), "ru", |body, signature| {
+        feed::verify_which(body, signature, &[other, TEST_KEY])
+    })
+    .expect("the vector reads");
+
+    assert_eq!(key, 1);
+    assert_eq!(read, feed::parse_body(BODY, "ru").expect("parses"));
+}
+
 /// The heading of the entry with this identifier — the entries are named by number and never
 /// by position, because which of them survive depends on the language.
 fn title_of(news: &[lang_switcher::letters::FeedItem], id: u64) -> &str {

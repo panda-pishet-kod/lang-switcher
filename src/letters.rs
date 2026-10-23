@@ -10395,6 +10395,78 @@ pub mod feed {
         /// At most [`NEWS_KEPT`] `news` entries — the ones with the greatest identifiers,
         /// **oldest first**, which is the order they are shown in.
         pub news: Vec<FeedItem>,
+        /// The `[download]` table — where the installer of the version the `update` entry
+        /// names lies, its SHA-256 and its size (TZ E104 §0 п. 16). **Only the updater reads
+        /// it** ([`crate::update`]); the program shows letters and nothing else of it.
+        pub download: Table<Download>,
+        /// The `[stop]` table — the versions no updater may install, and the word that the
+        /// working key is revoked for good. Honoured only in a feed signed with the **reserve**
+        /// key (TZ E104 §0 п. 16), and that is the updater's rule, not the parser's.
+        pub stop: Table<Stop>,
+    }
+
+    /// A top-level table of the feed that one reader needs and another does not — what was
+    /// there, read whole, or that it was there and could not be read.
+    ///
+    /// # Why «malformed» is its own answer and not a refused file
+    ///
+    /// The tables `[download]` and `[stop]` arrived with stage Э104 **under `schema = 1`** (§0
+    /// п. 16): every installed version since `e88` reads the file, skips a top-level table it
+    /// does not know (`RawFeed` has no `deny_unknown_fields` — measured on the code of `e103`,
+    /// посылка П3, 189.30) and goes on showing letters. A table this build cannot read must
+    /// cost **this table** and not the letters: a mistake in a line about the installer must
+    /// not silence the news of the same file — and the updater, for which the table is the
+    /// whole point, does nothing about a table it cannot read.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Table<T> {
+        /// The file has no such table.
+        Absent,
+        /// The table, read and checked.
+        Read(T),
+        /// The table is there and is not of the shape §0 п. 16 describes.
+        Malformed,
+    }
+
+    impl<T> Default for Table<T> {
+        fn default() -> Self {
+            Self::Absent
+        }
+    }
+
+    impl<T> Table<T> {
+        /// The table, when it was there and could be read.
+        pub fn read(&self) -> Option<&T> {
+            match self {
+                Self::Read(value) => Some(value),
+                Self::Absent | Self::Malformed => None,
+            }
+        }
+    }
+
+    /// The `[download]` table, checked: the shape is the parser's business, whether to believe
+    /// it is the updater's ([`crate::update::decide`]).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Download {
+        /// The version the installer installs — the same as the `update` entry's, or the
+        /// updater installs nothing (§0 п. 16).
+        pub version: String,
+        /// Where the installer lies — checked against the one host and folder by the updater,
+        /// not here.
+        pub url: String,
+        /// The SHA-256 of the installer, from 64 hexadecimal digits.
+        pub sha256: [u8; 32],
+        /// The size of the installer, in bytes; never zero.
+        pub size: u64,
+    }
+
+    /// The `[stop]` table, checked.
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub struct Stop {
+        /// Versions no updater installs, whatever the rest of the file says.
+        pub versions: Vec<String>,
+        /// The working key is revoked for good — the updater remembers it and accepts only the
+        /// reserve key from then on.
+        pub revoke_working: bool,
     }
 
     /// The signature line and the body it covers — the split every read makes first.
@@ -10486,17 +10558,35 @@ pub mod feed {
         language: &str,
         verify: impl Fn(&[u8], &[u8]) -> bool,
     ) -> Result<Feed, Refusal> {
+        read_document_by(text, language, |body, signature| {
+            verify(body, signature).then_some(0)
+        })
+        .map(|(feed, _)| feed)
+    }
+
+    /// [`read_document`] that also answers **which key** the signature checked out against —
+    /// the index into the keys the verifier holds, [`verify_which`] for the product.
+    ///
+    /// The program does not care which of the two keys signed a letter; the updater does (TZ
+    /// E104 §0 п. 15–16): `[stop]` counts only in a file signed with the reserve key, and a
+    /// working key the reserve has revoked is refused for good. One body for both, so that the
+    /// file the updater believes is the file the program shows.
+    pub fn read_document_by(
+        text: &str,
+        language: &str,
+        verify: impl Fn(&[u8], &[u8]) -> Option<usize>,
+    ) -> Result<(Feed, usize), Refusal> {
         if text.len() > RESPONSE_CAP {
             return Err(Refusal::TooBig);
         }
 
         let (signature, body) = split(text)?;
 
-        if !verify(body.as_bytes(), &signature) {
+        let Some(key) = verify(body.as_bytes(), &signature) else {
             return Err(Refusal::Unsigned);
-        }
+        };
 
-        parse_body(body, language)
+        parse_body(body, language).map(|feed| (feed, key))
     }
 
     /// The parsed body — the half that needs no cryptography and no network.
@@ -10536,7 +10626,12 @@ pub mod feed {
             news.drain(..news.len() - NEWS_KEPT);
         }
 
-        Ok(Feed { update, news })
+        Ok(Feed {
+            update,
+            news,
+            download: table_of(document.download, download_of),
+            stop: table_of(document.stop, stop_of),
+        })
     }
 
     /// **Checks the author's signature over the body** — FR-102, the system's own cryptography
@@ -10566,6 +10661,13 @@ pub mod feed {
     /// author. What the test then exercises is this very body — the import, the hash, the
     /// verify and the two-key loop — and not a copy of it.
     pub fn verify_with(body: &[u8], signature: &[u8], keys: &[[u8; 64]]) -> bool {
+        verify_which(body, signature, keys).is_some()
+    }
+
+    /// [`verify_with`] that answers **which** of the keys the signature checked out against —
+    /// its index in `keys`, or `None` (task T-104-4). The same import, hash and verify; the
+    /// program asks only whether, the updater asks which (TZ E104 §0 п. 15).
+    pub fn verify_which(body: &[u8], signature: &[u8], keys: &[[u8; 64]]) -> Option<usize> {
         use windows::Win32::Security::Cryptography::{
             BCRYPT_ALG_HANDLE, BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM,
             BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_FLAGS, BCRYPT_KEY_HANDLE,
@@ -10575,12 +10677,10 @@ pub mod feed {
         use windows::core::PCWSTR;
 
         if signature.len() != 64 {
-            return false;
+            return None;
         }
 
-        let Some(hash) = sha256(body) else {
-            return false;
-        };
+        let hash = sha256(body)?;
 
         let mut algorithm = BCRYPT_ALG_HANDLE::default();
 
@@ -10600,12 +10700,12 @@ pub mod feed {
                 "BCryptOpenAlgorithmProvider",
                 &windows::core::Error::from_hresult(opened.to_hresult()),
             );
-            return false;
+            return None;
         }
 
-        let mut accepted = false;
+        let mut accepted = None;
 
-        for key in keys {
+        for (index, key) in keys.iter().enumerate() {
             // `BCRYPT_ECCPUBLIC_BLOB`: the magic, the size of one coordinate, then X and Y.
             let mut blob = Vec::with_capacity(8 + key.len());
             blob.extend_from_slice(&BCRYPT_ECDSA_PUBLIC_P256_MAGIC.to_le_bytes());
@@ -10644,7 +10744,7 @@ pub mod feed {
             let _ = unsafe { BCryptDestroyKey(handle) };
 
             if verified.is_ok() {
-                accepted = true;
+                accepted = Some(index);
                 break;
             }
         }
@@ -11064,11 +11164,96 @@ pub mod feed {
     }
 
     /// The document as the author writes it — FR-102.
+    ///
+    /// ⚠ **No `deny_unknown_fields`, and that is load-bearing** (посылка П3 of TZ E104, measured
+    /// on the code of `e103`, 189.30): every installed build skips a top-level table it does not
+    /// know, which is the only reason `[download]` and `[stop]` could arrive under `schema = 1`.
+    /// The two tables are taken as raw TOML here and read by [`table_of`], so that a table of
+    /// the wrong shape costs itself and not the whole file.
     #[derive(serde::Deserialize)]
     struct RawFeed {
         schema: u32,
         #[serde(default)]
         item: Vec<RawItem>,
+        #[serde(default)]
+        download: Option<toml::Value>,
+        #[serde(default)]
+        stop: Option<toml::Value>,
+    }
+
+    /// `[download]` as written: four fields, all of them obligatory.
+    #[derive(serde::Deserialize)]
+    struct RawDownload {
+        version: String,
+        url: String,
+        sha256: String,
+        size: u64,
+    }
+
+    /// `[stop]` as written: both fields may be left out, and then nothing is stopped.
+    #[derive(serde::Deserialize)]
+    struct RawStop {
+        #[serde(default)]
+        versions: Vec<String>,
+        #[serde(default)]
+        revoke_working: bool,
+    }
+
+    /// One of the two tables of the updater, read whole or not at all.
+    fn table_of<R: serde::de::DeserializeOwned, T>(
+        raw: Option<toml::Value>,
+        check: impl FnOnce(R) -> Option<T>,
+    ) -> Table<T> {
+        let Some(value) = raw else {
+            return Table::Absent;
+        };
+
+        // A table, and not an array of tables or a value: `[[download]]` is a mistake of the
+        // author, and two installers for one version is not a thing this format can say.
+        if !value.is_table() {
+            return Table::Malformed;
+        }
+
+        value
+            .try_into::<R>()
+            .ok()
+            .and_then(check)
+            .map_or(Table::Malformed, Table::Read)
+    }
+
+    /// `[download]` checked for its shape: sixty-four hexadecimal digits of the sum, in either
+    /// case, and a size that is not zero. Whether the address is the author's and the version
+    /// newer is the updater's question ([`crate::update::decide`]), not the shape's.
+    fn download_of(raw: RawDownload) -> Option<Download> {
+        let digits = raw.sha256.as_bytes();
+
+        if digits.len() != 64 || raw.size == 0 || raw.version.is_empty() || raw.url.is_empty() {
+            return None;
+        }
+
+        let mut sha256 = [0u8; 32];
+
+        for (byte, pair) in sha256.iter_mut().zip(digits.chunks_exact(2)) {
+            let high = char::from(pair[0]).to_digit(16)?;
+            let low = char::from(pair[1]).to_digit(16)?;
+
+            *byte = u8::try_from(high * 16 + low).ok()?;
+        }
+
+        Some(Download {
+            version: raw.version,
+            url: raw.url,
+            sha256,
+            size: raw.size,
+        })
+    }
+
+    /// `[stop]` has no shape beyond its types.
+    fn stop_of(raw: RawStop) -> Option<Stop> {
+        Some(Stop {
+            versions: raw.versions,
+            revoke_working: raw.revoke_working,
+        })
     }
 
     /// One entry, before the language is chosen.
