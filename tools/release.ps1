@@ -108,7 +108,15 @@
     asked; 11 -- rustc did not tell its sysroot and commit, so the remap of the build machine's
     folders cannot be made; 12 -- the base image did not build; 13 -- verify-one-body.ps1 failed;
     14 -- the copy of the base image does not match its build; 15 -- signing the base image
-    failed; 16 -- its signature does not verify; 17 -- the perimeter gate failed over it.
+    failed; 16 -- its signature does not verify; 17 -- the perimeter gate failed over it;
+    18 to 21 -- the same four for the updater, LangSwitcherUpdate.exe (stage E104): its build is
+    missing or its copy differs, signing failed, the signature does not verify, the perimeter --
+    gates 3 to 6 included -- failed over it.
+
+    THE UPDATER (stage E104, question 189). The same `cargo build --release` of step 1 builds
+    LangSwitcherUpdate.exe, the second binary of the crate; it is kept beside the unsigned full
+    image right after that step (the base build of step 7 builds it again), and step 11 copies,
+    signs and measures it like the two images. One image: it has no uiAccess.
 
     Examples:
       .\release.ps1
@@ -130,6 +138,8 @@ param(
     # Where the base image goes (stage E91). Empty means <name>-base.exe beside -Artifact:
     # LangSwitcher-base.exe in the artifact folder.
     [string]$BaseArtifact = '',
+    # Where the updater goes (stage E104). Empty means LangSwitcherUpdate.exe beside -Artifact.
+    [string]$UpdaterArtifact = '',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     # What the signature says the file is and where it comes from (/d and /du of signtool,
     # decision 155.4). Gate 3 of verify-perimeter.ps1 judges the certificate table against this
@@ -240,6 +250,9 @@ $ReleaseExe = Join-Path $TargetDir 'release\LangSwitcher.exe'
 $OneBodyDir = Join-Path $TargetDir 'one-body'
 $OneBodyFull = Join-Path $OneBodyDir 'LangSwitcher-full.exe'
 $OneBodyBase = Join-Path $OneBodyDir 'LangSwitcher-base.exe'
+# The updater of step 1 (stage E104), kept unsigned before the base build of step 7 builds it again.
+$ReleaseUpdater = Join-Path $TargetDir 'release\LangSwitcherUpdate.exe'
+$OneBodyUpdater = Join-Path $OneBodyDir 'LangSwitcherUpdate.exe'
 
 # --- The artifact --------------------------------------------------------------------------
 # -Artifact, else LANGSW_ARTIFACTS, else <repository>\dist\ -- the one folder this script may
@@ -258,6 +271,9 @@ if (-not $Artifact) {
 }
 if (-not $BaseArtifact) {
     $BaseArtifact = Join-Path (Split-Path -Parent $Artifact) ([System.IO.Path]::GetFileNameWithoutExtension($Artifact) + '-base.exe')
+}
+if (-not $UpdaterArtifact) {
+    $UpdaterArtifact = Join-Path (Split-Path -Parent $Artifact) 'LangSwitcherUpdate.exe'
 }
 
 function Write-Section { param([string]$Text)
@@ -393,6 +409,12 @@ Write-Host '  the copy is byte for byte the binary criterion 8 was measured over
 # The unsigned full image, kept for the one-body check of step 8 (stage E91).
 if (-not (Test-Path -LiteralPath $OneBodyDir)) { New-Item -ItemType Directory -Path $OneBodyDir | Out-Null }
 Copy-Item -Path $ReleaseExe -Destination $OneBodyFull -Force
+# The updater of the same build (stage E104), for step 11.
+if (-not (Test-Path -LiteralPath $ReleaseUpdater)) {
+    Write-Host ("FAIL: the updater was not built: {0}" -f $ReleaseUpdater)
+    exit 18
+}
+Copy-Item -Path $ReleaseUpdater -Destination $OneBodyUpdater -Force
 
 # --- 4 and 5. Sign and verify -------------------------------------------------------------
 $timestamped = $false
@@ -487,21 +509,47 @@ if ($basePerimeter -ne 0) {
     exit 17
 }
 
-# --- 11. Summary ----------------------------------------------------------------------------
+# --- 11. The updater -- copy, sign, the perimeter (stage E104) ---------------------------------
+Write-Section 'Step 11: the updater -- copy, sign, verify, the perimeter'
+Copy-Item -Path $OneBodyUpdater -Destination $UpdaterArtifact -Force
+$updaterBuiltHash = Show-Binary -Path $OneBodyUpdater -Label 'updater built (unsigned):'
+$updaterCopyHash = Show-Binary -Path $UpdaterArtifact -Label 'copy in the artifact directory:'
+if ($updaterBuiltHash -ne $updaterCopyHash) {
+    Write-Host 'FAIL: the copy of the updater does not match its build.'
+    exit 18
+}
+$updaterTimestamped = $false
+if ($SkipSign) {
+    Write-Host '  -SkipSign was given: the updater is UNSIGNED.'
+} else {
+    $updaterTimestamped = Set-ArtifactSignature -Path $UpdaterArtifact -SignFailCode 19 -VerifyFailCode 20
+}
+& (Join-Path $ScriptDir 'verify-perimeter.ps1') -Artifact $UpdaterArtifact -SignUrl $SignUrl
+$updaterPerimeter = $LASTEXITCODE
+if ($updaterPerimeter -ne 0) {
+    Write-Host ''
+    Write-Host ("FAIL: verify-perimeter.ps1 returned {0} over the updater; it must not be shipped." -f $updaterPerimeter)
+    exit 21
+}
+
+# --- 12. Summary ----------------------------------------------------------------------------
 Write-Section 'Result'
 $finalHash = Show-Binary -Path $Artifact -Label 'shipping artifact, FULL image:'
 $baseFinalHash = Show-Binary -Path $BaseArtifact -Label 'shipping artifact, BASE image:'
+$updaterFinalHash = Show-Binary -Path $UpdaterArtifact -Label 'shipping artifact, the UPDATER:'
 Write-Host ''
 Write-Host ("  full: unsigned build SHA-256  {0}" -f $builtHash)
 Write-Host ("        artifact SHA-256        {0}" -f $finalHash)
 Write-Host ("  base: unsigned build SHA-256  {0}" -f $baseBuiltHash)
 Write-Host ("        artifact SHA-256        {0}" -f $baseFinalHash)
+Write-Host ("  updater: unsigned SHA-256     {0}" -f $updaterBuiltHash)
+Write-Host ("        artifact SHA-256        {0}" -f $updaterFinalHash)
 if (-not $SkipSign) {
     Write-Host '  (each pair differs by design: a signature is appended to the file)'
-    if ($timestamped -and $baseTimestamped) {
-        Write-Host '  timestamp: PRESENT on both'
+    if ($timestamped -and $baseTimestamped -and $updaterTimestamped) {
+        Write-Host '  timestamp: PRESENT on all three'
     } else {
-        Write-Host ("  timestamp: full {0}, base {1} -- DEVIATION, record it in the report" -f $timestamped, $baseTimestamped)
+        Write-Host ("  timestamp: full {0}, base {1}, updater {2} -- DEVIATION, record it in the report" -f $timestamped, $baseTimestamped, $updaterTimestamped)
     }
 }
 Write-Host ('  {0} now holds the BASE image (see the header)' -f $ReleaseExe)
@@ -510,5 +558,6 @@ Write-Host '====================================================================
 Write-Host ' RESULT: PASS'
 Write-Host ("  {0}" -f $Artifact)
 Write-Host ("  {0}" -f $BaseArtifact)
+Write-Host ("  {0}" -f $UpdaterArtifact)
 Write-Host '======================================================================'
 exit 0

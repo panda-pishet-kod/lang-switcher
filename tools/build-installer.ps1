@@ -29,6 +29,10 @@
     the helper accepts only a full image signed by exactly that certificate, and the
     uninstaller never removes it.
 
+    AND THE UPDATER (stage E104, question 189). -UpdaterArtifact, LangSwitcherUpdate.exe of the
+    same build, signed by release.ps1 like the program, is packaged with /DSourceUpdater= and
+    checked like the two images.
+
     Skip it with -SkipProductBuild only when the signed LangSwitcher.exe of the
     artifact folder is already known good; the script still refuses to run if that
     file is missing.
@@ -98,6 +102,9 @@ param(
     # The signed base image (stage E91), produced by tools\release.ps1 beside the product.
     # Empty means LangSwitcher-base.exe in the artifact folder.
     [string]$BaseArtifact = '',
+    # The signed updater (stage E104), produced by tools\release.ps1 beside the product.
+    # Empty means LangSwitcherUpdate.exe in the artifact folder.
+    [string]$UpdaterArtifact = '',
     # Where the finished installer goes. Empty means LangSwitcher-setup.exe in the
     # artifact folder. On the author's machine the LangSw-Install scheduled task runs
     # the installer by this name from that folder, so the name cannot be changed.
@@ -179,6 +186,7 @@ if (-not $ArtifactDir) {
 }
 if (-not $ProductArtifact) { $ProductArtifact = Join-Path $ArtifactDir 'LangSwitcher.exe' }
 if (-not $BaseArtifact)    { $BaseArtifact    = Join-Path $ArtifactDir 'LangSwitcher-base.exe' }
+if (-not $UpdaterArtifact) { $UpdaterArtifact = Join-Path $ArtifactDir 'LangSwitcherUpdate.exe' }
 if (-not $SetupArtifact)   { $SetupArtifact   = Join-Path $ArtifactDir 'LangSwitcher-setup.exe' }
 
 $IsccFrom = '-Iscc'
@@ -236,6 +244,7 @@ Write-Host ("Project    {0}" -f $ProjectDir)
 Write-Host ("Script     {0}" -f $IssFile)
 Write-Host ("Product    {0}" -f $ProductArtifact)
 Write-Host ("Base image {0}" -f $BaseArtifact)
+Write-Host ("Updater    {0}" -f $UpdaterArtifact)
 Write-Host ("Installer  {0}" -f $SetupArtifact)
 Write-Host ("ISCC       {0}  [{1}]" -f $Iscc, $IsccFrom)
 Write-Host ("signtool   {0}  [{1}]" -f $SignTool, $SignToolFrom)
@@ -264,8 +273,13 @@ if (-not (Test-Path $BaseArtifact)) {
     Write-Host ("FAIL: the signed base image is missing: {0}" -f $BaseArtifact)
     exit 2
 }
+if (-not (Test-Path $UpdaterArtifact)) {
+    Write-Host ("FAIL: the signed updater is missing: {0}" -f $UpdaterArtifact)
+    exit 2
+}
 $productHash = Show-Binary -Path $ProductArtifact -Label 'product to be packaged, FULL image:'
 $baseHash = Show-Binary -Path $BaseArtifact -Label 'product to be packaged, BASE image:'
+$updaterHash = Show-Binary -Path $UpdaterArtifact -Label 'updater to be packaged:'
 
 # Both images must already be signed (section 8.2; the helper checks the full one's signature
 # on the user's machine). Checked, not assumed.
@@ -273,7 +287,7 @@ if (-not $SignTool) {
     Write-Host '  WARNING: signtool.exe was not found, so the signatures of the images are NOT checked.'
     Write-Host '  Continuing only because -SkipSign was given: an unsigned dry run is what it is for.'
 } else {
-    foreach ($image in @($ProductArtifact, $BaseArtifact)) {
+    foreach ($image in @($ProductArtifact, $BaseArtifact, $UpdaterArtifact)) {
         Write-Host ("  signtool verify /pa {0}" -f $image)
         & $SignTool verify /pa $image
         if ($LASTEXITCODE -ne 0) {
@@ -309,6 +323,7 @@ if (Test-Path $IssOutput) { Remove-Item -Path $IssOutput -Force }
 $isccArgs = @()
 $isccArgs += ('/DSourceExe=' + $ProductArtifact)
 $isccArgs += ('/DSourceExeBase=' + $BaseArtifact)
+$isccArgs += ('/DSourceUpdater=' + $UpdaterArtifact)
 $isccArgs += ('/DAuthorThumbprint=' + $AuthorThumbprint)
 $isccArgs += $IssFile
 

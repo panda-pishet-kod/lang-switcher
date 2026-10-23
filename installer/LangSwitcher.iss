@@ -97,6 +97,21 @@
 #ifndef AuthorThumbprint
   #error AuthorThumbprint is not defined: run tools\build-installer.ps1, it passes /DAuthorThumbprint=<SHA-1>
 #endif
+; Stage E104 (question 189, TZ E104 p. 13): the updater, signed like the program, one image (no
+; uiAccess), beside the program file. No default, for the reason SourceExe has none.
+#ifndef SourceUpdater
+  #error SourceUpdater is not defined: run tools\build-installer.ps1, it passes /DSourceUpdater=<signed updater>
+#endif
+
+; The updater and what it needs on the machine (TZ E104 p. 14-18). THESE MUST MATCH
+; src\update.rs LITERALLY: TASK_NAME, DATA_DIR + UPDATE_DIR, INSTALLED_SETUP, SETUP_MUTEX and
+; PHASE_TWO_SWITCH; tests\installer_updater.rs reads both files and compares them.
+#define UpdaterExeName "LangSwitcherUpdate.exe"
+#define UpdateTask     "Lang Switcher Update"
+#define UpdateDir      "Lang_Switcher\update"
+#define InstalledSetup "installed-setup.exe"
+#define SetupMutexName "Global\Lang_Switcher.Setup"
+#define PhaseTwo       "/phase2"
 
 ; The temporary name of the full image beside the program file, and the public part of the
 ; certificate the helper makes on this machine (installer\local-trust.ps1 writes it).
@@ -205,6 +220,9 @@ AllowNoIcons=yes
 CloseApplications=yes
 CloseApplicationsFilter=*.exe
 RestartApplications=no
+; Stage E104: one Setup at a time on the machine, and the name phase two of the updater waits on
+; -- it raises the program again, or starts a rollback, only once this Setup has ended.
+SetupMutex={#SetupMutexName}
 
 Uninstallable=yes
 UninstallDisplayName={#AppName}
@@ -292,6 +310,9 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 ; itself is never copied: [Code] extracts it into {tmp}.
 Source: "{#SourceExeBase}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#FullTempName}"; Flags: ignoreversion
+; Stage E104: the updater, one image, signed by the author like the program; it needs no
+; uiAccess and no local certificate (TZ E104 p. 13).
+Source: "{#SourceUpdater}"; DestDir: "{app}"; DestName: "{#UpdaterExeName}"; Flags: ignoreversion
 Source: "local-trust.ps1"; Flags: dontcopy
 ; Stage E99, decision 167.1 (B1): the logo of the signature of the author, one per theme and scale
 ; (tools\make-installer-art.ps1); [Code] extracts the one it needs into {tmp}.
@@ -335,6 +356,18 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 ; {userappdata} is the profile of the account the uninstaller runs as -- the same caveat as the
 ; HKCU value in CurUninstallStepChanged.
 Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
+; Stage E104 (TZ E104 p. 17, SPEC section 13 p. 7): the folder of the updater -- its state, its
+; journal, the copies of the installer -- goes whole, and the data folder with it when nothing
+; else is in it. The task of the scheduler goes in [Code] (CurUninstallUpdater), before the files.
+Type: filesandordirs; Name: "{commonappdata}\{#UpdateDir}"
+Type: dirifempty; Name: "{commonappdata}\Lang_Switcher"
+
+[Dirs]
+; Stage E104 (TZ E104 p. 15, premise P10): the folder of the updater. Its list of rights is not
+; Inno's to give -- Permissions only adds, and %ProgramData% lets every user create files below
+; it -- so [Code] (SecureUpdateFolders) takes the owner and cuts the inheritance with icacls.
+Name: "{commonappdata}\Lang_Switcher"
+Name: "{commonappdata}\{#UpdateDir}"
 
 [Run]
 ; skipifsilent is the whole point of this entry being safe: a silent install --
@@ -987,4 +1020,208 @@ begin
     else
       Log('Lang Switcher: the folder ' + Folder + ' is kept: something is left in it');
   end;
+end;
+
+(* ---------------------------------------------------------------------------
+  The updater (stage E104, question 189; TZ E104 p. 13-18).
+
+  After the files:
+    1. the folders %ProgramData%\Lang_Switcher and its update -- owner Administrators,
+       inheritance cut, full control for SYSTEM and Administrators and for nobody else
+       (premise P10); what was in them takes the list of the folder.  icacls of System32,
+       by its full path: %ProgramData% lets every user create files below it, and a folder a
+       person made there before this Setup ran would otherwise stay that person's;
+    2. the copy of this very installer, the srcexe constant, under installed-setup.exe in
+       that folder -- what a rollback installs (TZ E104 p. 17, premise P9);
+    3. the task "Lang Switcher Update" of the scheduler, from an XML of this script:
+       the system account, once a day and at the sign-in of any user five minutes late,
+       only when the computer has been idle ten minutes, a missed start at the first chance,
+       thirty minutes at most, no second instance (TZ E104 p. 14).  schtasks of System32.
+  At the very end of a Setup started with /UPDATE -- phase one of the updater starts it so --
+  the updater just installed is started with /phase2 (TZ E104 p. 18).  In DeinitializeSetup
+  and not in [Run], on purpose: [Run] runs only after a successful installation, and phase two
+  is just as needed after a failed one -- it raises the program the update closed.  It waits
+  for SetupMutex to go before it does anything.
+  Before the files of a Setup started by a person, a running instance of the task is ended:
+  the updater must not hold its file while it is replaced.
+  The uninstaller ends and deletes the task before the files; [UninstallDelete] takes the
+  folder.  Every step writes one line in the log of Setup; none of them stops it.
+  --------------------------------------------------------------------------- *)
+const
+  LangSwUpdateTask = '{#UpdateTask}';
+
+function UpdateFolder(): String;
+begin
+  Result := ExpandConstant('{commonappdata}\{#UpdateDir}');
+end;
+
+function RunLogged(const Exe, Params: String): Integer;
+var
+  Code: Integer;
+begin
+  Code := -1;
+  Log('Lang Switcher: running "' + Exe + '" ' + Params);
+  try
+    if not ExecAndLogOutput(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, Code, nil) then
+    begin
+      Log('Lang Switcher: could not start it: ' + SysErrorMessage(Code));
+      Code := -1;
+    end;
+  except
+    Log('Lang Switcher: it failed to run: ' + GetExceptionMessage);
+    Code := -1;
+  end;
+  Log('Lang Switcher: it returned ' + IntToStr(Code));
+  Result := Code;
+end;
+
+procedure SecureUpdateFolders();
+var
+  Icacls, Data: String;
+begin
+  Icacls := ExpandConstant('{sys}\icacls.exe');
+  Data := ExpandConstant('{commonappdata}\Lang_Switcher');
+  RunLogged(Icacls, '"' + Data + '" /setowner *S-1-5-32-544 /T /C /Q');
+  RunLogged(Icacls, '"' + Data + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F /C /Q');
+  RunLogged(Icacls, '"' + Data + '\*" /reset /T /C /Q');
+end;
+
+procedure CopySetupForRollback();
+var
+  Source, Target: String;
+begin
+  Source := ExpandConstant('{srcexe}');
+  Target := UpdateFolder() + '\{#InstalledSetup}';
+  if CompareText(Source, Target) = 0 then
+    Log('Lang Switcher: this Setup is its own kept copy; nothing to copy')
+  else if CopyFile(Source, Target, False) then
+    Log('Lang Switcher: the copy of this Setup is kept for a rollback: ' + Target)
+  else
+    Log('Lang Switcher: the copy of this Setup could not be kept: ' + SysErrorMessage(DLLGetLastError()));
+end;
+
+function UpdateTaskXml(): String;
+var
+  N: String;
+begin
+  N := #13#10;
+  Result :=
+    '<?xml version="1.0" encoding="UTF-8"?>' + N +
+    '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + N +
+    '  <RegistrationInfo>' + N +
+    '    <Author>{#AppPublisher}</Author>' + N +
+    '    <Description>Lang Switcher: reads the author''s feed once a day and installs a new version while the computer is idle.</Description>' + N +
+    '  </RegistrationInfo>' + N +
+    '  <Triggers>' + N +
+    '    <CalendarTrigger>' + N +
+    '      <StartBoundary>2026-01-01T12:00:00</StartBoundary>' + N +
+    '      <Enabled>true</Enabled>' + N +
+    '      <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>' + N +
+    '    </CalendarTrigger>' + N +
+    '    <LogonTrigger>' + N +
+    '      <Enabled>true</Enabled>' + N +
+    '      <Delay>PT5M</Delay>' + N +
+    '    </LogonTrigger>' + N +
+    '  </Triggers>' + N +
+    '  <Principals>' + N +
+    '    <Principal id="System">' + N +
+    '      <UserId>S-1-5-18</UserId>' + N +
+    '      <RunLevel>HighestAvailable</RunLevel>' + N +
+    '    </Principal>' + N +
+    '  </Principals>' + N +
+    '  <Settings>' + N +
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>' + N +
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>' + N +
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>' + N +
+    '    <AllowHardTerminate>true</AllowHardTerminate>' + N +
+    '    <StartWhenAvailable>true</StartWhenAvailable>' + N +
+    '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>' + N +
+    '    <IdleSettings>' + N +
+    '      <Duration>PT10M</Duration>' + N +
+    '      <WaitTimeout>PT23H</WaitTimeout>' + N +
+    '      <StopOnIdleEnd>false</StopOnIdleEnd>' + N +
+    '      <RestartOnIdle>false</RestartOnIdle>' + N +
+    '    </IdleSettings>' + N +
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>' + N +
+    '    <Enabled>true</Enabled>' + N +
+    '    <Hidden>false</Hidden>' + N +
+    '    <RunOnlyIfIdle>true</RunOnlyIfIdle>' + N +
+    '    <WakeToRun>false</WakeToRun>' + N +
+    '    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>' + N +
+    '    <Priority>7</Priority>' + N +
+    '  </Settings>' + N +
+    '  <Actions Context="System">' + N +
+    '    <Exec>' + N +
+    '      <Command>"' + ExpandConstant('{app}\{#UpdaterExeName}') + '"</Command>' + N +
+    '    </Exec>' + N +
+    '  </Actions>' + N +
+    '</Task>' + N;
+end;
+
+procedure CreateUpdateTask();
+var
+  Xml: String;
+begin
+  Xml := ExpandConstant('{tmp}\langsw-update-task.xml');
+  if not SaveStringToFile(Xml, UpdateTaskXml(), False) then
+  begin
+    Log('Lang Switcher: the XML of the task could not be written: ' + Xml);
+    Exit;
+  end;
+  if RunLogged(ExpandConstant('{sys}\schtasks.exe'), '/Create /TN "' + LangSwUpdateTask + '" /XML "' + Xml + '" /F') = 0 then
+    Log('Lang Switcher: the task "' + LangSwUpdateTask + '" is registered')
+  else
+    Log('Lang Switcher: the task "' + LangSwUpdateTask + '" could NOT be registered');
+end;
+
+<event('CurStepChanged')>
+procedure CurStepUpdater(CurStep: TSetupStep);
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  SecureUpdateFolders();
+  CopySetupForRollback();
+  CreateUpdateTask();
+end;
+
+<event('PrepareToInstall')>
+function PrepareToInstallUpdater(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not HasSwitch('/UPDATE') then
+    RunLogged(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "' + LangSwUpdateTask + '"');
+end;
+
+<event('DeinitializeSetup')>
+procedure DeinitializeUpdater();
+var
+  Updater: String;
+  Code: Integer;
+begin
+  if not HasSwitch('/UPDATE') then
+    Exit;
+  try
+    Updater := ExpandConstant('{app}\{#UpdaterExeName}');
+  except
+    Updater := ExpandConstant('{commonpf64}\Lang_Switcher\{#UpdaterExeName}');
+  end;
+  if Exec(Updater, '{#PhaseTwo}', '', SW_HIDE, ewNoWait, Code) then
+    Log('Lang Switcher: phase two of the updater is started')
+  else
+    Log('Lang Switcher: phase two of the updater could not be started: ' + SysErrorMessage(Code));
+end;
+
+<event('CurUninstallStepChanged')>
+procedure CurUninstallUpdater(CurUninstallStep: TUninstallStep);
+var
+  SchTasks: String;
+begin
+  if CurUninstallStep <> usUninstall then
+    Exit;
+  SchTasks := ExpandConstant('{sys}\schtasks.exe');
+  RunLogged(SchTasks, '/End /TN "' + LangSwUpdateTask + '"');
+  if RunLogged(SchTasks, '/Delete /TN "' + LangSwUpdateTask + '" /F') = 0 then
+    Log('Lang Switcher: the task "' + LangSwUpdateTask + '" is deleted')
+  else
+    Log('Lang Switcher: the task "' + LangSwUpdateTask + '" could not be deleted (absent is not an error)');
 end;
