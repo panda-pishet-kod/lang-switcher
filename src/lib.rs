@@ -27,6 +27,9 @@ pub mod sticky;
 pub mod switch;
 pub mod theme;
 pub mod tray;
+/// The updater of stage Э104 — `LangSwitcherUpdate.exe` (вопрос 189, TZ E104 §0 п. 13–19). The
+/// program does not call it; the second binary of this crate does.
+pub mod update;
 pub mod watchdog;
 pub mod widgets;
 

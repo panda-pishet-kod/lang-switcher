@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  The manifest of LangSwitcherUpdate.exe, the updater of stage E104 (TZ E104 p. 13).
+
+  asInvoker and NO uiAccess: the updater has no window and reaches no window; it is run by the
+  task "Lang Switcher Update" under the system account. The explicit level is not decoration:
+  without a manifest Windows guesses that a file whose name holds "Update" is an installer and
+  asks for elevation when a person starts it (installer detection of UAC).
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="PandaKoder.LangSwitcher.Update" version="1.0.0.0" processorArchitecture="amd64"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

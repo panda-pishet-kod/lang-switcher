@@ -84,7 +84,30 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=/Brepro");
     }
 
-    embed_resource::compile("app.rc", macros)
+    // ⭐ Stage E104 (TZ E104 p. 13): two resource scripts, each for its own binaries. Until E104
+    // `compile` linked app.rc into EVERY binary of the crate -- the program and the bench were
+    // the only ones -- and the updater would have carried the manifest of the program, uiAccess
+    // and all. The updater has no window and no uiAccess: updater.rc, with updater.manifest and a
+    // version block whose numbers come from [package] version (no twelfth place of the version).
+    println!("cargo:rerun-if-changed=updater.rc");
+    println!("cargo:rerun-if-changed=updater.manifest");
+
+    embed_resource::compile_for("app.rc", ["LangSwitcher", "langsw-e2e"], macros)
+        .manifest_required()
+        .unwrap();
+
+    let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets the package version");
+    let mut numbers = version.split('.').map(|part| {
+        part.parse::<u16>()
+            .unwrap_or_else(|_| panic!("the package version {version} is not three numbers"))
+    });
+    let version_macros = [
+        format!("LANGSW_VER_MAJOR={}", numbers.next().unwrap_or(0)),
+        format!("LANGSW_VER_MINOR={}", numbers.next().unwrap_or(0)),
+        format!("LANGSW_VER_PATCH={}", numbers.next().unwrap_or(0)),
+    ];
+
+    embed_resource::compile_for("updater.rc", ["LangSwitcherUpdate"], &version_macros)
         .manifest_required()
         .unwrap();
 }

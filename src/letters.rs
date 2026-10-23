@@ -973,6 +973,35 @@ pub mod links {
         }
     }
 
+    /// The page «Что нового» — the target of a click on the notification «Lang Switcher обновлён
+    /// до X» (TZ E104 §0 п. 5, task T-104-7): the Russian side, marked `?lang=ru` for the site
+    /// (решение 181.35).
+    pub const CHANGELOG_URL: &str = "https://panda-pishet-kod.dev/langswitcher/changelog/?lang=ru";
+
+    /// The English page «What's new» — the pair of [`CHANGELOG_URL`] under `/en/`, marked
+    /// `?lang=en`.
+    pub const CHANGELOG_URL_EN: &str =
+        "https://panda-pishet-kod.dev/en/langswitcher/changelog/?lang=en";
+
+    /// **The page «Что нового» in the language a person reads the program in** — the side of
+    /// [`reads_the_russian_side`], as for the two pages above.
+    pub fn changelog_url(language: Language) -> &'static str {
+        if reads_the_russian_side(language) {
+            CHANGELOG_URL
+        } else {
+            CHANGELOG_URL_EN
+        }
+    }
+
+    /// **The one folder the updater takes an installer from** — TZ E104 §0 п. 7 и 15: the
+    /// author's site, `/langswitcher/files/`, and nowhere else; no second road (решение 189.10).
+    ///
+    /// ⚠ Not a page and not opened by anything: the program never touches it. It is here because
+    /// ворота 3 of `tools\verify-perimeter.ps1` judge every `https://` of an image against this
+    /// module, and the updater carries this one ([`crate::update::decide`] holds the address of
+    /// a `[download]` against it).
+    pub const UPDATE_FILES_URL: &str = "https://panda-pishet-kod.dev/langswitcher/files/";
+
     /// Whether this address is one of the placeholders — the one test every button that opens
     /// a link is behind.
     pub fn is_placeholder(url: &str) -> bool {
@@ -1040,6 +1069,8 @@ pub mod links {
                 DOWNLOAD_URL_EN,
                 PROGRAM_URL,
                 PROGRAM_URL_EN,
+                CHANGELOG_URL,
+                CHANGELOG_URL_EN,
             ])
             .filter_map(host_of)
     }
@@ -10756,65 +10787,110 @@ pub mod feed {
     }
 
     /// The SHA-256 of a buffer, by the system's own hash — the half of the check that is not
-    /// about keys.
+    /// about keys. [`Sha256`] over one piece.
     fn sha256(body: &[u8]) -> Option<[u8; 32]> {
-        use windows::Win32::Security::Cryptography::{
-            BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS,
-            BCRYPT_SHA256_ALGORITHM, BCryptCloseAlgorithmProvider, BCryptCreateHash,
-            BCryptDestroyHash, BCryptFinishHash, BCryptHashData, BCryptOpenAlgorithmProvider,
-        };
-        use windows::core::PCWSTR;
+        let mut hasher = Sha256::new()?;
 
-        let mut algorithm = BCRYPT_ALG_HANDLE::default();
-
-        // SAFETY: as in `verify_signature` — a live local and a static literal.
-        let opened = unsafe {
-            BCryptOpenAlgorithmProvider(
-                &mut algorithm,
-                BCRYPT_SHA256_ALGORITHM,
-                PCWSTR::null(),
-                BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS(0),
-            )
-        };
-
-        if opened.is_err() {
-            crate::app::report_non_critical(
-                "BCryptOpenAlgorithmProvider",
-                &windows::core::Error::from_hresult(opened.to_hresult()),
-            );
+        if !hasher.update(body) {
             return None;
         }
 
-        let mut hash = BCRYPT_HASH_HANDLE::default();
+        hasher.finish()
+    }
 
-        // SAFETY: `algorithm` is the provider just opened; `None` for the object buffer asks
-        // the provider to allocate its own, which is the documented modern form.
-        let created = unsafe { BCryptCreateHash(algorithm, &mut hash, None, None, 0) };
+    /// **The system's SHA-256 fed in pieces** — task T-104-5: the installer the updater
+    /// downloads is hashed as it arrives, and the signature of the feed is hashed in one piece
+    /// ([`sha256`]); one body for both, so there is one way this crate hashes anything.
+    ///
+    /// The provider and the hash object are this value's and are freed in `Drop`, once, on
+    /// every path — a download that fails halfway drops the hasher like any other value.
+    pub struct Sha256 {
+        algorithm: windows::Win32::Security::Cryptography::BCRYPT_ALG_HANDLE,
+        hash: windows::Win32::Security::Cryptography::BCRYPT_HASH_HANDLE,
+    }
 
-        let mut digest = [0u8; 32];
-        let mut ok = created.is_ok();
+    impl Sha256 {
+        /// A fresh hash — `None`, with the refusal in the journal, when the system will not
+        /// give one.
+        pub fn new() -> Option<Self> {
+            use windows::Win32::Security::Cryptography::{
+                BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE, BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS,
+                BCRYPT_SHA256_ALGORITHM, BCryptCloseAlgorithmProvider, BCryptCreateHash,
+                BCryptOpenAlgorithmProvider,
+            };
+            use windows::core::PCWSTR;
 
-        if ok {
-            // SAFETY: `hash` is the object just created and `body` a buffer the caller owns for
-            // the length of this call; it is read and not written.
-            ok = unsafe { BCryptHashData(hash, body, 0) }.is_ok();
+            let mut algorithm = BCRYPT_ALG_HANDLE::default();
+
+            // SAFETY: as in `verify_signature` — a live local and a static literal.
+            let opened = unsafe {
+                BCryptOpenAlgorithmProvider(
+                    &mut algorithm,
+                    BCRYPT_SHA256_ALGORITHM,
+                    PCWSTR::null(),
+                    BCRYPT_OPEN_ALGORITHM_PROVIDER_FLAGS(0),
+                )
+            };
+
+            if opened.is_err() {
+                crate::app::report_non_critical(
+                    "BCryptOpenAlgorithmProvider",
+                    &windows::core::Error::from_hresult(opened.to_hresult()),
+                );
+                return None;
+            }
+
+            let mut hash = BCRYPT_HASH_HANDLE::default();
+
+            // SAFETY: `algorithm` is the provider just opened; `None` for the object buffer asks
+            // the provider to allocate its own, which is the documented modern form.
+            let created = unsafe { BCryptCreateHash(algorithm, &mut hash, None, None, 0) };
+
+            if created.is_err() {
+                // SAFETY: closes exactly the provider opened above, once.
+                let _ = unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
+                return None;
+            }
+
+            Some(Self { algorithm, hash })
         }
 
-        if ok {
+        /// Feeds one piece; `false` when the system refused it, and then the sum is worthless.
+        pub fn update(&mut self, data: &[u8]) -> bool {
+            // SAFETY: `self.hash` is the live object this value owns and `data` a buffer the
+            // caller owns for the length of this call; it is read and not written.
+            unsafe { windows::Win32::Security::Cryptography::BCryptHashData(self.hash, data, 0) }
+                .is_ok()
+        }
+
+        /// The sum of everything fed.
+        pub fn finish(self) -> Option<[u8; 32]> {
+            let mut digest = [0u8; 32];
+
             // SAFETY: as above; `digest` is a live local the call fills, and its length is what
-            // SHA-256 produces.
-            ok = unsafe { BCryptFinishHash(hash, &mut digest, 0) }.is_ok();
+            // SHA-256 produces. The object is freed by `Drop` right after.
+            let ok = unsafe {
+                windows::Win32::Security::Cryptography::BCryptFinishHash(self.hash, &mut digest, 0)
+            }
+            .is_ok();
+
+            ok.then_some(digest)
         }
+    }
 
-        if !created.is_err() {
-            // SAFETY: frees exactly the hash object created above, once.
-            let _ = unsafe { BCryptDestroyHash(hash) };
+    impl Drop for Sha256 {
+        fn drop(&mut self) {
+            use windows::Win32::Security::Cryptography::{
+                BCryptCloseAlgorithmProvider, BCryptDestroyHash,
+            };
+
+            // SAFETY: frees exactly the hash object and closes exactly the provider this value
+            // was made with, once each — `Drop` runs once.
+            unsafe {
+                let _ = BCryptDestroyHash(self.hash);
+                let _ = BCryptCloseAlgorithmProvider(self.algorithm, 0);
+            }
         }
-
-        // SAFETY: closes exactly the provider opened above, once.
-        let _ = unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
-
-        ok.then_some(digest)
     }
 
     /// The name this program calls itself on the network — FR-102, and **it carries no
@@ -10857,13 +10933,7 @@ pub mod feed {
     /// from any thread, and the product calls it from a thread of its own that lives exactly
     /// one request (SPEC section 6.1).
     pub fn fetch(url: &str) -> Option<String> {
-        use windows::Win32::Networking::WinHttp::{
-            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WinHttpCloseHandle, WinHttpOpen,
-            WinHttpSetTimeouts,
-        };
-        use windows::core::PCWSTR;
-
-        let (host, path) = split_https(url)?;
+        let target = target_of(url)?;
 
         // The line that makes «no request was made» measurable. It is written **before** the
         // session exists, carries no address and no status (SEC-07), and is the positive half
@@ -10874,9 +10944,89 @@ pub mod feed {
             crate::diag::OsCode::NONE,
         );
 
+        let mut body: Vec<u8> = Vec::new();
+
+        get(&target, RESPONSE_CAP as u64, &mut |chunk| {
+            body.extend_from_slice(chunk);
+            true
+        })?;
+
+        // The document is UTF-8 by construction — the author's own script writes it. Anything
+        // else is not the author's file, and `from_utf8` saying so is the cheapest of the
+        // checks that say it.
+        String::from_utf8(body).ok()
+    }
+
+    /// Where one `GET` goes — task T-104-5: the host, the port, the path and whether the request
+    /// is over TLS. The feed of the program and the installer of the updater go through one body,
+    /// [`get`], and this is what it is told.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Target {
+        /// The name of the host, as it was written in the address.
+        pub host: String,
+        /// 443 for every address of a Release build.
+        pub port: u16,
+        /// The path, from its first `/`.
+        pub path: String,
+        /// `WINHTTP_FLAG_SECURE` — always, outside the doors of the stand.
+        pub secure: bool,
+    }
+
+    /// The target of an address: `https://host/path` only ([`split_https`]), port 443.
+    ///
+    /// ⚠ **Under the `testing` feature, and only there**, also `http://` and the loopback of the
+    /// machine with a port of its own — the feed and the installer of the stand of TZ E104 §0
+    /// п. 22, served inside the guest. The door is not in a Release image: ворота 6 of
+    /// `tools\verify-perimeter.ps1` refuse an image that carries the name of the loopback.
+    pub fn target_of(url: &str) -> Option<Target> {
+        if let Some((host, path)) = split_https(url) {
+            return Some(Target {
+                host,
+                port: 443,
+                path,
+                secure: true,
+            });
+        }
+
+        #[cfg(feature = "testing")]
+        if let Some(target) = loopback_of(url) {
+            return Some(target);
+        }
+
+        None
+    }
+
+    /// The door of the stand: `http://127.0.0.1:<port>/<path>` — TZ E104 §0 п. 22.
+    #[cfg(feature = "testing")]
+    fn loopback_of(url: &str) -> Option<Target> {
+        let rest = url.strip_prefix("http://127.0.0.1:")?;
+        let (port, path) = rest.split_once('/')?;
+
+        Some(Target {
+            host: "127.0.0.1".to_owned(),
+            port: port.parse().ok()?,
+            path: format!("/{path}"),
+            secure: false,
+        })
+    }
+
+    /// **One `GET`, its body handed to `sink` as it arrives** — at most `cap` bytes, and the
+    /// number of bytes there were. The one body under [`fetch`] (the feed, into memory) and the
+    /// download of the updater (the installer, into a file as it is hashed — task T-104-5).
+    ///
+    /// The request is the request of FR-102 and nothing more: no parameters, no headers of ours
+    /// beyond the agent, no cookie. `None` for every refusal — the name, the connection, a
+    /// status that is not 200, a body over `cap`, a `sink` that answered `false`.
+    pub fn get(target: &Target, cap: u64, sink: &mut dyn FnMut(&[u8]) -> bool) -> Option<u64> {
+        use windows::Win32::Networking::WinHttp::{
+            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WinHttpCloseHandle, WinHttpOpen,
+            WinHttpSetTimeouts,
+        };
+        use windows::core::PCWSTR;
+
         let agent = crate::settings::wide(USER_AGENT);
-        let host_wide = crate::settings::wide(&host);
-        let path_wide = crate::settings::wide(&path);
+        let host_wide = crate::settings::wide(&target.host);
+        let path_wide = crate::settings::wide(&target.path);
         let verb = crate::settings::wide("GET");
 
         // SAFETY: the agent is a NUL-terminated buffer of this frame; the two null pointers are
@@ -10911,7 +11061,15 @@ pub mod feed {
             )
         };
 
-        let answer = read_over(session, &host_wide, &path_wide, &verb);
+        let request = Request {
+            host: &host_wide,
+            port: target.port,
+            path: &path_wide,
+            verb: &verb,
+            secure: target.secure,
+        };
+
+        let answer = read_over(session, &request, cap, sink);
 
         // SAFETY: closes exactly the session opened above, once. Every handle below it is
         // closed by `read_over` before it returns.
@@ -10920,25 +11078,35 @@ pub mod feed {
         answer
     }
 
-    /// The connection, the request and the reading — the half of [`fetch`] that owns three
+    /// The four wide strings and two values one request is made of — what [`get`] hands down.
+    struct Request<'a> {
+        host: &'a [u16],
+        port: u16,
+        path: &'a [u16],
+        verb: &'a [u16],
+        secure: bool,
+    }
+
+    /// The connection, the request and the reading — the half of [`get`] that owns three
     /// handles, split out so that the session above is closed on every path.
     fn read_over(
         session: *mut std::ffi::c_void,
-        host: &[u16],
-        path: &[u16],
-        verb: &[u16],
-    ) -> Option<String> {
+        request_of: &Request<'_>,
+        cap: u64,
+        sink: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Option<u64> {
         use windows::Win32::Networking::WinHttp::{
             WINHTTP_FLAG_SECURE, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect,
             WinHttpOpenRequest, WinHttpReceiveResponse, WinHttpSendRequest,
         };
         use windows::core::PCWSTR;
 
-        const HTTPS_PORT: u16 = 443;
+        let (host, path, verb) = (request_of.host, request_of.path, request_of.verb);
 
         // SAFETY: `session` is the live session and `host` a NUL-terminated buffer of the
         // caller's frame; the reserved argument is zero as documented.
-        let connection = unsafe { WinHttpConnect(session, PCWSTR(host.as_ptr()), HTTPS_PORT, 0) };
+        let connection =
+            unsafe { WinHttpConnect(session, PCWSTR(host.as_ptr()), request_of.port, 0) };
 
         if connection.is_null() {
             crate::app::report_non_critical("WinHttpConnect", &windows::core::Error::from_thread());
@@ -10947,8 +11115,14 @@ pub mod feed {
 
         // ⚠ **`WINHTTP_FLAG_SECURE` is what makes this HTTPS and it is not optional.** Without
         // it the same call would fetch the same path over plain HTTP from port 443 and fail in
-        // a way that looks like a network problem.
-        //
+        // a way that looks like a network problem. Only the door of the stand ([`target_of`],
+        // `testing`) asks for a target that is not secure.
+        let flags = if request_of.secure {
+            WINHTTP_OPEN_REQUEST_FLAGS(WINHTTP_FLAG_SECURE.0)
+        } else {
+            WINHTTP_OPEN_REQUEST_FLAGS(0)
+        };
+
         // SAFETY: `connection` is the handle just opened; the four string arguments are
         // NUL-terminated buffers (two of the caller's frame, two null for «the default version»
         // and «no referrer»), and the accept-types pointer is null for «anything».
@@ -10960,7 +11134,7 @@ pub mod feed {
                 PCWSTR::null(),
                 PCWSTR::null(),
                 std::ptr::null(),
-                WINHTTP_OPEN_REQUEST_FLAGS(WINHTTP_FLAG_SECURE.0),
+                flags,
             )
         };
 
@@ -11002,7 +11176,7 @@ pub mod feed {
                 // with its number: SEC-07, and the number is the host's business.
                 None
             } else {
-                drain(request)
+                drain(request, cap, sink)
             }
         };
 
@@ -11042,11 +11216,16 @@ pub mod feed {
         if read.is_err() { 0 } else { status }
     }
 
-    /// Reads the body to [`RESPONSE_CAP`] and no further.
-    fn drain(request: *mut std::ffi::c_void) -> Option<String> {
+    /// Reads the body to `cap` and no further — [`RESPONSE_CAP`] for the feed — handing every
+    /// piece to `sink`, and answers how many bytes there were.
+    fn drain(
+        request: *mut std::ffi::c_void,
+        cap: u64,
+        sink: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Option<u64> {
         use windows::Win32::Networking::WinHttp::WinHttpReadData;
 
-        let mut body: Vec<u8> = Vec::new();
+        let mut total: u64 = 0;
         let mut chunk = [0u8; 8192];
 
         loop {
@@ -11079,18 +11258,22 @@ pub mod feed {
 
             // The ceiling of FR-102. A host that answers for ever fills one buffer and is then
             // dropped: the read stops and the file is refused, because a truncated document is
-            // a document whose signature will not check out anyway.
-            if body.len() + taken > RESPONSE_CAP {
+            // a document whose signature will not check out anyway. The updater's ceiling is the
+            // size the signed feed named, so one byte more is a refusal too (TZ E104 §0 п. 15).
+            let taken_bytes = u64::try_from(taken).unwrap_or(u64::MAX);
+
+            if total.saturating_add(taken_bytes) > cap {
                 return None;
             }
 
-            body.extend_from_slice(&chunk[..taken]);
+            if !sink(&chunk[..taken]) {
+                return None;
+            }
+
+            total += taken_bytes;
         }
 
-        // The document is UTF-8 by construction — the author's own script writes it. Anything
-        // else is not the author's file, and `from_utf8` saying so is the cheapest of the
-        // checks that say it.
-        String::from_utf8(body).ok()
+        Some(total)
     }
 
     /// **One read of the feed** — FR-102: [`read_from`] over the addresses this build carries,

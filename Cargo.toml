@@ -17,6 +17,15 @@ path = "src/lib.rs"
 name = "LangSwitcher"
 path = "src/main.rs"
 
+# The updater of stage E104 (вопрос 189, TZ E104 §0 п. 13): LangSwitcherUpdate.exe, beside the
+# program in its folder, run by the task «Lang Switcher Update» under the system account. A second
+# binary of THIS crate on purpose — the feed, its signature and the one GET are the program's own
+# module `letters::feed`, not a copy. No window and no uiAccess: build.rs links updater.rc (and its
+# manifest) into this target only.
+[[bin]]
+name = "LangSwitcherUpdate"
+path = "src/update_main.rs"
+
 # The end-to-end acceptance bench of SPEC section 11.5. Task T-04-3.
 #
 # The entry point is deliberately named e2e.rs and not main.rs: cargo auto-discovers

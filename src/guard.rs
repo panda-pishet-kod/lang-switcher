@@ -1874,6 +1874,18 @@ pub fn is_credential_process_name(name: &str) -> bool {
 /// correct read of an ordinary process does. A test process asking for its own name is the one
 /// place the answer can be checked against something known.
 pub fn process_file_name(pid: u32) -> Option<String> {
+    process_image_path(pid).map(|path| file_name_of(&path))
+}
+
+/// The **full path** of the executable of `pid` — the body under [`process_file_name`], and the
+/// one read of a process's image in this crate (the sweep of `tests\guard.rs` holds it to this
+/// module).
+///
+/// ⭐ Task T-104-5: the updater asks it too, for a reason of its own — which sessions run **the
+/// installed** `LangSwitcher.exe` and not a copy of that name somewhere else (TZ E104 §0 п. 18).
+/// It asks here rather than with a second `QueryFullProcessImageNameW` of its own: one reader of
+/// the name, as before.
+pub fn process_image_path(pid: u32) -> Option<String> {
     // SAFETY: `OpenProcess` takes three values and returns a handle or an error; it dereferences
     // nothing of ours. `false` for the inheritance flag is what a handle that must not leave this
     // process needs. NFR-13: the result is a `Result` and is examined here — a refusal is the
@@ -1903,9 +1915,7 @@ pub fn process_file_name(pid: u32) -> Option<String> {
 
     read.ok()?;
 
-    let path = String::from_utf16_lossy(&buffer[..length as usize]);
-
-    Some(file_name_of(&path))
+    Some(String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
 /// The last component of a Windows path — the executable name FR-72 compares.
