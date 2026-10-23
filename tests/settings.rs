@@ -17714,11 +17714,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 237] = [
         "News and updates",
     ),
     (
+        // Решение 189.31: the short form of 189.12 for the window — the full text made «От автора»
+        // 35–40 units taller and the windows a step smaller on six screens of fifteen (C9, 189.30);
+        // README and SPEC carry 189.12 word for word.
         settings::IDS_NEWS_ABOUT_FEED,
-        "Раз в 15 дней программа читает один файл с сайта автора: письма и номер свежей версии. \
-         Больше она ничего не отправляет и не скачивает.",
-        "Once in fifteen days the program reads one file from the author's site: letters and \
-         the number of the latest version. It sends nothing else and downloads nothing.",
+        "Раз в сутки программа читает файл новостей с сайта автора и ничего о вас не передаёт. \
+         Новые версии она скачивает оттуда же и ставит сама, проверив подпись.",
+        "Once a day the program reads a news file from the author's site and sends nothing about \
+         you. It downloads new versions from there and installs them itself after checking the \
+         signature.",
     ),
     (
         settings::IDS_NEWS_NEVER_READ,
@@ -17726,9 +17730,11 @@ const FR_94_STRINGS: [(u16, &str, &str); 237] = [
         "The feed has not been read yet.",
     ),
     (
+        // Решение 189.31: the feed is read once a day, and «следующее чтение через 1 дней» said
+        // nothing a person needed — the second sentence went in all fourteen tables.
         settings::IDS_NEWS_READ_ON,
-        "Лента прочитана {0}, подпись автора верна. Следующее чтение через {1} дней.",
-        "Feed read on {0}, the author's signature checks out. Next reading in {1} days.",
+        "Лента прочитана {0}, подпись автора верна.",
+        "Feed read on {0}, the author's signature checks out.",
     ),
     (
         settings::IDS_NEWS_LATEST,
