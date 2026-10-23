@@ -87,6 +87,16 @@ fn reasons_the_updater_is_not_installed(script: &str) -> Vec<String> {
         "the uninstaller does not remove the folder of the updater",
     );
 
+    // ⛔ Round 1 of T-104-9 (Test_VM): `schtasks` refused the XML with «(1,40) unable to switch the
+    // encoding» — a declaration of UTF-8 in a file it reads into a wide string — and the task was
+    // not registered at all. The XML carries no declaration.
+    if script.contains("<?xml version=\"1.0\" encoding=") {
+        reasons.push(
+            "the task XML declares an encoding: schtasks refuses it («unable to switch the encoding»)"
+                .to_owned(),
+        );
+    }
+
     reasons
 }
 

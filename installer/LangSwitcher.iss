@@ -1105,8 +1105,11 @@ var
   N: String;
 begin
   N := #13#10;
+  (* NO XML declaration, on purpose (finding of round 1 of T-104-9 on Test_VM): schtasks reads
+     the file into a wide string before it parses it, and a declaration of UTF-8 there is refused
+     with "(1,40) unable to switch the encoding" -- the task was not registered at all.  The text
+     is ASCII, so it needs no declaration. *)
   Result :=
-    '<?xml version="1.0" encoding="UTF-8"?>' + N +
     '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + N +
     '  <RegistrationInfo>' + N +
     '    <Author>{#AppPublisher}</Author>' + N +
