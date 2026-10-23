@@ -7523,7 +7523,8 @@ impl AuthorWords {
     /// the line about the feed and the quiet line about the file.
     ///
     /// The line of the reading is counted on the 28th of **every** month — which name of a month is
-    /// the widest is the language's own business — with the next reading fifteen days away; the
+    /// the widest is the language's own business — with the next reading a day away (fifteen until
+    /// решение 189.2, and the two digits of «15» were what grew the greek window at 28 px); the
     /// line of the version **both** ways, «доступна» on a build the published update is ahead of
     /// and «это последняя» on one past it: in Greek and in English the second has more letters.
     fn fed(switch: bool, feed: &PublishedFeed) -> Self {
@@ -7792,7 +7793,7 @@ fn fed_letters(switch: bool, read: letters::Date) -> settings::Letters {
 }
 
 /// «От автора» of a machine whose feed is live, for a build of `version`, on the 28th of `month`
-/// — the day it read the feed: a day of two digits, and the next reading fifteen days away.
+/// — the day it read the feed: a day of two digits, and the next reading a day away (решение 189.2).
 fn fed_view(switch: bool, month: u32, version: &str, feed: &PublishedFeed) -> letters::AuthorView {
     let day = letters::Date::from_ymd(2026, month, 28).expect("a day");
 
@@ -17757,11 +17758,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 235] = [
         "Tell me about the author's updates and news",
     ),
     (
+        // Решение 189.12 (TZ E104 §0 п. 12): the switch turns off the letters and the news only —
+        // the updates are read always (189.4), and the line says nothing about them (189.12).
         settings::IDS_NEWS_SWITCH_SUB,
-        "Раз в 15 дней программа читает один файл с сайта автора. Больше она ничего не \
-         отправляет и не скачивает.",
-        "Once in fifteen days the program reads one file from the author's site. It sends \
-         nothing else and downloads nothing.",
+        "Раз в сутки программа читает один файл с сайта автора. Выключатель отключает письма и \
+         новости из этого файла.",
+        "Once a day, the program reads one file from the author's site. This switch turns off \
+         the letters and news from that file.",
     ),
     (settings::IDS_FEEDBACK_PANEL, "Обратная связь", "Feedback"),
     (

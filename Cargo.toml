@@ -68,7 +68,9 @@ windows = { version = "0.62.2", features = [
   # program has ever added for a purpose other than a window**, and they are the whole of what
   # the author's feed needs:
   #
-  #   Win32_Networking_WinHttp     — one GET, no more often than once in fifteen days
+  #   Win32_Networking_WinHttp     — one GET of the feed, no more often than once a day
+  #                                  (решение 189.2); and, in the updater only, one GET of
+  #                                  the installer the signed feed names (stage Э104)
   #   Win32_Security_Cryptography  — the ECDSA P-256 signature of the file, checked by CNG
   #
   # ⚠ **Crates: none added.** The list of section 3.2 is closed, and SEC-03 is enforced by

@@ -1142,8 +1142,8 @@ pub struct Letters {
     pub last_letter: Option<letters::Date>,
 
     /// The day the feed was last read **and its signature verified** — FR-102. A failed read
-    /// does not move it, which is what keeps a broken host from being asked again for fifteen
-    /// days.
+    /// does not move it; what keeps a broken host from being asked again the same day is
+    /// `feed_last_try` below, and since решение 189.2 the next good read is due the next day.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feed_last_read: Option<letters::Date>,
 
@@ -5132,9 +5132,14 @@ const TALLEST_FIRST_FACE: i32 = FONT_STEP_FLOOR;
 /// and the reading with its date is what grew it. The test
 /// `the_tallest_window_by_face_is_the_table_the_rule_counts_with` measures it again every run and
 /// wants this table **exactly** — enough units at every face, and not one more.
+///
+/// ⭐ **28 px: 421 → 412 with task T-104-3** (решение 189.2): the next reading of the feed is a day
+/// away and no longer fifteen, so the line of the reading says «1» and not «15», and in Greek at
+/// this one face those two digits were what took the line onto a fourth row. Measured by the test
+/// above; no face went up.
 const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
     407, 399, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
-    386, 399, 403, 404, 386, 396, 401, 421, 404, 392, // 21 … 30 px
+    386, 399, 403, 404, 386, 396, 401, 412, 404, 392, // 21 … 30 px
     401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
 ];
 

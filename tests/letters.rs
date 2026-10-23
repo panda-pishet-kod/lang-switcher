@@ -909,10 +909,14 @@ fn the_count_of_reminders_never_passes_two() {
 // The feed's own cadences — FR-102
 // =========================================================================================
 
-/// Once in fifteen days, the first read on the first run, and nothing at all when the feed is
-/// off.
+/// **Once a day** — решение 189.2 (вопрос 189, task T-104-3), once in fifteen days until `e104` —
+/// the first read on the first run, and nothing at all when the feed is off.
+///
+/// A day and not fifteen because the feed now carries the updates the updater installs by itself
+/// (TZ E104 §0 п. 2): a version the person learns of a fortnight late is a fortnight of the old
+/// one. The day of a read is a calendar day, so the next read is the next day whatever the hour.
 #[test]
-fn the_feed_is_read_once_in_fifteen_days_and_not_at_all_when_it_is_off() {
+fn the_feed_is_read_once_a_day_and_not_at_all_when_it_is_off() {
     let mut state = settled("0.39.0");
     let today = day(2026, 9, 3);
 
@@ -922,14 +926,19 @@ fn the_feed_is_read_once_in_fifteen_days_and_not_at_all_when_it_is_off() {
     );
 
     state.feed_last_read = Some(today);
-    assert!(!letters::feed_read_is_due(&state, today));
-    assert!(!letters::feed_read_is_due(&state, today.plus_days(14)));
-    assert!(letters::feed_read_is_due(&state, today.plus_days(15)));
+    assert!(
+        !letters::feed_read_is_due(&state, today),
+        "a feed read today is not read again today"
+    );
+    assert!(
+        letters::feed_read_is_due(&state, today.plus_days(1)),
+        "a feed read yesterday is due today — once a day, решение 189.2"
+    );
 
-    assert_eq!(letters::days_until_feed_read(&state, today), 15);
+    assert_eq!(letters::days_until_feed_read(&state, today), 1);
     assert_eq!(
-        letters::days_until_feed_read(&state, today.plus_days(3)),
-        12
+        letters::days_until_feed_read(&state, today.plus_days(1)),
+        0
     );
     assert_eq!(
         letters::days_until_feed_read(&state, today.plus_days(20)),
@@ -949,7 +958,9 @@ fn the_feed_is_read_once_in_fifteen_days_and_not_at_all_when_it_is_off() {
 /// that meant a new request at every tick of the letters — once an hour, for as long as the
 /// host did not answer — and the placeholder address hid it, because a placeholder is never
 /// read at all. `feed_last_try` is the day the feed was last asked, whatever came of it, and
-/// one attempt a day is all a feed gets; a good read still closes it for fifteen days.
+/// one attempt a day is all a feed gets; a good read closes it for the day, and since решение
+/// 189.2 a day is also the whole of the period — the two rules now say the same thing on a good
+/// day and differ only on a bad one.
 #[test]
 fn a_feed_asked_today_is_not_asked_again_before_tomorrow() {
     let mut state = settled("0.88.0");
@@ -966,10 +977,12 @@ fn a_feed_asked_today_is_not_asked_again_before_tomorrow() {
     );
     assert!(letters::feed_read_is_due(&state, today.plus_days(1)));
 
-    // A good read closes the feed for fifteen days, whatever day the last attempt was on.
+    // A good read closes the feed until the next day, whatever day the last attempt was on.
     state.feed_last_read = Some(today);
-    assert!(!letters::feed_read_is_due(&state, today.plus_days(1)));
-    assert!(letters::feed_read_is_due(&state, today.plus_days(15)));
+    state.feed_last_try = Some(day(2026, 9, 24));
+    assert!(!letters::feed_read_is_due(&state, today));
+    assert!(letters::feed_read_is_due(&state, today.plus_days(1)));
+    state.feed_last_try = Some(today);
 
     // Overdue and already asked today: the panel says one day, because the next attempt is
     // tomorrow; asked yesterday, it says zero — the read is due now.

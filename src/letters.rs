@@ -8,12 +8,14 @@
 //!
 //! # What this module may not do — SEC-03, вопрос 101 п. 1 and п. 3
 //!
-//! **Nothing here downloads or runs anything, ever.** The «Обновление» letter of FR-101 tells
-//! a person that a newer version exists and walks them to the download page; the fetching and
-//! the installing are theirs. The single network operation this program is allowed at all —
-//! one signed read of the author's feed, no more often than once in fifteen days — lives in
-//! the submodule `feed` of stage Б and nowhere else, so that «which code can open a socket»
-//! is a question with a one-line answer.
+//! **Nothing here downloads or runs anything, ever** — not in the program. The «Обновление»
+//! letter of FR-101 tells a person that a newer version exists and walks them to the download
+//! page; since stage Э104 (вопрос 189) the fetching and the installing are the updater's, a
+//! separate file without a window and without `uiAccess` ([`crate::update`]), and the letter is
+//! its fallback. The single network operation this program is allowed at all — one signed read
+//! of the author's feed, no more often than once a day (решение 189.2) — lives in the submodule
+//! `feed` of stage Б and nowhere else, so that «which code can open a socket» is a question with
+//! a one-line answer; the updater reads through the same submodule.
 //!
 //! # Why the schedule is a pure function
 //!
@@ -38,7 +40,7 @@ use crate::settings::Letters;
 /// A civil date — year, month and day, and nothing else.
 ///
 /// Every cadence of FR-101 and FR-102 is counted in whole days (thirty to «Спасибо», seven to
-/// a snooze, seven and fourteen to the two reminders, fifteen between feed reads, ninety
+/// a snooze, seven and fourteen to the two reminders, one between feed reads, ninety
 /// before the feed switch appears), so a date is what the state stores and a day is the unit
 /// the arithmetic works in. There is no time of day anywhere in `[letters]`: a letter that
 /// arrived at 09:00 and one that arrived at 23:00 are the same day's letter.
@@ -325,8 +327,10 @@ pub const THANKS_AFTER_DAYS: i64 = 30;
 /// Days the one snooze of «Спасибо» moves it by — FR-101, «Напомнить через неделю».
 pub const SNOOZE_DAYS: i64 = 7;
 
-/// Days between two reads of the feed — FR-102.
-pub const FEED_EVERY_DAYS: i64 = 15;
+/// Days between two reads of the feed — FR-102: **one**, решение 189.2 (task T-104-3); fifteen
+/// until `e104`. The feed carries the versions the updater installs by itself, and a version
+/// learnt of a fortnight late was a fortnight of the old one.
+pub const FEED_EVERY_DAYS: i64 = 1;
 
 /// When the two reminders of an unread «Новость» fall, counted from the day it was first
 /// shown — FR-101.
@@ -596,8 +600,9 @@ pub fn switch_is_shown(state: &Letters, today: Date) -> bool {
             .is_some_and(|first| today.days_since(first) >= SWITCH_AFTER_DAYS)
 }
 
-/// Whether the feed may be read today — FR-102: once in fifteen days, the first read happens on
-/// the first run, when there is nothing to count from, and **one attempt a day** at most.
+/// Whether the feed may be read today — FR-102: once a day (решение 189.2), the first read
+/// happens on the first run, when there is nothing to count from, and **one attempt a day** at
+/// most.
 ///
 /// ⭐ Task T-88-1, решение 148.8: a read that fails leaves `feed_last_read` where it was, so
 /// the feed stays due — and until `e88` the next tick of the letters started it again, once an
@@ -10287,8 +10292,8 @@ fn wrap_row(widths: &[i32], gap: i32, width: i32) -> Vec<(i32, usize)> {
 ///
 /// # What is in here and what is deliberately not
 ///
-/// In: one `GET` over HTTPS from a fixed list of addresses, no more often than once in fifteen
-/// days; the ECDSA P-256 signature of the answer, checked by the system's own cryptography; the
+/// In: one `GET` over HTTPS from a fixed list of addresses, no more often than once a day
+/// (решение 189.2); the ECDSA P-256 signature of the answer, checked by the system's own cryptography; the
 /// parsing of the document; the choice of language. **Nothing else in this program opens a
 /// socket** — that is what makes «which code can reach the network» a question with a one-line
 /// answer, and what ворота 3 of `tools\verify-perimeter.ps1` checks from the outside by reading
@@ -10742,9 +10747,9 @@ pub mod feed {
     /// `None` for every refusal — a name that will not resolve, a connection that will not
     /// open, a status that is not 200, a body over the ceiling. FR-102 says a refusal is
     /// silent: the journal is told the name of the call, the interface is told nothing, and
-    /// `feed_last_read` is **not** moved, so a broken host is tried again tomorrow rather than
-    /// in fifteen days — and not sooner: the tick wrote the day of this attempt before it started
-    /// it (`feed_last_try`, решение 148.8).
+    /// `feed_last_read` is **not** moved, so a broken host is tried again tomorrow — as a good
+    /// one is, since решение 189.2 — and not sooner: the tick wrote the day of this attempt
+    /// before it started it (`feed_last_try`, решение 148.8).
     ///
     /// # Safety
     ///
@@ -11005,7 +11010,7 @@ pub mod feed {
     ///
     /// `None` when no address gave one. The caller then leaves `feed_last_read` where it is, so
     /// the read stays due and is tried again tomorrow — the day of this attempt is already in
-    /// `feed_last_try` (решение 148.8) — rather than in fifteen days.
+    /// `feed_last_try` (решение 148.8) — and not again today.
     ///
     /// # Why the addresses are a parameter — task T-88-1
     ///
