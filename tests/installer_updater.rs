@@ -190,6 +190,20 @@ fn the_installer_and_the_updater_name_the_same_things() {
         update::SETUP_SWITCHES.contains("/UPDATE"),
         "phase one must start Setup with the switch the script waits for"
     );
+
+    // Решение 189.33: the helper of the updater finds the program's window by the class the
+    // program registers and the uninstaller posts to — three places, one name.
+    assert_eq!(
+        define_value(&script, "ProductWindowClass").as_deref(),
+        Some(update::PROGRAM_WINDOW_CLASS)
+    );
+    assert!(
+        read("src/app.rs").contains(&format!(
+            "const WINDOW_CLASS_NAME: PCWSTR = w!(\"{}\");",
+            update::PROGRAM_WINDOW_CLASS
+        )),
+        "src\\app.rs must register the class the updater looks for"
+    );
 }
 
 /// **The script installs the updater the way §0 п. 13–18 describes** — the file, the folder and

@@ -104,6 +104,17 @@ pub const STALE_PENDING_SECONDS: u64 = 60 * 60;
 /// The switch the installer starts phase two with.
 pub const PHASE_TWO_SWITCH: &str = "/phase2";
 
+/// The switch of the helper that asks the program to close in its own session — решение 189.33.
+pub const CLOSE_SWITCH: &str = "/close";
+
+/// How long phase one waits for the program to close by itself before it ends it — решение 189.33,
+/// the ten seconds the uninstaller gives it (155.25).
+pub const CLOSE_WAIT_SECONDS: u64 = 10;
+
+/// The class of the one top-level window of the program — `WINDOW_CLASS_NAME` of `src\app.rs` and
+/// `ProductWindowClass` of the installer; `tests\installer_updater.rs` holds the three together.
+pub const PROGRAM_WINDOW_CLASS: &str = "LangSwitcher.Hidden";
+
 /// The switches phase one starts an installer with — silent, no question, no restart, and
 /// `/UPDATE`, which tells the installer to start phase two at its end (§0 п. 18).
 pub const SETUP_SWITCHES: &str = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE";
@@ -1099,6 +1110,214 @@ pub fn raise_and_check(sessions: &[u32], program: &Path, journal: &Journal) -> b
     }
 }
 
+/// **Closes the program in a session before the installer runs** — решение 189.33. Politely
+/// first: a copy of this file under the system account, started in that session on its desktop
+/// ([`start_system_in_session`]), posts the program's window `WM_ENDSESSION` with
+/// `ENDSESSION_CLOSEAPP` — the message the uninstaller posts (155.25) and the end of a session
+/// sends, which the program answers with its one way out, FR-83. If the program is still there
+/// after [`CLOSE_WAIT_SECONDS`], its process is ended. `true` when it runs there no more.
+///
+/// Why a copy in the session and not a message from here: a window of another session is not on
+/// this desktop — that is what «Session Mismatch» of the Restart Manager says (189.32) — and the
+/// system account of that session is above the integrity of the program, whatever it is.
+pub fn close_program_in(session: u32, program: &Path, journal: &Journal) -> bool {
+    if !running_in(session, program) {
+        return true;
+    }
+
+    let asked = std::env::current_exe()
+        .ok()
+        .is_some_and(|me| start_system_in_session(session, &me, CLOSE_SWITCH));
+
+    journal.line(
+        if asked {
+            "close: asked politely"
+        } else {
+            "close: the helper did not start"
+        },
+        session,
+    );
+
+    let deadline = seconds_now() + CLOSE_WAIT_SECONDS;
+
+    while asked && seconds_now() < deadline {
+        if !running_in(session, program) {
+            journal.line("close: the program closed by itself", session);
+            return true;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+
+    for (pid, at) in processes_of(program) {
+        if at == session {
+            terminate(pid);
+        }
+    }
+
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    let gone = !running_in(session, program);
+    journal.line(
+        if gone {
+            "close: ended"
+        } else {
+            "close: still running"
+        },
+        session,
+    );
+    gone
+}
+
+/// Ends a process — the fallback of [`close_program_in`].
+fn terminate(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess};
+
+    // SAFETY: a plain call; the handle is closed below.
+    let Ok(process) = (unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) }) else {
+        return;
+    };
+
+    // SAFETY: `process` is the handle just opened with the right to end it.
+    let _ = unsafe { TerminateProcess(process, 1) };
+    // SAFETY: closes exactly the handle opened above, once.
+    let _ = unsafe { CloseHandle(process) };
+}
+
+/// Starts `exe` with `arguments` **under this process's own account** (the system) **in
+/// `session`**, on that session's desktop — the token of this process duplicated and given the
+/// session's number.
+fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        DuplicateTokenEx, SecurityImpersonation, SetTokenInformation, TOKEN_ALL_ACCESS,
+        TokenPrimary, TokenSessionId,
+    };
+    use windows::Win32::System::Threading::{
+        CreateProcessAsUserW, GetCurrentProcess, OpenProcessToken, PROCESS_CREATION_FLAGS,
+        PROCESS_INFORMATION, STARTUPINFOW,
+    };
+    use windows::core::{PCWSTR, PWSTR};
+
+    let mut own = HANDLE::default();
+
+    // SAFETY: the pseudo-handle of this process and a live local.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &mut own) }.is_err() {
+        return false;
+    }
+
+    let mut token = HANDLE::default();
+
+    // SAFETY: `own` is the token just opened; `token` a live local the call fills.
+    let duplicated = unsafe {
+        DuplicateTokenEx(
+            own,
+            TOKEN_ALL_ACCESS,
+            None,
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut token,
+        )
+    };
+
+    // SAFETY: closes exactly the token opened above, once.
+    let _ = unsafe { CloseHandle(own) };
+
+    if duplicated.is_err() {
+        return false;
+    }
+
+    let mut number = session;
+
+    // SAFETY: `token` is the primary token just made; the value is a live `u32` of this frame and
+    // the length is its size.
+    let moved = unsafe {
+        SetTokenInformation(
+            token,
+            TokenSessionId,
+            std::ptr::from_mut(&mut number).cast(),
+            u32::try_from(size_of::<u32>()).unwrap_or(4),
+        )
+    };
+
+    let application = wide_path(exe);
+    let mut command: Vec<u16> = format!("\"{}\" {arguments}", exe.display())
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut desktop: Vec<u16> = "winsta0\\default".encode_utf16().chain(Some(0)).collect();
+    let startup = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
+        lpDesktop: PWSTR(desktop.as_mut_ptr()),
+        ..Default::default()
+    };
+    let mut process = PROCESS_INFORMATION::default();
+
+    let started = moved.is_ok()
+        // SAFETY: `token` is a primary token of this account in the session asked for; every
+        // buffer is NUL-terminated and lives for this frame; the command line is writable.
+        && unsafe {
+            CreateProcessAsUserW(
+                Some(token),
+                PCWSTR(application.as_ptr()),
+                Some(PWSTR(command.as_mut_ptr())),
+                None,
+                None,
+                false,
+                PROCESS_CREATION_FLAGS(0),
+                None,
+                PCWSTR::null(),
+                &startup,
+                &mut process,
+            )
+        }
+        .is_ok();
+
+    // SAFETY: closes exactly the token and, when the start succeeded, the two handles of the new
+    // process, once each.
+    unsafe {
+        let _ = CloseHandle(token);
+
+        if started {
+            let _ = CloseHandle(process.hThread);
+            let _ = CloseHandle(process.hProcess);
+        }
+    }
+
+    started
+}
+
+/// **The helper's whole work** — finds the program's window on this desktop and posts it
+/// `WM_ENDSESSION` (`wParam` TRUE, `lParam` `ENDSESSION_CLOSEAPP`), as the uninstaller does
+/// (155.25). Posted, not sent: a program that hangs cannot hang the updater. `false` when there
+/// is no such window.
+fn ask_the_program_to_close() -> bool {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_ENDSESSION};
+    use windows::core::PCWSTR;
+
+    const ENDSESSION_CLOSEAPP: isize = 0x0000_0001;
+
+    let class: Vec<u16> = PROGRAM_WINDOW_CLASS.encode_utf16().chain(Some(0)).collect();
+
+    // SAFETY: a NUL-terminated class name of this frame; no window name.
+    let Ok(window) = (unsafe { FindWindowW(PCWSTR(class.as_ptr()), PCWSTR::null()) }) else {
+        return false;
+    };
+
+    // SAFETY: `window` is the window just found; the message carries two plain values.
+    unsafe {
+        PostMessageW(
+            Some(window),
+            WM_ENDSESSION,
+            WPARAM(1),
+            LPARAM(ENDSESSION_CLOSEAPP),
+        )
+    }
+    .is_ok()
+}
+
 // =========================================================================================
 // 8. The download and the installer
 // =========================================================================================
@@ -1258,6 +1477,8 @@ pub mod code {
     pub const STATE: u8 = 5;
     /// The folders of this machine cannot be told.
     pub const PLACES: u8 = 6;
+    /// The helper `/close` found no window of the program to ask.
+    pub const CLOSE: u8 = 7;
 }
 
 /// **The whole of a run of `LangSwitcherUpdate.exe`** — phase one, or phase two under
@@ -1265,6 +1486,20 @@ pub mod code {
 pub fn run() -> ExitCode {
     if !runs_as_system() {
         return ExitCode::from(code::NOT_SYSTEM);
+    }
+
+    // The helper of [`close_program_in`]: a copy of this file under the system account in the
+    // session of the program, which asks its window to close and is gone. It takes no mutex — the
+    // updater that started it holds it — and touches no file.
+    if std::env::args()
+        .skip(1)
+        .any(|argument| argument == CLOSE_SWITCH)
+    {
+        return ExitCode::from(if ask_the_program_to_close() {
+            code::DONE
+        } else {
+            code::CLOSE
+        });
     }
 
     let Some(places) = Places::of_this_machine() else {
@@ -1400,6 +1635,31 @@ fn phase_one_of(places: &Places, journal: &Journal) -> u8 {
     if !state.save(&state_file) {
         journal.line("state not written", 0);
         return code::STATE;
+    }
+
+    // ⛔ Решение 189.33 (C4 of 189.32, measured on Test_VM): the Restart Manager of a Setup that runs
+    // as the system account does not close a program in a session of its own («Session Mismatch»),
+    // the file stays busy and the installation aborts. So the program is closed HERE, in every
+    // session it runs in, before the installer starts — politely and, failing that, for good.
+    let sessions = state
+        .pending
+        .as_ref()
+        .map(|p| p.sessions.clone())
+        .unwrap_or_default();
+    let closed = sessions
+        .iter()
+        .all(|&session| close_program_in(session, &places.program, journal));
+
+    if !closed {
+        journal.line("the program could not be closed: nothing installed", 0);
+
+        if let Some(pending) = state.pending.take() {
+            let _ = raise_and_check(&pending.sessions, &places.program, journal);
+            put_rollback_copy_back(places, &pending);
+        }
+
+        let _ = state.save(&state_file);
+        return code::DONE;
     }
 
     if !start_setup(&setup, &places.update_dir.join(SETUP_LOG)) {

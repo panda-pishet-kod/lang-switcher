@@ -346,13 +346,23 @@ if ($certLength -gt 0) {
 # so two addresses come out of the file as ONE run: «https://a/onehttps://b/two». A pattern that
 # stopped at the first «https://» would then find one address, and a stray one glued to a known
 # one would be «explained» by it. Each run is therefore cut at every further «https://».
+#
+# ⚠ Stage E104: a run whose HOST has no dot is not an address and is not judged. The bare scheme
+# constant «https://» of the parser (letters::feed::split_https) is stored on its own, and in the
+# image of the updater the linker put two printable bytes behind it: «https://H9» -- no host any
+# network knows. Every address that can leave a machine has a dotted host (a name or an IPv4), and
+# «localhost» is gate 6's. Such runs are printed by the caller as «not an address», never hidden.
+# Control (scratchpad-E104\gate3-dot-bait.log): a bait with «https://evil.example/x» still FAILS,
+# one with «https://H9» passes.
+$script:UndottedRuns = @()
 function Get-HttpsRuns([byte[]]$span) {
     $ascii = -join ($span | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
     $wide  = -join ($span | Where-Object { $_ -ne 0 } | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { "`n" } })
     $runs = @()
     foreach ($haystack in @($ascii, $wide)) {
         foreach ($match in [regex]::Matches($haystack, 'https://(?:(?!https://)[A-Za-z0-9\.\-/_%~:@\?=&\+])*')) {
-            $runs += $match.Value
+            $hostPart = ($match.Value.Substring(8) -split '[/\?#:@]')[0]
+            if ($hostPart.Contains('.')) { $runs += $match.Value } else { $script:UndottedRuns += $match.Value }
         }
     }
     return @($runs | Sort-Object -Unique)
@@ -382,6 +392,7 @@ $imageRuns = Get-HttpsRuns $imageBytes
 $imageStray = Get-StrayRuns $imageRuns $declared
 Write-Host ("  the image ({0} bytes): https:// runs {1}, against src\letters.rs" -f $imageBytes.Length, $imageRuns.Count)
 foreach ($url in $imageStray) { Write-Host ("  FOUND   {0}  (in the image)" -f $url) }
+foreach ($url in ($script:UndottedRuns | Sort-Object -Unique)) { Write-Host ("  not an address (no dotted host): {0}" -f $url) }
 
 $signatureStray = @()
 if ($signatureBytes.Length -gt 0) {

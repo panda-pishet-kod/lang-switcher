@@ -585,6 +585,32 @@ fn the_journal_turns_at_its_cap() {
     );
 }
 
+/// **Phase one closes the program before it starts the installer** — решение 189.33: on Test_VM the
+/// Restart Manager of a Setup under the system account did not close the program of the user's
+/// session («Session Mismatch», 189.32), and the installation aborted. The order of the code lines
+/// of phase one: the sessions written, every one closed, and only then the installer.
+#[test]
+fn phase_one_closes_the_program_before_the_installer_starts() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/update.rs"),
+    )
+    .expect("src/update.rs must be readable");
+
+    let start = source.find("fn phase_one_of(").expect("phase one");
+    let body = &source[start..start + source[start..].find("\nfn ").expect("its end")];
+    let at = |needle: &str| {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("phase one has no «{needle}»"))
+    };
+
+    assert!(at("sessions: sessions_running(&places.program)") < at("close_program_in("));
+    assert!(
+        at("close_program_in(") < at("if !start_setup(&setup"),
+        "the program must be closed BEFORE the installer starts"
+    );
+    assert_eq!(update::CLOSE_WAIT_SECONDS, 10, "the ten seconds of 155.25");
+}
+
 /// The signer of each key of FR-102.
 #[test]
 fn the_working_key_is_the_first_and_the_reserve_the_second() {
