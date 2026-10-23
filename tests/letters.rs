@@ -751,7 +751,11 @@ fn the_update_letter_waits_three_days_for_the_updater() {
     };
 
     assert!(letters::notice_update(&mut state, "0.103.0", feed, first));
-    assert_eq!(state.update_noticed, Some(first), "the first read that named it");
+    assert_eq!(
+        state.update_noticed,
+        Some(first),
+        "the first read that named it"
+    );
     assert!(
         !letters::notice_update(&mut state, "0.103.0", feed, first.plus_days(1)),
         "a later read keeps the day of the first"
@@ -769,7 +773,10 @@ fn the_update_letter_waits_three_days_for_the_updater() {
             Some(Letter::Update),
             "day {offset}: the updater still has its chance"
         );
-        assert!(!letters::update_fallback_is_open(&state, first.plus_days(offset)));
+        assert!(!letters::update_fallback_is_open(
+            &state,
+            first.plus_days(offset)
+        ));
     }
 
     let third = first.plus_days(3);
@@ -783,8 +790,14 @@ fn the_update_letter_waits_three_days_for_the_updater() {
 
     // The updater did its work: the build is the version the feed names, and nothing is pending.
     assert!(letters::notice_update(&mut state, "0.104.0", feed, third));
-    assert_eq!(state.update_noticed, None, "a read that names nothing newer clears it");
-    assert!(!letters::update_fallback_is_open(&state, third.plus_days(10)));
+    assert_eq!(
+        state.update_noticed, None,
+        "a read that names nothing newer clears it"
+    );
+    assert!(!letters::update_fallback_is_open(
+        &state,
+        third.plus_days(10)
+    ));
 }
 
 /// **The balloon «обновлён до X» comes once per version, after an update and only then** — §0
@@ -801,8 +814,14 @@ fn the_balloon_after_an_update_comes_once_per_version() {
     );
 
     let mut state = settled("0.103.0");
-    assert!(letters::was_updated(&state, "0.104.0"), "0.103.0 → 0.104.0 is an update");
-    assert!(!letters::was_updated(&state, "0.103.0"), "the same version is not");
+    assert!(
+        letters::was_updated(&state, "0.104.0"),
+        "0.103.0 → 0.104.0 is an update"
+    );
+    assert!(
+        !letters::was_updated(&state, "0.103.0"),
+        "the same version is not"
+    );
     assert!(
         !letters::was_updated(&state, "0.102.0"),
         "a rollback to an older build is not an update"
@@ -826,11 +845,25 @@ fn the_tick_asks_about_the_update_before_it_moves_the_version_and_knocks_once() 
     .expect("src/letters.rs must be readable");
 
     let start = source.find("pub fn tick(owner: HWND) {").expect("the tick");
-    let body = &source[start..start + source[start..].find("\n}\n").or_else(|| source[start..].find("\n}\r\n")).expect("its end")];
-    let at = |needle: &str| body.find(needle).unwrap_or_else(|| panic!("tick has no «{needle}»"));
+    let body = &source[start
+        ..start
+            + source[start..]
+                .find("\n}\n")
+                .or_else(|| source[start..].find("\n}\r\n"))
+                .expect("its end")];
+    let at = |needle: &str| {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("tick has no «{needle}»"))
+    };
 
-    assert!(at("let updated = was_updated(&stored, &version);") < at("if initialise(&mut stored, today, &version)"));
-    assert!(at("if updated {") < at("let due = with_feed("), "the balloon of the update comes before any letter");
+    assert!(
+        at("let updated = was_updated(&stored, &version);")
+            < at("if initialise(&mut stored, today, &version)")
+    );
+    assert!(
+        at("if updated {") < at("let due = with_feed("),
+        "the balloon of the update comes before any letter"
+    );
     assert!(at("announce_updated(&version);") < at("let due = with_feed("));
 }
 
@@ -1043,10 +1076,7 @@ fn the_feed_is_read_once_a_day_and_not_at_all_when_it_is_off() {
     );
 
     assert_eq!(letters::days_until_feed_read(&state, today), 1);
-    assert_eq!(
-        letters::days_until_feed_read(&state, today.plus_days(1)),
-        0
-    );
+    assert_eq!(letters::days_until_feed_read(&state, today.plus_days(1)), 0);
     assert_eq!(
         letters::days_until_feed_read(&state, today.plus_days(20)),
         0

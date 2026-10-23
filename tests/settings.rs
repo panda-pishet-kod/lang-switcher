@@ -25432,8 +25432,14 @@ fn the_balloon_after_an_update_fits_in_every_language() {
         let title_units = title.encode_utf16().count();
         let text_units = text.encode_utf16().count();
 
-        if !title.contains(version) || title_units > 63 || text_units > 255 || text.trim().is_empty() {
-            too_long.push(format!("{tag}: title {title_units} «{title}», text {text_units}"));
+        if !title.contains(version)
+            || title_units > 63
+            || text_units > 255
+            || text.trim().is_empty()
+        {
+            too_long.push(format!(
+                "{tag}: title {title_units} «{title}», text {text_units}"
+            ));
         }
 
         if title_units > 20 {
@@ -25442,7 +25448,10 @@ fn the_balloon_after_an_update_fits_in_every_language() {
     }
 
     assert!(too_long.is_empty(), "{}", too_long.join("\n"));
-    assert!(short_ceiling > 0, "control: a ceiling of 20 units must be exceeded somewhere");
+    assert!(
+        short_ceiling > 0,
+        "control: a ceiling of 20 units must be exceeded somewhere"
+    );
 }
 
 /// **Task Т-31-3 — the retired number 3004 is a hole, and a hole costs nothing.**

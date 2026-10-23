@@ -20,7 +20,10 @@ const SUM: [u8; 32] = [7u8; 32];
 fn download_of(version: &str) -> feed::Download {
     feed::Download {
         version: version.to_owned(),
-        url: format!("{FILES}e{}/LangSwitcher-setup.exe", version.split('.').nth(1).unwrap_or("0")),
+        url: format!(
+            "{FILES}e{}/LangSwitcher-setup.exe",
+            version.split('.').nth(1).unwrap_or("0")
+        ),
         sha256: SUM,
         size: 3_500_000,
     }
@@ -60,17 +63,35 @@ fn only_a_strictly_newer_version_is_installed() {
     let feed = offering("0.104.1");
 
     assert_eq!(
-        chosen(update::decide("0.104.0", &feed, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &feed,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Ok("0.104.1".to_owned()),
         "newer — installed"
     );
     assert_eq!(
-        chosen(update::decide("0.104.1", &feed, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.1",
+            &feed,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::NotNewer),
         "equal — nothing"
     );
     assert_eq!(
-        chosen(update::decide("0.105.0", &feed, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.105.0",
+            &feed,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::NotNewer),
         "older — no going back"
     );
@@ -90,28 +111,52 @@ fn a_feed_without_a_download_or_with_a_mismatched_one_installs_nothing() {
     let mut plain = offering("0.104.1");
     plain.download = feed::Table::Absent;
     assert_eq!(
-        chosen(update::decide("0.104.0", &plain, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &plain,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::NoDownload)
     );
 
     let mut broken = offering("0.104.1");
     broken.download = feed::Table::Malformed;
     assert_eq!(
-        chosen(update::decide("0.104.0", &broken, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &broken,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::DownloadMalformed)
     );
 
     let mut mismatched = offering("0.104.1");
     mismatched.download = feed::Table::Read(download_of("0.104.2"));
     assert_eq!(
-        chosen(update::decide("0.104.0", &mismatched, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &mismatched,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::NoUpdateEntry)
     );
 
     let mut no_entry = offering("0.104.1");
     no_entry.update = None;
     assert_eq!(
-        chosen(update::decide("0.104.0", &no_entry, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &no_entry,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::NoUpdateEntry)
     );
 }
@@ -133,12 +178,24 @@ fn a_stop_of_the_reserve_key_stops_and_a_stop_of_the_working_key_does_not() {
     let mut state = State::default();
 
     assert_eq!(
-        chosen(update::decide("0.104.0", &feed, Signer::Reserve, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &feed,
+            Signer::Reserve,
+            &state,
+            FILES
+        )),
         Err(Skip::Stopped),
         "the reserve stops it"
     );
     assert_eq!(
-        chosen(update::decide("0.104.0", &feed, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &feed,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Ok("0.104.1".to_owned()),
         "a [stop] the working key signed is not heard"
     );
@@ -148,7 +205,13 @@ fn a_stop_of_the_reserve_key_stops_and_a_stop_of_the_working_key_does_not() {
 
     let later = offering("0.104.1");
     assert_eq!(
-        chosen(update::decide("0.104.0", &later, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &later,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::Stopped),
         "what the reserve stopped, a later feed of the working key cannot bring back"
     );
@@ -156,7 +219,13 @@ fn a_stop_of_the_reserve_key_stops_and_a_stop_of_the_working_key_does_not() {
     let mut unreadable = offering("0.104.1");
     unreadable.stop = feed::Table::Malformed;
     assert_eq!(
-        chosen(update::decide("0.104.0", &unreadable, Signer::Reserve, &State::default(), FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &unreadable,
+            Signer::Reserve,
+            &State::default(),
+            FILES
+        )),
         Err(Skip::StopMalformed),
         "a [stop] of the reserve that cannot be read — nothing at all"
     );
@@ -171,11 +240,23 @@ fn a_version_that_failed_here_is_not_tried_again() {
 
     assert_eq!(state.failed, vec!["0.104.1".to_owned()], "marked once");
     assert_eq!(
-        chosen(update::decide("0.104.0", &offering("0.104.1"), Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &offering("0.104.1"),
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::FailedBefore)
     );
     assert_eq!(
-        chosen(update::decide("0.104.0", &offering("0.104.2"), Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &offering("0.104.2"),
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Ok("0.104.2".to_owned()),
         "the next version is not the failed one"
     );
@@ -212,12 +293,24 @@ fn a_revoked_working_key_stays_revoked_across_a_restart() {
 
     assert_eq!(again, state);
     assert_eq!(
-        chosen(update::decide("0.104.0", &offering("0.104.1"), Signer::Working, &again, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &offering("0.104.1"),
+            Signer::Working,
+            &again,
+            FILES
+        )),
         Err(Skip::WorkingKeyRevoked),
         "after the restart the working key is still refused"
     );
     assert_eq!(
-        chosen(update::decide("0.104.0", &offering("0.104.1"), Signer::Reserve, &again, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &offering("0.104.1"),
+            Signer::Reserve,
+            &again,
+            FILES
+        )),
         Ok("0.104.1".to_owned()),
         "the reserve key still is heard"
     );
@@ -256,7 +349,13 @@ fn only_a_file_in_the_authors_folder_is_downloaded() {
         feed.download = feed::Table::Read(download);
 
         assert_eq!(
-            chosen(update::decide("0.104.0", &feed, Signer::Working, &state, FILES)),
+            chosen(update::decide(
+                "0.104.0",
+                &feed,
+                Signer::Working,
+                &state,
+                FILES
+            )),
             Err(Skip::ForeignAddress),
             "{url} must be refused"
         );
@@ -283,7 +382,13 @@ fn the_size_is_at_most_sixteen_megabytes_and_the_one_named() {
     feed.download = feed::Table::Read(big);
 
     assert_eq!(
-        chosen(update::decide("0.104.0", &feed, Signer::Working, &state, FILES)),
+        chosen(update::decide(
+            "0.104.0",
+            &feed,
+            Signer::Working,
+            &state,
+            FILES
+        )),
         Err(Skip::TooBig)
     );
 
@@ -363,10 +468,27 @@ fn the_folder_is_trusted_only_when_nobody_else_may_write() {
     };
 
     assert!(update::folder_verdict(true, Some(&[system, users_read])));
-    assert!(!update::folder_verdict(false, Some(&[system])), "a foreign owner");
-    assert!(!update::folder_verdict(true, None), "no list — open to everybody");
+    assert!(
+        !update::folder_verdict(false, Some(&[system])),
+        "a foreign owner"
+    );
+    assert!(
+        !update::folder_verdict(true, None),
+        "no list — open to everybody"
+    );
 
-    for right in [0x0002, 0x0004, 0x0010, 0x0040, 0x0100, 0x0001_0000, 0x0004_0000, 0x0008_0000, 0x1000_0000, 0x4000_0000] {
+    for right in [
+        0x0002,
+        0x0004,
+        0x0010,
+        0x0040,
+        0x0100,
+        0x0001_0000,
+        0x0004_0000,
+        0x0008_0000,
+        0x1000_0000,
+        0x4000_0000,
+    ] {
         let writer = Allowed {
             mask: 0x0012_00A9 | right,
             trusted: false,
@@ -416,12 +538,20 @@ fn the_state_goes_to_the_file_and_back() {
     let folder = scratch("state");
     let file = folder.join(update::STATE_FILE);
 
-    assert_eq!(State::load(&file), Some(State::default()), "no file — the empty state");
+    assert_eq!(
+        State::load(&file),
+        Some(State::default()),
+        "no file — the empty state"
+    );
     assert!(state.save(&file));
     assert_eq!(State::load(&file), Some(state));
 
     std::fs::write(&file, "pending = [").expect("written");
-    assert_eq!(State::load(&file), None, "a file that cannot be read is not a default");
+    assert_eq!(
+        State::load(&file),
+        None,
+        "a file that cannot be read is not a default"
+    );
 
     let _ = std::fs::remove_dir_all(&folder);
 }
@@ -449,7 +579,10 @@ fn the_journal_turns_at_its_cap() {
     let _ = std::fs::remove_dir_all(&folder);
 
     assert!(size <= update::LOG_CAP, "{size} bytes — over the cap");
-    assert!(kept <= update::LOG_CAP && kept > update::LOG_CAP / 2, "{kept} bytes kept");
+    assert!(
+        kept <= update::LOG_CAP && kept > update::LOG_CAP / 2,
+        "{kept} bytes kept"
+    );
 }
 
 /// The signer of each key of FR-102.
@@ -462,10 +595,7 @@ fn the_working_key_is_the_first_and_the_reserve_the_second() {
 
 /// A folder of the test's own under the temporary folder.
 fn scratch(name: &str) -> std::path::PathBuf {
-    let folder = std::env::temp_dir().join(format!(
-        "langsw-update-{name}-{}",
-        std::process::id()
-    ));
+    let folder = std::env::temp_dir().join(format!("langsw-update-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(&folder).expect("a scratch folder");
     folder

@@ -701,38 +701,73 @@ fn a_table_of_the_wrong_shape_is_malformed_and_the_letters_stay() {
     let good_sha = "00112233445566778899AABBCCDDEEFF00112233445566778899aabbccddeeff";
 
     let downloads = [
-        ("63 digits", DOWNLOAD_TABLE.replace(good_sha, &good_sha[1..])),
-        ("65 digits", DOWNLOAD_TABLE.replace(good_sha, &format!("{good_sha}0"))),
-        ("not hex", DOWNLOAD_TABLE.replace(good_sha, &good_sha.replace('a', "g"))),
-        ("size zero", DOWNLOAD_TABLE.replace("size = 3500000", "size = 0")),
-        ("size negative", DOWNLOAD_TABLE.replace("size = 3500000", "size = -1")),
+        (
+            "63 digits",
+            DOWNLOAD_TABLE.replace(good_sha, &good_sha[1..]),
+        ),
+        (
+            "65 digits",
+            DOWNLOAD_TABLE.replace(good_sha, &format!("{good_sha}0")),
+        ),
+        (
+            "not hex",
+            DOWNLOAD_TABLE.replace(good_sha, &good_sha.replace('a', "g")),
+        ),
+        (
+            "size zero",
+            DOWNLOAD_TABLE.replace("size = 3500000", "size = 0"),
+        ),
+        (
+            "size negative",
+            DOWNLOAD_TABLE.replace("size = 3500000", "size = -1"),
+        ),
         ("no url", DOWNLOAD_TABLE.replace("url = ", "address = ")),
-        ("no version", DOWNLOAD_TABLE.replace("version = ", "release = ")),
-        ("an array", DOWNLOAD_TABLE.replace("[download]", "[[download]]")),
+        (
+            "no version",
+            DOWNLOAD_TABLE.replace("version = ", "release = "),
+        ),
+        (
+            "an array",
+            DOWNLOAD_TABLE.replace("[download]", "[[download]]"),
+        ),
     ];
 
     for (what, table) in &downloads {
-        assert_ne!(table, DOWNLOAD_TABLE, "the bait «{what}» must change the table");
+        assert_ne!(
+            table, DOWNLOAD_TABLE,
+            "the bait «{what}» must change the table"
+        );
 
-        let read = feed::parse_body(&format!("{BODY}{table}"), "en")
-            .unwrap_or_else(|refusal| panic!("«{what}»: the file must still parse, got {refusal:?}"));
+        let read = feed::parse_body(&format!("{BODY}{table}"), "en").unwrap_or_else(|refusal| {
+            panic!("«{what}»: the file must still parse, got {refusal:?}")
+        });
 
         assert_eq!(read.download, feed::Table::Malformed, "«{what}»");
-        assert_eq!(read.update, plain.update, "«{what}»: the update entry stays");
+        assert_eq!(
+            read.update, plain.update,
+            "«{what}»: the update entry stays"
+        );
         assert_eq!(read.news, plain.news, "«{what}»: the news stay");
     }
 
     let stops = [
-        ("versions not strings", STOP_TABLE.replace("[\"0.42.0\", \"0.43.0\"]", "[42, 43]")),
-        ("revoke not a boolean", STOP_TABLE.replace("= true", "= \"yes\"")),
+        (
+            "versions not strings",
+            STOP_TABLE.replace("[\"0.42.0\", \"0.43.0\"]", "[42, 43]"),
+        ),
+        (
+            "revoke not a boolean",
+            STOP_TABLE.replace("= true", "= \"yes\""),
+        ),
         ("an array", STOP_TABLE.replace("[stop]", "[[stop]]")),
     ];
 
     for (what, table) in &stops {
         assert_ne!(table, STOP_TABLE, "the bait «{what}» must change the table");
 
-        let read = feed::parse_body(&format!("{BODY}{table}"), "en")
-            .unwrap_or_else(|refusal| panic!("«{what}»: the file must still parse, got {refusal:?}"));
+        let read = feed::parse_body(&format!("{BODY}{table}"), "en").unwrap_or_else(|refusal| {
+            panic!("«{what}»: the file must still parse, got {refusal:?}")
+        });
 
         assert_eq!(read.stop, feed::Table::Malformed, "«{what}»");
         assert_eq!(read.news, plain.news, "«{what}»: the news stay");

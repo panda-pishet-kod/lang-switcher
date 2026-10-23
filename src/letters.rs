@@ -10537,20 +10537,15 @@ pub mod feed {
     /// cost **this table** and not the letters: a mistake in a line about the installer must
     /// not silence the news of the same file — and the updater, for which the table is the
     /// whole point, does nothing about a table it cannot read.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
     pub enum Table<T> {
         /// The file has no such table.
+        #[default]
         Absent,
         /// The table, read and checked.
         Read(T),
         /// The table is there and is not of the shape §0 п. 16 describes.
         Malformed,
-    }
-
-    impl<T> Default for Table<T> {
-        fn default() -> Self {
-            Self::Absent
-        }
     }
 
     impl<T> Table<T> {

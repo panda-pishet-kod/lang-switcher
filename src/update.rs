@@ -202,7 +202,10 @@ pub fn decide<'f>(
         feed::Table::Read(download) => download,
     };
 
-    if feed.update.as_ref().and_then(|entry| entry.version.as_deref())
+    if feed
+        .update
+        .as_ref()
+        .and_then(|entry| entry.version.as_deref())
         != Some(download.version.as_str())
     {
         return Err(Skip::NoUpdateEntry);
@@ -672,8 +675,10 @@ fn security_of(name: &[u16]) -> Option<(bool, Option<Vec<Allowed>>)> {
                 let allowed = unsafe { entry.cast::<ACCESS_ALLOWED_ACE>().read_unaligned() };
                 let sid = PSID(
                     // SAFETY: `SidStart` is a field of the entry `entry` points at.
-                    unsafe { std::ptr::addr_of_mut!((*entry.cast::<ACCESS_ALLOWED_ACE>()).SidStart) }
-                        .cast(),
+                    unsafe {
+                        std::ptr::addr_of_mut!((*entry.cast::<ACCESS_ALLOWED_ACE>()).SidStart)
+                    }
+                    .cast(),
                 );
 
                 entries.push(Allowed {
@@ -791,7 +796,8 @@ impl Places {
     /// (TZ E104 §0 п. 22) laid over them.
     pub fn of_this_machine() -> Option<Self> {
         let app_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-        let data_dir = known_folder(&windows::Win32::UI::Shell::FOLDERID_ProgramData)?.join(DATA_DIR);
+        let data_dir =
+            known_folder(&windows::Win32::UI::Shell::FOLDERID_ProgramData)?.join(DATA_DIR);
 
         #[allow(unused_mut)]
         let mut places = Self {
@@ -929,8 +935,10 @@ fn processes_of(program: &Path) -> Vec<(u32, u32)> {
     let mut count = 0u32;
 
     // SAFETY: the local server, version 1, and two live locals the call fills.
-    if unsafe { WTSEnumerateProcessesW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut list, &mut count) }
-        .is_err()
+    if unsafe {
+        WTSEnumerateProcessesW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut list, &mut count)
+    }
+    .is_err()
     {
         return Vec::new();
     }
@@ -1272,7 +1280,9 @@ pub fn run() -> ExitCode {
     }
 
     let journal = Journal::at(&places.update_dir);
-    let phase_two = std::env::args().skip(1).any(|argument| argument == PHASE_TWO_SWITCH);
+    let phase_two = std::env::args()
+        .skip(1)
+        .any(|argument| argument == PHASE_TWO_SWITCH);
 
     let outcome = if phase_two {
         phase_two_of(&places, &journal)
@@ -1375,8 +1385,8 @@ fn phase_one_of(places: &Places, journal: &Journal) -> u8 {
     journal.line("download verified", 0);
 
     let installed_copy = places.update_dir.join(INSTALLED_SETUP);
-    let rollback_copy =
-        installed_copy.exists() && replace_file(&installed_copy, &places.update_dir.join(ROLLBACK_SETUP));
+    let rollback_copy = installed_copy.exists()
+        && replace_file(&installed_copy, &places.update_dir.join(ROLLBACK_SETUP));
 
     state.pending = Some(Pending {
         version: chosen.version.clone(),
@@ -1526,8 +1536,15 @@ pub fn version_of_file(path: &Path) -> Option<String> {
     let mut buffer = vec![0u8; usize::try_from(size).ok()?];
 
     // SAFETY: `buffer` holds `size` bytes and lives for this frame.
-    unsafe { GetFileVersionInfoW(PCWSTR(name.as_ptr()), None, size, buffer.as_mut_ptr().cast()) }
-        .ok()?;
+    unsafe {
+        GetFileVersionInfoW(
+            PCWSTR(name.as_ptr()),
+            None,
+            size,
+            buffer.as_mut_ptr().cast(),
+        )
+    }
+    .ok()?;
 
     let (major, minor, patch, _) = crate::tray::parse_fixed_file_version(&buffer)?;
 
