@@ -902,6 +902,16 @@ pub mod links {
     /// copy of it.
     pub const MAIL_ADDRESS: &str = "send.me@panda-pishet-kod.dev";
 
+    /// **Where the wizard sends an appeal** — решения 199.1, 199.7 и 199.9: one `POST` of
+    /// [`super::appeal::body`] over HTTPS, when the person presses «Отправить», and at no other
+    /// moment.
+    ///
+    /// ⚠ Not a page and not opened by anything, so not in [`allowed_hosts`] — the shell is never
+    /// handed it. It is in this module for the reason [`UPDATE_FILES_URL`] is: ворота 3 of
+    /// `tools\verify-perimeter.ps1` judge every `https://` of an image against the addresses
+    /// written here, and the image carries this one.
+    pub const APPEAL_URL: &str = "https://panda-pishet-kod.dev/langswitcher/feedback";
+
     /// **Which side of the author's places a person reads, by the language they read the program
     /// in** — решения 181.1 и 181.33: Russian and Ukrainian read the Russian side (the topic of the
     /// group, the pages of the site without `/en/`), the other twelve the English one (GitHub
@@ -10424,6 +10434,15 @@ fn wrap_row(widths: &[i32], gap: i32, width: i32) -> Vec<(i32, usize)> {
 /// of any kind** (вопрос 101 п. 5): the file holds every language and the choice is made on
 /// this machine.
 ///
+/// # ⚠ And the one thing the program sends — the appeal, since 1.2.0
+///
+/// Задача T-107-2, решения 199.1 и 199.7: an appeal of the wizard goes to the site by one `POST`
+/// ([`post`]) — **only when the person presses «Отправить»**, and exactly the text they saw. It
+/// runs on the same body as the read ([`exchange`]), so «which code can reach the network» is
+/// still this module and nothing else; what it sends is built by [`super::appeal::body`], where
+/// the rule of what goes and what never does is written down. The read of the feed is untouched by
+/// it: the same verb, the same headers (none), the same timeouts, the same redirections.
+///
 /// # The trust is in the signature and not in the host
 ///
 /// The addresses are ordinary web hosting and may be anybody's tomorrow. What the program
@@ -10995,6 +11014,32 @@ pub mod feed {
     /// And how long for the answer — FR-102.
     pub const RECEIVE_TIMEOUT_MS: i32 = 20_000;
 
+    /// The four timeouts of one exchange, in milliseconds, in the order `WinHttpSetTimeouts`
+    /// takes them: the name, the connection, the sending, the answer.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Timeouts {
+        pub resolve: i32,
+        pub connect: i32,
+        pub send: i32,
+        pub receive: i32,
+    }
+
+    impl Timeouts {
+        /// The longest one exchange can wait in all — the four one after another.
+        pub const fn total(self) -> i32 {
+            self.resolve + self.connect + self.send + self.receive
+        }
+    }
+
+    /// FR-102's four, as they have been since the feed was first read: the read of the feed and
+    /// the download of the updater wait this long.
+    pub const READ_TIMEOUTS: Timeouts = Timeouts {
+        resolve: CONNECT_TIMEOUT_MS,
+        connect: CONNECT_TIMEOUT_MS,
+        send: RECEIVE_TIMEOUT_MS,
+        receive: RECEIVE_TIMEOUT_MS,
+    };
+
     /// **Reads one address** — the whole of the network surface of this program.
     ///
     /// One `GET` over HTTPS with no parameters, no headers of ours beyond the agent, no
@@ -11102,16 +11147,82 @@ pub mod feed {
     /// beyond the agent, no cookie. `None` for every refusal — the name, the connection, a
     /// status that is not 200, a body over `cap`, a `sink` that answered `false`.
     pub fn get(target: &Target, cap: u64, sink: &mut dyn FnMut(&[u8]) -> bool) -> Option<u64> {
+        let call = Call {
+            verb: "GET",
+            headers: None,
+            body: &[],
+            expect: 200,
+            redirects: true,
+            timeouts: READ_TIMEOUTS,
+        };
+
+        exchange(target, &call, Some((cap, sink)))
+    }
+
+    /// **One `POST` of `body`, and whether the host answered `201 Created`** — the appeal of the
+    /// wizard, решения 199.7 и 199.9, задача T-107-2.
+    ///
+    /// The request of [`get`] with three differences and no fourth: the verb, one header of ours
+    /// (`Content-Type`), and a body whose length goes in `Content-Length` — WinHTTP writes it out
+    /// of the total length handed to `WinHttpSendRequest`, so the body is never chunked (the site
+    /// answers a chunked one with 411, 199.9). **A redirection is not followed**: a `POST` turned
+    /// into a `GET` somewhere else would answer something that is not the site's «принято».
+    ///
+    /// **Only 201 is a yes.** Every other status, a name that will not resolve, a connection that
+    /// will not open, a timeout — `false`, which the wizard shows as «Не удалось отправить». The
+    /// body of the answer is **not read**: the program shows no number of the appeal (решение
+    /// 199.10), so there is nothing in it to take, and a host that answered for ever holds this
+    /// thread for not one byte.
+    pub fn post(target: &Target, content_type: &str, body: &[u8], timeouts: Timeouts) -> bool {
+        let headers = format!("Content-Type: {content_type}\r\n");
+        let call = Call {
+            verb: "POST",
+            headers: Some(&headers),
+            body,
+            expect: 201,
+            redirects: false,
+            timeouts,
+        };
+
+        exchange(target, &call, None).is_some()
+    }
+
+    /// What one exchange is besides its address — what [`get`] and [`post`] differ in.
+    struct Call<'a> {
+        verb: &'a str,
+        /// Headers of ours beyond the agent, each ending in CRLF — `None` for the read.
+        headers: Option<&'a str>,
+        /// The body — empty for the read.
+        body: &'a [u8],
+        /// The one status that is an answer: 200 for the read, 201 for an appeal.
+        expect: u32,
+        /// Whether WinHTTP may follow a redirection — the read as it always has, an appeal never.
+        redirects: bool,
+        timeouts: Timeouts,
+    }
+
+    /// How the body of an answer is read: at most this many bytes, each piece handed to the sink —
+    /// or, for `None`, not read at all.
+    type Read<'a> = Option<(u64, &'a mut dyn FnMut(&[u8]) -> bool)>;
+
+    /// The one body under [`get`] and [`post`]: the session, the four timeouts of `call`, the
+    /// connection, the request, the status — and the body of the answer to `read` (at most its
+    /// cap) when there is a `read`, or nothing read at all when there is not.
+    fn exchange(target: &Target, call: &Call<'_>, read: Read<'_>) -> Option<u64> {
         use windows::Win32::Networking::WinHttp::{
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WinHttpCloseHandle, WinHttpOpen,
             WinHttpSetTimeouts,
         };
         use windows::core::PCWSTR;
 
+        // The length is a `u32` to WinHTTP; a body that does not fit is refused before any handle
+        // exists, so no early return below has a handle to forget.
+        let length = u32::try_from(call.body.len()).ok()?;
+
         let agent = crate::settings::wide(USER_AGENT);
         let host_wide = crate::settings::wide(&target.host);
         let path_wide = crate::settings::wide(&target.path);
-        let verb = crate::settings::wide("GET");
+        let verb = crate::settings::wide(call.verb);
 
         // SAFETY: the agent is a NUL-terminated buffer of this frame; the two null pointers are
         // the documented «no proxy, no bypass», and the access type asks Windows for the
@@ -11131,17 +11242,18 @@ pub mod feed {
             return None;
         }
 
-        // The four timeouts of FR-102: resolve, connect, send, receive. A feed that does not
-        // answer must not hold a thread of this program for minutes.
+        // The four timeouts: resolve, connect, send, receive — FR-102's for the read, the
+        // appeal's own for an appeal. A host that does not answer must not hold a thread of this
+        // program for minutes.
         //
         // SAFETY: `session` is the handle just opened; the four numbers are plain values.
         let _ = unsafe {
             WinHttpSetTimeouts(
                 session,
-                CONNECT_TIMEOUT_MS,
-                CONNECT_TIMEOUT_MS,
-                RECEIVE_TIMEOUT_MS,
-                RECEIVE_TIMEOUT_MS,
+                call.timeouts.resolve,
+                call.timeouts.connect,
+                call.timeouts.send,
+                call.timeouts.receive,
             )
         };
 
@@ -11151,9 +11263,11 @@ pub mod feed {
             path: &path_wide,
             verb: &verb,
             secure: target.secure,
+            call,
+            length,
         };
 
-        let answer = read_over(session, &request, cap, sink);
+        let answer = read_over(session, &request, read);
 
         // SAFETY: closes exactly the session opened above, once. Every handle below it is
         // closed by `read_over` before it returns.
@@ -11162,26 +11276,29 @@ pub mod feed {
         answer
     }
 
-    /// The four wide strings and two values one request is made of — what [`get`] hands down.
+    /// The wide strings and values one request is made of — what [`exchange`] hands down.
     struct Request<'a> {
         host: &'a [u16],
         port: u16,
         path: &'a [u16],
         verb: &'a [u16],
         secure: bool,
+        call: &'a Call<'a>,
+        /// The length of `call.body`, already known to fit WinHTTP's `u32`.
+        length: u32,
     }
 
-    /// The connection, the request and the reading — the half of [`get`] that owns three
+    /// The connection, the request and the reading — the half of [`exchange`] that owns three
     /// handles, split out so that the session above is closed on every path.
     fn read_over(
         session: *mut std::ffi::c_void,
         request_of: &Request<'_>,
-        cap: u64,
-        sink: &mut dyn FnMut(&[u8]) -> bool,
+        read: Read<'_>,
     ) -> Option<u64> {
         use windows::Win32::Networking::WinHttp::{
-            WINHTTP_FLAG_SECURE, WINHTTP_OPEN_REQUEST_FLAGS, WinHttpCloseHandle, WinHttpConnect,
-            WinHttpOpenRequest, WinHttpReceiveResponse, WinHttpSendRequest,
+            WINHTTP_DISABLE_REDIRECTS, WINHTTP_FLAG_SECURE, WINHTTP_OPEN_REQUEST_FLAGS,
+            WINHTTP_OPTION_DISABLE_FEATURE, WinHttpCloseHandle, WinHttpConnect, WinHttpOpenRequest,
+            WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
         };
         use windows::core::PCWSTR;
 
@@ -11232,12 +11349,57 @@ pub mod feed {
             return None;
         }
 
-        // **No headers of ours and no body**: `None` for the headers, null and zero for the
-        // optional data, and zero for the context. That is the whole request — вопрос 101 п. 5.
+        // ⛔ **An appeal is not redirected** (TZ E107 §0 п. 9). The default of WinHTTP follows a
+        // redirection and turns a `POST` into a `GET` on the way; the feature is switched off on
+        // this request, and a request on which it would not switch off is not sent at all.
         //
-        // SAFETY: `request` is the handle just opened; every argument is a plain value or a
-        // documented «nothing».
-        let sent = unsafe { WinHttpSendRequest(request, None, None, 0, 0, 0) };
+        // SAFETY: `request` is the handle just opened; the buffer is a live local of four bytes,
+        // the size the option is documented to take.
+        let redirects_off = request_of.call.redirects
+            || unsafe {
+                WinHttpSetOption(
+                    Some(request.cast_const()),
+                    WINHTTP_OPTION_DISABLE_FEATURE,
+                    Some(&WINHTTP_DISABLE_REDIRECTS.to_ne_bytes()),
+                )
+            }
+            .map_err(|error| crate::app::report_non_critical("WinHttpSetOption", &error))
+            .is_ok();
+
+        if !redirects_off {
+            // SAFETY: closes exactly the two handles opened above, once each.
+            unsafe {
+                let _ = WinHttpCloseHandle(request);
+                let _ = WinHttpCloseHandle(connection);
+            }
+            return None;
+        }
+
+        // **The read: no headers of ours and no body** — `None` for the headers, null and zero for
+        // the optional data. That is the whole request of FR-102 (вопрос 101 п. 5). An appeal hands
+        // its one header and its body; the total length is the body's own, so WinHTTP writes
+        // `Content-Length` and sends the body in one piece.
+        let headers: Option<Vec<u16>> = request_of
+            .call
+            .headers
+            .map(|headers| headers.encode_utf16().collect());
+        let body = request_of.call.body;
+        let data = (!body.is_empty()).then(|| body.as_ptr().cast::<std::ffi::c_void>());
+
+        // SAFETY: `request` is the handle just opened; the headers are a live buffer of this frame
+        // whose length the crate passes beside it, and `data` points into `body`, which the caller
+        // owns for the length of this call and which the call only reads — `request_of.length`
+        // bytes of it, its whole length.
+        let sent = unsafe {
+            WinHttpSendRequest(
+                request,
+                headers.as_deref(),
+                data,
+                request_of.length,
+                request_of.length,
+                0,
+            )
+        };
 
         let answer = if sent.is_err() {
             crate::app::report_non_critical(
@@ -11255,12 +11417,16 @@ pub mod feed {
                     &windows::core::Error::from_thread(),
                 );
                 None
-            } else if status_of(request) != 200 {
-                // A status that is not 200 is a refusal like any other and is not journalled
-                // with its number: SEC-07, and the number is the host's business.
+            } else if status_of(request) != request_of.call.expect {
+                // A status that is not the one expected — 200 for the read, 201 for an appeal — is
+                // a refusal like any other and is not journalled with its number: SEC-07, and the
+                // number is the host's business.
                 None
             } else {
-                drain(request, cap, sink)
+                match read {
+                    Some((cap, sink)) => drain(request, cap, sink),
+                    None => Some(0),
+                }
             }
         };
 
@@ -11579,5 +11745,241 @@ pub mod feed {
                 version: if is_update { self.version } else { None },
             })
         }
+    }
+}
+
+// =========================================================================================
+// 13. The appeal of the wizard — FR-104, решения 199.1…199.12, задача T-107-2
+// =========================================================================================
+
+/// **What the wizard sends to the site, and how** — решения 199.1, 199.7, 199.9 и 199.12.
+///
+/// # What goes, and what never does
+///
+/// Exactly the text the last step of the wizard showed the person (199.1: for a trouble what the
+/// boxes of FR-104 let in, for an idea the person's words and the version), the language of the
+/// interface, the kind of the appeal, the version of the program, the contact **if** the person
+/// wrote one, and a nonce that makes a repeated press one appeal and not two. Nothing else: no
+/// identifier of the machine, no name of the person, nothing the person did not see on the screen.
+/// The address the site sees is the site's business (199.4: kept in memory against the floods
+/// and never written beside the appeal).
+///
+/// # When
+///
+/// Only when the person presses «Отправить» (199.5, 199.12: «уходит на сайт, только когда вы сами
+/// нажмёте «Отправить»»), and again only when they press «Повторить» — on a thread of its own
+/// that lives one request ([`super::start_appeal`]). Never on its own, never in the background,
+/// never a second time behind the person's back.
+///
+/// # The test folder of the site
+///
+/// `"test": true` sends an appeal into the folder «Тест» of the site, with no notice to the author
+/// and cleared after seven days (199.7, 199.9). **Only a build with the `testing` feature writes
+/// it** — the stand of TZ E107; the code that writes the field does not exist in a Release image,
+/// and `the_shipped_body_carries_no_test_field` holds that.
+pub mod appeal {
+    use super::{feed, links, report};
+
+    /// The longest contact the site takes, in characters — 199.7. The field of the wizard does
+    /// not let more be typed, and [`contact_of`] cuts it here a second time.
+    pub const CONTACT_MAX: usize = 200;
+
+    /// `Content-Type` of the body — 199.7.
+    pub const CONTENT_TYPE: &str = "application/json; charset=utf-8";
+
+    /// **How long one appeal waits — 15 seconds at the very most** (TZ E107 §0 п. 10: «не больше
+    /// 15 с всего»): 3 for the name, 4 for the connection, 4 for the sending, 4 for the answer.
+    ///
+    /// Why so much shorter than the feed's 60: a person is looking at «Отправляется…» and waiting,
+    /// and a press that hangs for a minute reads as a program that hung. The site answers in well
+    /// under a second (201.1: three appeals of premise П2 in one second of the clock), so four
+    /// seconds a stage is room for a slow network and not for a dead one; a dead one ends in
+    /// «Не удалось отправить», where «Повторить» and the letter wait.
+    pub const TIMEOUTS: feed::Timeouts = feed::Timeouts {
+        resolve: 3_000,
+        connect: 4_000,
+        send: 4_000,
+        receive: 4_000,
+    };
+
+    /// `type` of the body — the two kinds the site knows (199.7). A `match` without a wildcard on
+    /// purpose: a fourth card of the first step does not compile until somebody has said which of
+    /// the two it is.
+    pub fn kind_of(trouble: report::Trouble) -> &'static str {
+        match trouble {
+            report::Trouble::WrongResult | report::Trouble::NothingHappened => "error",
+            report::Trouble::Idea => "wish",
+        }
+    }
+
+    /// One appeal, as it goes.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Appeal<'a> {
+        /// [`kind_of`] the first step.
+        pub kind: &'static str,
+        /// The tag of the language of the interface — `settings::Language::tag`.
+        pub lang: &'a str,
+        /// The version of this build, `X.Y.Z`.
+        pub version: &'a str,
+        /// The text the field of the last step holds — what the person saw.
+        pub text: &'a str,
+        /// What the person typed into «Как с вами связаться», as typed; empty when nothing.
+        pub contact: &'a str,
+        /// [`nonce`] of this appeal — one for every press of this appeal (199.7 (б)).
+        pub nonce: &'a str,
+    }
+
+    /// The contact as it goes: without the spaces around it and at most [`CONTACT_MAX`]
+    /// characters. Empty means **no field at all** in the body (199.9: `null` is a 400).
+    pub fn contact_of(typed: &str) -> String {
+        let cut: String = typed.trim().chars().take(CONTACT_MAX).collect();
+
+        cut.trim_end().to_owned()
+    }
+
+    /// **The body of the `POST`** — 199.7 and 199.9 word for word: `schema`, `type`, `lang`,
+    /// `version`, `text`, `contact` only when there is one, `nonce` — and `test` only in a build of
+    /// the stand. A pure function of its argument, so the tests read exactly what goes.
+    ///
+    /// Written by hand rather than through a crate: the list of crates is closed (C2), the body
+    /// is seven fields, and [`string`] is the whole of JSON a string needs.
+    pub fn body(appeal: &Appeal<'_>) -> String {
+        let mut out = String::with_capacity(appeal.text.len() + appeal.contact.len() + 192);
+
+        out.push_str("{\"schema\":1,\"type\":");
+        string(&mut out, appeal.kind);
+        out.push_str(",\"lang\":");
+        string(&mut out, appeal.lang);
+        out.push_str(",\"version\":");
+        string(&mut out, appeal.version);
+        out.push_str(",\"text\":");
+        string(&mut out, appeal.text);
+
+        let contact = contact_of(appeal.contact);
+
+        // ⚠ **Absent, not `null` and not `""`** — 199.9: the site answers `null` with 400, and an
+        // empty string would be a contact that says nothing.
+        if !contact.is_empty() {
+            out.push_str(",\"contact\":");
+            string(&mut out, &contact);
+        }
+
+        out.push_str(",\"nonce\":");
+        string(&mut out, appeal.nonce);
+
+        // ⛔ **The stand's folder, and only the stand's.** Under `testing` the site files the appeal
+        // under «Тест» (199.9); without the feature this line is not compiled, so no Release build
+        // can send it — the field is not switched off there, it does not exist.
+        #[cfg(feature = "testing")]
+        out.push_str(",\"test\":true");
+
+        out.push('}');
+        out
+    }
+
+    /// One JSON string — RFC 8259 § 7: the quotation mark, the reverse solidus and the control
+    /// characters escaped, everything else as it is (the body is UTF-8, 199.7).
+    pub fn string(out: &mut String, value: &str) {
+        out.push('"');
+
+        for character in value.chars() {
+            match character {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                control if u32::from(control) < 0x20 => {
+                    out.push_str(&format!("\\u{:04x}", u32::from(control)));
+                }
+                other => out.push(other),
+            }
+        }
+
+        out.push('"');
+    }
+
+    /// **A fresh nonce** — 32 lowercase hexadecimal digits of 16 bytes from the system's own
+    /// generator (`BCryptGenRandom`, the preferred one of the system), 199.7 (б) and 199.8 (2).
+    /// `None` when the system refused, and then the appeal is not sent: a nonce that is not random
+    /// would make two people's appeals one.
+    pub fn nonce() -> Option<String> {
+        use windows::Win32::Security::Cryptography::{
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
+        };
+
+        let mut bytes = [0u8; 16];
+
+        // SAFETY: `bytes` is a live local the call fills, and the crate passes its length; no
+        // algorithm handle is needed with the flag of the system's preferred generator.
+        let drawn = unsafe { BCryptGenRandom(None, &mut bytes, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+
+        if drawn.is_err() {
+            crate::app::report_non_critical(
+                "BCryptGenRandom",
+                &windows::core::Error::from_hresult(drawn.to_hresult()),
+            );
+            return None;
+        }
+
+        Some(hex(&bytes))
+    }
+
+    /// **The nonce of an appeal: the one it has, or a fresh one the first time** — 199.7 (б):
+    /// «Повторить» sends the nonce of the first press, so the site answers a repeat with the same
+    /// 201 and records the appeal once. `draw` is asked only when there is none yet; `None` when it
+    /// is asked and refuses.
+    pub fn keep_or_draw(
+        kept: &mut Option<String>,
+        draw: impl FnOnce() -> Option<String>,
+    ) -> Option<&str> {
+        if kept.is_none() {
+            *kept = draw();
+        }
+
+        kept.as_deref()
+    }
+
+    /// Bytes as lowercase hexadecimal digits, two to a byte.
+    pub fn hex(bytes: &[u8]) -> String {
+        const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+        let mut out = String::with_capacity(bytes.len() * 2);
+
+        for &byte in bytes {
+            out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+            out.push(char::from(DIGITS[usize::from(byte & 0x0F)]));
+        }
+
+        out
+    }
+
+    /// **Sends one body to [`links::APPEAL_URL`], and whether the site took it** — `true` only for
+    /// `201`. Blocks for at most [`TIMEOUTS`]; called on the thread of [`super::start_appeal`].
+    ///
+    /// The journal gets the fact and never a byte of the appeal (SEC-01, SEC-07): «appeal request»
+    /// before anything leaves, «appeal sent» or «appeal refused» after.
+    pub fn send(body: &str) -> bool {
+        let Some(target) = feed::target_of(links::APPEAL_URL) else {
+            return false;
+        };
+
+        crate::diag::record(
+            crate::diag::Operation::from_name("appeal request"),
+            crate::diag::OsCode::NONE,
+        );
+
+        let sent = feed::post(&target, CONTENT_TYPE, body.as_bytes(), TIMEOUTS);
+
+        crate::diag::record(
+            crate::diag::Operation::from_name(if sent {
+                "appeal sent"
+            } else {
+                "appeal refused"
+            }),
+            crate::diag::OsCode::NONE,
+        );
+
+        sent
     }
 }

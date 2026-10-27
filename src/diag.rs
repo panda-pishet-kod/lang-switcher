@@ -814,6 +814,21 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the keys, not which of the reasons, not the
     // window. `Kind::Process` and **no new `Kind`**, the rule every note above follows.
     ("classic console replacement refused", Kind::Process),
+    // ⭐ **Stage E107, task T-107-2, decisions 199.1 and 199.7** — the appeal of the wizard goes to
+    // the site by one `POST` when the person presses «Отправить». «appeal request» is written
+    // before anything leaves — the line that says a request was made at all, as «feed request» is
+    // for the read — and one of the next two after the answer. The two calls are the steps the
+    // read did not have: switching off the redirections of the request and drawing the nonce.
+    // Appended at the end so that no index above them moves.
+    //
+    // ⚠ **A fact and no value (SEC-01, SEC-07)** — not the address, not the status, not a byte of
+    // the text or of the contact. `Kind::Process` and **no new `Kind`**, the rule every note above
+    // follows.
+    ("appeal request", Kind::Process),
+    ("appeal sent", Kind::Process),
+    ("appeal refused", Kind::Process),
+    ("WinHttpSetOption", Kind::Process),
+    ("BCryptGenRandom", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
