@@ -793,3 +793,117 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
         println!("{what}: {}", refused.join(" | "));
     }
 }
+
+// -----------------------------------------------------------------------------------------------
+// The context of the strings — res/lang/context.tsv, task T-L10N-5
+// -----------------------------------------------------------------------------------------------
+
+/// The rows of `context.tsv`: id, window, control, room_px, placeholders, note.
+fn context() -> Vec<Vec<String>> {
+    let path = resource_script::root().join("res/lang/context.tsv");
+    let text = std::fs::read_to_string(&path).expect("res/lang/context.tsv must be readable");
+    let mut lines = text
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty());
+    assert_eq!(
+        lines.next(),
+        Some("id\twindow\tcontrol\troom_px\tplaceholders\tnote"),
+        "the heading of context.tsv"
+    );
+    lines
+        .map(|line| line.split('\t').map(str::to_owned).collect())
+        .collect()
+}
+
+/// **`context.tsv` has one row for every string of `en.rc` and for nothing else**, six cells in
+/// each, a window and a room in every row, every substitution of the English string named in
+/// its placeholders, and every control it names standing in the template of its window — so a
+/// translator reading a row reads a place that exists.
+#[test]
+fn the_context_has_one_row_for_every_string_and_names_real_places() {
+    let english = english();
+    let rows = context();
+    let script = resource_script::resource_script();
+
+    // The controls of every template of app.rc, by dialog.
+    let mut templates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut dialog: Option<String> = None;
+    for line in script.lines() {
+        if let Some((name, _)) = line.split_once(" DIALOGEX") {
+            dialog = Some(name.trim().to_owned());
+            continue;
+        }
+        if line.trim() == "END" {
+            dialog = None;
+        }
+        if let Some(dialog) = &dialog {
+            for word in line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+                if word.starts_with("IDC_") || word == "IDOK" || word == "IDCANCEL" {
+                    templates
+                        .entry(dialog.clone())
+                        .or_default()
+                        .insert(word.to_owned());
+                }
+            }
+        }
+    }
+
+    let mut wrong = Vec::new();
+    let mut seen = BTreeSet::new();
+    for row in &rows {
+        let id = row[0].as_str();
+        if row.len() != 6 {
+            wrong.push(format!("{id}: {} cells, not 6", row.len()));
+            continue;
+        }
+        if !seen.insert(id.to_owned()) {
+            wrong.push(format!("{id}: two rows"));
+        }
+        let Some(original) = english.strings.get(id) else {
+            wrong.push(format!("{id}: a row for a string en.rc does not have"));
+            continue;
+        };
+        for (cell, name) in [
+            (1, "window"),
+            (3, "room_px"),
+            (4, "placeholders"),
+            (5, "note"),
+        ] {
+            if row[cell].trim().is_empty() {
+                wrong.push(format!("{id}: an empty {name}"));
+            }
+        }
+        for placeholder in placeholders(original) {
+            if !row[4].contains(&placeholder) {
+                wrong.push(format!(
+                    "{id}: placeholders do not say what {placeholder} carries"
+                ));
+            }
+        }
+        let windows: Vec<&str> = row[1].split(',').collect();
+        for control in row[2]
+            .split(',')
+            .filter(|c| c.starts_with("IDC_") || c.starts_with("ID"))
+        {
+            let known = windows.iter().any(|window| {
+                templates
+                    .get(*window)
+                    .is_some_and(|set| set.contains(control))
+            });
+            if !known {
+                wrong.push(format!("{id}: {control} is in no template of {}", row[1]));
+            }
+        }
+    }
+    for id in english.strings.keys() {
+        if !seen.contains(id) {
+            wrong.push(format!("{id}: no row in context.tsv"));
+        }
+    }
+    println!(
+        "context.tsv: {} rows, {} templates",
+        rows.len(),
+        templates.len()
+    );
+    assert!(wrong.is_empty(), "context.tsv:\n{}", wrong.join("\n"));
+}
