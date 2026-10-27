@@ -1,0 +1,876 @@
+# res/lang/languages.toml -- the registry of the languages of the interface. Stage L10N, task T-L10N-4.
+#
+# One entry per language: the fourteen the program ships (group "shipped", the order of
+# `Language::ALL`) and the fifty of decisions 198.13/198.14 -- group A (28: own script or switched
+# with Russian all the time) and group B (22: Latin with letters of its own), in the order of
+# reports/LANGUAGES-UI-TRANSLATION-2026-10-27.md of the control folder.
+#
+#   tag            the value of `[general] language` and the `[item.<tag>]` of the feed
+#   locale         the Windows locale of the interface language (table 198.13)
+#   langid         its LANGID, measured on the host: LocaleNameToLCID(locale) and back
+#                  LCIDToLocaleName (scratchpad-L10N/measure-langid.ps1, 69 of 69 round trips);
+#                  the LANGUAGE statement of res/lang/<tag>.rc says the same number
+#   name_en        what Windows calls the language in English (LOCALE_SENGLISHLANGUAGENAME)
+#   endonym        the name in the language chooser. For "shipped" -- `Language::native_name`,
+#                  character for character (tests/l10n.rs). For "planned" -- what Windows calls it
+#                  in itself (LOCALE_SNATIVELANGUAGENAME), first letter capital: a proposal the
+#                  translator confirms
+#   script         ISO 15924, as Windows reports it (LOCALE_SSCRIPTS)
+#   rtl            right to left (LOCALE_IREADINGLAYOUT = 1)
+#   inno           the name of the language of the installer, as the file installer/lang/<inno>.isl
+#   inno_official  Inno Setup 6.7.3 ships a translation of its own messages (Languages/<inno>.isl)
+#   group          shipped | A | B
+#   state          shipped | planned
+#   note           only where a choice is the owner's (TZ L10N, decision 6): the value written is
+#                  the one of the Windows interface, the alternatives are measured and listed
+#
+# ⚠ `language` of the configuration is a closed set (SPEC section 7): a new value raises
+# `schema_version`, once per stage of translations -- not here (TZ L10N, decision 7).
+
+[[language]]
+tag = "ru"
+locale = "ru-RU"
+langid = 0x0419
+name_en = "Russian"
+endonym = "Русский"
+script = "Cyrl"
+rtl = false
+inno = "Russian"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "en"
+locale = "en-US"
+langid = 0x0409
+name_en = "English"
+endonym = "English"
+script = "Latn"
+rtl = false
+inno = "English"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "uk"
+locale = "uk-UA"
+langid = 0x0422
+name_en = "Ukrainian"
+endonym = "Українська"
+script = "Cyrl"
+rtl = false
+inno = "Ukrainian"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "de"
+locale = "de-DE"
+langid = 0x0407
+name_en = "German"
+endonym = "Deutsch"
+script = "Latn"
+rtl = false
+inno = "German"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "fr"
+locale = "fr-FR"
+langid = 0x040C
+name_en = "French"
+endonym = "Français"
+script = "Latn"
+rtl = false
+inno = "French"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "es"
+locale = "es-ES_tradnl"
+langid = 0x040A
+name_en = "Spanish"
+endonym = "Español"
+script = "Latn"
+rtl = false
+inno = "Spanish"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "pt"
+locale = "pt-BR"
+langid = 0x0416
+name_en = "Portuguese (Brazil)"
+endonym = "Português (Brasil)"
+script = "Latn"
+rtl = false
+inno = "BrazilianPortuguese"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "it"
+locale = "it-IT"
+langid = 0x0410
+name_en = "Italian"
+endonym = "Italiano"
+script = "Latn"
+rtl = false
+inno = "Italian"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "pl"
+locale = "pl-PL"
+langid = 0x0415
+name_en = "Polish"
+endonym = "Polski"
+script = "Latn"
+rtl = false
+inno = "Polish"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "cs"
+locale = "cs-CZ"
+langid = 0x0405
+name_en = "Czech"
+endonym = "Čeština"
+script = "Latn"
+rtl = false
+inno = "Czech"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "tr"
+locale = "tr-TR"
+langid = 0x041F
+name_en = "Turkish"
+endonym = "Türkçe"
+script = "Latn"
+rtl = false
+inno = "Turkish"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "el"
+locale = "el-GR"
+langid = 0x0408
+name_en = "Greek"
+endonym = "Ελληνικά"
+script = "Grek"
+rtl = false
+inno = "Greek"
+inno_official = false
+group = "shipped"
+state = "shipped"
+note = "the installer has no Greek: Inno 6.7.3 ships no Greek.isl, the Greek user gets English (155.11)"
+
+[[language]]
+tag = "he"
+locale = "he-IL"
+langid = 0x040D
+name_en = "Hebrew"
+endonym = "עברית"
+script = "Hebr"
+rtl = true
+inno = "Hebrew"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+[[language]]
+tag = "ar"
+locale = "ar-SA"
+langid = 0x0401
+name_en = "Arabic"
+endonym = "العربية"
+script = "Arab"
+rtl = true
+inno = "Arabic"
+inno_official = true
+group = "shipped"
+state = "shipped"
+
+# ---------------------------------------------------------------------------------------------
+# Group A -- 28 languages: own script, or switched with Russian all the time; Windows has the UI.
+# ---------------------------------------------------------------------------------------------
+
+[[language]]
+tag = "hi"
+locale = "hi-IN"
+langid = 0x0439
+name_en = "Hindi"
+endonym = "हिन्दी"
+script = "Deva"
+rtl = false
+inno = "Hindi"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "bn"
+locale = "bn-IN"
+langid = 0x0445
+name_en = "Bengali"
+endonym = "বাংলা"
+script = "Beng"
+rtl = false
+inno = "Bengali"
+inno_official = false
+group = "A"
+state = "planned"
+note = "variant: Windows has the LIP bn-IN (India); bn-BD (Bangladesh) is 0x0845 -- the owner chooses"
+
+[[language]]
+tag = "ur"
+locale = "ur-PK"
+langid = 0x0420
+name_en = "Urdu"
+endonym = "اردو"
+script = "Arab"
+rtl = true
+inno = "Urdu"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "pa"
+locale = "pa-IN"
+langid = 0x0446
+name_en = "Punjabi"
+endonym = "ਪੰਜਾਬੀ"
+script = "Guru"
+rtl = false
+inno = "Punjabi"
+inno_official = false
+group = "A"
+state = "planned"
+note = "variant: Windows has the LIP pa-IN (Gurmukhi); pa-Arab-PK (Shahmukhi, right to left) is 0x0846 -- the owner chooses"
+
+[[language]]
+tag = "mr"
+locale = "mr-IN"
+langid = 0x044E
+name_en = "Marathi"
+endonym = "मराठी"
+script = "Deva"
+rtl = false
+inno = "Marathi"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "te"
+locale = "te-IN"
+langid = 0x044A
+name_en = "Telugu"
+endonym = "తెలుగు"
+script = "Telu"
+rtl = false
+inno = "Telugu"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "ta"
+locale = "ta-IN"
+langid = 0x0449
+name_en = "Tamil"
+endonym = "தமிழ்"
+script = "Taml"
+rtl = false
+inno = "Tamil"
+inno_official = true
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "fa"
+locale = "fa-IR"
+langid = 0x0429
+name_en = "Persian"
+endonym = "فارسی"
+script = "Arab"
+rtl = true
+inno = "Persian"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "gu"
+locale = "gu-IN"
+langid = 0x0447
+name_en = "Gujarati"
+endonym = "ગુજરાતી"
+script = "Gujr"
+rtl = false
+inno = "Gujarati"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "th"
+locale = "th-TH"
+langid = 0x041E
+name_en = "Thai"
+endonym = "ไทย"
+script = "Thai"
+rtl = false
+inno = "Thai"
+inno_official = true
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "kn"
+locale = "kn-IN"
+langid = 0x044B
+name_en = "Kannada"
+endonym = "ಕನ್ನಡ"
+script = "Knda"
+rtl = false
+inno = "Kannada"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "or"
+locale = "or-IN"
+langid = 0x0448
+name_en = "Odia"
+endonym = "ଓଡ଼ିଆ"
+script = "Orya"
+rtl = false
+inno = "Odia"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "ml"
+locale = "ml-IN"
+langid = 0x044C
+name_en = "Malayalam"
+endonym = "മലയാളം"
+script = "Mlym"
+rtl = false
+inno = "Malayalam"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "uz"
+locale = "uz-Latn-UZ"
+langid = 0x0443
+name_en = "Uzbek (Latin)"
+endonym = "O‘zbek"
+script = "Latn"
+rtl = false
+inno = "Uzbek"
+inno_official = false
+group = "A"
+state = "planned"
+note = "variant: Windows has the LIP uz-Latn-UZ; uz-Cyrl-UZ is 0x0843 -- the owner chooses"
+
+[[language]]
+tag = "ne"
+locale = "ne-NP"
+langid = 0x0461
+name_en = "Nepali"
+endonym = "नेपाली"
+script = "Deva"
+rtl = false
+inno = "Nepali"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "as"
+locale = "as-IN"
+langid = 0x044D
+name_en = "Assamese"
+endonym = "অসমীয়া"
+script = "Beng"
+rtl = false
+inno = "Assamese"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "az"
+locale = "az-Latn-AZ"
+langid = 0x042C
+name_en = "Azerbaijani (Latin)"
+endonym = "Azərbaycan"
+script = "Latn"
+rtl = false
+inno = "Azerbaijani"
+inno_official = false
+group = "A"
+state = "planned"
+note = "variant: Windows has the LIP az-Latn-AZ; az-Cyrl-AZ is 0x082C -- the owner chooses"
+
+[[language]]
+tag = "km"
+locale = "km-KH"
+langid = 0x0453
+name_en = "Khmer"
+endonym = "ខ្មែរ"
+script = "Khmr"
+rtl = false
+inno = "Khmer"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "kk"
+locale = "kk-KZ"
+langid = 0x043F
+name_en = "Kazakh"
+endonym = "Қазақ тілі"
+script = "Cyrl"
+rtl = false
+inno = "Kazakh"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "sr"
+locale = "sr-Latn-RS"
+langid = 0x241A
+name_en = "Serbian (Latin)"
+endonym = "Srpski"
+script = "Latn"
+rtl = false
+inno = "SerbianLatin"
+inno_official = false
+group = "A"
+state = "planned"
+note = "variant: Windows has the language pack sr-Latn-RS and the LIP sr-Cyrl-RS (0x281A); both scripts share the primary tag sr -- the owner chooses one, or both as two languages"
+
+[[language]]
+tag = "ug"
+locale = "ug-CN"
+langid = 0x0480
+name_en = "Uyghur"
+endonym = "ئۇيغۇرچە"
+script = "Arab"
+rtl = true
+inno = "Uyghur"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "bg"
+locale = "bg-BG"
+langid = 0x0402
+name_en = "Bulgarian"
+endonym = "Български"
+script = "Cyrl"
+rtl = false
+inno = "Bulgarian"
+inno_official = true
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "hy"
+locale = "hy-AM"
+langid = 0x042B
+name_en = "Armenian"
+endonym = "Հայերեն"
+script = "Armn"
+rtl = false
+inno = "Armenian"
+inno_official = true
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "lo"
+locale = "lo-LA"
+langid = 0x0454
+name_en = "Lao"
+endonym = "ລາວ"
+script = "Laoo"
+rtl = false
+inno = "Lao"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "be"
+locale = "be-BY"
+langid = 0x0423
+name_en = "Belarusian"
+endonym = "Беларуская"
+script = "Cyrl"
+rtl = false
+inno = "Belarusian"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "tt"
+locale = "tt-RU"
+langid = 0x0444
+name_en = "Tatar"
+endonym = "Татар"
+script = "Cyrl"
+rtl = false
+inno = "Tatar"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "ka"
+locale = "ka-GE"
+langid = 0x0437
+name_en = "Georgian"
+endonym = "ქართული"
+script = "Geor"
+rtl = false
+inno = "Georgian"
+inno_official = false
+group = "A"
+state = "planned"
+
+[[language]]
+tag = "mk"
+locale = "mk-MK"
+langid = 0x042F
+name_en = "Macedonian"
+endonym = "Македонски"
+script = "Cyrl"
+rtl = false
+inno = "Macedonian"
+inno_official = false
+group = "A"
+state = "planned"
+
+# ---------------------------------------------------------------------------------------------
+# Group B -- 22 languages: Latin with letters of its own; Windows has the UI.
+# ---------------------------------------------------------------------------------------------
+
+[[language]]
+tag = "vi"
+locale = "vi-VN"
+langid = 0x042A
+name_en = "Vietnamese"
+endonym = "Tiếng Việt"
+script = "Latn"
+rtl = false
+inno = "Vietnamese"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "nl"
+locale = "nl-NL"
+langid = 0x0413
+name_en = "Dutch"
+endonym = "Nederlands"
+script = "Latn"
+rtl = false
+inno = "Dutch"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "ro"
+locale = "ro-RO"
+langid = 0x0418
+name_en = "Romanian"
+endonym = "Română"
+script = "Latn"
+rtl = false
+inno = "Romanian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "hu"
+locale = "hu-HU"
+langid = 0x040E
+name_en = "Hungarian"
+endonym = "Magyar"
+script = "Latn"
+rtl = false
+inno = "Hungarian"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "sv"
+locale = "sv-SE"
+langid = 0x041D
+name_en = "Swedish"
+endonym = "Svenska"
+script = "Latn"
+rtl = false
+inno = "Swedish"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "sq"
+locale = "sq-AL"
+langid = 0x041C
+name_en = "Albanian"
+endonym = "Shqip"
+script = "Latn"
+rtl = false
+inno = "Albanian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "da"
+locale = "da-DK"
+langid = 0x0406
+name_en = "Danish"
+endonym = "Dansk"
+script = "Latn"
+rtl = false
+inno = "Danish"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "fi"
+locale = "fi-FI"
+langid = 0x040B
+name_en = "Finnish"
+endonym = "Suomi"
+script = "Latn"
+rtl = false
+inno = "Finnish"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "hr"
+locale = "hr-HR"
+langid = 0x041A
+name_en = "Croatian"
+endonym = "Hrvatski"
+script = "Latn"
+rtl = false
+inno = "Croatian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "sk"
+locale = "sk-SK"
+langid = 0x041B
+name_en = "Slovak"
+endonym = "Slovenčina"
+script = "Latn"
+rtl = false
+inno = "Slovak"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "nb"
+locale = "nb-NO"
+langid = 0x0414
+name_en = "Norwegian Bokmål"
+endonym = "Norsk bokmål"
+script = "Latn"
+rtl = false
+inno = "Norwegian"
+inno_official = true
+group = "B"
+state = "planned"
+note = "two languages, as in 198.13: Bokmål (this entry, Inno Norwegian.isl is $0414) and Nynorsk (nn)"
+
+[[language]]
+tag = "lt"
+locale = "lt-LT"
+langid = 0x0427
+name_en = "Lithuanian"
+endonym = "Lietuvių"
+script = "Latn"
+rtl = false
+inno = "Lithuanian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "sl"
+locale = "sl-SI"
+langid = 0x0424
+name_en = "Slovenian"
+endonym = "Slovenščina"
+script = "Latn"
+rtl = false
+inno = "Slovenian"
+inno_official = true
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "bs"
+locale = "bs-Latn-BA"
+langid = 0x141A
+name_en = "Bosnian (Latin)"
+endonym = "Bosanski"
+script = "Latn"
+rtl = false
+inno = "Bosnian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "lv"
+locale = "lv-LV"
+langid = 0x0426
+name_en = "Latvian"
+endonym = "Latviešu"
+script = "Latn"
+rtl = false
+inno = "Latvian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "et"
+locale = "et-EE"
+langid = 0x0425
+name_en = "Estonian"
+endonym = "Eesti"
+script = "Latn"
+rtl = false
+inno = "Estonian"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "cy"
+locale = "cy-GB"
+langid = 0x0452
+name_en = "Welsh"
+endonym = "Cymraeg"
+script = "Latn"
+rtl = false
+inno = "Welsh"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "mt"
+locale = "mt-MT"
+langid = 0x043A
+name_en = "Maltese"
+endonym = "Malti"
+script = "Latn"
+rtl = false
+inno = "Maltese"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "is"
+locale = "is-IS"
+langid = 0x040F
+name_en = "Icelandic"
+endonym = "Íslenska"
+script = "Latn"
+rtl = false
+inno = "Icelandic"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "lb"
+locale = "lb-LU"
+langid = 0x046E
+name_en = "Luxembourgish"
+endonym = "Lëtzebuergesch"
+script = "Latn"
+rtl = false
+inno = "Luxembourgish"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "mi"
+locale = "mi-NZ"
+langid = 0x0481
+name_en = "Māori"
+endonym = "Māori"
+script = "Latn"
+rtl = false
+inno = "Maori"
+inno_official = false
+group = "B"
+state = "planned"
+
+[[language]]
+tag = "nn"
+locale = "nn-NO"
+langid = 0x0814
+name_en = "Norwegian Nynorsk"
+endonym = "Norsk nynorsk"
+script = "Latn"
+rtl = false
+inno = "NorwegianNynorsk"
+inno_official = false
+group = "B"
+state = "planned"
+note = "two languages, as in 198.13: Nynorsk (this entry; no Inno translation) and Bokmål (nb)"
