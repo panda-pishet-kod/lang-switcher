@@ -69,10 +69,11 @@ Portuguese, Italian, Polish, Czech, Turkish, Greek, Hebrew and Arabic (the last 
 
 **Typing.** The program converts between any two Windows keyboard layouts installed on your
 computer, except layouts with an IME (Chinese, Japanese, Korean), where a character is built from
-several keys in a candidate window. It was **measured** on the layouts of Windows 11 for **106**
-languages: 16 Cyrillic, 45 Latin with letters of their own, 34 with a script of their own (Arabic,
-Hebrew, Greek, Armenian, Georgian, Thai, the Indian scripts and more) and 11 smaller scripts
-(Cherokee, Inuktitut syllabics, Javanese, ADLaM and others).
+several keys in a candidate window. It was **measured** on the layouts of Windows 11 for **107**
+languages and scripts: 16 Cyrillic, 45 Latin with letters of their own, 34 with a script of their
+own (Arabic, Hebrew, Greek, Armenian, Georgian, Thai, the Indian scripts and more) and the smaller
+scripts (Cherokee, Javanese, ADLaM, Inuktitut — counted twice, in syllabics and in Latin letters —
+and others).
 
 The finer points:
 
