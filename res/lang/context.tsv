@@ -27,9 +27,9 @@ IDS_EXCLUSION_AUTO	IDD_SETTINGS	IDC_EXCLUSION_AUTO_LABEL	326x19	-	-
 IDS_EXCLUSION_MANUAL	IDD_SETTINGS	IDC_EXCLUSION_MANUAL_LABEL	326x19	-	-
 IDS_EXCLUSION_PICK	IDD_SETTINGS	IDC_EXCLUSION_PICK	326x30	-	-
 IDS_EXCLUSION_PICK_NOTE	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	-	-
-IDS_EXCLUSION_PICK_COUNT	IDD_SETTINGS	IDC_EXCLUSION_PICK	326x30	{0} = seconds left, «5» (code: seconds.to_string().as_str())	the caption of the button while it counts down
-IDS_EXCLUSION_ADDED	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	{0} = a process name, «notepad.exe» (code: name.as_str())	number as «label: {0}»
-IDS_EXCLUSION_ALREADY	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	{0} = a process name, «notepad.exe» (code: name.as_str())	number as «label: {0}»
+IDS_EXCLUSION_PICK_COUNT	IDD_SETTINGS	IDC_EXCLUSION_PICK	326x30	{0} = seconds left, «5» (code: seconds.to_string().as_str())	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7); the caption of the button while it counts down
+IDS_EXCLUSION_ADDED	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	{0} = a process name, «notepad.exe» (code: name.as_str())	-
+IDS_EXCLUSION_ALREADY	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	{0} = a process name, «notepad.exe» (code: name.as_str())	-
 IDS_EXCLUSION_NOT_PICKED	IDD_SETTINGS	IDC_EXCLUSION_PICK_NOTE	326x36 (2 lines)	-	-
 IDS_GROUP_DIAGNOSTICS	IDD_SETTINGS	IDC_GROUP_DIAGNOSTICS	350x17	-	-
 IDS_LOG_ENABLED	IDD_SETTINGS	IDC_LOG_ENABLED	158x21	-	-
@@ -59,18 +59,18 @@ IDS_STATE_WORKING	IDD_SETTINGS	IDC_STATE_HOOK	704x19	-	-
 IDS_STATE_SUSPENDED	IDD_SETTINGS	IDC_STATE_HOOK	704x19	-	-
 IDS_STATE_HOOK_ABSENT	IDD_SETTINGS	IDC_STATE_HOOK	704x19	-	-
 IDS_STATE_DISABLED	IDD_SETTINGS	IDC_STATE_HOOK	704x19	-	-
-IDS_STATE_HEALTH	IDD_SETTINGS	IDC_STATE_HOOK	704x19	{0} {1} {2}	number as «label: {0}»
+IDS_STATE_HEALTH	IDD_SETTINGS	IDC_STATE_HOOK	704x19	{0} {1} {2}	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
 IDS_STATE_PAIR	IDD_SETTINGS	IDC_STATE_PAIR	704x19	{0} = a layout, «English (US)»; {1} = a layout, «Russian» (code: source, target)	-
-IDS_STATE_CYCLE	IDD_SETTINGS	IDC_STATE_PAIR	704x19	{0} = the layouts of the cycle, «English (US) → Russian» (code: &names.join(" → "))	number as «label: {0}»
+IDS_STATE_CYCLE	IDD_SETTINGS	IDC_STATE_PAIR	704x19	{0} = the layouts of the cycle, «English (US) → Russian» (code: &names.join(&text(IDS_CYCLE_ARROW)))	-
 IDS_STATE_PAIR_NONE	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	-
 IDS_STATE_NO_FAILURES	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	-
-IDS_STATE_FAILURES	IDD_SETTINGS	IDC_STATE_PAIR	704x19	{0} = a count, «3» (code: &refusals.to_string())	number as «label: {0}»
+IDS_STATE_FAILURES	IDD_SETTINGS	IDC_STATE_PAIR	704x19	{0} = a count, «3» (code: &refusals.to_string())	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
 IDS_STATE_JOINED	IDD_SETTINGS	IDC_STATE_PAIR,IDC_STATE_HOOK	704x19	{0}, {1} = two parts of the line joined with « · » (code: &text(program.string_id()), &format_text( IDS_STATE_HEALTH, &[ &health.silent_removals.to_string(), &health.install_failures.to_string(), // **Task T-36-4, finding Н40 — the third number.** Presses the user // made that reached nobody: the callback recognised one, FR-95 had // already swallowed the key, and the handoff failed. A row of its own // was the other way to show it, and the appearance is frozen (слово // владельца 2026-09-10) — so it joins the line the panel already has. // // ⚠ `hook::lost_hotkeys` and not `hook::post_failures`: that counter is // shared with the layout probe of FR-21, whose failure costs a re-read // and nothing a person would care about. A number that summed the two // would mean nothing. &crate::hook::lost_hotkeys().to_string(), | &what, &refused)	not translated: the same in every language
-IDS_STATE_LAYOUTS	IDD_SETTINGS	IDC_STATE_LAYOUTS	704x19	{0} {1} {2} = code: &state.session.len().to_string(), &crate::guard::counters().exclusions.to_string(), &crate::diag::recorded().to_string(),	number as «label: {0}»
-IDS_STATE_AUTOSTART	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	{0} = IDS_AUTOSTART_PRESENT or IDS_AUTOSTART_ABSENT (code: &match autostart_value() { Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command)	a path of Windows: not translated; \\ is one backslash; number as «label: {0}»; HKCU\\…\\Run is a path of Windows
+IDS_STATE_LAYOUTS	IDD_SETTINGS	IDC_STATE_LAYOUTS	704x19	{0} {1} {2} = code: &state.session.len().to_string(), &crate::guard::counters().exclusions.to_string(), &crate::diag::recorded().to_string(),	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
+IDS_STATE_AUTOSTART	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	{0} = IDS_AUTOSTART_PRESENT or IDS_AUTOSTART_ABSENT (code: &match autostart_value() { Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command)	a path of Windows: not translated; \\ is one backslash; HKCU\\…\\Run is a path of Windows
 IDS_AUTOSTART_PRESENT	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	{0} = the path of LangSwitcher.exe	the value put into {0} of IDS_STATE_AUTOSTART
 IDS_AUTOSTART_ABSENT	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	-	the value put into {0} of IDS_STATE_AUTOSTART
-IDS_LAYOUT_NOTE	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	{0} = code: &unresolved.join(", ")	-
+IDS_LAYOUT_NOTE	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	{0} = code: &unresolved.join(&text(IDS_LIST_SEPARATOR))	-
 IDS_LAYOUT_WORD_SOURCE	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	a word put into {0} of IDS_LAYOUT_NOTE
 IDS_LAYOUT_WORD_TARGET	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	a word put into {0} of IDS_LAYOUT_NOTE
 IDS_LOG_DIR_MISSING	IDD_SETTINGS	IDC_LOG_DIR	326x34 (2 lines)	-	a path of Windows: not translated; \\ is one backslash
@@ -91,8 +91,8 @@ IDS_ABOUT_HELP_3	IDD_ABOUT	IDC_ABOUT_HELP_3	362x62 (3 lines)	{0}	key names as on
 IDS_ABOUT_HELP_4	IDD_ABOUT	IDC_ABOUT_HELP_4	362x40 (2 lines)	-	the number «4.» beside it is IDC_ABOUT_HELP_N4, not this string
 IDS_ABOUT_HELP_5	IDD_ABOUT	IDC_ABOUT_HELP_5	362x21	-	the number «5.» beside it is IDC_ABOUT_HELP_N5, not this string
 IDS_CAPTURE_HINT	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on the keyboards of the country
-IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip, after «Lang Switcher — »
-IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip, after «Lang Switcher — »
+IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
+IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_LETTER_CAPTION	IDD_LETTER	caption	window caption: 448 px wide	-	-
 IDS_CLOSE	IDD_LETTER,IDD_LETTERS_LIST,IDD_AUTHOR,IDD_WIZARD	IDC_LETTERS_CLOSE,IDC_AUTHOR_CLOSE	89x30	-	-
 IDS_CHANNEL_OPEN	IDD_LETTER,IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CHANNEL,IDC_WZ_CHANNEL	110x30	-	-
@@ -151,7 +151,7 @@ IDS_TOAST_THANKS	toast	text	balloon text: 255 characters	-	-
 IDS_TOAST_UPDATE_TITLE	toast	title	balloon title: 63 characters	{0} = the new version, «1.1.0»	-
 IDS_TOAST_UPDATE	toast	text	balloon text: 255 characters	-	-
 IDS_TOAST_WHATSNEW	toast	text	balloon text: 255 characters	-	-
-IDS_ABOUT_AUTHOR	IDD_ABOUT	IDC_ABOUT_AUTHOR	161x30	-	in 1.0.0 the button does not take this string: the template carries a Russian literal (finding of 2026-10-27, 15:36; stage E106)
+IDS_ABOUT_AUTHOR	IDD_ABOUT	IDC_ABOUT_AUTHOR	161x30	-	the button takes it since 1.1.0 (stage E106, T-106-2); in 1.0.0 it showed the Russian literal of the template
 IDS_ENTRY_UPDATE_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date; {1} = the installed version, «1.0.0» (code: &update.date.map_or_else(String::new, format_date), version)	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_ENTRY_UNREAD_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_ENTRY_READ_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
@@ -184,7 +184,7 @@ IDS_WIZARD_WHERE_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is la
 IDS_WIZARD_PROGRAM	report,IDD_WIZARD	IDC_WZ_PROGRAM_LABEL	105x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CAPTURE	IDD_WIZARD	IDC_WZ_CAPTURE	102x30	-	-
 IDS_WIZARD_CAPTURE_NOTE	IDD_WIZARD	IDC_WZ_CAPTURE_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CAPTURE_COUNT	IDD_WIZARD	IDC_WZ_CAPTURE	102x30	{0} = seconds left, «5» (code: &wizard.countdown.to_string())	the caption of the button while it counts down
+IDS_WIZARD_CAPTURE_COUNT	IDD_WIZARD	IDC_WZ_CAPTURE	102x30	{0} = seconds left, «5» (code: &wizard.countdown.to_string())	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7); the caption of the button while it counts down
 IDS_WIZARD_WHERE_FIELD	report	-	the text of the report: no limit	-	a line of the report text of the letter
 IDS_WIZARD_FIELD_NORMAL	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
 IDS_WIZARD_FIELD_PASSWORD	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
@@ -210,7 +210,7 @@ IDS_WIZARD_ATTACH_MACHINE	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
 IDS_WIZARD_ATTACH_LAYOUTS	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
 IDS_WIZARD_ATTACH_SETTINGS	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
 IDS_WIZARD_ATTACH_JOURNAL	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
-IDS_WIZARD_ATTACH_JOURNAL_SUB	IDD_WIZARD	IDC_WZ_ATTACH_V1	383x21	{0} = a count of journal entries, «42» (code: &entries)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_ATTACH_JOURNAL_SUB	IDD_WIZARD	IDC_WZ_ATTACH_V1	383x21	{0} = a count of journal entries, «42» (code: &entries)	the window is laid out when shown: the height grows with the text, the width does not; a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
 IDS_WIZARD_ATTACH_FOOT	IDD_WIZARD	IDC_WZ_ATTACH_FOOT	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_PREVIEW_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_PREVIEW_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -219,19 +219,22 @@ IDS_WIZARD_SAVE	IDD_WIZARD	IDC_WZ_SAVE	172x30	-	-
 IDS_WIZARD_COPIED_ONLY	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_MAIL_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_MAIL_ADDRESS	IDD_WIZARD	IDC_WZ_ADDRESS	406x21	{0} = the address, «send.me@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not; number as «label: {0}»
+IDS_WIZARD_MAIL_ADDRESS	IDD_WIZARD	IDC_WZ_ADDRESS	406x21	{0} = the address, «send.me@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_COPY_TEXT	IDD_WIZARD	IDC_WZ_COPY	228x30	-	-
 IDS_WIZARD_COPY_ADDRESS	IDD_WIZARD	IDC_WZ_COPY_ADDRESS	172x30	-	-
 IDS_WIZARD_TEXT_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = code: address | links::MAIL_ADDRESS	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_ADDRESS_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = the address of the letter (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_TOAST_UPDATED_TITLE	toast	title	balloon title: 63 characters	{0} = the new version, «1.1.0» (code: version)	Lang Switcher is not translated
 IDS_TOAST_UPDATED	toast	text	balloon text: 255 characters	-	-
-IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not; number as «label: {0}»
+IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_FAILED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_THANKYOU_BUG_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_THANKYOU_IDEA_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_THANKYOU_BUG_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_THANKYOU_IDEA_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_LIST_SEPARATOR	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	the separator of the list in {0} of IDS_LAYOUT_NOTE, «, » with its space; right to left: the separator of the language («،») is the translator's choice, the stand checks it
+IDS_CYCLE_ARROW	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	between the layouts of the cycle in {0} of IDS_STATE_CYCLE, « → » with its spaces; right to left: the direction of the arrow is the translator's choice, the stand checks it
+IDS_TIP_FORMAT	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	{0} = «Lang Switcher», not translated; {1} = IDS_TIP_ACTIVE or IDS_TIP_PAUSED (code: APP_NAME, &state)	the tooltip of the tray icon; the order and the joiner are the language's
 IDS_MENU_SUSPEND	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME_RESTART	menu	-	menu: grows with the text	-	-

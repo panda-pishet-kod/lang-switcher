@@ -1839,6 +1839,15 @@ END
 // block 3248..3263 the two above opened. {0} is the version of the running build.
 #define IDS_TOAST_UPDATED_TITLE 3249
 #define IDS_TOAST_UPDATED       3250
+// Stage L10N, task T-L10N-10 (decisions 200.10 and 200.10а): three pieces the code glued into its
+// text as literals until 1.1.0 -- the separator of a list («, » in IDS_LAYOUT_NOTE), the arrow
+// between the layouts of a cycle (« → » in IDS_STATE_CYCLE) and the form of the tooltip
+// («{0} — {1}»: the name of the program, its state). In every language the value is the literal
+// the code wrote, so no screen changes; a translation may now give its own (right to left: the
+// direction of the arrow, «،»). Block 3248..3263 again.
+#define IDS_LIST_SEPARATOR      3251
+#define IDS_CYCLE_ARROW         3252
+#define IDS_TIP_FORMAT          3253
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is

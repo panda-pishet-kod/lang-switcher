@@ -231,7 +231,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Layout nel sistema"
     IDS_WIZARD_ATTACH_SETTINGS "Impostazioni"
     IDS_WIZARD_ATTACH_JOURNAL "Registro del programma, dalla memoria"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} voci. Solo nomi di operazioni e codici di errore, nemmeno un tasto: è così che è fatto il registro"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Voci nel registro: {0}. Solo nomi di operazioni e codici di errore, nemmeno un tasto: è così che è fatto il registro"
     IDS_WIZARD_ATTACH_FOOT  "Non serve un file di registro: le voci stanno in memoria finché il programma è in esecuzione. Se il problema si ripete, accendi il registro nelle impostazioni e le voci sopravvivranno a un riavvio."
     IDS_WIZARD_PREVIEW_TITLE "Controlla e invia"
     IDS_WIZARD_PREVIEW_NOTE "Questo è tutto il testo del messaggio. Modifica quello che vuoi. Lo invii tu: il testo va negli appunti e GitHub Issues si apre nel browser."
@@ -253,6 +253,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Grazie per l'idea"
     IDS_THANKYOU_BUG_TEXT   "Leggo ogni messaggio io stesso. Gli errori li riparo, e ciò che conta per tutti lo racconto in una lettera nel programma o nel canale. È bello che tu abbia trovato il tempo 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Leggo ogni messaggio io stesso. Le idee vanno nel piano e le migliori le realizzo, e ciò che conta per tutti lo racconto in una lettera nel programma o nel canale. È bello che tu abbia trovato il tempo 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x10, 0x01

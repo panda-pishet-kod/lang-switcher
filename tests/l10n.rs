@@ -611,8 +611,8 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        237,
-        "the strings of 1.0.0 (premise П1)"
+        240,
+        "the strings of 1.0.0 (premise П1) and the three of T-L10N-10"
     );
 
     let mut refused = Vec::new();
@@ -632,6 +632,79 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
                 &same[..same.len().min(20)],
                 if same.len() > 20 { " …" } else { "" }
             );
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} отказов:\n{}",
+        refused.len(),
+        refused.join("\n")
+    );
+}
+
+/// The strings whose substitution is a count. The program does not decline a noun after a
+/// number (TZ L10N, decision 9; `RULES.md` п. 7), so a count stands as «label: {0}», or after «…»
+/// in a countdown, and never inside the phrase before its noun — «{0} записей» reads «1 записей».
+const COUNT_STRINGS: [&str; 6] = [
+    "IDS_STATE_HEALTH",
+    "IDS_STATE_FAILURES",
+    "IDS_STATE_LAYOUTS",
+    "IDS_WIZARD_ATTACH_JOURNAL_SUB",
+    "IDS_EXCLUSION_PICK_COUNT",
+    "IDS_WIZARD_CAPTURE_COUNT",
+];
+
+/// The substitutions of a string that do not follow a colon or an ellipsis.
+fn counts_inside_the_phrase(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(found) = raw[from..].find('{') {
+        let start = from + found;
+        let after = &raw[start + 1..];
+        let digits = after.chars().take_while(char::is_ascii_digit).count();
+        if digits > 0 && after[digits..].starts_with('}') {
+            let before = raw[..start].trim_end_matches([' ', '\u{a0}']);
+            if !(before.ends_with(':') || before.ends_with('…')) {
+                out.push(raw[start..start + digits + 2].to_owned());
+            }
+        }
+        from = start + 1;
+    }
+    out
+}
+
+/// **Every count stands as «label: number»** in every language file — T-L10N-10, decisions
+/// 200.10 and 200.10а: the one string of 1.0.0 that put its number before a noun,
+/// `IDS_WIZARD_ATTACH_JOURNAL_SUB` («{0} записей», «{0} entries»), was red here in all fourteen.
+#[test]
+fn every_count_stands_as_label_colon_number() {
+    assert_eq!(
+        counts_inside_the_phrase("{0} записей. Только имена"),
+        ["{0}"],
+        "the control"
+    );
+    assert!(
+        counts_inside_the_phrase("Записей в журнале: {0}. Только").is_empty(),
+        "and back"
+    );
+    assert!(
+        counts_inside_the_phrase("Переключитесь… {0}").is_empty(),
+        "a countdown"
+    );
+
+    let mut refused = Vec::new();
+    for (tag, text) in resource_script::language_files() {
+        let read = read_language_file(&format!("{tag}.rc"), &text);
+        for id in COUNT_STRINGS {
+            let Some(raw) = read.strings.get(id) else {
+                continue;
+            };
+            for count in counts_inside_the_phrase(raw) {
+                refused.push(format!(
+                    "{tag}.rc: {id} — число {count} внутри фразы: пишите «подпись: {count}» \
+                     (RULES п. 7)"
+                ));
+            }
         }
     }
     assert!(
@@ -1315,18 +1388,11 @@ fn fit_faces() -> Vec<(String, Face)> {
         .collect()
 }
 
-/// The overflows already known on the shipped files — findings of stage L10N (condition C5,
-/// record 200.11), recorded and not mended there; the eye on the stand decides them:
-///
-/// * `cs.rc` `IDS_LOG_DIR_LABEL` — two lines in a label of one, at 100 % · 8 pt only;
-/// * `el.rc` `IDS_WRITE_TO_AUTHOR` — 136 px of words in a button of 132, at 100 % · 8 pt only;
-/// * `el.rc` `IDS_NEWS_SWITCH` — one line beside the glyph of «От автора», 7 scales of 12
-///   (495 px in 464 at 125 % · 10 pt); the drawing of that glyph was not read against the model.
-const KNOWN_OVERFLOWS: [(&str, &str); 3] = [
-    ("cs.rc", "IDS_LOG_DIR_LABEL"),
-    ("el.rc", "IDS_WRITE_TO_AUTHOR"),
-    ("el.rc", "IDS_NEWS_SWITCH"),
-];
+/// The overflows known on the shipped files and accepted for the time being. **Empty since
+/// T-L10N-10** (решение 200.11а): the three findings of C5 (record 200.11) — `cs`
+/// `IDS_LOG_DIR_LABEL`, `el` `IDS_WRITE_TO_AUTHOR`, `el` `IDS_NEWS_SWITCH` — were shortened, the
+/// text only; the third is still for the eye on the stand (its glyph's drawing is not modelled).
+const KNOWN_OVERFLOWS: [(&str, &str); 0] = [];
 
 /// **Every string of every language file fits its element at every scale of FR-92** — the
 /// instrument of T-L10N-6, without a screen.
@@ -1441,4 +1507,81 @@ fn every_string_fits_its_element_at_every_scale_of_fr_92() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+// -----------------------------------------------------------------------------------------------
+// The pieces the code glued as literals — task T-L10N-10
+// -----------------------------------------------------------------------------------------------
+
+/// The body of the function `name` in a source file of the crate: from its `fn` to the brace
+/// that closes it.
+fn body_of(file: &str, name: &str) -> String {
+    let path = resource_script::root().join(file);
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{file} must be readable: {e}"))
+        .replace("\r\n", "\n");
+    let start = source
+        .find(&format!("fn {name}("))
+        .unwrap_or_else(|| panic!("{file} has no fn {name}"));
+    let open = start + source[start..].find('{').expect("a body");
+    let mut depth = 0;
+    for (offset, c) in source[open..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source[start..=open + offset].to_owned();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("{file}: the body of {name} does not close");
+}
+
+/// **The separator of a list, the arrow of a cycle and the form of the tooltip come out of the
+/// tables, not out of literals of the code** — T-L10N-10, решения 200.10 и 200.10а. In every
+/// language their value is the literal they replaced, so the screen cannot tell the two apart:
+/// only the code can, and this reads it. A literal brought back is red here.
+#[test]
+fn the_glued_pieces_come_out_of_the_tables_and_not_out_of_literals() {
+    for (file, function, string, literal) in [
+        ("src/tray.rs", "icon_tip", "IDS_TIP_FORMAT", "{APP_NAME} — "),
+        (
+            "src/settings.rs",
+            "show_layout_note",
+            "IDS_LIST_SEPARATOR",
+            "join(\", \")",
+        ),
+        (
+            "src/settings.rs",
+            "acting_line",
+            "IDS_CYCLE_ARROW",
+            "join(\" → \")",
+        ),
+    ] {
+        let body = body_of(file, function);
+        assert!(
+            body.contains(string),
+            "{file} {function}: the piece must be {string}, a string of the tables"
+        );
+        assert!(
+            !body.contains(literal),
+            "{file} {function}: the literal {literal} is back — a translation cannot reach it"
+        );
+    }
+
+    let english = english();
+    for (id, value) in [
+        ("IDS_LIST_SEPARATOR", ", "),
+        ("IDS_CYCLE_ARROW", " → "),
+        ("IDS_TIP_FORMAT", "{0} — {1}"),
+    ] {
+        assert_eq!(
+            english.strings.get(id).map(String::as_str),
+            Some(value),
+            "{id}: the value of en.rc is the literal it replaced, so no screen changes"
+        );
+    }
 }

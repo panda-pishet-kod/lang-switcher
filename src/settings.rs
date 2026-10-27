@@ -3389,6 +3389,16 @@ pub const IDS_WIZARD_ADDRESS_COPIED: u16 = 3248;
 pub const IDS_TOAST_UPDATED_TITLE: u16 = 3249;
 /// «Щёлкните, чтобы узнать, что нового.» — its text; the click opens the page «Что нового».
 pub const IDS_TOAST_UPDATED: u16 = 3250;
+/// The separator of a list the program builds — «, » in every language until a translation gives
+/// its own — stage L10N, task T-L10N-10 (decisions 200.10 and 200.10а). Until 1.1.0 a literal of
+/// the code, which a translation could not reach; joins the layouts of [`IDS_LAYOUT_NOTE`].
+pub const IDS_LIST_SEPARATOR: u16 = 3251;
+/// The arrow between the layouts of a cycle in [`IDS_STATE_CYCLE`] — « → » with its spaces; a
+/// right-to-left translation chooses its direction. Task T-L10N-10.
+pub const IDS_CYCLE_ARROW: u16 = 3252;
+/// The tooltip of the tray icon: `{0}` the name of the program, `{1}` [`IDS_TIP_ACTIVE`] or
+/// [`IDS_TIP_PAUSED`] — «{0} — {1}» until a translation gives its own order. Task T-L10N-10.
+pub const IDS_TIP_FORMAT: u16 = 3253;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3618,7 +3628,11 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and thirty-seven since task T-104-7** — TZ E104 §0 п. 5 и 12 (решения 189.3,
 /// 189.18): the program updates itself, and the balloon after an update got its two words,
 /// [`IDS_TOAST_UPDATED_TITLE`] and [`IDS_TOAST_UPDATED`] (3249, 3250).
-pub const INTERFACE_STRINGS: [u16; 237] = [
+///
+/// ⚠ **Two hundred and forty since stage L10N, task T-L10N-10** — решения 200.10 и 200.10а: the
+/// three pieces the code glued as literals became strings, [`IDS_LIST_SEPARATOR`],
+/// [`IDS_CYCLE_ARROW`] and [`IDS_TIP_FORMAT`] (3251…3253).
+pub const INTERFACE_STRINGS: [u16; 240] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3865,6 +3879,10 @@ pub const INTERFACE_STRINGS: [u16; 237] = [
     // Task T-104-7, TZ E104 §0 п. 5 и 12 — the balloon after an update.
     IDS_TOAST_UPDATED_TITLE,
     IDS_TOAST_UPDATED,
+    // Stage L10N, task T-L10N-10 — the pieces the code glued as literals until 1.1.0.
+    IDS_LIST_SEPARATOR,
+    IDS_CYCLE_ARROW,
+    IDS_TIP_FORMAT,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -13501,7 +13519,12 @@ fn show_layout_note(hwnd: HWND, state: &DialogState<'_>) {
         &if unresolved.is_empty() {
             String::new()
         } else {
-            format_text(IDS_LAYOUT_NOTE, &[&unresolved.join(", ")])
+            // The separator is a string since T-L10N-10: «, » in every table, a translation's own
+            // where its language has one («،»).
+            format_text(
+                IDS_LAYOUT_NOTE,
+                &[&unresolved.join(&text(IDS_LIST_SEPARATOR))],
+            )
         },
     );
 }
@@ -13746,7 +13769,11 @@ pub enum Acting {
 pub fn acting_line(acting: &Acting, refusals: u32) -> String {
     let what = match acting {
         Acting::Pair(source, target) => format_text(IDS_STATE_PAIR, &[source, target]),
-        Acting::Cycle(names) => format_text(IDS_STATE_CYCLE, &[&names.join(" → ")]),
+        // The arrow is a string since T-L10N-10: « → » in every table; right to left, the
+        // translation chooses its direction.
+        Acting::Cycle(names) => {
+            format_text(IDS_STATE_CYCLE, &[&names.join(&text(IDS_CYCLE_ARROW))])
+        }
         Acting::None => text(IDS_STATE_PAIR_NONE),
     };
 

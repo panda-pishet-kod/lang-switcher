@@ -229,7 +229,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Layouts im System"
     IDS_WIZARD_ATTACH_SETTINGS "Einstellungen"
     IDS_WIZARD_ATTACH_JOURNAL "Programmjournal aus dem Speicher"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} Einträge. Nur Namen von Operationen und Fehlercodes, keine einzige Taste: so ist das Journal gebaut"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Einträge im Journal: {0}. Nur Namen von Operationen und Fehlercodes, keine einzige Taste: so ist das Journal gebaut"
     IDS_WIZARD_ATTACH_FOOT  "Eine Journaldatei ist nicht nötig: die Einträge liegen im Speicher, solange das Programm läuft. Wiederholt sich das Problem, schalten Sie das Journal in den Einstellungen ein, dann überleben die Einträge einen Neustart."
     IDS_WIZARD_PREVIEW_TITLE "Prüfen und senden"
     IDS_WIZARD_PREVIEW_NOTE "Das ist der ganze Text der Meldung. Ändern Sie, was Sie möchten. Gesendet wird von Ihnen: der Text kommt in die Zwischenablage, und GitHub Issues öffnet sich im Browser."
@@ -251,6 +251,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Danke für die Idee"
     IDS_THANKYOU_BUG_TEXT   "Ich lese jede Meldung selbst. Fehler behebe ich, und worüber alle Bescheid wissen sollten, erzähle ich in einem Brief im Programm oder im Kanal. Schön, dass Sie sich die Zeit genommen haben 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Ich lese jede Meldung selbst. Ideen kommen in den Plan und die besten davon setze ich um, und worüber alle Bescheid wissen sollten, erzähle ich in einem Brief im Programm oder im Kanal. Schön, dass Sie sich die Zeit genommen haben 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x07, 0x01

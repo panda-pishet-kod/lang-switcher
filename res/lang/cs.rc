@@ -54,7 +54,7 @@ BEGIN
     IDS_LOG_SAVE            "Uložit protokol"
     IDS_LOG_SAVE_FAILED     "Protokol se nepodařilo uložit."
     IDS_LOG_SAVED           "Protokol uložen"
-    IDS_LOG_DIR_LABEL       "Složka protokolu:"
+    IDS_LOG_DIR_LABEL       "Složka:"
     IDS_GROUP_STATE         "Stav"
     IDS_OK                  "OK"
     IDS_CANCEL              "Zrušit"
@@ -227,7 +227,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Rozložení v systému"
     IDS_WIZARD_ATTACH_SETTINGS "Nastavení"
     IDS_WIZARD_ATTACH_JOURNAL "Deník programu z paměti"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} záznamů. Jen názvy operací a kódy chyb, ani jedna klávesa: tak je deník udělaný"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Záznamů v deníku: {0}. Jen názvy operací a kódy chyb, ani jedna klávesa: tak je deník udělaný"
     IDS_WIZARD_ATTACH_FOOT  "Soubor deníku není potřeba: záznamy jsou v paměti, dokud program běží. Pokud se problém opakuje, zapněte deník v nastavení, pak záznamy přežijí restart."
     IDS_WIZARD_PREVIEW_TITLE "Zkontrolujte a odešlete"
     IDS_WIZARD_PREVIEW_NOTE "Toto je celý text hlášení. Upravte cokoli chcete. Odesíláte vy: text půjde do schránky a GitHub Issues se otevře v prohlížeči."
@@ -249,6 +249,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Děkuji za nápad"
     IDS_THANKYOU_BUG_TEXT   "Každé hlášení čtu sám. Chyby opravuji a o tom, co je důležité pro všechny, vyprávím dopisem v programu nebo v kanálu. Je skvělé, že jste si na to našli čas 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Každé hlášení čtu sám. Nápady zakládám do plánu a ty nejlepší dělám, a o tom, co je důležité pro všechny, vyprávím dopisem v programu nebo v kanálu. Je skvělé, že jste si na to našli čas 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x05, 0x01

@@ -225,7 +225,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "The layouts in the system"
     IDS_WIZARD_ATTACH_SETTINGS "The settings"
     IDS_WIZARD_ATTACH_JOURNAL "The program's journal, out of memory"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entries. Only operation names and error codes, not a single keystroke: that is how the journal itself is built"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Journal entries: {0}. Only operation names and error codes, not a single keystroke: that is how the journal itself is built"
     IDS_WIZARD_ATTACH_FOOT  "No journal file is needed: the entries are in memory while the program runs. If the problem repeats, turn the journal on in the settings and the entries will survive a restart."
     IDS_WIZARD_PREVIEW_TITLE "Check it and send"
     IDS_WIZARD_PREVIEW_NOTE "This is the whole text of the appeal. Edit anything you like. You send it yourself: the text goes to the clipboard and GitHub Issues opens in the browser."
@@ -247,6 +247,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Thank you for the idea"
     IDS_THANKYOU_BUG_TEXT   "I read every appeal myself. Bugs I fix, and what matters to everybody I tell about in a letter in the program or in the channel. It is good that you found the time 🖤"
     IDS_THANKYOU_IDEA_TEXT  "I read every appeal myself. Ideas go into the plan and the best of them get made, and what matters to everybody I tell about in a letter in the program or in the channel. It is good that you found the time 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x09, 0x01

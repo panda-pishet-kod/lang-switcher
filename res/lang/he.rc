@@ -227,7 +227,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "פריסות במערכת"
     IDS_WIZARD_ATTACH_SETTINGS "הגדרות"
     IDS_WIZARD_ATTACH_JOURNAL "יומן התוכנה מהזיכרון"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} רשומות. רק שמות פעולות וקודי שגיאה, ולא מקש אחד: כך בנוי היומן עצמו"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "רשומות ביומן: {0}. רק שמות פעולות וקודי שגיאה, ולא מקש אחד: כך בנוי היומן עצמו"
     IDS_WIZARD_ATTACH_FOOT  "קובץ יומן אינו נחוץ: הרשומות בזיכרון כל עוד התוכנה פועלת. אם הבעיה חוזרת, הפעילו את היומן בהגדרות, ואז הרשומות ישרדו הפעלה מחדש."
     IDS_WIZARD_PREVIEW_TITLE "בדקו ושלחו"
     IDS_WIZARD_PREVIEW_NOTE "זה כל הטקסט של הפנייה. ערכו מה שתרצו. אתם השולחים: הטקסט ייכנס ללוח, ודף GitHub Issues ייפתח בדפדפן."
@@ -249,6 +249,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "תודה על הרעיון"
     IDS_THANKYOU_BUG_TEXT   "אני קורא כל פנייה בעצמי. תקלות אני מתקן, ועל מה שחשוב לכולם אני מספר במכתב בתוכנה או בערוץ. נהדר שמצאתם לכך זמן 🖤"
     IDS_THANKYOU_IDEA_TEXT  "אני קורא כל פנייה בעצמי. רעיונות אני מכניס לתוכנית ואת הטובים שבהם עושה, ועל מה שחשוב לכולם אני מספר במכתב בתוכנה או בערוץ. נהדר שמצאתם לכך זמן 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x0D, 0x01

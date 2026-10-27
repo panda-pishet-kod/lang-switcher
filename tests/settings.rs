@@ -17350,7 +17350,11 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **237 since task T-104-7** — TZ E104 §0 п. 5 и 12: the two words of the balloon after an
 /// update — 235 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 237] = [
+///
+/// ⚠ **240 since stage L10N, task T-L10N-10** — решения 200.10 и 200.10а: the three pieces the
+/// code glued as literals — the separator of a list, the arrow of a cycle, the form of the
+/// tooltip — 237 + 3, each the literal it replaced.
+const FR_94_STRINGS: [(u16, &str, &str); 240] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18231,10 +18235,11 @@ const FR_94_STRINGS: [(u16, &str, &str); 237] = [
     ),
     (
         settings::IDS_WIZARD_ATTACH_JOURNAL_SUB,
-        "{0} записей. Только имена операций и коды ошибок, ни одной клавиши: так устроен сам \
-         журнал",
-        "{0} entries. Only operation names and error codes, not a single keystroke: that is how \
-         the journal itself is built",
+        // «подпись: число» since T-L10N-10 (решение 200.10а): the number stood before its noun.
+        "Записей в журнале: {0}. Только имена операций и коды ошибок, ни одной клавиши: так \
+         устроен сам журнал",
+        "Journal entries: {0}. Only operation names and error codes, not a single keystroke: that \
+         is how the journal itself is built",
     ),
     (
         settings::IDS_WIZARD_ATTACH_FOOT,
@@ -18433,6 +18438,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 237] = [
         "Щёлкните, чтобы узнать, что нового.",
         "Click to see what's new.",
     ),
+    (settings::IDS_LIST_SEPARATOR, ", ", ", "),
+    (settings::IDS_CYCLE_ARROW, " → ", " → "),
+    (settings::IDS_TIP_FORMAT, "{0} — {1}", "{0} — {1}"),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -25623,8 +25631,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        237,
-        "two hundred and THIRTY-SEVEN identifiers in use since task T-104-7 (TZ E104 §0 п. 5 и \
+        240,
+        "two hundred and FORTY identifiers in use since stage L10N, task T-L10N-10 (решения \
+         200.10, 200.10а): the separator of a list, the arrow of a cycle and the form of the \
+         tooltip left the code for the tables (3251…3253). Two hundred and thirty-seven since \
+         task T-104-7 (TZ E104 §0 п. 5 и \
          12): the program updates itself, and the balloon after an update got its two words \
          (3249, 3250). Two hundred and thirty-five since task T-103-7 (решение 181.6): an \
          appeal about a trouble goes to the author by letter, and its last step got six words of \

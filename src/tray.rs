@@ -4931,7 +4931,9 @@ fn resource_id(id: u16) -> PCWSTR {
 /// the notification area.
 ///
 /// The em dash and the two spaces around it are the same joiner the caption of the settings
-/// window uses («Lang Switcher — настройки»), and they are not translated either.
+/// window uses («Lang Switcher — настройки»). Since stage L10N, task T-L10N-10 (решения 200.10 и
+/// 200.10а) the form is a string, [`settings::IDS_TIP_FORMAT`] — «{0} — {1}» in every table, so
+/// a language may give its own order and joiner; the name stays untranslated as `{0}`.
 pub fn icon_tip(enabled: bool) -> String {
     let state = settings::text(if enabled {
         settings::IDS_TIP_ACTIVE
@@ -4939,7 +4941,7 @@ pub fn icon_tip(enabled: bool) -> String {
         settings::IDS_TIP_PAUSED
     });
 
-    format!("{APP_NAME} — {state}")
+    settings::format_text(settings::IDS_TIP_FORMAT, &[APP_NAME, &state])
 }
 
 /// Copies `text` into one of the fixed fields of the notification area, always NUL-terminated

@@ -230,7 +230,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Sistemdeki düzenler"
     IDS_WIZARD_ATTACH_SETTINGS "Ayarlar"
     IDS_WIZARD_ATTACH_JOURNAL "Programın bellekteki günlüğü"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} kayıt. Yalnızca işlem adları ve hata kodları, tek bir tuş bile yok: günlüğün kendisi böyle kurulmuştur"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Günlükteki kayıtlar: {0}. Yalnızca işlem adları ve hata kodları, tek bir tuş bile yok: günlüğün kendisi böyle kurulmuştur"
     IDS_WIZARD_ATTACH_FOOT  "Günlük dosyası gerekmez: program çalıştığı sürece kayıtlar bellektedir. Sorun yinelenirse günlüğü ayarlardan açın, o zaman kayıtlar yeniden başlatmayı atlatır."
     IDS_WIZARD_PREVIEW_TITLE "Denetleyin ve gönderin"
     IDS_WIZARD_PREVIEW_NOTE "Bu, bildirimin tüm metnidir. İstediğinizi değiştirin. Gönderen sizsiniz: metin panoya gider, GitHub Issues da tarayıcıda açılır."
@@ -252,6 +252,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Fikir için teşekkürler"
     IDS_THANKYOU_BUG_TEXT   "Her bildirimi kendim okurum. Hataları onarırım, herkesi ilgilendireni de programdaki bir mektupla ya da kanalda anlatırım. Buna vakit ayırmanız çok güzel 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Her bildirimi kendim okurum. Fikirleri plana koyarım ve en iyilerini yaparım, herkesi ilgilendireni de programdaki bir mektupla ya da kanalda anlatırım. Buna vakit ayırmanız çok güzel 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x1F, 0x01

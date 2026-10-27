@@ -231,7 +231,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Dispositions installées"
     IDS_WIZARD_ATTACH_SETTINGS "Réglages"
     IDS_WIZARD_ATTACH_JOURNAL "Journal du programme, depuis la mémoire"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} entrées. Seulement des noms d'opérations et des codes d'erreur, pas une seule touche : c'est ainsi qu'est fait le journal"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Entrées du journal : {0}. Seulement des noms d'opérations et des codes d'erreur, pas une seule touche : c'est ainsi qu'est fait le journal"
     IDS_WIZARD_ATTACH_FOOT  "Aucun fichier de journal n'est nécessaire : les entrées sont en mémoire tant que le programme tourne. Si le problème se répète, activez le journal dans les réglages et les entrées survivront à un redémarrage."
     IDS_WIZARD_PREVIEW_TITLE "Vérifiez et envoyez"
     IDS_WIZARD_PREVIEW_NOTE "Voici tout le texte du message. Modifiez ce que vous voulez. C'est vous qui l'envoyez : le texte ira dans le presse-papiers et GitHub Issues s'ouvrira dans le navigateur."
@@ -253,6 +253,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Merci pour l'idée"
     IDS_THANKYOU_BUG_TEXT   "Je lis chaque message moi-même. Je répare les erreurs, et ce qui compte pour tous, je le raconte dans une lettre du programme ou dans la chaîne. C'est bien que vous ayez pris ce temps 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Je lis chaque message moi-même. Les idées vont dans le plan et les meilleures se font, et ce qui compte pour tous, je le raconte dans une lettre du programme ou dans la chaîne. C'est bien que vous ayez pris ce temps 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x0C, 0x01

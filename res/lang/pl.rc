@@ -231,7 +231,7 @@ BEGIN
     IDS_WIZARD_ATTACH_LAYOUTS "Układy w systemie"
     IDS_WIZARD_ATTACH_SETTINGS "Ustawienia"
     IDS_WIZARD_ATTACH_JOURNAL "Dziennik programu z pamięci"
-    IDS_WIZARD_ATTACH_JOURNAL_SUB "{0} wpisów. Tylko nazwy operacji i kody błędów, ani jednego klawisza: tak zbudowany jest sam dziennik"
+    IDS_WIZARD_ATTACH_JOURNAL_SUB "Wpisów w dzienniku: {0}. Tylko nazwy operacji i kody błędów, ani jednego klawisza: tak zbudowany jest sam dziennik"
     IDS_WIZARD_ATTACH_FOOT  "Plik dziennika nie jest potrzebny: wpisy są w pamięci, dopóki program działa. Jeśli problem się powtarza, włącz dziennik w ustawieniach, wtedy wpisy przetrwają ponowne uruchomienie."
     IDS_WIZARD_PREVIEW_TITLE "Sprawdź i wyślij"
     IDS_WIZARD_PREVIEW_NOTE "To cały tekst zgłoszenia. Popraw, co chcesz. Wysyłasz je ty: tekst trafi do schowka, a GitHub Issues otworzy się w przeglądarce."
@@ -253,6 +253,9 @@ BEGIN
     IDS_THANKYOU_IDEA_TITLE "Dziękuję za pomysł"
     IDS_THANKYOU_BUG_TEXT   "Czytam każde zgłoszenie sam. Błędy naprawiam, a o tym, co ważne dla wszystkich, opowiadam listem w programie albo w kanale. Świetnie, że znalazłeś na to czas 🖤"
     IDS_THANKYOU_IDEA_TEXT  "Czytam każde zgłoszenie sam. Pomysły trafiają do planu i najlepsze z nich robię, a o tym, co ważne dla wszystkich, opowiadam listem w programie albo w kanale. Świetnie, że znalazłeś na to czas 🖤"
+    IDS_LIST_SEPARATOR      ", "
+    IDS_CYCLE_ARROW         " → "
+    IDS_TIP_FORMAT          "{0} — {1}"
 END
 
 LANGUAGE 0x15, 0x01
