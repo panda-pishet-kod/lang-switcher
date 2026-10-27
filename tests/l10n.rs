@@ -6,7 +6,7 @@
 //! refusal names the file, the string and the reason in words a translator acts on:
 //! «hi.rc: IDS_X — нет подстановки {1}».
 //!
-//! * premise П4 — a feed of all 64 languages is read by the reader of today;
+//! * premise П4 — a feed of all 66 languages is read by the reader of today;
 //! * the registry `res/lang/languages.toml` (T-L10N-4) against `Language::ALL` and against
 //!   Windows itself;
 //! * the guard of the files (T-L10N-3) against `en.rc`, with its mutants;
@@ -21,11 +21,14 @@ use lang_switcher::settings::Language;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The tags of the registry, in its order — the 14 the program ships, then groups A and B.
-const ALL_TAGS: [&str; 64] = [
+/// Serbian and Uzbek in both scripts since T-L10N-11 (200б.1): the plain tag is the script BCP 47
+/// takes for it by default (`sr` — Cyrillic, `uz` — Latin), the other names its script.
+const ALL_TAGS: [&str; 66] = [
     "ru", "en", "uk", "de", "fr", "es", "pt", "it", "pl", "cs", "tr", "el", "he",
     "ar", // shipped
-    "hi", "bn", "ur", "pa", "mr", "te", "ta", "fa", "gu", "th", "kn", "or", "ml", "uz", "ne", "as",
-    "az", "km", "kk", "sr", "ug", "bg", "hy", "lo", "be", "tt", "ka", "mk", // A
+    "hi", "bn", "ur", "pa", "mr", "te", "ta", "fa", "gu", "th", "kn", "or", "ml", "uz", "uz-Cyrl",
+    "ne", "as", "az", "km", "kk", "sr", "sr-Latn", "ug", "bg", "hy", "lo", "be", "tt", "ka",
+    "mk", // A
     "vi", "nl", "ro", "hu", "sv", "sq", "da", "fi", "hr", "sk", "nb", "lt", "sl", "bs", "lv", "et",
     "cy", "mt", "is", "lb", "mi", "nn", // B
 ];
@@ -52,7 +55,7 @@ fn feed_of(tags: &[&str]) -> String {
     body
 }
 
-/// **Premise П4 of TZ L10N.** A feed with sections for all 64 languages stays under the ceiling
+/// **Premise П4 of TZ L10N.** A feed with sections for all 66 languages stays under the ceiling
 /// of the response, and the reader of today picks the interface language out of it for every
 /// one of them; a language the feed does not carry falls back to `en`, and without `en` to `ru`
 /// — the rule `[language, "en", "ru"]` of `letters::feed`. Nothing of the reader changes on a new
@@ -61,7 +64,7 @@ fn feed_of(tags: &[&str]) -> String {
 /// ⚠ The reader of 0.104.0 (tag `e104`) is the same code by reading — `RawFeed` without
 /// `deny_unknown_fields`, the sections a flattened map — and is **not measured** here.
 #[test]
-fn a_feed_of_all_sixty_four_languages_is_read_in_each_of_them() {
+fn a_feed_of_all_sixty_six_languages_is_read_in_each_of_them() {
     let body = feed_of(&ALL_TAGS);
     println!(
         "feed of {} languages: {} bytes, ceiling {} bytes",
@@ -71,7 +74,7 @@ fn a_feed_of_all_sixty_four_languages_is_read_in_each_of_them() {
     );
     assert!(
         body.len() < feed::RESPONSE_CAP / 4,
-        "64 languages must leave the ceiling of the response far away: {} bytes",
+        "66 languages must leave the ceiling of the response far away: {} bytes",
         body.len()
     );
 
@@ -148,15 +151,16 @@ fn registry() -> Vec<Entry> {
         .language
 }
 
-/// **The registry holds the 64 languages of decision 198.14, and its 14 shipped entries are the
-/// program's own `Language::ALL` — tag, LANGID, direction and the name of the chooser.**
+/// **The registry holds the 66 languages of decisions 198.14 and 200б.1, and its 14 shipped
+/// entries are the program's own `Language::ALL` — tag, LANGID, direction and the name of the
+/// chooser.**
 ///
 /// Groups and states are closed sets; tags, LANGIDs and installer names are unique; 12 of the
-/// 50 planned languages have a translation of their own in Inno Setup 6.7.3 (premise П5); every
+/// 52 planned languages have a translation of their own in Inno Setup 6.7.3 (premise П5); every
 /// shipped language with an official Inno translation has the installer's own file
 /// `installer/lang/<inno>.isl`, Greek — the one without — has none (155.11).
 #[test]
-fn the_registry_holds_sixty_four_languages_and_the_shipped_ones_are_the_programs() {
+fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs() {
     let registry = registry();
     let tags: Vec<&str> = registry.iter().map(|entry| entry.tag.as_str()).collect();
     assert_eq!(
@@ -220,7 +224,7 @@ fn the_registry_holds_sixty_four_languages_and_the_shipped_ones_are_the_programs
     }
     assert_eq!(
         groups,
-        BTreeMap::from([("A", 28), ("B", 22), ("shipped", 14)]),
+        BTreeMap::from([("A", 30), ("B", 22), ("shipped", 14)]),
         "the groups of 198.13"
     );
 
@@ -252,7 +256,7 @@ fn the_registry_holds_sixty_four_languages_and_the_shipped_ones_are_the_programs
         .count();
     assert_eq!(
         official_planned, 12,
-        "premise П5: 12 of the 50 have an Inno translation"
+        "premise П5: 12 of the 52 have an Inno translation"
     );
 
     for entry in &shipped {

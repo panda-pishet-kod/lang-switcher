@@ -1,7 +1,7 @@
 # res/lang/languages.toml -- the registry of the languages of the interface. Stage L10N, task T-L10N-4.
 #
 # One entry per language: the fourteen the program ships (group "shipped", the order of
-# `Language::ALL`) and the fifty of decisions 198.13/198.14 -- group A (28: own script or switched
+# `Language::ALL`) and the fifty-two of decisions 198.13/198.14 and 200б.1 -- group A (30: own script or switched
 # with Russian all the time) and group B (22: Latin with letters of its own), in the order of
 # reports/LANGUAGES-UI-TRANSLATION-2026-10-27.md of the control folder.
 #
@@ -21,8 +21,8 @@
 #   inno_official  Inno Setup 6.7.3 ships a translation of its own messages (Languages/<inno>.isl)
 #   group          shipped | A | B
 #   state          shipped | planned
-#   note           only where a choice is the owner's (TZ L10N, decision 6): the value written is
-#                  the one of the Windows interface, the alternatives are measured and listed
+#   note           where a language has variants: what the owner chose (200б.1 -- Serbian and Uzbek in
+#                  both scripts, the rest as recommended in 200а) and what was not taken, measured
 #
 # ⚠ `language` of the configuration is a closed set (SPEC section 7): a new value raises
 # `schema_version`, once per stage of translations -- not here (TZ L10N, decision 7).
@@ -211,7 +211,8 @@ group = "shipped"
 state = "shipped"
 
 # ---------------------------------------------------------------------------------------------
-# Group A -- 28 languages: own script, or switched with Russian all the time; Windows has the UI.
+# Group A -- 30 languages: own script, or switched with Russian all the time; Windows has the UI.
+# The 28 of 198.13, Serbian and Uzbek each in both of their scripts (200б.1).
 # ---------------------------------------------------------------------------------------------
 
 [[language]]
@@ -239,7 +240,7 @@ inno = "Bengali"
 inno_official = false
 group = "A"
 state = "planned"
-note = "variant: Windows has the LIP bn-IN (India); bn-BD (Bangladesh) is 0x0845 -- the owner chooses"
+note = "one language, the LANGID of the LIP bn-IN (200б.1, as recommended); bn-BD (0x0845) not taken: the primary tag bn takes both countries"
 
 [[language]]
 tag = "ur"
@@ -266,7 +267,7 @@ inno = "Punjabi"
 inno_official = false
 group = "A"
 state = "planned"
-note = "variant: Windows has the LIP pa-IN (Gurmukhi); pa-Arab-PK (Shahmukhi, right to left) is 0x0846 -- the owner chooses"
+note = "Gurmukhi, the LIP pa-IN (200б.1, as recommended); Shahmukhi pa-Arab-PK (0x0846, right to left, no LIP) not taken"
 
 [[language]]
 tag = "mr"
@@ -397,7 +398,21 @@ inno = "Uzbek"
 inno_official = false
 group = "A"
 state = "planned"
-note = "variant: Windows has the LIP uz-Latn-UZ; uz-Cyrl-UZ is 0x0843 -- the owner chooses"
+note = "two languages (200б.1): Latin the main one (this entry, the LIP uz-Latn-UZ) and Cyrillic (uz-Cyrl); the primary tag uz does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers uz-Latn-UZ or uz-Cyrl-UZ) belongs to the stage of translations A"
+
+[[language]]
+tag = "uz-Cyrl"
+locale = "uz-Cyrl-UZ"
+langid = 0x0843
+name_en = "Uzbek (Cyrillic)"
+endonym = "Ўзбекча"
+script = "Cyrl"
+rtl = false
+inno = "UzbekCyrillic"
+inno_official = false
+group = "A"
+state = "planned"
+note = "two languages (200б.1): Cyrillic the second (this entry, Windows has no LIP of it) and Latin (uz); the primary tag uz does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers uz-Latn-UZ or uz-Cyrl-UZ) belongs to the stage of translations A"
 
 [[language]]
 tag = "ne"
@@ -437,7 +452,7 @@ inno = "Azerbaijani"
 inno_official = false
 group = "A"
 state = "planned"
-note = "variant: Windows has the LIP az-Latn-AZ; az-Cyrl-AZ is 0x082C -- the owner chooses"
+note = "Latin, the LIP az-Latn-AZ (200б.1); Cyrillic az-Cyrl-AZ (0x082C) not taken"
 
 [[language]]
 tag = "km"
@@ -467,6 +482,20 @@ state = "planned"
 
 [[language]]
 tag = "sr"
+locale = "sr-Cyrl-RS"
+langid = 0x281A
+name_en = "Serbian (Cyrillic)"
+endonym = "Српски"
+script = "Cyrl"
+rtl = false
+inno = "SerbianCyrillic"
+inno_official = false
+group = "A"
+state = "planned"
+note = "two languages (200б.1): Cyrillic the main one (this entry, the LIP sr-Cyrl-RS) and Latin (sr-Latn, the language pack of Windows); the primary tag sr does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers sr-Cyrl-RS or sr-Latn-RS) belongs to the stage of translations A"
+
+[[language]]
+tag = "sr-Latn"
 locale = "sr-Latn-RS"
 langid = 0x241A
 name_en = "Serbian (Latin)"
@@ -477,7 +506,7 @@ inno = "SerbianLatin"
 inno_official = false
 group = "A"
 state = "planned"
-note = "variant: Windows has the language pack sr-Latn-RS and the LIP sr-Cyrl-RS (0x281A); both scripts share the primary tag sr -- the owner chooses one, or both as two languages"
+note = "two languages (200б.1): Latin the second (this entry, the language pack of Windows) and Cyrillic (sr); the primary tag sr does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers sr-Cyrl-RS or sr-Latn-RS) belongs to the stage of translations A"
 
 [[language]]
 tag = "ug"
@@ -729,7 +758,7 @@ inno = "Norwegian"
 inno_official = true
 group = "B"
 state = "planned"
-note = "two languages, as in 198.13: Bokmål (this entry, Inno Norwegian.isl is $0414) and Nynorsk (nn)"
+note = "two languages (198.13, 200б.1): Bokmål (this entry, Inno Norwegian.isl is $0414) and Nynorsk (nn)"
 
 [[language]]
 tag = "lt"
@@ -873,4 +902,4 @@ inno = "NorwegianNynorsk"
 inno_official = false
 group = "B"
 state = "planned"
-note = "two languages, as in 198.13: Nynorsk (this entry; no Inno translation) and Bokmål (nb)"
+note = "two languages (198.13, 200б.1): Nynorsk (this entry; no Inno translation) and Bokmål (nb)"
