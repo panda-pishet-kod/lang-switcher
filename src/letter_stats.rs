@@ -111,14 +111,10 @@ impl Reading<'_> {
     }
 
     /// The mean cost per symbol of the candidate read so far, its end included — lower is more
-    /// probable. A candidate of no symbol at all costs the most.
+    /// probable.
     pub fn cost(&self) -> f32 {
         let mut ended = *self;
         ended.step(0);
-
-        if ended.count == 0 {
-            return f32::MAX;
-        }
 
         ended.cost as f32 / ended.count as f32
     }
