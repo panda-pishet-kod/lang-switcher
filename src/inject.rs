@@ -1373,6 +1373,41 @@ pub fn resolve_auto(class: Option<&str>) -> Delivery {
     }
 }
 
+/// ⭐ **Task T-106-3, решение 198.8 — the fields whose erasure must settle before the insertion
+/// of FR-41.** `RichEditD2DPT` is the text field of Notepad of Windows 11.
+///
+/// Measured on the stand `Test_VM` without this program (`tools\vmlab\jobs\e106\j106-bs-*.ps1`,
+/// table in `reports\ITOG-E106.md`): the packet of FR-41 sent in one call — `Backspace` events,
+/// then the insertion as `KEYEVENTF_UNICODE` — came back as the last character repeated
+/// (`X uuuuuu` for `X l;ylfu`) in 13 trials of 31 (case Q-197-1 of stage Э105: 3 of 5, with the
+/// program). The insertion arriving while the field still digests the erasure is what collapses:
+/// the same insertion after a pause was exact — 20 ms 11 of 12, 35…100 ms 48 of 48, 50 ms in
+/// three passes 32 of 32 — while a pause between the events (FR-44, 1 ms) collapsed 10 of 10 and a
+/// `WM_NULL` round trip to the field (it answers in 0…2 ms) did not help (4 of 10).
+pub const SETTLING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+
+/// The pause between the erasure and the insertion in a field of [`SETTLING_FIELD_CLASSES`] —
+/// 2.5 times the dose that still collapsed (20 ms) and the one measured in every pass.
+pub const ERASE_SETTLE_MS: u32 = 50;
+
+/// **The pure half of the settling of task T-106-3** — the pause a field of class `class` needs
+/// between the erasure and the insertion of FR-41, or zero: one call, as FR-41 has it.
+///
+/// `None` (the field cannot be read) and every other class answer zero — the packet every other
+/// window has always got. Case-insensitively, as [`resolve_auto`] compares.
+pub fn erase_settle_for(class: Option<&str>) -> u32 {
+    match class {
+        Some(class)
+            if SETTLING_FIELD_CLASSES
+                .iter()
+                .any(|settling| class.eq_ignore_ascii_case(settling)) =>
+        {
+            ERASE_SETTLE_MS
+        }
+        _ => 0,
+    }
+}
+
 /// The class name of `window`, or `None` when it cannot be read.
 ///
 /// The Win32 half of FR-42а, split from [`resolve_auto`] so that the resolution rule is a pure
@@ -1779,7 +1814,9 @@ pub fn inter_event_delay_ms() -> u32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Dispatched {
     /// `SendInput` calls made. **Exactly one** whenever the packet is non-empty and the pause
-    /// of FR-44 is zero, which is what FR-41 requires of the ordinary case.
+    /// of FR-44 is zero, which is what FR-41 requires of the ordinary case — and two for the
+    /// `backspace` packet in the field of Notepad of Windows 11 (task T-106-3,
+    /// [`dispatch_settled`]).
     pub calls: usize,
     /// Events handed to `SendInput`, summed over the calls.
     pub requested: usize,
@@ -1826,8 +1863,18 @@ pub trait Environment {
     /// Hands one portion to the system and answers how many events it accepted — FR-41, FR-45.
     fn send(&mut self, events: &[INPUT]) -> u32;
 
-    /// The pause of FR-44. Reached only when the configured delay is above zero.
+    /// The pause of FR-44 — reached when the configured delay is above zero — and the settling of
+    /// task T-106-3 between the erasure and the insertion of FR-41.
     fn pause(&mut self, delay_ms: u32);
+
+    /// ⭐ **Task T-106-3, решение 198.8 — how long the erasure of FR-41 must settle before the
+    /// insertion, in the field that has the keyboard focus** ([`erase_settle_for`]). Asked once
+    /// per `backspace` packet that erases and types. The default answers zero — one call, as
+    /// FR-41 has it — so a bench sees the split only when it asks for one; [`System`] reads the
+    /// class of the focused field.
+    fn erase_settle_ms(&mut self) -> u32 {
+        0
+    }
 
     /// **FR-40 step 5 — the layout switch. The connection point of task T-05-1.**
     ///
@@ -1911,6 +1958,22 @@ impl Environment for System {
 
     fn pause(&mut self, delay_ms: u32) {
         sleep_ms(delay_ms);
+    }
+
+    /// **Task T-106-3** — the class of the field with the focus in the foreground window, through
+    /// the one body `guard` asks it by ([`crate::guard::focused_control`]).
+    fn erase_settle_ms(&mut self) -> u32 {
+        // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches
+        // no memory of ours; callable from any thread.
+        let foreground = unsafe { GetForegroundWindow() };
+
+        if foreground.is_invalid() {
+            return 0;
+        }
+
+        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
+
+        erase_settle_for(class.as_deref())
     }
 
     /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
@@ -2136,6 +2199,50 @@ pub fn dispatch_in(env: &mut impl Environment, events: &[INPUT], delay_ms: u32) 
     record_discrepancy(done);
 
     done
+}
+
+/// ⭐ **Task T-106-3, решение 198.8 — FR-41 in two calls, for a field whose erasure must settle**
+/// ([`erase_settle_for`]): the first `erase_events` of `packet` (every `Backspace`, down and up),
+/// the pause `settle_ms`, then the rest — the insertion. Each half goes as [`dispatch_in`] sends
+/// a packet, so the portions of FR-44, when there are any, are kept inside each half.
+///
+/// FR-41 asks for one call, and the reason is order and atomicity; the order is kept — the
+/// erasure is whole before the insertion starts — and what is given up is the atomicity between
+/// the halves, in this one field and only for the `backspace` packet. Why: in one call the field
+/// of Notepad of Windows 11 collapsed the insertion into its last character repeated — see
+/// [`SETTLING_FIELD_CLASSES`] for the measurement.
+///
+/// FR-45 across the halves: an erasure the system did not take whole is **not** followed by the
+/// insertion. In one call `SendInput` stops at the first blocked event and sends nothing after
+/// it; the two calls keep that, and the answer counts the whole packet as asked for, so the
+/// replacement does not pass for one that reached the screen.
+fn dispatch_settled(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    erase_events: usize,
+    delay_ms: u32,
+    settle_ms: u32,
+) -> Dispatched {
+    let (erasure, insertion) = packet.split_at(erase_events.min(packet.len()));
+
+    let first = dispatch_in(env, erasure, delay_ms);
+
+    if !first.is_complete() || insertion.is_empty() {
+        return Dispatched {
+            requested: first.requested + insertion.len(),
+            ..first
+        };
+    }
+
+    env.pause(settle_ms);
+
+    let second = dispatch_in(env, insertion, delay_ms);
+
+    Dispatched {
+        calls: first.calls + second.calls,
+        requested: first.requested + second.requested,
+        accepted: first.accepted + second.accepted,
+    }
 }
 
 /// Where the portion starting at `start` ends — one event, or the whole of a character outside
@@ -2526,7 +2633,17 @@ pub fn replace_in_with(
         if matches!(delivery, Delivery::Keystrokes) {
             run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
         } else {
-            run_steps(env, &events[..len], erased, typed, delay_ms)
+            // ⭐ Task T-106-3, решение 198.8: a `backspace` packet that erases and types asks the
+            // field whether its erasure must settle first — the one question, after the packet is
+            // built and before steps 3 to 5.
+            let settle_ms = if matches!(delivery, Delivery::Backspace) && erased > 0 && typed > 0
+            {
+                env.erase_settle_ms()
+            } else {
+                0
+            };
+
+            run_steps(env, &events[..len], erased, typed, delay_ms, settle_ms)
         }
     });
 
@@ -2542,18 +2659,26 @@ pub fn replace_in_with(
 
 /// Steps 3 to 5 of FR-40 around a packet that is already built — step 6 is not performed (task
 /// T-40-3, see the end of the body).
+///
+/// `settle_ms` above zero — task T-106-3 — sends the `backspace` packet of FR-41 in two calls with
+/// that pause between them; see [`dispatch_settled`].
 fn run_steps(
     env: &mut impl Environment,
     packet: &[INPUT],
     erased: usize,
     typed: usize,
     delay_ms: u32,
+    settle_ms: u32,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = dispatch_in(env, packet, delay_ms);
+    let replacement = if settle_ms > 0 {
+        dispatch_settled(env, packet, replacement_events(erased, 0), delay_ms, settle_ms)
+    } else {
+        dispatch_in(env, packet, delay_ms)
+    };
 
     // ---- step 5 — the connection point of task T-05-1 ----------------------------------
     //

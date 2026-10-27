@@ -2233,7 +2233,9 @@ pub fn publish_exclusions(names: &[String]) -> usize {
 /// and the watcher thread of this program never has the keyboard focus, so it would report
 /// nothing for ever. The information belongs to the thread that owns the foreground window, and
 /// `GetGUIThreadInfo` is the one call that will answer for another thread.
-fn focused_control(window: HWND) -> Option<HWND> {
+///
+/// ⭐ Also the field `inject` asks for the settling of FR-41 (task T-106-3) — one body for both.
+pub(crate) fn focused_control(window: HWND) -> Option<HWND> {
     // SAFETY: `window` is the live foreground window; `None` for the process id is the documented
     // way to ask for the thread id alone and is what keeps the call from writing through a
     // pointer of ours. NFR-13: a zero return means the window died and is examined below.

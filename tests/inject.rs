@@ -191,6 +191,9 @@ struct Bench {
     /// keyboard. (Until task T-40-3 it was also a `Shift` step 6 found and pressed again; and it is
     /// the same property that made step 6 unable to see the user's own keys — finding С12.)
     keyboard: Option<Modifiers>,
+    /// ⭐ **Task T-106-3.** What `erase_settle_ms` answers — the field with the focus. Zero is
+    /// every field but the one of Notepad of Windows 11.
+    settle: u32,
 }
 
 impl Bench {
@@ -202,6 +205,15 @@ impl Bench {
             refuse: 0,
             log: Vec::new(),
             keyboard: None,
+            settle: 0,
+        }
+    }
+
+    /// **Task T-106-3.** A bench whose focused field asks the erasure to settle `settle` ms.
+    fn settling(settle: u32) -> Self {
+        Self {
+            settle,
+            ..Self::new()
         }
     }
 
@@ -304,6 +316,10 @@ impl Environment for Bench {
 
     fn pause(&mut self, delay_ms: u32) {
         self.log.push(Step::Pause(delay_ms));
+    }
+
+    fn erase_settle_ms(&mut self) -> u32 {
+        self.settle
     }
 
     fn switch_layout(&mut self) {
@@ -1293,6 +1309,156 @@ fn a_zero_delay_sends_the_whole_array_in_exactly_one_call() {
     assert_eq!(outcome.replacement.calls, 1);
     assert_eq!(outcome.release.calls, 1);
     assert_eq!(bench.sent().len(), 2);
+}
+
+// ---------------------------------------------------------------------------------------
+// Task T-106-3, решение 198.8 — the erasure settles before the insertion in Notepad
+// ---------------------------------------------------------------------------------------
+
+/// The steps of the log that send, pause or switch — what the order of step 4 is made of.
+fn sends_pauses_switches(bench: &Bench) -> Vec<Step> {
+    bench
+        .log
+        .iter()
+        .filter(|step| !matches!(step, Step::Held(_)))
+        .cloned()
+        .collect()
+}
+
+/// **Task T-106-3.** A field that asks its erasure to settle — the field of Notepad of Windows 11 —
+/// gets the packet of FR-41 in two calls: every `Backspace`, the pause, the whole insertion, and
+/// the switch of FR-43 after both. Measured on the stand: in one call the insertion came back as
+/// its last character repeated in 13 trials of 31; with 50 ms between the halves, 32 of 32 exact.
+#[test]
+fn a_settling_field_gets_the_erasure_the_pause_and_then_the_insertion() {
+    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
+    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
+
+    let steps = sends_pauses_switches(&bench);
+    println!("{steps:?}");
+
+    assert_eq!(
+        steps.len(),
+        4,
+        "решение 198.8: erasure, pause, insertion, switch — {steps:?}"
+    );
+
+    match &steps[..] {
+        [Step::Send(erasure), Step::Pause(pause), Step::Send(insertion), Step::Switch] => {
+            assert_eq!(erasure.len(), 12, "six Backspaces, down and up");
+            assert!(
+                erasure.iter().enumerate().all(|(at, event)| event.is_backspace(at % 2 == 1)),
+                "the first call is the erasure and nothing else"
+            );
+            assert_eq!(*pause, inject::ERASE_SETTLE_MS);
+            assert_eq!(insertion.len(), 12, "six code units, down and up");
+            assert!(
+                insertion.iter().all(|event| event.is_unicode()),
+                "the second call is the insertion and nothing else"
+            );
+        }
+        other => panic!("решение 198.8: the order is not erasure, pause, insertion, switch: {other:?}"),
+    }
+
+    assert_eq!(outcome.replacement.calls, 2);
+    assert_eq!(outcome.replacement.requested, 24);
+    assert_eq!(outcome.replacement.accepted, 24);
+    assert!(outcome.reached_the_screen());
+}
+
+/// **Task T-106-3 — and nothing else changes.** Every other field keeps the one call of FR-41; the
+/// selection of FR-42 and a press that only erases are not split even in the field of Notepad.
+#[test]
+fn the_settling_touches_the_backspace_packet_of_a_settling_field_only() {
+    // Every other field: one call, no pause.
+    let mut bench = Bench::new();
+    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
+
+    assert_eq!(outcome.replacement.calls, 1, "FR-41: one call in every other field");
+    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
+
+    // The selection of FR-42 in the field of Notepad: one call.
+    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
+    let outcome = inject::replace_in_with(
+        &mut bench,
+        &ghbdtn(),
+        &russian(),
+        inject::OnScreen::as_typed(&ghbdtn()),
+        0,
+        ReplacementMethod::Selection,
+    )
+    .expect("sized");
+
+    assert_eq!(outcome.replacement.calls, 1, "FR-42 is not split");
+    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
+
+    // Erasing without typing in the field of Notepad: nothing follows the erasure to wait for.
+    let origin = layout_with(LayoutId::from_raw(0x0409_0409), 0x22, KeyMapping::EMPTY);
+    let strokes = [Keystroke::recorded_in(&origin, 0x22, false, Mods::NONE)];
+    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
+    let outcome = inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &origin,
+        inject::OnScreen::as_injected(&strokes, &russian()),
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("one backspace is a packet");
+
+    assert_eq!(outcome.replacement.calls, 1, "an erasure alone is one call");
+    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
+}
+
+/// **Task T-106-3 — FR-45 across the two calls.** An erasure the system did not take whole is not
+/// followed by the insertion: in one call `SendInput` stops at the first blocked event and sends
+/// nothing after it, and the two calls keep that — no pause, no insertion, no switch.
+#[test]
+fn an_erasure_cut_short_is_not_followed_by_the_insertion() {
+    // A short call is counted by FR-45 in a process-wide counter the neighbours read.
+    let _short_sends = short_sends_are_mine();
+
+    let mut bench = Bench {
+        settle: inject::ERASE_SETTLE_MS,
+        ..Bench::refusing(1)
+    };
+    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
+
+    let steps = sends_pauses_switches(&bench);
+    println!("{steps:?}");
+
+    assert!(
+        matches!(&steps[..], [Step::Send(erasure)] if erasure.len() == 12),
+        "only the erasure was sent: {steps:?}"
+    );
+    assert_eq!(outcome.replacement.calls, 1);
+    assert_eq!(outcome.replacement.requested, 24, "the whole packet was asked for");
+    assert_eq!(outcome.replacement.accepted, 11);
+    assert!(!outcome.reached_the_screen());
+}
+
+/// **Task T-106-3 — the rule of the field**, the pure half: the field of Notepad of Windows 11 and
+/// nothing else, case-insensitively, and a field that cannot be read is no reason to wait.
+#[test]
+fn only_the_field_of_notepad_asks_the_erasure_to_settle() {
+    assert_eq!(inject::ERASE_SETTLE_MS, 50);
+    assert_eq!(inject::erase_settle_for(Some("RichEditD2DPT")), 50);
+    assert_eq!(inject::erase_settle_for(Some("richeditd2dpt")), 50);
+
+    for class in [
+        "Edit",
+        "RICHEDIT50W",
+        "RichEdit20W",
+        "Chrome_RenderWidgetHostHWND",
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "Notepad",
+        "",
+    ] {
+        assert_eq!(inject::erase_settle_for(Some(class)), 0, "{class}");
+    }
+
+    assert_eq!(inject::erase_settle_for(None), 0);
 }
 
 // ---------------------------------------------------------------------------------------
