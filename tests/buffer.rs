@@ -4915,3 +4915,156 @@ fn the_idle_rule_is_reachable_from_the_thread_local_layer() {
 
     buffer::uninstall();
 }
+
+// =========================================================================================
+// Решение 194.1 (stage Э105) — the right `Alt` in a layout without `AltGr`
+// =========================================================================================
+
+/// Polish (Programmers), as far as these tests need it: `A` is `a`, `AltGr+A` is `ą` and
+/// `AltGr+Shift+A` is `Ą`, and `AltGr+Z` is a symbol (`€` on this synthetic key) — a key that
+/// writes under `AltGr`, but no letter.
+fn polish_programmers() -> LayoutMap {
+    map_of(
+        LayoutId::from_raw(0x0415_0415),
+        &[
+            (SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a')),
+            (
+                SCAN_A,
+                MAIN_BLOCK,
+                Mods::new(false, false, true),
+                KeyMapping::from_char('ą'),
+            ),
+            (
+                SCAN_A,
+                MAIN_BLOCK,
+                Mods::new(true, false, true),
+                KeyMapping::from_char('Ą'),
+            ),
+            (SCAN_Z, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('z')),
+            (
+                SCAN_Z,
+                MAIN_BLOCK,
+                Mods::new(false, false, true),
+                KeyMapping::from_char('€'),
+            ),
+        ],
+    )
+}
+
+/// US as Windows ships it: **no `AltGr`** — nothing on the `AltGr` columns of any key.
+fn us_without_altgr() -> LayoutMap {
+    map_of(
+        EN,
+        &[
+            (SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a')),
+            (SCAN_A, MAIN_BLOCK, Mods::SHIFT, KeyMapping::from_char('A')),
+            (SCAN_Z, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('z')),
+        ],
+    )
+}
+
+/// A recorder typing in US, with Polish (Programmers) in the session.
+fn typing_in_us_beside_polish() -> Recorder {
+    let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
+    recorder.set_cache(
+        LayoutCache::from_maps(vec![us_without_altgr(), polish_programmers()])
+            .expect("two non-empty maps"),
+    );
+    recorder.set_active_layout(EN);
+    recorder.verify_held_with(everything_is_physically_held);
+    recorder
+}
+
+/// **The right `Alt` + a key that is a letter under `AltGr` in a layout of the session is a
+/// stroke, not a command, when the active layout has no `AltGr`** — решение 194.1, cases 12 and
+/// 7 of замер 187: `mąka` typed in US with the keys of Polish (Programmers) lost `ą` and stayed
+/// `mka`, because Windows delivers the right `Alt` alone in US and FR-10 flushed it as a command.
+/// The stroke writes nothing in US — the screen shows nothing for it, as it did — and carries
+/// `AltGr`, so the conversion asks Polish for `AltGr+A`.
+#[test]
+fn the_right_alt_in_a_layout_without_altgr_records_the_letter_of_the_layout_that_has_it() {
+    let mut recorder = typing_in_us_beside_polish();
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(hold(&mut recorder, VK_RMENU), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_A, SCAN_A),
+        Recorded::Stored,
+        "the right Alt + A in US is ą typed with the keys of Polish, not a command"
+    );
+    assert_eq!(release(&mut recorder, VK_RMENU), Recorded::Modifier);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+
+    assert_eq!(recorder.len(), 3, "a, ą, a — nothing flushed");
+    let second = recorder.stroke(1).expect("the stroke of the right Alt");
+    assert!(second.mods().altgr(), "recorded under AltGr");
+    assert!(
+        second.units().is_empty(),
+        "US writes nothing for it — the screen shows nothing"
+    );
+
+    assert_eq!(
+        polish_programmers()
+            .lookup(SCAN_A, MAIN_BLOCK, second.mods().to_layout_mods())
+            .single_char(),
+        Some('ą'),
+        "the conversion into Polish finds ą on the same key under AltGr"
+    );
+
+    // With Shift, the capital.
+    hold(&mut recorder, VK_LSHIFT);
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    let capital = recorder.stroke(3).expect("the capital");
+    assert_eq!(
+        polish_programmers()
+            .lookup(SCAN_A, MAIN_BLOCK, capital.mods().to_layout_mods())
+            .single_char(),
+        Some('Ą')
+    );
+}
+
+/// **Everything else stays the command it was** — the negative controls of решение 194.1: the
+/// left `Alt` + a letter, the right `Alt` + `Tab`, the right `Alt` + a key that writes only a
+/// symbol under `AltGr` anywhere, and the right `Alt` alone in a layout that has `AltGr` (there
+/// Windows fakes the `Ctrl`, and a right `Alt` without it is not `AltGr`).
+#[test]
+fn the_left_alt_and_the_right_alt_without_a_letter_still_flush() {
+    let mut recorder = typing_in_us_beside_polish();
+    press(&mut recorder, VK_A, SCAN_A);
+    hold(&mut recorder, VK_LMENU);
+    assert_eq!(
+        press(&mut recorder, VK_A, SCAN_A),
+        Recorded::Flushed,
+        "left Alt + A"
+    );
+    release(&mut recorder, VK_LMENU);
+
+    let mut recorder = typing_in_us_beside_polish();
+    press(&mut recorder, VK_A, SCAN_A);
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(
+        press(&mut recorder, VK_TAB, 0x0F),
+        Recorded::Flushed,
+        "right Alt + Tab"
+    );
+
+    let mut recorder = typing_in_us_beside_polish();
+    press(&mut recorder, VK_A, SCAN_A);
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(
+        press(&mut recorder, VK_Z, SCAN_Z),
+        Recorded::Flushed,
+        "right Alt + a key that is only a symbol under AltGr"
+    );
+
+    let mut recorder = typing_in_us_beside_polish();
+    recorder.set_active_layout(LayoutId::from_raw(0x0415_0415));
+    press(&mut recorder, VK_A, SCAN_A);
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(
+        press(&mut recorder, VK_A, SCAN_A),
+        Recorded::Flushed,
+        "a right Alt without Ctrl in a layout that has AltGr is a command"
+    );
+}

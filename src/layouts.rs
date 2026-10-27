@@ -600,9 +600,24 @@ pub struct LayoutMap {
     reverse: Box<[ReverseSlot]>,
     /// Number of forward entries that carry a character.
     filled: u32,
+    /// Whether any key gives anything under `AltGr` — решение 194.1, see [`LayoutMap::has_altgr`].
+    altgr: bool,
 }
 
 impl LayoutMap {
+    /// **Whether the layout has `AltGr` at all** — whether any key of it gives a character, or a
+    /// dead key, with `Ctrl` and the right `Alt` held. Решение 194.1 (stage Э105).
+    ///
+    /// The same thing the layout's own `KLLF_ALTGR` says (посылка П3, 197.11: US and Thai have
+    /// none, French, Polish, Russian and Arabic 101 have it): a layout with `AltGr` is the one
+    /// Windows fakes a left `Ctrl` in front of the right `Alt` for, and its sweep of FR-20 finds
+    /// characters on the `AltGr` columns; a layout without it delivers the right `Alt` alone, and
+    /// `ToUnicodeEx` gives nothing on those columns. Decided once, in [`LayoutMapBuilder::finish`],
+    /// so that the hook callback reads a boolean (NFR-01, NFR-02).
+    pub const fn has_altgr(&self) -> bool {
+        self.altgr
+    }
+
     /// Which layout this map describes.
     pub fn layout(&self) -> LayoutId {
         self.layout
@@ -722,6 +737,12 @@ impl LayoutMapBuilder {
 
     /// Derives the reverse index and freezes the map.
     pub fn finish(self) -> LayoutMap {
+        let altgr = (0..KEY_SLOTS).any(|key| {
+            Mods::ALL.iter().any(|mods| {
+                mods.altgr() && !self.forward[key * MOD_COMBINATIONS + mods.index()].is_empty()
+            })
+        });
+
         let mut reverse = vec![ReverseSlot::FREE; REVERSE_CAPACITY].into_boxed_slice();
         // Ascending key index, so the whole plain half is walked before the extended one and
         // the main block wins every reverse slot it shares with the keypad.
@@ -751,6 +772,7 @@ impl LayoutMapBuilder {
             forward: self.forward,
             reverse,
             filled: self.filled,
+            altgr,
         }
     }
 }
@@ -1120,6 +1142,32 @@ impl LayoutCache {
         self.maps
             .iter()
             .any(|map| !map.lookup(scan, extended, mods).is_empty())
+    }
+
+    /// **Whether the key `(scan, extended)` gives a letter under `AltGr` in some layout of the
+    /// session** — решение 194.1 (stage Э105). `mods` carries `Shift` and `CapsLock` as held; the
+    /// `AltGr` bit is set here.
+    ///
+    /// The second half of the rule of the right `Alt` in a layout without `AltGr`: `mąka` typed in
+    /// US with the keys of Polish (Programmers) is `M`, right `Alt`+`A`, `K`, `A`, and the second
+    /// stroke is a letter in Polish while US delivers the right `Alt` alone. A letter, and only a
+    /// letter (`char::is_alphabetic` of the character the key gives): a right `Alt` with a key that
+    /// gives a symbol, a dead key or nothing under `AltGr` anywhere — `Tab`, `F4`, a digit — is a
+    /// command, as it always was. One array read per layout of the session and a table lookup in
+    /// the standard library: no allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05) and no
+    /// Win32 call (NFR-02) — safe from inside the hook callback, where it is called, and only on
+    /// the command row with the right `Alt` held.
+    pub fn altgr_letter_in_any_map(&self, scan: u16, extended: bool, mods: Mods) -> bool {
+        let altgr = Mods::new(mods.shift(), mods.caps(), true);
+
+        self.maps.iter().any(|map| {
+            let mapping = map.lookup(scan, extended, altgr);
+
+            !mapping.is_dead()
+                && char::decode_utf16(mapping.units().iter().copied())
+                    .next()
+                    .is_some_and(|ch| ch.is_ok_and(char::is_alphabetic))
+        })
     }
 }
 

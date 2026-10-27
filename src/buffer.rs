@@ -1939,6 +1939,35 @@ impl Recorder {
             command = (mods.ctrl() || mods.alt() || self.held.win()) && !mods.altgr();
         }
 
+        // ---------------------------------------------------------------------------------
+        // ⭐ **The right `Alt` in a layout without `AltGr` — решение 194.1, stage Э105.**
+        //
+        // A layout with `AltGr` (Russian, Polish, French) makes Windows fake a left `Ctrl` in
+        // front of the right `Alt`, and the mask above already reads the pair as `AltGr`. A
+        // layout without it — US, Thai — delivers the right `Alt` **alone**, and the row above
+        // called every such stroke a command: `mąka` typed in US with the keys of Polish
+        // (Programmers) — `M`, right `Alt`+`A`, `K`, `A` — lost its first two strokes and stayed
+        // `mka` after `Pause`, `сөз` in Kyrgyz came out `cз` (cases 12 and 7 of замер 187).
+        //
+        // **The rule, in full:** the right `Alt` alone — no left `Alt`, no `Ctrl`, no `Win` — in a
+        // layout whose map has nothing on its `AltGr` columns, with a key that gives a **letter**
+        // under `AltGr` in some layout of the session, is a stroke under `AltGr`, not a command.
+        // It is recorded as one and the layout it was typed in gives it nothing — the screen
+        // shows nothing for it, which is what Windows did — and the conversion asks the target
+        // for `AltGr` + that key. The left `Alt` + a letter, and the right `Alt` with a key that
+        // gives no letter anywhere (`Tab`, `F4`, a digit), stay commands and flush.
+        //
+        // **NFR-01, NFR-02.** Only the command row pays it, and only with the right `Alt` held:
+        // two booleans, then one array read per layout of the cache, no Win32 call. The price the
+        // owner took (194): a window may read the right `Alt` + letter as a menu command before
+        // the hotkey, and a command made with the right `Alt` without a change of window or field
+        // leaves one empty stroke in the word.
+        // ---------------------------------------------------------------------------------
+        if command && self.right_alt_types_a_letter(key.scan, mods) {
+            mods = mods.with(StrokeMods::ALTGR);
+            command = false;
+        }
+
         // ⚠ **FR-11, and it stands in front of every flush row below — decision Р-44.**
         //
         // FR-11 names two combinations — `Alt+Shift` and `Win+Space` — and says a layout switch
@@ -2715,6 +2744,26 @@ impl Recorder {
     /// The map of the active layout, if there is a cache and the layout is in it.
     fn active_map(&self) -> Option<&crate::layouts::LayoutMap> {
         self.cache.as_ref()?.map_at(self.active_index?)
+    }
+
+    /// **Whether this command-looking stroke is the right `Alt` typing a letter** — решение 194.1.
+    ///
+    /// The right `Alt` alone (no left `Alt`, no `Ctrl`, no `Win`), the active layout without
+    /// `AltGr` ([`crate::layouts::LayoutMap::has_altgr`]), and the key a letter under `AltGr` in a
+    /// layout of the session ([`crate::layouts::LayoutCache::altgr_letter_in_any_map`]). Without a
+    /// cache, or with the active layout outside it, the answer is no and the stroke stays the
+    /// command it always was: «I do not know» is not «a letter». See the call site for the rule.
+    fn right_alt_types_a_letter(&self, scan: u16, mods: StrokeMods) -> bool {
+        if !self.held.alt_right || self.held.alt_left || self.held.ctrl() || self.held.win() {
+            return false;
+        }
+
+        let (Some(cache), Some(active)) = (self.cache.as_ref(), self.active_map()) else {
+            return false;
+        };
+
+        !active.has_altgr()
+            && cache.altgr_letter_in_any_map(scan, mods.extended(), mods.to_layout_mods())
     }
 
     /// Whether this stroke wrote **nothing, in any layout the session has** — task T-52-1.
