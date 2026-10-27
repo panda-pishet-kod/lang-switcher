@@ -28,7 +28,7 @@ const OLD_NAMES: [&str; 2] = ["Lang Switcher for Windows", "Lang Switcher для
 const MARK: &str = "UntilE100";
 
 /// The part of the tree the old name has to leave.
-const SWEPT: [&str; 4] = ["installer", "tools", "README.md", "SPEC.md"];
+const SWEPT: [&str; 5] = ["installer", "tools", "README.md", "README.ru.md", "SPEC.md"];
 
 /// Not of the tree: the machine's own values (stage E89, untracked) and the output of the compiler
 /// of the installer.

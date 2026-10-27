@@ -1,316 +1,166 @@
 # Lang Switcher
 
-**Lang Switcher** fixes text typed in the wrong keyboard layout. Type `ghbdtn` with
-the English layout on, press `Pause/Break`, and the word becomes `привет` while the active window
-switches to the Russian layout; press again and the original comes back. It is a small tray program
-for Windows 10 and 11, free, licensed under `MIT OR Apache-2.0`. Builds are published on the
-[Releases](../../releases) page of this repository; to build from source, run `cargo build --release`.
+[Русский](README.ru.md)
 
-[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/)
+**Lang Switcher fixes text typed in the wrong keyboard layout.** You meant to type `hello`, but the
+Russian layout was on, so the screen shows `руддщ`. Press `Pause/Break`: the word becomes `hello`,
+and the window switches to the English layout. Press it again and you get the original back,
+exactly as you typed it. One key, no setup, nothing to learn.
 
-Step-by-step install: [Edge](https://panda-pishet-kod.dev/en/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/en/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/en/langswitcher/download/opera/) · [Yandex Browser](https://panda-pishet-kod.dev/en/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/en/langswitcher/download/firefox/)
+It is a small tray program for Windows 10 and 11. It is free and open source, licensed under
+`MIT OR Apache-2.0`.
 
-Documentation: [questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [no Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
+[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-Report a problem — in English or Russian: [Issues](../../issues).
+**Status:** version **1.2.0**. New in it: you can send a message to the author straight from the
+program — the "Write to the author" wizard has a **Send** button now, no email app or browser
+needed; the letter statistics that pick the right reading of an ambiguous key now cover Arabic,
+Persian, Indonesian, Hindi, Tamil and Sinhala as well; and four rare cases of special layouts were
+fixed (see [Languages](#languages)). Since 1.0.0 the program updates itself.
+
+## How it works
+
+- **The word you just typed.** Lang Switcher remembers the keys you pressed — the keys, not the
+  text — and on `Pause/Break` retypes them in the other layout, erasing the wrong word first. A
+  second press goes back, character for character, because the program keeps the keys themselves
+  and never overwrites them with the result.
+- **Selected text.** Select any text, press `Pause/Break`, and the selection is converted. The
+  clipboard is put back exactly as it was afterwards, every format of it.
+- **Which layouts.** By default, the two layouts you use most; you can name a pair or a cycle of
+  several in the settings window.
+- **Where.** Notepad, Word, browsers, messengers, Windows Terminal and the classic console. It also
+  works in programs run as administrator. In password fields the program keeps no record of your
+  keys at all.
+
+## Download and install
+
+Releases are on the [Releases](../../releases) page of this repository and on the
+[download page](https://panda-pishet-kod.dev/en/langswitcher/download/) of the site. The installer
+speaks the language of your Windows.
 
 **If the browser or Windows warns you.** The program is signed with the author's own certificate,
-not with one from a certification authority, and a new release is still rarely downloaded, so you
-will see warnings before installing — this is expected. Edge: in Downloads, "…" → "Keep" → in the
-dialog, "Delete ▾" → "Keep anyway". Chrome: "Download suspicious file". When you run it, Windows
-may show "Windows protected your PC" — "More info" → "Run anyway". Then the yellow UAC prompt —
-"Yes". You can check the file against the SHA-256 on its release page. The step-by-step page of
-your browser above shows every window.
+not one from a certification authority, and a new release is still downloaded rarely, so you will
+see warnings — this is expected:
 
-The rest of this README and all other documents of the project are in Russian.
+- **Edge:** in Downloads, "…" → "Keep", then in the dialog "Delete ▾" → "Keep anyway".
+- **Chrome:** "Download suspicious file".
+- **Windows** may show "Windows protected your PC" — "More info" → "Run anyway". Then the yellow UAC
+  prompt — "Yes".
 
-Резидентная утилита для Windows, исправляющая текст, набранный в неверной раскладке клавиатуры.
-По нажатию `Pause/Break` последнее набранное слово перекодируется в другую раскладку,
-а раскладка активного окна переключается на соответствующую.
+Every window, step by step: [Edge](https://panda-pishet-kod.dev/en/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/en/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/en/langswitcher/download/opera/) · [Yandex Browser](https://panda-pishet-kod.dev/en/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/en/langswitcher/download/firefox/).
+You can check the file against the SHA-256 on its release page.
 
-[Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/) · [Конвертер раскладки](https://panda-pishet-kod.dev/raskladka/)
+**What the installer does with a certificate.** Your Windows does not trust the author's
+certificate, so the installer creates one of its own on your computer, "Lang Switcher (local)": good
+**for code signing only**, not a certification authority, for 30 years. It signs the program with it,
+**destroys the private key at once**, and puts the public part into the computer's Trusted Root
+Certification Authorities. Uninstalling the program removes that certificate. If you would rather
+not have it, run `LangSwitcher-setup.exe /NOLOCALCERT`: you get a copy of the program without the
+certificate, which works everywhere except in programs run as administrator.
 
-Пошаговая установка: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/)
+## Requirements
 
-Документация: [вопросы и ответы](https://panda-pishet-kod.dev/langswitcher/docs/) · [горячая клавиша — если нет Pause/Break](https://panda-pishet-kod.dev/langswitcher/docs/goryachaya-klavisha/)
+Windows 10 or Windows 11, 64-bit. No runtime to install, no account, no internet needed to work.
 
-Программа делает одну вещь. «Лёгкость» здесь означает отсутствие постороннего функционала,
-а не упрощение инженерной реализации.
+## Languages
 
-**Состояние:** версия **0.103.0** — поставка `e103`: мастер «Написать автору…» ведёт туда, где можно
-написать, — обращение об ошибке (с журналом и сведениями о компьютере) предлагает отправить автору
-письмом: адрес на экране, кнопки «Скопировать текст» и «Скопировать адрес»; пожелание несёт только
-текст человека и версию и открывает тему программы в группе автора в Telegram (русский и украинский
-интерфейс) или GitHub Issues (остальные языки); туда же ведёт письмо «Спасибо»; страница загрузки
-и страница программы открываются на языке интерфейса — русские при русском и украинском, английские
-при остальных; пауза между событиями
-замены (`inter_event_delay_ms`) — не больше 250 мс. С поставки `e102` письмо «Привет» при
-первом запуске показывает
-пример на языке интерфейса — слово на языке читателя, набранное в английской раскладке, и оно же
-после нажатия клавиши; по-английски и по-польски пример обратный, по-русски — прежний; английские
-строки программы — в американском написании. С поставки `e101` программа называется просто «Lang Switcher»,
-без «для Windows», — так теперь называются мастер установки, папка «Пуска», запись в «Приложениях»,
-описание подписи в запросе UAC и сертификат, который установщик создаёт на машине, — «Lang Switcher
-(local)»; обновление убирает папку «Пуска» и сертификат прежнего имени. Удаление программы больше не
-оставляет в `%APPDATA%\Lang_Switcher` журнал: он уходит всегда, а настройки — по ответу «Да». С
-поставки `e100` в окне настроек, в разделе «Исключения»,
-программу можно добавить автоматически — нажать «Выбрать окно программы» и за 5 секунд
-переключиться в неё: имя её процесса встаёт в список и выделяется, под кнопкой — «Добавлено: …»;
-прежний способ — имя процесса в поле и «Добавить» — остался под словом «Вручную»; щелчком можно
-отметить несколько строк списка, и «Удалить» уберёт их разом. У программ Microsoft Store
-(Калькулятор, «Параметры») программа берёт их собственный процесс, а не общую рамку
-`ApplicationFrameHost.exe`, — и так же решает, исключено ли окно. С поставки `e99` мастер
-установки — в стиле сайта автора: цвета сайта, светлые или тёмные по теме Windows, бамбук у краёв,
-внизу каждой страницы — подпись «Panda Koder · программы, сделанные с душой» и адрес сайта,
-который по щелчку открывается в браузере. С поставки `e98` на первой странице установщика, «Всё
-готово к установке», фраза о
-сертификате переносится по строкам и видна целиком; в README — раздел о
-предупреждениях браузера и Windows (ниже); размер шрифта окон программа выбирает с учётом окна «От
-автора» при живой ленте — рукой не видно. С поставки `e97` двойной `Shift` отвечает быстрее — на
-каждом касании программа спрашивает Windows только о `Ctrl`, `Alt` и `Win`, а не обо всех
-модификаторах, и снова укладывается в свою норму времени отклика; рукой разница не видна. С
-поставки `e96` в классической консоли слово больше не
-пропадает — там программа сначала переключает раскладку, а потом нажимает те же клавиши (абзац
-«Консоли» ниже). С поставки `e95` горячей клавишей можно назначить двойное
-нажатие `Shift` — два коротких касания подряд (раздел «Горячая клавиша» ниже). С поставки `e94`
-письмо, которое программа открывает сама, показывается без рамки фокуса на кнопке — рамка
-появляется после первого `Tab`; с поставки `e93` горячей клавишей можно назначить сочетание —
-клавишу вместе с `Ctrl`, `Alt`, `Shift`. С поставки `e91`
-установщик ставит полный образ, подписав его сертификатом, созданным на этой машине
-(раздел «Что установщик делает с сертификатом»), а где это не удалось — запасной образ без
-`uiAccess`; автор называется «Panda Koder»; мастер установки говорит на языке Windows.
-§12 спецификации перечисляет одиннадцать этапов; Э12 и
-последующие заведены поверх них по прямому заказу владельца — доводка вида по очной
-приёмке, ремонты по итогам сплошных аудитов кода, письма от автора и лента. Метку получает
-каждая **установленная** поставка, поэтому номера меток не сплошные; точный список даёт
-`git tag`. С поставки `e36` по `e104` номер метки и версия были одним числом (`e90` — это
-0.90.0); с `e105` версия обычная — 1.0.0 (первая цифра — большие перемены, вторая — новые
-возможности, третья — исправления), а номер поставки — только внутренняя отметка метки и
-записей, в номер версии он не входит.
+**The interface** speaks 14 languages: English, Russian, Ukrainian, German, French, Spanish,
+Portuguese, Italian, Polish, Czech, Turkish, Greek, Hebrew and Arabic (the last two right to left).
 
-**Главный сценарий работает целиком.** В английской раскладке набрано `ghbdtn`, нажат
-`Pause` — в поле стоит `привет`, и раскладка активного окна переключилась на русскую.
-Проверено не только тестами: сквозной стенд приёмки §11.5 проходит этот путь на живой
-программе в Блокноте, Microsoft Word и двух полях Chrome.
+**Typing.** The program converts between any two Windows keyboard layouts installed on your
+computer, except layouts with an IME (Chinese, Japanese, Korean), where a character is built from
+several keys in a candidate window. It was **measured** on the layouts of Windows 11 for **106**
+languages: 16 Cyrillic, 45 Latin with letters of their own, 34 with a script of their own (Arabic,
+Hebrew, Greek, Armenian, Georgian, Thai, the Indian scripts and more) and 11 smaller scripts
+(Cherokee, Inuktitut syllabics, Javanese, ADLaM and others).
 
-Повторное нажатие возвращает исходный текст **побитово**: буфер хранит сами нажатия
-и никогда не переписывается результатом конвертации, а рядом идёт счётчик позиции в цикле.
-Поэтому многократные проходы не накапливают искажений.
+The finer points:
 
-**Что программа умеет сегодня.** Живёт в трее с контекстным меню и не допускает второго
-экземпляра; читает и пишет конфигурацию атомарной записью с лестницей миграций схемы;
-ставит глобальный клавиатурный хук и держит при нём сторожа, переустанавливающего хук
-после смены рабочего стола, блокировки сеанса и пробуждения; перестраивает кэш раскладок
-при их смене; запоминает нажатия в кольцевом буфере с обнулением памяти при каждом сбросе;
-заменяет набранное перекодированным одним из трёх настраиваемых методов — `auto` (умолчание,
-FR-42а: выбор по классу переднего окна, Windows Terminal получает `Backspace`, классическая
-консоль — набор клавишами, прочие — режим совместимости), `backspace` и `selection` как ручное
-принуждение; переключает раскладку одним способом, `WM_INPUTLANGCHANGEREQUEST`, а вердикт берёт перечитыванием раскладки
-потока фокуса, а не из возвращаемого значения; конвертирует **выделенный** текст через
-буфер обмена со снимком и восстановлением всех форматов — кроме консолей: в Windows Terminal
-и классической консоли конвертируется набранное слово, а выделенное нет, потому что узнать
-о выделении можно только нажав `Ctrl+C`, а там без выделения это отменяет набранную строку
-и прерывает работающую команду (замер этапа Э92);
-**не ведёт буфер в полях ввода пароля** — три уровня проверки, включая UI
-Automation; уважает список исключений процессов — программу туда добавляют автоматически
-(«Выбрать окно программы» и за 5 секунд переключиться в неё; у программ Microsoft Store берётся
-процесс самой программы, а не общей рамки) или вручную, именем процесса, а убирают — отметив
-щелчками сколько угодно строк сразу; несёт окно настроек и окно «О программе»;
-говорит на четырнадцати языках — `ru`, `en`, `uk`, `de`, `fr`, `es`, `pt`, `it`, `pl`, `cs`,
-`tr`, `el`, `he`, `ar`, иврит и арабский справа налево; оформляет свои окна светлой, тёмной
-или следующей за системной темой; показывает письма от автора (FR-101), окно «От автора» и
-мастер обращения к нему (FR-103, FR-104); раз в сутки читает подписанную ленту автора
-(FR-102), из которой приходят новости, и **обновляется сама**: отдельный обновляльщик
-`LangSwitcherUpdate.exe` (SEC-10) раз в сутки читает ту же ленту, скачивает новую версию с сайта
-автора, проверяет подпись и сумму и ставит её, пока компьютер простаивает, — после обновления у
-значка появится короткое уведомление; подписана Authenticode
-самодельным сертификатом автора и ставится установщиком Inno Setup, который говорит на языке
-Windows — тринадцать языков программы, греческой системе и всякой другой английский; язык можно
-задать параметром `/LANG=` (например, `/LANG=russian`).
+- Letters a layout gives only with `AltGr`, dead keys and keys that print several characters at
+  once (Arabic `لا`, Indian conjuncts) are converted the way Windows itself types them.
+- Text in scripts with signs above and below the letters is erased and selected exactly: the
+  program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points).
+- When a key of the layout is ambiguous (Arabic 101: `لا` is one key, `B`, and also two, `G` and
+  `H`) and the word was not typed just now, the program picks the reading that is more probable in
+  the target language. It has letter statistics for English, French, Spanish and Russian, and since
+  1.2.0 for Arabic, Persian, Indonesian, Hindi, Tamil and Sinhala.
+- The level of the right `Ctrl` (Canadian Multilingual Standard and similar layouts) is not part of
+  the model: a word typed with it is not converted, and the program sounds a refusal instead.
+- A letter the target layout builds from two dead keys in a row (BÉPO: `´`, `´`, `o` for `ő`)
+  comes out as the accents and the letter, `´´o`.
+- In selected text the program cannot see `CapsLock`, and a character the target layout does not
+  have is carried over as it is.
 
-**Консоли.** В Windows Terminal программа заменяет слово как везде: стирает его и печатает
-символы. Классическая консоль — окно `conhost`, в котором открываются `cmd` и Windows
-PowerShell, если Windows Terminal не выбран терминалом по умолчанию, и по команде
-`conhost <оболочка>`, — с Windows PowerShell 5.1 напечатанных программой символов не
-принимает: стирание проходило, а замена не появлялась, и слово пропадало. Поэтому в
-классической консоли программа сначала переключает раскладку окна — без проверки, прочитать
-раскладку консоли надёжно нельзя, — а потом одним пакетом стирает слово и нажимает те же
-клавиши, что нажимал человек. На стенде этапа Э96 — 50 верных нажатий из 50 и в Windows
-PowerShell 5.1, и в `cmd`, туда и обратно, с заглавными. Набор, который клавиши повторить не
-могут, — с мёртвой клавишей или `AltGr`, — не заменяется: слово остаётся как набрано, и звучит
-отказ.
+**Where the letter statistics come from:** public-domain books of Project Gutenberg (English,
+French, Spanish, Russian) and the Leipzig Corpora Collection, Universität Leipzig, licensed CC BY
+(the six languages of 1.2.0; the Sinhala corpus is drawn from Wikipedia, CC BY-SA). Only tables of
+letter frequencies are in the program, not the texts.
 
-**Письмо за пределами русской и английской (с 1.0.0).** Замена выделением (`auto` вне консолей)
-стирает ровно слово и в письме со знаками над и под буквой: число `Shift+Left` считается по
-буквам Windows, а не по кодовым точкам (тайское `สวัสดี` — 4 буквы из 6 точек, хинди `नमस्ते` — 3,
-`Việt` — 4); `Backspace` по-прежнему снимает одну кодовую точку. Правый `Alt` в английской
-раскладке, у которой нет `AltGr`, с клавишей, дающей букву в другой раскладке круга, — это буква,
-а не команда: `mąka`, набранное в US клавишами польской (программистов), переводится. Мёртвые
-клавиши переводятся как в Windows: `[etre`, набранное в US клавишами французской, становится
-`être`, а `ê` обратно — `[e`; соединения берутся из таблицы самой раскладки. Выделенный текст
-раскладки с неоднозначной клавишей-лигатурой (арабская 101: `لا` — это `B` или `G` и `H`)
-переводится по настоящим нажатиям, если слово только что набрано в том же поле (короткая память
-только для таких раскладок, минута без набора, гаснет при смене поля), иначе — по статистике букв
-английского.
+## The hotkey
 
-Модульных и интеграционных тестов — **1324** обычным `cargo test` и **1430** с фичей
-`testing`, красных ноль. Всего в дереве **1468** функций `#[test]`. Разница до 1430 — ровно
-**38** тестов с `#[ignore]`: они трогают настоящий буфер обмена или клавиатуру машины и
-запускаются отдельно (`--ignored --test-threads=1`) при выключенной программе. Без фичи
-`testing` не собираются, сверх того, **108** тестов — отладочного канала SEC-04a, сквозного
-стенда и других дверей этой фичи; обычный `cargo test` поэтому видит 1324 + 36 = 1360.
+`Pause/Break` by default. In the settings window you can set another key, alone or with `Ctrl`,
+`Alt` and `Shift` (`Ctrl+F12`, `Alt+Shift+K`), or a **double tap of `Shift`** — two short taps in a
+row. No `Pause` key? Try `Fn+Pause`, a combination such as `Ctrl+F12`, `CapsLock` or the double
+`Shift`.
 
-⚠ **Тесты привязаны к конфигурации машины разработчика** (ровно две раскладки, именно
-русская и US) и на произвольной машине не воспроизводятся без правки. Это осознанное
-решение проекта, а не дефект.
-
----
-
-## Если браузер или Windows предупреждают
-
-Программа подписана самодельным сертификатом автора, а не сертификатом удостоверяющего центра,
-и новый выпуск пока скачивают редко, поэтому перед установкой будут предупреждения — это
-ожидаемо:
-
-- **Edge:** в загрузках «…» → «Сохранить» → в окне «Удалить ▾» → «Все равно сохранить».
-- **Chrome:** «Скачать подозрительный файл».
-- **Windows** при запуске может показать «Система Windows защитила ваш компьютер» — «Подробнее» →
-  «Выполнить в любом случае».
-- Затем жёлтый запрос UAC — «Да».
-
-Все окна по шагам, со снимками, — на странице своего браузера: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/).
-
-Сверить скачанный файл можно по SHA-256 на странице его выпуска в разделе
-[Releases](../../releases). Что установщик делает с сертификатом на вашем компьютере — в разделе
-[«Что установщик делает с сертификатом»](#что-установщик-делает-с-сертификатом).
-
-## Языки
-
-Программа сама языков не ограничивает: она переводит набранное между любыми двумя раскладками
-Windows, которые стоят на компьютере, — кроме раскладок с IME (китайской, японской, корейской:
-FR-35, там знак собирается из нескольких нажатий в окне подсказок, и связь «клавиша — знак»
-рвётся). Ниже — языки, с которыми программа работает **по замеру** раскладок Windows 11
-(вопросы 187 и 198, этапы Э105 и Э106): у языка есть раскладка, в которой его буквы стоят на
-своих клавишах, и слово, набранное не в той раскладке, переводится туда и обратно.
-
-**Кириллица** (16): азербайджанский (кириллица), башкирский, белорусский, болгарский, боснийский
-(кириллица), казахский, киргизский, македонский, монгольский, русский, саха, сербский
-(кириллица), таджикский, татарский, узбекский (кириллица), украинский.
-
-**Латиница со своими буквами** (45): азербайджанский (латиница), албанский, английский, валлийский,
-венгерский, верхнелужицкий, волоф, вьетнамский, гавайский, гренландский, гуарани, датский, игбо,
-исландский, испанский, итальянский, йоруба, латышский, литовский, люксембургский, мальтийский,
-маори, немецкий, нидерландский, норвежский (букмол), польский, португальский, румынский,
-северносаамский, северный сото, сербский (латиница), словацкий, словенский, среднеатласский
-тамазигхтский (латиница), тсвана, турецкий, туркменский, фарерский, финский, французский, хауса,
-хорватский, чешский, шведский, эстонский.
-
-**Своё письмо** (34): арабский, армянский, ассамский, бенгальский, бирманский, греческий, грузинский,
-гуджарати, дзонг-кэ, иврит, каннада, курдский (арабица), кхмерский, лаосский, малаялам,
-мальдивский, манден (нко), маратхи, монгольский (монгольское письмо), непальский, ория, панджаби,
-персидский, пушту, сантали (ол-чики), сингальский, среднеатласский тамазигхтский (тифинаг),
-тайский, тамильский, телугу, тибетский, уйгурский, урду, хинди.
-
-**Малые письмена** (11): бугийский, инуктитут (слоговое письмо и латиница), лису, осейдж,
-сирийский, сора, тай лы (новое письмо), тай нюа (тай лэ), чероки, яванский; и фула (адлам).
-У адлама, осейджа и соры буквы лежат за пределами BMP (каждая — две кодовые единицы UTF-16): программа
-переносит такую букву целиком и стирает её одним нажатием, как одну кодовую точку; живым замером это
-пока не подтверждено.
-
-**Где нужна оговорка.** Буквы, которые раскладка даёт только через `AltGr`, мёртвые клавиши и
-клавиши, печатающие по несколько знаков (арабское «لا», индийские слоги), с 1.0.0 переводятся
-как в самой Windows; выделенный текст раскладки с неоднозначной клавишей-лигатурой, набранный не
-только что, читается по статистике букв языка цели — она есть у английского, французского,
-испанского и русского (с 1.1.0), арабского, персидского, индонезийского, хинди, тамильского и
-сингальского (с 1.2.0); для остальных языков цели такое слово делится по одиночным клавишам.
-Источник статистики: книги Project Gutenberg в общественном достоянии (английский, французский,
-испанский, русский) и Leipzig Corpora Collection, Universität Leipzig, CC BY (шесть языков 1.2.0;
-сингальский корпус — из Википедии, CC BY-SA); в программе только таблицы частот, не тексты.
-Уровень правого `Ctrl` (канадская многоязычная стандартная и подобные раскладки) программа не
-знает: слово, набранное с ним, она не заменяет и отказывается со звуком. В выделенном тексте
-не виден `CapsLock`, а знак, которого нет в раскладке цели, переносится как есть.
-Как программы стирают и выделяют письмо со знаками над и под буквой,
-**измерено** в Блокноте, Edit, RichEdit, Edge, Microsoft Word, Google Chrome и Telegram: одно
-нажатие `Backspace` снимает одну кодовую точку, `Shift+Left` идёт по буквам Windows — программа
-считает так же.
-
-## Горячая клавиша
-
-По умолчанию — `Pause/Break`. Сменить её можно в окне настроек, раздел «Горячая клавиша»:
-нажать «Задать», затем нужную клавишу — одну или вместе с `Ctrl`, `Alt`, `Shift` в любом наборе
-(`Ctrl+F12`, `Alt+Shift+K`). Сочетание срабатывает только при точном наборе: при горячей
-клавише `Ctrl+F12` голая `F12` и `Ctrl+Shift+F12` достаются программам, как без Lang Switcher.
-Голая горячая клавиша, как и прежде, срабатывает и при удерживаемых модификаторах.
-
-Нет клавиши `Pause` — `Fn+Pause` на клавиатурах, где она живёт под `Fn`, либо сочетание
-вроде `Ctrl+F12`, либо `CapsLock`, либо **двойное нажатие `Shift`**.
-
-**Двойное нажатие `Shift`.** В захвате нажать `Shift` два раза подряд — поле покажет «Shift,
-Shift». Тогда два коротких касания `Shift` (каждое — не дольше 0,4 с, второе — не позже 0,4 с
-после начала первого) делают то же, что `Pause`; ещё два — возвращают слово. Касанием не
-считается `Shift`, нажатый под `Ctrl`, `Alt` или `Win` (`Alt+Shift` переключает раскладку), с
-другой клавишей (заглавные буквы) или со щелчком мыши (выделение). Касания программы видят:
-программа, у которой на двойной `Shift` своя команда (поиск по всему в средах JetBrains),
-выполнит её тоже. Двойным назначается только `Shift`; `Ctrl` и `Alt` — только вместе с клавишей.
-
-Пять нажатий `Shift` подряд Windows считает своим сочетанием и предлагает включить залипание
-клавиш — а пара «туда», пара «обратно» и заглавная после них дают пять. Поэтому, пока выбран
-двойной `Shift` и программа работает, это сочетание Windows выключено — только в памяти сеанса,
-в настройки Windows ничего не записывается. При выборе другой клавиши, выходе из программы и её
-удалении сочетание возвращается; включённое залипание клавиш программа не трогает. После падения
-программы сочетание вернётся при следующем входе в систему.
-
-Захват отклоняет — и объясняет почему, под полем: клавишу, которая печатает символ, одну,
-с `Shift` или с `Ctrl`+`Alt` (это `AltGr`, во многих раскладках он печатает символы);
-одиночные `Ctrl` и `Alt`; сочетание с `Win`; клавиши правки текста — стрелки, `Home`, `End`,
-`Delete` и подобные — и с модификаторами; аварийное `Ctrl+Alt+Shift+F12`.
-
-В файле настроек (`%APPDATA%\Lang_Switcher\config.toml`, §7 спецификации):
+In the settings file `%APPDATA%\Lang_Switcher\config.toml`:
 
 ```toml
 [hotkey]
 key       = "F12"
-modifiers = ["Ctrl"]    # из "Ctrl", "Alt", "Shift"; [] — клавиша одна
-trigger   = "press"     # press — нажатие; double_tap — два касания (только key = "Shift")
+modifiers = ["Ctrl"]    # any of "Ctrl", "Alt", "Shift"; [] for the key alone
+trigger   = "press"     # press, or double_tap (with key = "Shift" only)
 ```
 
-Двойное нажатие `Shift` в файле — `key = "Shift"`, `modifiers = []`, `trigger = "double_tap"`.
-Модификатор вне трёх (`"Win"` в том числе), слово `trigger` вне двух или `double_tap` с другой
-клавишей — и горячей клавишей остаётся `Pause`.
+## Privacy
 
-## Что здесь лежит
+Your keystrokes are **never** written to disk — not to the log, not to the settings, not to
+temporary files.
 
-| Файл | Назначение |
-|---|---|
-| `SPEC.md` | Техническое задание. **Только чтение.** Изменяется исключительно по прямому указанию пользователя |
-| `.gitignore`, `.gitattributes` | Правила репозитория. Секреты не версионируются ни при каком условии |
-| `src/` | Код продукта: 15 модулей по таблице §6.2 спецификации, `app.rs` (жизненный цикл процесса, решение R-18), `control.rs` (отладочный канал SEC-04a, только с фичей `testing`), `lib.rs` и `main.rs`; `letters.rs` — письма от автора и чтение ленты (FR-101, FR-102). Заглушек не осталось |
-| `tests/` | Интеграционные тесты по модулям и сквозной стенд приёмки §11.5 в `tests/e2e/` |
-| `res/`, `build.rs`, `app.rc` | Иконки, `VERSIONINFO`, диалоговые шаблоны. Встраиваются через `embed-resource` |
-| `app.manifest`, `app-dev.manifest` | Манифесты: с `uiAccess` — полного образа; без него — отладочной сборки и запасного образа. Выбор — в `build.rs`, по профилю сборки и переменной `LANGSW_NO_UIACCESS` |
-| `tools/` | Скрипты сборки поставки: `release.ps1` (сборка обоих образов, проверка критерия 8, подпись), `build-installer.ps1`, `make-cert.ps1`, `make-icons.ps1`, `make-installer-art.ps1` (картинки мастера установки: бамбук и логотип сайта автора), `verify-criterion8.ps1`, `verify-icons.ps1`, `verify-one-body.ps1` (полный и запасной образы — одно тело), `verify-perimeter.ps1` (NFR-07, критерий 4, адреса SEC-03), `verify-version.ps1`, `accept-clean-machine.ps1` (приёмка установщика на чистой машине); ленты автора касаются `make-news-key.ps1` (ключи подписи) и `sign-news.ps1` (подпись файла ленты) — оба работают у автора, в программу не входят |
-| `installer/` | `LangSwitcher.iss` — сценарий Inno Setup; `local-trust.ps1` — помощник установщика, делающий полный образ доверенным на машине пользователя; `lang/` — свои сообщения установщика на его языках; `art/` — фон мастера и логотип подписи автора, светлые и тёмные, по размеру на каждый масштаб экрана (их рисует `tools/make-installer-art.ps1`); `Output/` — собранный подписанный установщик |
+Once a day Lang Switcher reads a short news file from the author's site; it sends nothing about your
+computer. When a new version comes out, the program downloads it from the same site by itself,
+checks the author's signature and installs it while the computer is idle. A short notice by the tray
+icon tells you when it has been updated.
 
-Артефакты сборки в репозиторий не попадают: переменная `CARGO_TARGET_DIR` уводит их
-в каталог, заданный ею; без неё `cargo` пишет в `target\`, и `.gitignore` не пускает его в дерево.
-В каталоге проекта — только чистый код.
+A message to the author from the wizard goes to the site only when you press **Send** yourself —
+exactly the text you saw before sending; a way to contact you is optional.
 
-## Где всё остальное
+How it works, in detail:
 
-Контур проекта — состояние, бэклог, решения, вопросы, точные версии инструментов, отчёты этапов,
-— инструментарий (rustup, cargo, Build Tools, Inno Setup), микро-crate'ы для проверки отдельных
-черт поведения Win32, сборки, установщики и публичная часть сертификата живут у автора вне
-репозитория. Скрипты поставки находят папки машины через переменные окружения — раздел ниже.
-Ссылки в коде и комментариях вида «решение 120.4», `DECISIONS`, `STATE.md`, `TOOLCHAIN.md`,
-`scratchpad-…` ведут в этот внутренний журнал автора; он не публикуется.
+- **The news file** is `https://panda-pishet-kod.dev/langswitcher/news.toml` — one `GET` request
+  with no parameters. If it does not come, the next try is not before tomorrow. Letters and news
+  from it can be turned off in the settings file (`[letters] feed = false`), and, after the first
+  letter of the feed but not earlier than 90 days after the first start, in the "From the author"
+  window as well.
+- **Updates** are installed not by the program itself but by a separate file without a window,
+  `LangSwitcherUpdate.exe`, a scheduled task "Lang Switcher Update" running as the system. It takes
+  the installer only from the `/langswitcher/files/` folder of the same site; its size and SHA-256
+  must match the ones signed in the news file, and its version must be newer than yours. If the new
+  version does not start, the previous one comes back.
+- **A message from the wizard** is one `POST` request to
+  `https://panda-pishet-kod.dev/langswitcher/feedback`, sent only when you press **Send** or
+  **Retry**. It carries the text of the message as it stands in the window, the language of the
+  interface, the kind of message (a problem or a suggestion), the version of the program, your
+  contact if you typed one, and a random number of the request so that the site does not file a
+  repeat twice. The program waits for the answer no longer than 15 seconds. If the site does not
+  answer, the wizard offers to send the same text by email to `lang.switcher@panda-pishet-kod.dev`
+  or to save it to a file.
 
-## Сборка
+There is no other network activity. The details are in section 9 of the specification (in Russian).
+
+## Reporting a problem or an idea
+
+The tray menu → "Write to the author…" opens a short wizard: it collects what is useful (only what
+you leave ticked), shows you the whole text, and sends it with **Send**. Or open an issue in
+[Issues](../../issues) — in English or Russian.
+
+## Building from source
 
 ```bash
 cargo build --release
 ```
 
-Перед каждой сборкой Release обязательны (§11.4 спецификации):
+Before a release build:
 
 ```bash
 cargo clippy -- -D warnings
@@ -320,106 +170,15 @@ cargo clippy -- -D warnings
 cargo test
 ```
 
-## Переменные окружения поставки
+The tests are tied to the developer's machine (exactly two layouts, Russian and US) and are not
+expected to pass unchanged elsewhere; this is a decision of the project, not a defect. The release
+scripts, the installer and the signing are described in [README.ru.md](README.ru.md) and in the
+specification `SPEC.md`; like the other documents of the project, they are in Russian.
 
-| Переменная | Что задаёт | Без неё |
-|---|---|---|
-| `LANGSW_ARTIFACTS` | папку подписанного образа, установщика и публичного сертификата | `dist\` в корне репозитория |
-| `LANGSW_ISCC`, `LANGSW_SIGNTOOL` | пути к `ISCC.exe` (Inno Setup 6) и `signtool.exe` (Windows SDK) | поиск в `PATH`, затем в Program Files и Windows Kits |
-| `LANGSW_NEWS_KEYS` | папку ключей подписи ленты автора | `make-news-key.ps1` и `sign-news.ps1 -Reserve` отказываются |
-| `LANGSW_NEWS_SITE`, `LANGSW_CONTROL` | файл ленты для теста `tests\feed.rs`; папку контура для стенда `tests\e2e` | тест печатает `SKIPPED_NO_NEWS_SITE`; стенд пишет в `<target>\e2e-reports\` |
-
-Удобнее всего задать их в `tools\local.ps1` — файл не отслеживается; образец — `tools\local.example.ps1`.
-
-## Три образа
-
-Это не удобство, а следствие устройства `uiAccess` (§8.2 спецификации).
-
-| Образ | Манифест | Расположение | Назначение |
-|---|---|---|---|
-| Debug | без `uiAccess` | любое | Разработка. Покрывает всё, кроме элевированных окон |
-| Release, полный — `LangSwitcher.exe` | `uiAccess="true"` | `%ProgramFiles%\Lang_Switcher` | Поставка: работает и в окнах программ, запущенных от имени администратора |
-| Release, запасной — `LangSwitcher-base.exe` | без `uiAccess` (`LANGSW_NO_UIACCESS=1`) | `%ProgramFiles%\Lang_Switcher` | Поставка там, где полному образу машина не доверяет: тот же код, окна администратора недоступны |
-
-Полный и запасной образы — одна сборка: `tools\verify-one-body.ps1` проверяет, что они
-различаются манифестом и полями, которые компоновщик выводит из содержимого файла, и больше ничем.
-Полный образ **обязан** быть подписан сертификатом, которому машина доверяет, и лежать
-в `%ProgramFiles%`. Как Windows отказывает иначе, **измерено** — и это три разных исхода:
-
-- подписи машина не доверяет, запуск через `ShellExecute` (так запускают «Пуск» и Проводник) —
-  программа не запускается вовсе: ошибка 8235, «Сервер возвратил ссылку»;
-- запуск через `CreateProcess` — ошибка `740 (ERROR_ELEVATION_REQUIRED)` в любой папке и при любой
-  подписи: флаг `uiAccess` ставит служба AppInfo, а до неё доходит только `ShellExecute`;
-- подпись доверена, но файл вне `%ProgramFiles%` — программа запускается с `UIAccess = 0`, то есть
-  без полномочий обхода UIPI, и не видит окон администратора.
-
-## Что установщик делает с сертификатом
-
-Сертификату автора чужая Windows не доверяет, поэтому установщик, работающий с правами администратора,
-создаёт на этой машине свой сертификат «Lang Switcher (local)»: годен **только для подписи
-кода**, не удостоверяющий центр, без метки времени и без сети, на 30 лет. Им подписывается полный образ,
-**закрытый ключ сразу уничтожается**, публичная часть кладётся в «Доверенные корневые центры
-сертификации» компьютера и копией — в `C:\Program Files\Lang_Switcher\LangSwitcher-local.cer`.
-Проверить: свойства `LangSwitcher.exe` → «Цифровые подписи», или `certlm.msc` → «Доверенные корневые
-центры сертификации». **Удаление программы убирает этот сертификат.** Работающую программу
-деинсталлятор закрывает сам, как Windows при выходе из системы; если она не закрылась за 10 секунд,
-он просит выйти из неё (меню значка в трее → «Выход»), а «Отмена» отменяет удаление целиком.
-Где подпись автора уже доверена, сертификат не создаётся.
-Запуск `LangSwitcher-setup.exe /NOLOCALCERT` ставит запасной образ без сертификата: программа
-работает везде, кроме окон программ, запущенных от имени администратора.
-
-## Безопасность при разработке
-
-Программа ставит глобальный клавиатурный хук. Неисправная сборка способна поглотить
-весь клавиатурный ввод в системе, лишив возможности переключиться на другое окно.
-
-Защита (§4.11 спецификации):
-
-- **`Ctrl+Alt+Shift+F12`** — аварийное снятие всех хуков и завершение процесса.
-  Обрабатывается **первой**, до любой другой логики, и присутствует в обеих конфигурациях сборки.
-- Отладочная сборка сама завершается через 10 минут после запуска.
-  Значение задаётся переменной `LANGSW_DEBUG_TIMEOUT_SEC` (по умолчанию `600`).
-- Обработчик паники снимает хуки до аварийного завершения.
-
-## Приватность
-
-Нажатия клавиш **никогда** не записываются на диск — ни в журнал, ни в конфигурацию,
-ни во временные файлы.
-
-Раз в сутки Lang Switcher читает с сайта автора короткий файл новостей; о вашем компьютере он
-ничего не передаёт. Когда выходит новая версия, программа сама скачивает её с того же сайта,
-проверяет подпись автора и устанавливает, пока компьютер простаивает. После обновления у значка
-появится короткое уведомление.
-
-Обращение к автору из мастера уходит на сайт, только когда вы сами нажмёте «Отправить», — ровно
-тот текст, который вы видели перед отправкой; контакт для связи — по желанию.
-
-Как это устроено. Файл новостей — `https://panda-pishet-kod.dev/langswitcher/news.toml`, один
-запрос `GET` без параметров, ничего не отправляя; если файл не получен, следующая попытка — не
-раньше чем назавтра. Письма и новости из него отключаются в файле настроек
-(`[letters] feed = false`), а после первого письма из ленты, но не раньше 90 дней от первого
-запуска, — и в окне «От автора». Скачивает и ставит новую версию не сама программа, а отдельный
-файл `LangSwitcherUpdate.exe` без окна — задача планировщика «Lang Switcher Update» от имени
-системы: установщик берётся только из папки `/langswitcher/files/` того же сайта, его размер и
-SHA-256 должны совпасть с подписанными в файле новостей, версия должна быть новее установленной;
-если новая версия не запустится, вернётся прежняя (SPEC, SEC-10). На время установки программа
-ненадолго закрывается и затем запускается снова. Обращение из мастера «Написать автору» — один
-запрос `POST` на `https://panda-pishet-kod.dev/langswitcher/feedback`, только по нажатию
-«Отправить» или «Повторить»: текст обращения, как он стоит в окне, язык интерфейса, тип обращения
-(ошибка или пожелание), версия программы, контакт, если вы его вписали, и случайный номер
-запроса, по которому сайт не запишет повтор дважды; ждать ответа программа будет не дольше
-15 секунд. Если сайт не ответил, мастер предложит отправить то же письмом на
-`lang.switcher@panda-pishet-kod.dev` или сохранить в файл. Иной сетевой активности нет.
-Буфер набора обнуляется явной перезаписью, а не пометкой «пуст».
-В поле ввода пароля буфер не ведётся — защита реализована и покрыта тестами.
-
-Подробно — раздел 9 спецификации.
-
-## Лицензия и авторство
+## License and authorship
 
 Copyright © 2026 Panda Koder
 
-Исходный код распространяется под двойной лицензией **MIT или Apache-2.0** — на выбор
-получателя; тексты лежат в [`LICENSE-MIT`](LICENSE-MIT) и [`LICENSE-APACHE`](LICENSE-APACHE),
-поле `license` в `Cargo.toml` называет то же. Присланные изменения принимаются на условиях
-[`CLA.md`](CLA.md); порядок — в [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The source code is available under either of **MIT or Apache-2.0**, at your option:
+[`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE). Contributions are accepted under
+[`CLA.md`](CLA.md); see [`CONTRIBUTING.md`](CONTRIBUTING.md).
