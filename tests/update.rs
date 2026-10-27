@@ -814,3 +814,29 @@ fn the_updater_carries_the_version_and_the_delivery_in_its_resource() {
         "the updater compares three fields"
     );
 }
+
+/// **Phase two closes the new version that did not start before it rolls back** — Q-189-1, stage
+/// Э105: the build that lacks a DLL stands in the loader's «System Error» box with a process and
+/// no window, the window helper answers «no window», and the rollback's installer would find the
+/// file held. The order of the code lines of phase two: the failure marked, every session closed,
+/// and only then the rollback started.
+#[test]
+fn phase_two_closes_the_program_that_did_not_start_before_the_rollback() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/update.rs"),
+    )
+    .expect("src/update.rs must be readable");
+
+    let start = source.find("fn phase_two_of(").expect("phase two");
+    let body = &source[start..start + source[start..].find("\nfn ").expect("its end")];
+    let at = |needle: &str| {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("phase two has no «{needle}»"))
+    };
+
+    assert!(at("state.mark_failed(&pending.version);") < at("close_program_in(session"));
+    assert!(
+        at("close_program_in(session") < at("if start_setup(&rollback"),
+        "the program that did not start must be closed BEFORE the rollback is installed"
+    );
+}

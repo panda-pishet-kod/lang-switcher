@@ -1888,6 +1888,15 @@ fn phase_two_of(places: &Places, journal: &Journal) -> u8 {
         return code::DONE;
     }
 
+    // ⭐ Q-189-1 (stage Э105): the new version that did not start may still stand in a session —
+    // the loader's «System Error» box of a missing DLL keeps its process until a person answers it,
+    // and the file that process holds would make the rollback's own installation fail («DeleteFile
+    // failed; code 5», as the Restart Manager left the program of 189.32). It is closed the way
+    // phase one closes the program before the installer: politely, then ended.
+    for &session in &pending.sessions {
+        let _ = close_program_in(session, &places.program, journal);
+    }
+
     pending.rolling_back = true;
     pending.since = seconds_now();
     state.pending = Some(pending);
