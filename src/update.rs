@@ -91,8 +91,14 @@ pub const SETUP_LOG: &str = "setup.log";
 /// 3 485 568 bytes.
 pub const MAX_INSTALLER_BYTES: u64 = 16 * 1024 * 1024;
 
-/// How long phase two waits for the program to appear in a session it raised it in — §0 п. 18.
+/// How long phase two waits for the program's window to appear in a session — §0 п. 18, and
+/// since stage Э105 the window rather than the process (решение 189.34, Q-189-1).
 pub const RAISE_WAIT_SECONDS: u64 = 60;
+
+/// How long the program's window has to live, once it is there, for phase two to call the
+/// program raised — решение 189.34: a program that shows its window and is gone a moment after
+/// (a crash, the WER box, an exit) is not a program that runs.
+pub const WINDOW_LIFE_SECONDS: u64 = 10;
 
 /// How long phase two waits for the installer that started it to end.
 pub const SETUP_WAIT_SECONDS: u64 = 180;
@@ -106,6 +112,12 @@ pub const PHASE_TWO_SWITCH: &str = "/phase2";
 
 /// The switch of the helper that asks the program to close in its own session — решение 189.33.
 pub const CLOSE_SWITCH: &str = "/close";
+
+/// The switch of the helper that tells phase two whether the program runs in its session —
+/// решение 189.34: its window [`PROGRAM_WINDOW_CLASS`] appeared within [`RAISE_WAIT_SECONDS`] and
+/// lived [`WINDOW_LIFE_SECONDS`]. The same copy under the system account in the session as
+/// [`CLOSE_SWITCH`], for the same reason: a window of another session is not on this desktop.
+pub const WINDOW_SWITCH: &str = "/window";
 
 /// How long phase one waits for the program to close by itself before it ends it — решение 189.33,
 /// the ten seconds the uninstaller gives it (155.25).
@@ -1068,14 +1080,30 @@ pub fn raise_in(session: u32, program: &Path) -> Raise {
     }
 }
 
-/// Raises the program in every session of `sessions` it does not run in now and waits, up to
-/// [`RAISE_WAIT_SECONDS`], for it to appear in each it was raised in. `false` only when it was
-/// raised somewhere and did not appear there — a session nobody is signed in to fails nothing.
+/// Raises the program in every session of `sessions` it does not run in now, and asks a helper in
+/// **every** session that has a person whether the program's window appeared there and lives —
+/// решение 189.34 (Q-189-1). `false` when it does not in one of them — a session nobody is signed
+/// in to fails nothing.
+///
+/// # ⛔ The window, not the process
+///
+/// Until stage Э105 the answer was «a process of the program is in the session within
+/// [`RAISE_WAIT_SECONDS`]», and round 6 of Э104 showed what that counts as running: the loader's
+/// «System Error» box of a missing DLL (the process stands while the box is up), a crash with the
+/// WER box, the moment before an exit, Defender's look at a new file — a program that never did
+/// one thing for the person. The window [`PROGRAM_WINDOW_CLASS`] is made by `app::run` after the
+/// configuration, the hook and the tray are up, so its being there [`WINDOW_LIFE_SECONDS`] on end
+/// is the program running.
+///
+/// A session the program already runs in is asked too: a process standing there is exactly what
+/// the old criterion believed. A helper that does not start is a session not shown to run — the
+/// decision asks for the window, and nothing here can see it but the helper.
 pub fn raise_and_check(sessions: &[u32], program: &Path, journal: &Journal) -> bool {
     let mut awaited = Vec::new();
 
     for &session in sessions {
         if running_in(session, program) {
+            awaited.push(session);
             continue;
         }
 
@@ -1089,24 +1117,88 @@ pub fn raise_and_check(sessions: &[u32], program: &Path, journal: &Journal) -> b
         }
     }
 
-    let deadline = seconds_now() + RAISE_WAIT_SECONDS;
+    let me = std::env::current_exe().ok();
 
-    loop {
-        awaited.retain(|&session| !running_in(session, program));
+    // All helpers at once: each waits for its own session, so two sessions cost one wait.
+    let helpers: Vec<(u32, Option<Helper>)> = awaited
+        .iter()
+        .map(|&session| {
+            (
+                session,
+                me.as_deref()
+                    .and_then(|me| start_system_in_session(session, me, WINDOW_SWITCH)),
+            )
+        })
+        .collect();
 
-        if awaited.is_empty() {
-            return true;
+    // The helper's own wait and the window's life, and a margin for its start.
+    let patience = (RAISE_WAIT_SECONDS + WINDOW_LIFE_SECONDS + 15) * 1000;
+    let mut all = true;
+
+    for (session, helper) in helpers {
+        let Some(helper) = helper else {
+            journal.line("raise: the window helper did not start", session);
+            all = false;
+            continue;
+        };
+
+        if helper.exit_code_within(patience) != Some(u32::from(code::DONE)) {
+            journal.line(
+                "raise: the program's window did not appear or did not live",
+                session,
+            );
+            all = false;
+        }
+    }
+
+    all
+}
+
+/// **Whether a window of class `class` appears on this desktop within `appear_within` and lives
+/// `live_for` once it is there** — the work of the helper [`WINDOW_SWITCH`] (решение 189.34), with
+/// the class and the two times as arguments so that `tests\update.rs` can drive it with a window
+/// of its own: the program's window on the machine that runs the tests is not the test's.
+///
+/// «Lives» is the same window, `IsWindow` on end: a program that crashes and leaves, or one whose
+/// window goes as soon as it came, is not running however many processes it had.
+pub fn window_lives(
+    class: &str,
+    appear_within: std::time::Duration,
+    live_for: std::time::Duration,
+) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
+    use windows::core::PCWSTR;
+
+    let class: Vec<u16> = class.encode_utf16().chain(Some(0)).collect();
+    let step = std::time::Duration::from_millis(250);
+    let started = std::time::Instant::now();
+
+    let window = loop {
+        // SAFETY: a NUL-terminated class name of this frame; no window name.
+        if let Ok(window) = unsafe { FindWindowW(PCWSTR(class.as_ptr()), PCWSTR::null()) } {
+            break window;
         }
 
-        if seconds_now() >= deadline {
-            for &session in &awaited {
-                journal.line("raise: the program did not appear", session);
-            }
-
+        if started.elapsed() >= appear_within {
             return false;
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        std::thread::sleep(step);
+    };
+
+    let found = std::time::Instant::now();
+
+    loop {
+        // SAFETY: a plain question about a handle; a stale handle answers FALSE.
+        if !unsafe { IsWindow(Some(window)) }.as_bool() {
+            return false;
+        }
+
+        if found.elapsed() >= live_for {
+            return true;
+        }
+
+        std::thread::sleep(step);
     }
 }
 
@@ -1127,7 +1219,7 @@ pub fn close_program_in(session: u32, program: &Path, journal: &Journal) -> bool
 
     let asked = std::env::current_exe()
         .ok()
-        .is_some_and(|me| start_system_in_session(session, &me, CLOSE_SWITCH));
+        .is_some_and(|me| start_system_in_session(session, &me, CLOSE_SWITCH).is_some());
 
     journal.line(
         if asked {
@@ -1185,10 +1277,42 @@ fn terminate(pid: u32) {
     let _ = unsafe { CloseHandle(process) };
 }
 
+/// A helper started by [`start_system_in_session`] — its process, closed on drop.
+struct Helper(windows::Win32::Foundation::HANDLE);
+
+impl Helper {
+    /// The helper's exit code once it has ended, waiting up to `milliseconds`; `None` when it has
+    /// not ended by then or the code cannot be read.
+    fn exit_code_within(&self, milliseconds: u64) -> Option<u32> {
+        use windows::Win32::Foundation::WAIT_OBJECT_0;
+        use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+
+        let limit = u32::try_from(milliseconds).unwrap_or(u32::MAX - 1);
+
+        // SAFETY: `self.0` is the live handle of the helper's process, owned by this value.
+        if unsafe { WaitForSingleObject(self.0, limit) } != WAIT_OBJECT_0 {
+            return None;
+        }
+
+        let mut code = 0u32;
+
+        // SAFETY: the same handle, and a live local the call fills.
+        unsafe { GetExitCodeProcess(self.0, &mut code) }.ok()?;
+        Some(code)
+    }
+}
+
+impl Drop for Helper {
+    fn drop(&mut self) {
+        // SAFETY: closes exactly the handle this value owns, once.
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
 /// Starts `exe` with `arguments` **under this process's own account** (the system) **in
 /// `session`**, on that session's desktop — the token of this process duplicated and given the
-/// session's number.
-fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> bool {
+/// session's number. The helper's process, to wait on or to drop.
+fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> Option<Helper> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::Security::{
         DuplicateTokenEx, SecurityImpersonation, SetTokenInformation, TOKEN_ALL_ACCESS,
@@ -1204,7 +1328,7 @@ fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> bool {
 
     // SAFETY: the pseudo-handle of this process and a live local.
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &mut own) }.is_err() {
-        return false;
+        return None;
     }
 
     let mut token = HANDLE::default();
@@ -1225,7 +1349,7 @@ fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> bool {
     let _ = unsafe { CloseHandle(own) };
 
     if duplicated.is_err() {
-        return false;
+        return None;
     }
 
     let mut number = session;
@@ -1274,18 +1398,17 @@ fn start_system_in_session(session: u32, exe: &Path, arguments: &str) -> bool {
         }
         .is_ok();
 
-    // SAFETY: closes exactly the token and, when the start succeeded, the two handles of the new
-    // process, once each.
+    // SAFETY: closes exactly the token and, when the start succeeded, the thread handle of the new
+    // process, once each; its process handle goes to the [`Helper`], which closes it.
     unsafe {
         let _ = CloseHandle(token);
 
         if started {
             let _ = CloseHandle(process.hThread);
-            let _ = CloseHandle(process.hProcess);
         }
     }
 
-    started
+    started.then_some(Helper(process.hProcess))
 }
 
 /// **The helper's whole work** — finds the program's window on this desktop and posts it
@@ -1479,6 +1602,9 @@ pub mod code {
     pub const PLACES: u8 = 6;
     /// The helper `/close` found no window of the program to ask.
     pub const CLOSE: u8 = 7;
+    /// The helper `/window` saw no window of the program within the wait, or saw it go before it
+    /// had lived its ten seconds — решение 189.34.
+    pub const NO_WINDOW: u8 = 8;
 }
 
 /// **The whole of a run of `LangSwitcherUpdate.exe`** — phase one, or phase two under
@@ -1500,6 +1626,25 @@ pub fn run() -> ExitCode {
         } else {
             code::CLOSE
         });
+    }
+
+    // The helper of [`raise_and_check`]: the same copy, which waits on this desktop for the
+    // program's window and its ten seconds of life (решение 189.34), and answers by its exit code.
+    if std::env::args()
+        .skip(1)
+        .any(|argument| argument == WINDOW_SWITCH)
+    {
+        return ExitCode::from(
+            if window_lives(
+                PROGRAM_WINDOW_CLASS,
+                std::time::Duration::from_secs(RAISE_WAIT_SECONDS),
+                std::time::Duration::from_secs(WINDOW_LIFE_SECONDS),
+            ) {
+                code::DONE
+            } else {
+                code::NO_WINDOW
+            },
+        );
     }
 
     let Some(places) = Places::of_this_machine() else {

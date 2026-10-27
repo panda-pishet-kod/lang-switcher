@@ -626,3 +626,155 @@ fn scratch(name: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&folder).expect("a scratch folder");
     folder
 }
+
+/// A hidden top-level window of a class of the test's own, made on a thread of its own after
+/// `appear_after` and destroyed after `live` (never, for `None`) — the program's window as the
+/// helper `/window` sees it, without the program: on the machine that runs the tests the
+/// program's own `LangSwitcher.Hidden` may well be up.
+fn window_of_class_on_a_thread(
+    class: &'static str,
+    appear_after: std::time::Duration,
+    live: Option<std::time::Duration>,
+) -> std::thread::JoinHandle<()> {
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, WINDOW_EX_STYLE, WNDCLASSW,
+        WS_POPUP,
+    };
+    use windows::core::PCWSTR;
+
+    unsafe extern "system" fn procedure(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        // SAFETY: the arguments are the ones the system handed this procedure.
+        unsafe { DefWindowProcW(window, message, wparam, lparam) }
+    }
+
+    std::thread::spawn(move || {
+        std::thread::sleep(appear_after);
+
+        let name: Vec<u16> = class.encode_utf16().chain(Some(0)).collect();
+        // SAFETY: the module of this test binary.
+        let instance = unsafe { GetModuleHandleW(None) }.expect("the module of the test");
+        let description = WNDCLASSW {
+            lpfnWndProc: Some(procedure),
+            hInstance: instance.into(),
+            lpszClassName: PCWSTR(name.as_ptr()),
+            ..Default::default()
+        };
+
+        // SAFETY: the description lives for this frame and names a procedure of this file.
+        assert_ne!(unsafe { RegisterClassW(&description) }, 0, "the test class");
+
+        // SAFETY: the class just registered; no parent, no menu, no parameter; hidden.
+        let window = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR(name.as_ptr()),
+                None,
+                WS_POPUP,
+                0,
+                0,
+                10,
+                10,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )
+        }
+        .expect("a window of the test class");
+
+        match live {
+            Some(live) => {
+                std::thread::sleep(live);
+                // SAFETY: the window this thread made, destroyed once by this thread.
+                unsafe { DestroyWindow(window) }.expect("the window goes");
+            }
+            // Lives as long as the test binary: a thread that is never joined.
+            None => loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            },
+        }
+    })
+}
+
+/// **Phase two counts the program as raised only when its window appeared and lived** — решение
+/// 189.34, Q-189-1: round 6 of Э104 showed a «program» that never ran counted by its process. The
+/// helper `/window` waits up to sixty seconds for the window of the class and then ten seconds of
+/// its life; here the same function under a class of the test's own and shorter times.
+#[test]
+fn the_program_counts_as_raised_only_when_its_window_appears_and_lives() {
+    use std::time::Duration;
+
+    let second = Duration::from_secs(1);
+
+    // No window at all — the fake «does not start», the loader's «System Error» box.
+    assert!(
+        !update::window_lives("LangSwitcher.TestE105.None", second, second),
+        "no window is not a running program"
+    );
+
+    // A window that comes after a moment and stays.
+    let _stays = window_of_class_on_a_thread(
+        "LangSwitcher.TestE105.Stays",
+        Duration::from_millis(700),
+        None,
+    );
+    assert!(
+        update::window_lives("LangSwitcher.TestE105.Stays", 3 * second, 2 * second),
+        "a window that appears within the wait and lives is a running program"
+    );
+
+    // A window that goes a moment after it came — a crash, the WER box, an exit.
+    let goes = window_of_class_on_a_thread(
+        "LangSwitcher.TestE105.Goes",
+        Duration::ZERO,
+        Some(Duration::from_millis(800)),
+    );
+    assert!(
+        !update::window_lives("LangSwitcher.TestE105.Goes", 3 * second, 3 * second),
+        "a window that does not live its time is not a running program"
+    );
+    goes.join().expect("the thread of the short window");
+
+    // The numbers of the decision, written as numbers (урок Э104: a loop up to the constant passes
+    // a mutant of the constant).
+    assert_eq!(update::RAISE_WAIT_SECONDS, 60);
+    assert_eq!(update::WINDOW_LIFE_SECONDS, 10);
+    assert_eq!(update::WINDOW_SWITCH, "/window");
+    assert_eq!(update::code::NO_WINDOW, 8);
+}
+
+/// **Phase two asks the helper about every session, and no process counts by itself** — the
+/// order of the code of [`update::raise_and_check`]: the old criterion («a process of the program
+/// is in the session») must not be its answer any more.
+#[test]
+fn raise_and_check_answers_by_the_window_helper_and_not_by_the_process() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/update.rs"),
+    )
+    .expect("src/update.rs must be readable");
+
+    let start = source
+        .find("pub fn raise_and_check(")
+        .expect("raise_and_check");
+    let body = &source[start..start + source[start..].find("\n}").expect("its end")];
+
+    assert!(
+        body.contains("start_system_in_session(session, me, WINDOW_SWITCH)"),
+        "the window helper is started in each awaited session"
+    );
+    assert!(
+        body.contains("exit_code_within(patience) != Some(u32::from(code::DONE))"),
+        "the helper's exit code is the answer"
+    );
+    assert!(
+        !body.contains("retain(|&session| !running_in(session, program))"),
+        "a process in the session is not the answer any more"
+    );
+}
