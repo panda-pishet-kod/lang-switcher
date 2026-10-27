@@ -805,12 +805,12 @@ fn the_updater_carries_the_version_and_the_delivery_in_its_resource() {
 
     assert_eq!(
         lang_switcher::tray::parse_fixed_file_version(&bytes),
-        Some((0, 104, 0, 0)),
-        "the updater must carry 0.104.0 and the delivery 0 of the old rule"
+        Some((1, 0, 0, 105)),
+        "the updater must carry 1.0.0 and the delivery 105 (решение 192.1)"
     );
     assert_eq!(
         update::version_of_file(path).as_deref(),
-        Some("0.104.0"),
+        Some("1.0.0"),
         "the updater compares three fields"
     );
 }

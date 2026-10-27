@@ -517,8 +517,8 @@ IDI_TRAY_DARK_PAUSED_UNREAD  ICON  "res/langswitcher-darkbar-paused-unread.ico"
 
 // Values fixed by decision 8 of DECISIONS.md.
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     0,104,0,0
-  PRODUCTVERSION  0,104,0,0
+  FILEVERSION     1,0,0,105
+  PRODUCTVERSION  1,0,0,105
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L
@@ -531,12 +531,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Panda Koder"
             VALUE "FileDescription",  "Lang Switcher"
-            VALUE "FileVersion",      "0.104.0.0"
+            VALUE "FileVersion",      "1.0.0.105"
             VALUE "InternalName",     "LangSwitcher.exe"
             VALUE "LegalCopyright",   "Copyright © 2026 Panda Koder"
             VALUE "OriginalFilename", "LangSwitcher.exe"
             VALUE "ProductName",      "Lang Switcher"
-            VALUE "ProductVersion",   "0.104.0.0"
+            VALUE "ProductVersion",   "1.0.0.105"
         END
     END
     BLOCK "VarFileInfo"

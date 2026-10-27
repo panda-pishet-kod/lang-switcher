@@ -1,6 +1,6 @@
 [package]
 name = "lang_switcher"
-version = "0.104.0"
+version = "1.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 # what every delivery up to `e104` (0.104.0) carried there, under the old rule «MINOR is the tag».
 # build.rs reads it for the updater; tools\verify-version.ps1 holds the other places to it.
 [package.metadata.langswitcher]
-delivery = 0
+delivery = 105
 
 # Two targets on purpose. Integration tests under tests\ can only link against a library
 # target, so a bin-only crate would make that directory useless and force a rebuild of the

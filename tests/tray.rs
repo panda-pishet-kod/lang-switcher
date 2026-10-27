@@ -6407,8 +6407,8 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     // what makes it the honest red before a version bump.
     assert_eq!(
         version,
-        Some((0, 104, 0, 0)),
-        "app.rc must declare FILEVERSION 0,104,0,0 — the delivery is `e104`"
+        Some((1, 0, 0, 105)),
+        "app.rc must declare FILEVERSION 1,0,0,105 — version 1.0.0 of the delivery `e105` (решение 192.1)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process
