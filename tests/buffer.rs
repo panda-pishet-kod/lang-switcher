@@ -5069,6 +5069,72 @@ fn the_left_alt_and_the_right_alt_without_a_letter_still_flush() {
     );
 }
 
+/// The `W` key — the double acute of BÉPO under `AltGr` (manual sheet of Э106, case 6).
+const SCAN_W: u16 = 0x11;
+const VK_W: u16 = 0x57;
+/// The `E` key.
+const SCAN_E: u16 = 0x12;
+const VK_E: u16 = 0x45;
+
+/// French (Standard, BÉPO) as far as the next test needs it: `W` is `é` and under `AltGr` the
+/// **dead** double acute `˝`, which with `o` writes `ő`; `E` is `o`.
+fn bepo() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0xF0B0_040C));
+
+    builder.set(SCAN_W, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('é'));
+    builder.set(
+        SCAN_W,
+        MAIN_BLOCK,
+        Mods::new(false, false, true),
+        KeyMapping::dead('˝'),
+    );
+    builder.set(SCAN_E, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('o'));
+    builder.add_dead_transition('˝', 'o', 'ő');
+
+    builder.finish()
+}
+
+/// **Stage E107, task T-107-6 (б), BACKLOG Q-198-5 — the right `Alt` + a key that is a dead key
+/// under `AltGr` in a layout of the session is a stroke too, not a command.** BÉPO writes `ő` as
+/// `AltGr`+`W` (the dead double acute) and then `O`; typed in US, which has no `AltGr`, the right
+/// `Alt` came alone, the rule of решение 194.1 took only a **letter** under `AltGr` for a stroke,
+/// and the dead key was a command: the word was cut and `qr` came back `qo` instead of `bő`
+/// (198.27 (б)). A dead key under `AltGr` is a key that writes — with the next key — and is
+/// recorded as one; US writes nothing for it, as for the letter of 194.1.
+///
+/// ⚠ Control: the right `Alt` + `Tab`, which writes nothing anywhere, is still a command.
+#[test]
+fn the_right_alt_with_a_dead_key_of_another_layout_is_a_stroke() {
+    let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
+    recorder.set_cache(
+        LayoutCache::from_maps(vec![us_without_altgr(), bepo()]).expect("two non-empty maps"),
+    );
+    recorder.set_active_layout(EN);
+    recorder.verify_held_with(everything_is_physically_held);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(hold(&mut recorder, VK_RMENU), Recorded::Modifier);
+    assert_eq!(
+        press(&mut recorder, VK_W, SCAN_W),
+        Recorded::Stored,
+        "198.27 (б): the right Alt + W in US is the dead key of BÉPO, not a command"
+    );
+    assert_eq!(release(&mut recorder, VK_RMENU), Recorded::Modifier);
+    assert_eq!(press(&mut recorder, VK_E, SCAN_E), Recorded::Stored);
+    assert_eq!(recorder.len(), 3, "a, the dead key, o — nothing flushed");
+
+    let dead = recorder.stroke(1).expect("the stroke of the right Alt");
+    assert!(dead.mods().altgr(), "recorded under AltGr");
+    assert!(dead.units().is_empty(), "US writes nothing for it");
+
+    hold(&mut recorder, VK_RMENU);
+    assert_eq!(
+        press(&mut recorder, VK_TAB, 0x0F),
+        Recorded::Flushed,
+        "the control: right Alt + Tab is a command"
+    );
+}
+
 // =========================================================================================
 // Решение 196.1 (stage Э105) — the short memory of the typing
 // =========================================================================================

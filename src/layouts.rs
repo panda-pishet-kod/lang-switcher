@@ -1597,23 +1597,41 @@ impl LayoutCache {
     ///
     /// The second half of the rule of the right `Alt` in a layout without `AltGr`: `mąka` typed in
     /// US with the keys of Polish (Programmers) is `M`, right `Alt`+`A`, `K`, `A`, and the second
-    /// stroke is a letter in Polish while US delivers the right `Alt` alone. A letter, and only a
-    /// letter (`char::is_alphabetic` of the character the key gives): a right `Alt` with a key that
-    /// gives a symbol, a dead key or nothing under `AltGr` anywhere — `Tab`, `F4`, a digit — is a
-    /// command, as it always was. One array read per layout of the session and a table lookup in
+    /// stroke is a letter in Polish while US delivers the right `Alt` alone. A letter
+    /// (`char::is_alphabetic` of the character the key gives) — or, since stage E107 (task
+    /// T-107-6 (б)), a dead key whose transitions in that layout compose a letter: a right `Alt`
+    /// with a key that gives a symbol, a dead key of symbols only or nothing under `AltGr` anywhere
+    /// — `Tab`, `F4`, a digit — is a command, as it always was. One array read per layout of the session and a table lookup in
     /// the standard library: no allocation (NFR-03), no lock (NFR-04), no I/O (NFR-05) and no
     /// Win32 call (NFR-02) — safe from inside the hook callback, where it is called, and only on
     /// the command row with the right `Alt` held.
     pub fn altgr_letter_in_any_map(&self, scan: u16, extended: bool, mods: Mods) -> bool {
         let altgr = Mods::new(mods.shift(), mods.caps(), true);
+        let is_letter =
+            |unit: u16| char::from_u32(u32::from(unit)).is_some_and(char::is_alphabetic);
 
         self.maps.iter().any(|map| {
             let mapping = map.lookup(scan, extended, altgr);
+            let first = mapping.units().first().copied();
 
-            !mapping.is_dead()
-                && char::decode_utf16(mapping.units().iter().copied())
-                    .next()
-                    .is_some_and(|ch| ch.is_ok_and(char::is_alphabetic))
+            // ⭐ **A dead key that writes a letter with the next key counts too — stage E107, task
+            // T-107-6 (б), BACKLOG Q-198-5.** BÉPO writes `ő` as `AltGr`+`W` (the dead double
+            // acute) and `O`; typed in US the right `Alt` + `W` was a command under the letter-only
+            // rule, the word was cut, `qr` came back `qo` and not `bő` (198.27 (б)). A dead key
+            // whose transitions in that layout compose a letter is a key that writes; a dead key
+            // that composes only symbols is a command, as before. The transitions are the map's
+            // own short slice — still no allocation, no lock, no Win32 call (NFR-02…NFR-05).
+            if mapping.is_dead() {
+                return first.is_some_and(|accent| {
+                    map.dead_transitions()
+                        .iter()
+                        .any(|step| step.accent == accent && is_letter(step.composed))
+                });
+            }
+
+            char::decode_utf16(mapping.units().iter().copied())
+                .next()
+                .is_some_and(|ch| ch.is_ok_and(char::is_alphabetic))
         })
     }
 }

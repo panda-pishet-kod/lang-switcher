@@ -2907,7 +2907,8 @@ impl Recorder {
     ///
     /// The right `Alt` alone (no left `Alt`, no `Ctrl`, no `Win`), the active layout without
     /// `AltGr` ([`crate::layouts::LayoutMap::has_altgr`]), and the key a letter under `AltGr` in a
-    /// layout of the session ([`crate::layouts::LayoutCache::altgr_letter_in_any_map`]). Without a
+    /// layout of the session — or, since task T-107-6 (б), a dead key there that composes a letter
+    /// ([`crate::layouts::LayoutCache::altgr_letter_in_any_map`]). Without a
     /// cache, or with the active layout outside it, the answer is no and the stroke stays the
     /// command it always was: «I do not know» is not «a letter». See the call site for the rule.
     fn right_alt_types_a_letter(&self, scan: u16, mods: StrokeMods) -> bool {
