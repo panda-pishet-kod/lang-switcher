@@ -5975,10 +5975,7 @@ fn without_the_memory_the_statistics_of_russian_read_the_word() {
     let russian = plain(RUSSIAN_E105, ['и', 'у', 'п', 'р', 'ш', 'д', 'е']);
     let plan = arabic_plan(russian, Vec::new());
 
-    assert_eq!(
-        selected("\u{0644}\u{0644}\u{0627}\u{0627}", &plan),
-        "пир"
-    );
+    assert_eq!(selected("\u{0644}\u{0644}\u{0627}\u{0627}", &plan), "пир");
 }
 
 /// **(2) No memory — text pasted, not typed: the statistics of English read the division** —

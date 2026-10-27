@@ -14743,7 +14743,11 @@ fn every_russian_literal_of_the_about_template_is_replaced_in_all_fourteen_langu
         russian.iter().any(|(id, _)| *id == 1136),
         "the instrument does not see the literal «От автора…» on 1136"
     );
-    assert_eq!(Language::ALL.len(), 14, "the sweep names fourteen languages");
+    assert_eq!(
+        Language::ALL.len(),
+        14,
+        "the sweep names fourteen languages"
+    );
 
     let mut wrong = Vec::new();
 

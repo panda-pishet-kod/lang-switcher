@@ -107,7 +107,11 @@ fn every_table_matches_its_alphabet_and_the_limits() {
 
     for table in &tables {
         let bytes = table.symbols().pow(3);
-        println!("{}: {} symbols, {bytes} bytes", table.language(), table.symbols());
+        println!(
+            "{}: {} symbols, {bytes} bytes",
+            table.language(),
+            table.symbols()
+        );
 
         assert!(bytes <= 64 * 1024, "{}: {bytes} bytes", table.language());
         total += bytes;

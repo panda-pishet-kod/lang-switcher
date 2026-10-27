@@ -2636,8 +2636,7 @@ pub fn replace_in_with(
             // ⭐ Task T-106-3, решение 198.8: a `backspace` packet that erases and types asks the
             // field whether its erasure must settle first — the one question, after the packet is
             // built and before steps 3 to 5.
-            let settle_ms = if matches!(delivery, Delivery::Backspace) && erased > 0 && typed > 0
-            {
+            let settle_ms = if matches!(delivery, Delivery::Backspace) && erased > 0 && typed > 0 {
                 env.erase_settle_ms()
             } else {
                 0
@@ -2675,7 +2674,13 @@ fn run_steps(
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
     let replacement = if settle_ms > 0 {
-        dispatch_settled(env, packet, replacement_events(erased, 0), delay_ms, settle_ms)
+        dispatch_settled(
+            env,
+            packet,
+            replacement_events(erased, 0),
+            delay_ms,
+            settle_ms,
+        )
     } else {
         dispatch_in(env, packet, delay_ms)
     };

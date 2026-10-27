@@ -1344,10 +1344,18 @@ fn a_settling_field_gets_the_erasure_the_pause_and_then_the_insertion() {
     );
 
     match &steps[..] {
-        [Step::Send(erasure), Step::Pause(pause), Step::Send(insertion), Step::Switch] => {
+        [
+            Step::Send(erasure),
+            Step::Pause(pause),
+            Step::Send(insertion),
+            Step::Switch,
+        ] => {
             assert_eq!(erasure.len(), 12, "six Backspaces, down and up");
             assert!(
-                erasure.iter().enumerate().all(|(at, event)| event.is_backspace(at % 2 == 1)),
+                erasure
+                    .iter()
+                    .enumerate()
+                    .all(|(at, event)| event.is_backspace(at % 2 == 1)),
                 "the first call is the erasure and nothing else"
             );
             assert_eq!(*pause, inject::ERASE_SETTLE_MS);
@@ -1357,7 +1365,9 @@ fn a_settling_field_gets_the_erasure_the_pause_and_then_the_insertion() {
                 "the second call is the insertion and nothing else"
             );
         }
-        other => panic!("решение 198.8: the order is not erasure, pause, insertion, switch: {other:?}"),
+        other => {
+            panic!("решение 198.8: the order is not erasure, pause, insertion, switch: {other:?}")
+        }
     }
 
     assert_eq!(outcome.replacement.calls, 2);
@@ -1374,7 +1384,10 @@ fn the_settling_touches_the_backspace_packet_of_a_settling_field_only() {
     let mut bench = Bench::new();
     let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
 
-    assert_eq!(outcome.replacement.calls, 1, "FR-41: one call in every other field");
+    assert_eq!(
+        outcome.replacement.calls, 1,
+        "FR-41: one call in every other field"
+    );
     assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
 
     // The selection of FR-42 in the field of Notepad: one call.
@@ -1432,7 +1445,10 @@ fn an_erasure_cut_short_is_not_followed_by_the_insertion() {
         "only the erasure was sent: {steps:?}"
     );
     assert_eq!(outcome.replacement.calls, 1);
-    assert_eq!(outcome.replacement.requested, 24, "the whole packet was asked for");
+    assert_eq!(
+        outcome.replacement.requested, 24,
+        "the whole packet was asked for"
+    );
     assert_eq!(outcome.replacement.accepted, 11);
     assert!(!outcome.reached_the_screen());
 }
