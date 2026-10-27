@@ -175,10 +175,10 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
-VersionInfoVersion=1.0.0.105
+VersionInfoVersion=1.0.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=1.0.0.105
+VersionInfoProductVersion=1.0.0.0
 VersionInfoDescription={#AppName} Setup
 VersionInfoCopyright={#AppCopyright}
 

@@ -6397,18 +6397,18 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
 
     // ⭐ **The number moves with every delivery.** Решение 8 fixed `0.1.0` as the *starting*
     // version and it stood, unmoved, for thirty-two deliveries; the rule of 2026-09-03 made
-    // MINOR the number of the delivery tag, up to `e104` = `0.104.0.0`. ⭐⭐ **Решение 192.1
-    // (stage Э105):** from `e105` the version is an ordinary `X.Y.Z` (`1.0.0`: X for a big
-    // change, Y for new abilities, Z for repairs) and the **fourth field is the number of the
-    // delivery tag** — `e105` is `1.0.0.105`. Two sources in `Cargo.toml` (`[package] version`
-    // and `[package.metadata.langswitcher] delivery`) and `tools\verify-version.ps1`, which holds
-    // the ten places to them — this assertion is the reader of the bytes `rc.exe` really
-    // produced, and the one the instrument cannot see: it is raised **by hand**, and that is
-    // what makes it the honest red before a version bump.
+    // MINOR the number of the delivery tag, up to `e104` = `0.104.0.0`. ⭐⭐ **Решения 192.1 и
+    // 192.3 (stage Э105):** from `e105` the version is an ordinary `X.Y.Z` (`1.0.0`: X for a big
+    // change, Y for new abilities, Z for repairs), the **fourth field is always 0**, and the
+    // number of the delivery is an internal mark only (the tag, the records) — `e105` is
+    // `1.0.0.0`. `Cargo.toml` is the one source and `tools\verify-version.ps1` holds the ten
+    // places to it — this assertion is the reader of the bytes `rc.exe` really produced, and the
+    // one the instrument cannot see: it is raised **by hand**, and that is what makes it the
+    // honest red before a version bump.
     assert_eq!(
         version,
-        Some((1, 0, 0, 105)),
-        "app.rc must declare FILEVERSION 1,0,0,105 — version 1.0.0 of the delivery `e105` (решение 192.1)"
+        Some((1, 0, 0, 0)),
+        "app.rc must declare FILEVERSION 1,0,0,0 — version 1.0.0, the fourth field always 0 (решение 192.3)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process

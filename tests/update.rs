@@ -779,13 +779,14 @@ fn raise_and_check_answers_by_the_window_helper_and_not_by_the_process() {
     );
 }
 
-/// **The updater's version resource carries the two sources of the version** — решение 192.1
-/// (stage Э105): `[package] version` in the first three fields and the delivery in the fourth,
-/// from build.rs, and the updater compares the feed with the three (§0 п. 15, посылка П4). Read
-/// off the file cargo really built; raised **by hand** with every delivery, the honest red before
-/// a bump, like the reader of `app.rc` in `tests\tray.rs`.
+/// **The updater's version resource carries the version, and 0 in the fourth field** — решения
+/// 192.1 и 192.3 (stage Э105): `[package] version` in the first three fields from build.rs, the
+/// fourth always 0 (the number of the delivery is an internal mark only), and the updater compares
+/// the feed with the three (§0 п. 15, посылка П4). Read off the file cargo really built; raised
+/// **by hand** with every version, the honest red before a bump, like the reader of `app.rc` in
+/// `tests\tray.rs`.
 #[test]
-fn the_updater_carries_the_version_and_the_delivery_in_its_resource() {
+fn the_updater_carries_the_version_in_its_resource() {
     use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW};
     use windows::core::PCWSTR;
 
@@ -805,8 +806,8 @@ fn the_updater_carries_the_version_and_the_delivery_in_its_resource() {
 
     assert_eq!(
         lang_switcher::tray::parse_fixed_file_version(&bytes),
-        Some((1, 0, 0, 105)),
-        "the updater must carry 1.0.0 and the delivery 105 (решение 192.1)"
+        Some((1, 0, 0, 0)),
+        "the updater must carry 1.0.0.0 (решение 192.3)"
     );
     assert_eq!(
         update::version_of_file(path).as_deref(),
