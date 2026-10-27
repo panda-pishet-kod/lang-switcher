@@ -21,7 +21,7 @@
     Written for Windows PowerShell 5.1 without a Cyrillic character (decision R-05).
 
     Usage:
-      .\make-letter-stats.ps1 -Books D:\dev\sandbox\e105-corpus\pg1342.txt,... -Out res\letter-stats-en.bin
+      .\make-letter-stats.ps1 -Books <folder>\pg1342.txt,<folder>\pg1661.txt,... -Out res\letter-stats-en.bin
 #>
 [CmdletBinding()]
 param(

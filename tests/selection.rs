@@ -5962,6 +5962,20 @@ fn without_the_memory_or_a_table_the_word_is_divided_by_single_keys() {
     assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &plan), "пру");
 }
 
+/// **(2) No memory — text pasted, not typed: the statistics of English read the division** —
+/// посылка П6 at the selection path: `لاث` is `be` (not `ghe`, case 9b of 187 without the
+/// memory) and `مهلاف` is `light` (not `libt`), by the table of English the image carries.
+#[test]
+fn without_the_memory_the_statistics_of_english_read_the_word() {
+    let plan = arabic_plan(us_for_ligatures(), Vec::new());
+
+    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &plan), "be");
+    assert_eq!(
+        selected("\u{0645}\u{0647}\u{0644}\u{0627}\u{0641}", &plan),
+        "light"
+    );
+}
+
 /// **One division: taken** — a ligature whose characters are not all on keys of their own is
 /// the one way the text was typed, wherever it stands in the word.
 #[test]

@@ -61,4 +61,31 @@ fn the_cheaper_reading_is_the_one_the_table_makes_probable() {
 fn only_english_has_a_table() {
     assert!(letter_stats::for_layout(LayoutId::from_raw(0x0419_0419)).is_none());
     assert!(letter_stats::for_layout(LayoutId::from_raw(0x0401_0401)).is_none());
+    assert!(letter_stats::for_layout(LayoutId::from_raw(0x0409_0409)).is_some());
+    assert!(
+        letter_stats::for_layout(LayoutId::from_raw(0x0809_0809)).is_some(),
+        "every English layout: the primary language decides"
+    );
+}
+
+/// **Посылка П6 — the table of English reads the two words of decision 196.1 the way English is
+/// written:** `لاث` divided as `B`, `E` is `be` and as `G`, `H`, `E` is `ghe`; `مهلاف` divided as `L`,
+/// `I`, `G`, `H`, `T` is `light` and as `L`, `I`, `B`, `T` is `libt`. The table is the image's own,
+/// made from the five books of the report.
+#[test]
+fn the_table_of_english_prefers_be_and_light() {
+    let english = letter_stats::for_layout(LayoutId::from_raw(0x0409_0409)).expect("the table");
+
+    let (be, ghe) = (cost(&english, "be"), cost(&english, "ghe"));
+    let (light, libt) = (cost(&english, "light"), cost(&english, "libt"));
+    println!("be {be:.2} ghe {ghe:.2} light {light:.2} libt {libt:.2}");
+
+    assert!(
+        be < ghe,
+        "be ({be}) is more probable English than ghe ({ghe})"
+    );
+    assert!(
+        light < libt,
+        "light ({light}) is more probable English than libt ({libt})"
+    );
 }

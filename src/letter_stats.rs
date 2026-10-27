@@ -32,8 +32,12 @@ pub const TABLE_LEN: usize = SYMBOLS * SYMBOLS * SYMBOLS;
 /// `LANG_ENGLISH`, the primary language of every English layout.
 const LANG_ENGLISH: usize = 0x09;
 
-/// The table of English — counted from the corpus of the report; empty until it is in the tree.
-const ENGLISH: &[u8] = &[];
+/// **The table of English** — `res\letter-stats-en.bin`, made by `tools\make-letter-stats.ps1` out
+/// of five books of Project Gutenberg in the public domain of the USA (решение 197.10а: «Pride and
+/// Prejudice», «The Adventures of Sherlock Holmes», «A Tale of Two Cities», «Frankenstein»,
+/// «Alice's Adventures in Wonderland»; 475 673 words, 2 020 716 letters; their sizes and SHA-256 are
+/// in the report of stage Э105). The books are not in the tree and not in the image — the table is.
+const ENGLISH: &[u8] = include_bytes!("../res/letter-stats-en.bin");
 
 /// **A trigram table of one language** — see the module documentation.
 #[derive(Clone, Copy, Debug)]
