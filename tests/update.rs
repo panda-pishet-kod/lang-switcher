@@ -806,12 +806,12 @@ fn the_updater_carries_the_version_in_its_resource() {
 
     assert_eq!(
         lang_switcher::tray::parse_fixed_file_version(&bytes),
-        Some((1, 1, 0, 0)),
-        "the updater must carry 1.1.0.0 (решение 192.3)"
+        Some((1, 2, 0, 0)),
+        "the updater must carry 1.2.0.0 (решение 192.3)"
     );
     assert_eq!(
         update::version_of_file(path).as_deref(),
-        Some("1.1.0"),
+        Some("1.2.0"),
         "the updater compares three fields"
     );
 }
