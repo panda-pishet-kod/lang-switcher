@@ -872,7 +872,7 @@ fn a_word_with_a_tail_of_spaces_is_erased_and_retyped_whole() {
     let strokes = ghbdtn_with_tail(1);
 
     assert_eq!(
-        inject::OnScreen::as_typed(&strokes).count(),
+        inject::OnScreen::as_typed(&strokes).characters(),
         7,
         "FR-41: «ghbdtn » стоит на экране семью символами — шесть букв и хвост"
     );
@@ -891,7 +891,7 @@ fn a_word_with_a_tail_of_spaces_is_erased_and_retyped_whole() {
     );
 
     assert_eq!(
-        inject::OnScreen::as_injected(&strokes, &russian_with_space()).count(),
+        inject::OnScreen::as_injected(&strokes, &russian_with_space()).characters(),
         7,
         "со второго шага цикла считается предыдущая инжекция, и она той же ширины"
     );
@@ -899,9 +899,9 @@ fn a_word_with_a_tail_of_spaces_is_erased_and_retyped_whole() {
     // Хвост из двух пробелов — то же самое и на единицу шире с каждой стороны.
     let longer = ghbdtn_with_tail(2);
 
-    assert_eq!(inject::OnScreen::as_typed(&longer).count(), 8);
+    assert_eq!(inject::OnScreen::as_typed(&longer).characters(), 8);
     assert_eq!(
-        inject::OnScreen::as_injected(&longer, &russian_with_space()).count(),
+        inject::OnScreen::as_injected(&longer, &russian_with_space()).characters(),
         8
     );
 }
@@ -948,12 +948,12 @@ fn the_space_bar_is_in_the_hardwired_table_of_fr25_and_the_tail_is_counted() {
     strokes.push(space);
 
     assert_eq!(
-        inject::OnScreen::as_typed(&strokes).count(),
+        inject::OnScreen::as_typed(&strokes).characters(),
         7,
         "семь из семи: «ghbdtn » стирается целиком, хвост считается вместе со словом"
     );
     assert_eq!(
-        inject::OnScreen::as_injected(&strokes, &target).count(),
+        inject::OnScreen::as_injected(&strokes, &target).characters(),
         7,
         "и то, что кладётся взамен, той же ширины — хвост переносится как есть"
     );
@@ -3397,14 +3397,15 @@ fn the_working_buffers_are_released_through_the_volatile_zeroing() {
         "nothing in this module zeroes with `fill` any more: {fills:?}"
     );
 
-    // Three buffers hold the user's text here and all three are zeroed through the helper: the
-    // converted text and the `INPUT` packet of `replace_in_with`, and the copy of the strokes
-    // `on_hotkey` takes out of the recorder.
+    // Five buffers hold the user's text here and all five are zeroed through the helper: the
+    // converted text and the `INPUT` packet of `replace_in_with`, the copy of the strokes
+    // `on_hotkey` takes out of the recorder, and since stage Э105 (решение 193.1) the two texts
+    // `OnScreen::as_typed` and `OnScreen::as_injected` count the letters of Windows over.
     let zeroed = code_lines_with(&source, "buffer::zero_slice(");
 
     assert_eq!(
         zeroed.len(),
-        3,
+        5,
         "every working buffer is zeroed through the helper: {zeroed:?}"
     );
 
@@ -4644,4 +4645,164 @@ fn the_input_window_sends_the_menu_mask_before_it_chooses_a_path() {
         mask > path,
         "the sweep does not see the mask moved below the gate"
     );
+}
+
+// =========================================================================================
+// Решение 193.1 (stage Э105) — the selection counts letters of Windows, `Backspace` code points
+// =========================================================================================
+
+/// A layout in which the keys from `Q` on produce `keys`, one string per key — a key may put
+/// several code points on the screen, as the ligature key `क्ष` of Hindi InScript does.
+fn keys_from_q(layout: LayoutId, keys: &[&str]) -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(layout);
+
+    for (offset, key) in keys.iter().enumerate() {
+        let units: Vec<u16> = key.encode_utf16().collect();
+        let scan = 0x10 + u16::try_from(offset).expect("a short word");
+        let mapping =
+            KeyMapping::from_to_unicode(i32::try_from(units.len()).expect("a short key"), &units);
+        builder.set(scan, false, Mods::NONE, mapping);
+    }
+
+    builder.finish()
+}
+
+/// The strokes of `keys` typed in [`keys_from_q`].
+fn typed_from_q(layout: &LayoutMap, keys: usize) -> Vec<Keystroke> {
+    (0..keys)
+        .map(|offset| {
+            let scan = 0x10 + u16::try_from(offset).expect("a short word");
+            Keystroke::recorded_in(layout, scan, false, Mods::NONE)
+        })
+        .collect()
+}
+
+/// How many `Left` (selection) and `Backspace` (erasure) the two packets of one press send.
+fn lefts_and_backspaces(
+    strokes: &[Keystroke],
+    target: &LayoutMap,
+    on_screen: inject::OnScreen,
+) -> (usize, usize) {
+    let mut selection = Bench::new();
+    inject::replace_in_with(
+        &mut selection,
+        strokes,
+        target,
+        on_screen,
+        0,
+        ReplacementMethod::Selection,
+    )
+    .expect("the selection packet goes out");
+
+    let mut erasure = Bench::new();
+    inject::replace_in_with(
+        &mut erasure,
+        strokes,
+        target,
+        on_screen,
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("the erasure packet goes out");
+
+    (
+        selection
+            .stream()
+            .iter()
+            .filter(|e| e.is_left(false))
+            .count(),
+        erasure
+            .stream()
+            .iter()
+            .filter(|e| e.is_backspace(false))
+            .count(),
+    )
+}
+
+/// The words of table 191.2 — `(name, keys, code points, letters of Windows)`, measured on
+/// Test_VM in Блокнот, Edit and RichEdit (`reports\MEASURE-Q191-erase.md`).
+const TABLE_191_2: [(&str, &[&str], usize, usize); 7] = [
+    ("latin control", &["h", "e", "l", "l", "o"], 5, 5),
+    (
+        "Thai, case 4b",
+        &[
+            "\u{0E2A}", "\u{0E27}", "\u{0E31}", "\u{0E2A}", "\u{0E14}", "\u{0E35}",
+        ],
+        6,
+        4,
+    ),
+    (
+        "Thai, vowel and tone",
+        &[
+            "\u{0E17}", "\u{0E35}", "\u{0E48}", "\u{0E19}", "\u{0E35}", "\u{0E48}",
+        ],
+        6,
+        2,
+    ),
+    (
+        "Hindi, conjunct",
+        &[
+            "\u{0928}", "\u{092E}", "\u{0938}", "\u{094D}", "\u{0924}", "\u{0947}",
+        ],
+        6,
+        3,
+    ),
+    (
+        "Hindi, ligature key",
+        &["\u{0915}\u{094D}\u{0937}", "\u{092E}", "\u{093E}"],
+        5,
+        2,
+    ),
+    (
+        "Vietnamese, tone key",
+        &["V", "i", "\u{00EA}", "\u{0323}", "t"],
+        5,
+        4,
+    ),
+    ("acute key", &["c", "a", "\u{0301}"], 3, 2),
+];
+
+/// **The selection of FR-42 takes as many `Shift+Left` as Windows has letters, `Backspace` as
+/// many as there are code points** — решение 193.1, table 191.2. Until Э105 the selection got
+/// the code points: six `Shift+Left` over `สวัสดี` (four stops) selected the space and the guard
+/// before it too (case 4b of 187).
+#[test]
+fn the_selection_counts_letters_of_windows_and_the_backspace_code_points() {
+    let target = us();
+
+    for (name, keys, points, letters) in TABLE_191_2 {
+        let source = keys_from_q(LayoutId::from_raw(0x041E_041E), keys);
+        let strokes = typed_from_q(&source, keys.len());
+
+        let (lefts, backspaces) =
+            lefts_and_backspaces(&strokes, &target, inject::OnScreen::as_typed(&strokes));
+
+        assert_eq!(lefts, letters, "{name}: Shift+Left per letter of Windows");
+        assert_eq!(backspaces, points, "{name}: Backspace per code point");
+    }
+}
+
+/// **From the second press on the same holds of what the previous press injected** — the text
+/// on the screen is then the strokes rendered into `previous` (Э20), and its letters are what the
+/// selection takes: Latin typed and turned into Thai by the first press is four letters again.
+#[test]
+fn the_selection_after_a_press_counts_the_letters_the_press_put_there() {
+    let target = us();
+
+    for (name, keys, points, letters) in TABLE_191_2 {
+        let previous = keys_from_q(LayoutId::from_raw(0x041E_041E), keys);
+        let strokes = typed_from_q(&target, keys.len());
+
+        let (lefts, backspaces) = lefts_and_backspaces(
+            &strokes,
+            &target,
+            inject::OnScreen::as_injected(&strokes, &previous),
+        );
+
+        assert_eq!(lefts, letters, "{name}: Shift+Left per letter injected");
+        assert_eq!(
+            backspaces, points,
+            "{name}: Backspace per code point injected"
+        );
+    }
 }

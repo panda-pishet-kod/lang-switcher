@@ -500,30 +500,162 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
         .sum()
 }
 
-/// **The `N` of FR-41 — how many characters of this run are on the screen right now.**
+/// **The `N` of FR-41 and FR-42 — how much of this run is on the screen right now**, counted the
+/// way each method takes it off.
 ///
 /// A type and not a bare `usize` for one reason: there are two right answers and they differ,
 /// so a number passed by hand is a number that can be the wrong one. The only two ways to build
 /// it are the two the program actually has, and both are named after the thing on the screen
 /// they describe.
+///
+/// # ⭐ Two counts over one text — решение 193.1, stage Э105
+///
+/// Each constructor counts the same text twice, because the two methods take it off the screen
+/// by two different units (замер 191.2 on Test_VM, `reports\MEASURE-Q191-erase.md`):
+///
+/// | method | one key takes | `สวัสดี` | `नमस्ते` | `Việt` |
+/// |---|---|---|---|---|
+/// | `Backspace` (FR-41) | one code point — [`OnScreen::characters`] | 6 | 6 | 5 |
+/// | `Shift+Left` (FR-42) | one **letter of Windows**, a caret stop — [`OnScreen::letters`] | 4 | 3 | 4 |
+///
+/// The same in Блокнот, Edit and RichEdit. Until Э105 the selection got the code points, and
+/// six `Shift+Left` over the Thai word selected the space and the character before it as well:
+/// the guard of the stand was eaten (case 4b of 187). [`OnScreen::for_delivery`] hands each
+/// packet its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OnScreen(usize);
+pub struct OnScreen {
+    characters: usize,
+    letters: usize,
+}
 
 impl OnScreen {
     /// The run as the **user typed it** — the OS composed the dead keys, see [`typed_chars`].
+    ///
+    /// The letters are counted over what the strokes produced, dead strokes left out — the
+    /// screen's text up to the composition a dead key makes, which joins two strokes into one
+    /// character and never changes how many letters there are.
     pub fn as_typed(strokes: &[Keystroke]) -> Self {
-        Self(typed_chars(strokes))
+        let mut text: Vec<u16> = strokes
+            .iter()
+            .filter(|stroke| !stroke.is_dead())
+            .flat_map(|stroke| stroke.produced().units().to_vec())
+            .collect();
+
+        let letters = windows_letters_in(&text);
+        crate::buffer::zero_slice(&mut text);
+
+        Self {
+            characters: typed_chars(strokes),
+            letters,
+        }
     }
 
     /// The run as a **previous step of the cycle injected it** — see [`injected_chars`].
     pub fn as_injected(strokes: &[Keystroke], previous: &LayoutMap) -> Self {
-        Self(injected_chars(strokes, previous))
+        let mut text = vec![0u16; convert::max_units(strokes.len())];
+        let letters = convert::convert_strokes(strokes, previous, &mut text).map_or_else(
+            |_| injected_chars(strokes, previous),
+            |len| windows_letters_in(&text[..len]),
+        );
+        crate::buffer::zero_slice(&mut text);
+
+        Self {
+            characters: injected_chars(strokes, previous),
+            letters,
+        }
     }
 
-    /// The count itself.
-    pub const fn count(self) -> usize {
-        self.0
+    /// Code points on the screen — what `N` × `Backspace` takes off (FR-41).
+    pub const fn characters(self) -> usize {
+        self.characters
     }
+
+    /// Letters of Windows on the screen — what `N` × `Shift+Left` selects (FR-42, решение 193.1).
+    pub const fn letters(self) -> usize {
+        self.letters
+    }
+
+    /// The `N` of the packet `delivery` builds: letters for the selection, code points for the
+    /// two paths that erase by `Backspace` (FR-41 and the keys of the classic console).
+    pub const fn for_delivery(self, delivery: Delivery) -> usize {
+        match delivery {
+            Delivery::Selection => self.letters,
+            Delivery::Backspace | Delivery::Keystrokes => self.characters,
+        }
+    }
+}
+
+/// **How many letters of Windows a run of UTF-16 code units is** — the caret stops a control of
+/// Windows puts in it, decision 193.1.
+///
+/// Uniscribe's `ScriptBreak`, `fCharStop`, over the items `ScriptItemize` cuts the run into: the
+/// mechanism Edit and RichEdit stop the caret by, and the one that reproduced table 191.2 (`สวัสดี`
+/// 4, `ที่นี่` 2, `नमस्ते` 3, `क्षमा` 2, `Việt` 4, `cá` 2 — посылка П1, 197.11). ICU of Windows answered
+/// the same on Windows 11, and was not taken: `icuuc.dll` is not in Windows 10 1607, the floor of
+/// SPEC §3, and its import would stop the program from starting there. The rules of `StringInfo`
+/// of .NET do not hold the Indian conjuncts (`स्ते` is two to them) and would select a space too.
+///
+/// A refusal of either call is answered with the code points — the count the selection had until
+/// Э105, which errs only towards the letters before the run, never leaves a tail (NFR-13: the
+/// result is examined, not smoothed over). Called on the input thread at the moment of the
+/// replacement, after the handoff of the hook (NFR-09), never from the callback.
+fn windows_letters_in(units: &[u16]) -> usize {
+    use windows::Win32::Globalization::{SCRIPT_ITEM, SCRIPT_LOGATTR, ScriptBreak, ScriptItemize};
+    use windows::core::PCWSTR;
+
+    /// `fCharStop` of `SCRIPT_LOGATTR`: the third bit of its one byte.
+    const CHAR_STOP: u8 = 0x04;
+
+    if units.is_empty() {
+        return 0;
+    }
+
+    let Ok(length) = i32::try_from(units.len()) else {
+        return chars_in(units);
+    };
+
+    // One item more than units: the call writes the end position into the item after the last.
+    let mut items = vec![SCRIPT_ITEM::default(); units.len() + 1];
+    let mut count = 0i32;
+
+    // SAFETY: `units` is a live slice; `items` holds one more item than `units` has units, the
+    // most `ScriptItemize` can cut it into plus the terminating item, and the binding derives the
+    // bound from the slice. `count` is a live local the call fills.
+    if unsafe { ScriptItemize(units, None, None, &mut items, &mut count) }.is_err() {
+        return chars_in(units);
+    }
+
+    let mut attributes = vec![SCRIPT_LOGATTR::default(); units.len()];
+
+    for item in 0..usize::try_from(count).unwrap_or(0) {
+        let start = usize::try_from(items[item].iCharPos).unwrap_or(0);
+        let end = usize::try_from(items[item + 1].iCharPos).unwrap_or(0);
+
+        if start >= end || end > units.len() {
+            return chars_in(units);
+        }
+
+        // SAFETY: `start..end` lies inside `units` (checked above) and `attributes` has as many
+        // entries as `units` has units, so the call writes `end - start` attributes inside it;
+        // the analysis is the one `ScriptItemize` made for this item.
+        let broken = unsafe {
+            ScriptBreak(
+                PCWSTR(units[start..].as_ptr()),
+                i32::try_from(end - start).unwrap_or(length),
+                &items[item].a,
+                attributes[start..].as_mut_ptr(),
+            )
+        };
+
+        if broken.is_err() {
+            return chars_in(units);
+        }
+    }
+
+    attributes
+        .iter()
+        .filter(|attribute| attribute._bitfield & CHAR_STOP != 0)
+        .count()
 }
 
 /// **Which layout's injection is standing on the screen right now** — the other half of the
@@ -796,8 +928,15 @@ pub const fn selection_events(erase: usize, units: usize) -> usize {
 /// IDE, a browser field with suggestions, Word — one `Backspace` may delete not one character
 /// but the whole token that was substituted, so `N` backspaces stop corresponding to `N`
 /// characters. A selection does not have that failure mode: `N` × `Shift+Left` selects exactly
-/// `N` characters whatever the application thinks a word is, and the insertion replaces the
-/// selection in one go rather than erasing anything.
+/// `N` **letters of Windows** — caret stops — whatever the application thinks a word is, and the
+/// insertion replaces the selection in one go rather than erasing anything.
+///
+/// ⛔ **Letters, not characters — замер 191.2, решение 193.1.** Until stage Э105 this said «exactly
+/// `N` characters», and that holds for Latin and Cyrillic only: in a script with marks above and
+/// below the letter one `Shift+Left` steps over the whole letter (`สวัสดี` is six code points and
+/// four stops, `नमस्ते` six and three), so six presses over the Thai word selected the space and the
+/// character before it too, and the insertion replaced somebody else's text (case 4b of 187).
+/// The caller's `erase` is [`OnScreen::letters`] for this packet.
 ///
 /// # What is in the packet, and why it is one `Shift` and not `N`
 ///
@@ -814,9 +953,10 @@ pub const fn selection_events(erase: usize, units: usize) -> usize {
 /// `4N` events instead of `2N + 2` for the same selection, and every application that watches
 /// modifier transitions would see `N` of them where the user made one.
 ///
-/// `N` is the same `N` as in FR-41 — [`OnScreen`], the number of **characters** standing on the
-/// screen and not the number of keys pressed — so a ligature is selected whole, exactly as it is
-/// erased whole in the other mode.
+/// `N` counts what stands on the screen and not the keys pressed, as in FR-41 — [`OnScreen`] —
+/// but in its own unit: [`OnScreen::letters`], where FR-41 takes [`OnScreen::characters`]. A
+/// ligature key that put three code points on the screen is one letter or more of Windows and
+/// is selected whole, exactly as it is erased whole by three `Backspace` in the other mode.
 ///
 /// The insertion is the same `KEYEVENTF_UNICODE` run [`build_replacement`] ends with, and it is
 /// what FR-42 means by "выделение заменяется одним событием": the first character event replaces
@@ -2077,11 +2217,11 @@ fn sleep_ms(delay_ms: u32) {
 /// What one replacement did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Replaced {
-    /// Characters taken off the screen — the `N` of FR-41, as [`OnScreen`] counted it.
+    /// What was taken off the screen — the `N` of the packet, as [`OnScreen`] counted it.
     ///
-    /// The same number in both modes and counted the same way: erased by `N` backspaces in the
-    /// `backspace` mode, selected by `N` × `Shift+Left` and replaced by the insertion in the
-    /// compatibility mode of FR-42.
+    /// Code points erased by `N` backspaces in the `backspace` mode; letters of Windows selected
+    /// by `N` × `Shift+Left` and replaced by the insertion in the compatibility mode of FR-42
+    /// (решение 193.1, stage Э105 — [`OnScreen::for_delivery`]).
     ///
     /// Which of the two counts of [`OnScreen`] it is depends on the press: the typing on the
     /// first, the previous injection from the second on — Э20, see [`OnScreen`].
@@ -2274,8 +2414,9 @@ pub fn replace_in_with(
 ) -> Result<Replaced, InjectError> {
     let delivery = delivery.into();
 
-    // FR-41 and FR-42: `N` is the number of characters **on the screen**, not the number of
-    // keys pressed, and it is the same `N` in both modes.
+    // FR-41 and FR-42: `N` is what stands **on the screen**, not the number of keys pressed —
+    // in code points for the paths that erase by `Backspace`, in letters of Windows for the
+    // selection (решение 193.1, stage Э105: `Shift+Left` stops at the caret stops of Windows).
     //
     // ⚠ It is handed in rather than computed here — audit of 2026-08-31 finding №5, stage Э20.
     // What stands on the screen is what the user typed only on the *first* press of a run; from
@@ -2283,7 +2424,7 @@ pub fn replace_in_with(
     // the run the two lengths differ (`café` typed is four characters, the same strokes
     // injected are five). Only the caller knows which press this is — `take_press` reads the
     // position counter of FR-32 — so only the caller can pick the right count. See [`OnScreen`].
-    let erased = on_screen.count();
+    let erased = on_screen.for_delivery(delivery);
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
     // FR-43. `max_units` is the length no conversion of these strokes can exceed, so the
