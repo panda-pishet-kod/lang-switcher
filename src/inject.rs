@@ -524,10 +524,22 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 /// six `Shift+Left` over the Thai word selected the space and the character before it as well:
 /// the guard of the stand was eaten (case 4b of 187). [`OnScreen::for_delivery`] hands each
 /// packet its own.
+///
+/// # ⭐ One letter more in Блокнот — task T-107-6 (в), решение 201.10а
+///
+/// Блокнот of Windows 11 stops the caret **inside** the Tamil conjunct `க்ஷ` (KSSA) when one key
+/// typed it — the ligature key `Shift+T` of Tamil 99 — and not when it was inserted, while
+/// `ScriptBreak` keeps it one letter (Test_VM, `tools\vmlab\jobs\e107\q107-*.ps1`, keys from the
+/// host): `க்ஷஅ` typed took three `Shift+Left` (4 of 4) and three `Backspace` (2 of 2), the same
+/// text inserted took two `Shift+Left`; `ஶ்ரீஅ` of the key `Shift+Y` took two typed as well. The
+/// selection of two letters left `க்` in front of the word (case 10 of the manual sheet of Э106,
+/// 5 of 6). [`OnScreen::for_field`] gives the selection there one letter more per such key, and
+/// only there: one `Shift+Left` too many would take the character before the run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OnScreen {
     characters: usize,
     letters: usize,
+    ksha_keys: usize,
 }
 
 impl OnScreen {
@@ -549,6 +561,7 @@ impl OnScreen {
         Self {
             characters: typed_chars(strokes),
             letters,
+            ksha_keys: ksha_keys_in(strokes),
         }
     }
 
@@ -564,6 +577,7 @@ impl OnScreen {
         Self {
             characters: injected_chars(strokes, previous),
             letters,
+            ksha_keys: 0,
         }
     }
 
@@ -585,6 +599,40 @@ impl OnScreen {
             Delivery::Backspace | Delivery::Keystrokes => self.characters,
         }
     }
+
+    /// Keys of the run that typed the conjunct `க்ஷ` whole — the ligature key of Tamil 99.
+    pub const fn ksha_keys(self) -> usize {
+        self.ksha_keys
+    }
+
+    /// [`OnScreen::for_delivery`] in a field that does or does not part the conjunct `க்ஷ` typed
+    /// by one key ([`parts_typed_ksha_in`]): there the selection takes one letter more per such
+    /// key. The two paths of `Backspace` are not touched — measured for the selection only.
+    pub const fn for_field(self, delivery: Delivery, parts_ksha: bool) -> usize {
+        match delivery {
+            Delivery::Selection if parts_ksha => self.letters + self.ksha_keys,
+            other => self.for_delivery(other),
+        }
+    }
+}
+
+/// The units of the Tamil conjunct `க்ஷ` — KA, PULLI, SSA.
+const KSHA: [u16; 3] = [0x0B95, 0x0BCD, 0x0BB7];
+
+/// How many keys of `strokes` produced [`KSHA`] in one go, dead strokes left out.
+fn ksha_keys_in(strokes: &[Keystroke]) -> usize {
+    strokes
+        .iter()
+        .filter(|stroke| !stroke.is_dead())
+        .map(|stroke| {
+            stroke
+                .produced()
+                .units()
+                .windows(KSHA.len())
+                .filter(|units| *units == KSHA)
+                .count()
+        })
+        .sum()
 }
 
 /// **How many letters of Windows a run of UTF-16 code units is** — the caret stops a control of
@@ -1408,6 +1456,23 @@ pub fn erase_settle_for(class: Option<&str>) -> u32 {
     }
 }
 
+/// ⭐ **Task T-107-6 (в), решение 201.10а — the fields that part the conjunct `க்ஷ` typed by one
+/// key**: Блокнот of Windows 11, see [`OnScreen`]. Edit and RichEdit are not in the list: with the
+/// text inserted they stop as `ScriptBreak` does, and typed by keys they were not measured — the
+/// stand did not put Tamil 99 into a field of WinForms, twice.
+pub const KSHA_PARTING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+
+/// **The pure half of task T-107-6 (в)** — whether a field of class `class` parts the conjunct
+/// `க்ஷ` typed by one key. `None` and every other class answer no. Case-insensitively, as
+/// [`resolve_auto`] compares.
+pub fn parts_typed_ksha_in(class: Option<&str>) -> bool {
+    class.is_some_and(|class| {
+        KSHA_PARTING_FIELD_CLASSES
+            .iter()
+            .any(|parting| class.eq_ignore_ascii_case(parting))
+    })
+}
+
 /// The class name of `window`, or `None` when it cannot be read.
 ///
 /// The Win32 half of FR-42а, split from [`resolve_auto`] so that the resolution rule is a pure
@@ -1876,6 +1941,14 @@ pub trait Environment {
         0
     }
 
+    /// ⭐ **Task T-107-6 (в) — whether the field with the focus parts the conjunct `க்ஷ` typed by
+    /// one key** ([`parts_typed_ksha_in`], [`OnScreen::for_field`]). Asked only for a selection
+    /// whose run holds such a key. The default answers no — the count of `ScriptBreak`;
+    /// [`System`] reads the class of the focused field.
+    fn parts_typed_ksha(&mut self) -> bool {
+        false
+    }
+
     /// **FR-40 step 5 — the layout switch. The connection point of task T-05-1.**
     ///
     /// Called after the replacement has been sent — and only when it was taken whole, task
@@ -1974,6 +2047,20 @@ impl Environment for System {
         let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
 
         erase_settle_for(class.as_deref())
+    }
+
+    /// **Task T-107-6 (в)** — the class of the focused field, the same way as above.
+    fn parts_typed_ksha(&mut self) -> bool {
+        // SAFETY: as in `erase_settle_ms` above.
+        let foreground = unsafe { GetForegroundWindow() };
+
+        if foreground.is_invalid() {
+            return false;
+        }
+
+        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
+
+        parts_typed_ksha_in(class.as_deref())
     }
 
     /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
@@ -2533,7 +2620,12 @@ pub fn replace_in_with(
     // the run the two lengths differ (`café` typed is four characters, the same strokes
     // injected are five). Only the caller knows which press this is — `take_press` reads the
     // position counter of FR-32 — so only the caller can pick the right count. See [`OnScreen`].
-    let erased = on_screen.for_delivery(delivery);
+    //
+    // ⭐ Task T-107-6 (в): the field is asked only when a key of the run typed `க்ஷ` whole.
+    let parts_ksha = matches!(delivery, Delivery::Selection)
+        && on_screen.ksha_keys() > 0
+        && env.parts_typed_ksha();
+    let erased = on_screen.for_field(delivery, parts_ksha);
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
     // FR-43. `max_units` is the length no conversion of these strokes can exceed, so the

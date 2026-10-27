@@ -194,6 +194,9 @@ struct Bench {
     /// ⭐ **Task T-106-3.** What `erase_settle_ms` answers — the field with the focus. Zero is
     /// every field but the one of Notepad of Windows 11.
     settle: u32,
+    /// ⭐ **Task T-107-6 (в).** What `parts_typed_ksha` answers — `true` is the field of Notepad of
+    /// Windows 11, which parts the conjunct of Tamil typed by one key.
+    ksha: bool,
 }
 
 impl Bench {
@@ -206,6 +209,7 @@ impl Bench {
             log: Vec::new(),
             keyboard: None,
             settle: 0,
+            ksha: false,
         }
     }
 
@@ -320,6 +324,10 @@ impl Environment for Bench {
 
     fn erase_settle_ms(&mut self) -> u32 {
         self.settle
+    }
+
+    fn parts_typed_ksha(&mut self) -> bool {
+        self.ksha
     }
 
     fn switch_layout(&mut self) {
@@ -5041,4 +5049,120 @@ fn the_selection_after_a_press_counts_the_letters_the_press_put_there() {
             "{name}: Backspace per code point injected"
         );
     }
+}
+
+/// How many `Left` the selection packet of one press sends in a field that does (`ksha`) or does
+/// not part the conjunct `க்ஷ` typed by one key — task T-107-6 (в).
+fn lefts_in_field(
+    strokes: &[Keystroke],
+    target: &LayoutMap,
+    on_screen: inject::OnScreen,
+    ksha: bool,
+) -> usize {
+    let mut bench = Bench {
+        ksha,
+        ..Bench::new()
+    };
+    inject::replace_in_with(
+        &mut bench,
+        strokes,
+        target,
+        on_screen,
+        0,
+        ReplacementMethod::Selection,
+    )
+    .expect("the selection packet goes out");
+
+    bench.stream().iter().filter(|e| e.is_left(false)).count()
+}
+
+/// ⭐ **Task T-107-6 (в), решение 201.10а — in Блокнот the conjunct `க்ஷ` typed by one key is two
+/// letters to the selection**, one everywhere else, as `ScriptBreak` has it. Test_VM, keys of
+/// Tamil 99 from the host: `க்ஷஅ` took three `Shift+Left` (4 of 4), `ஶ்ரீஅ` two and `க்கஅ` three —
+/// what `ScriptBreak` counts. Two letters left `க்` in front of the word (case 10 of the manual
+/// sheet of Э106, 5 of 6). The same text of three keys was not measured and keeps the count of
+/// `ScriptBreak`: one `Shift+Left` too many would take the character before the run.
+#[test]
+fn the_selection_in_notepad_takes_the_ksha_of_one_key_as_two_letters() {
+    let target = us();
+
+    // (name, keys, lefts in Блокнот, lefts in every other field)
+    let rows: [(&str, &[&str], usize, usize); 4] = [
+        (
+            "ksha by the ligature key, a",
+            &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
+            3,
+            2,
+        ),
+        (
+            "shri by the ligature key, a",
+            &["\u{0BB6}\u{0BCD}\u{0BB0}\u{0BC0}", "\u{0B85}"],
+            2,
+            2,
+        ),
+        (
+            "ka pulli ka a",
+            &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"],
+            3,
+            3,
+        ),
+        (
+            "ksha of three keys, a",
+            &["\u{0B95}", "\u{0BCD}", "\u{0BB7}", "\u{0B85}"],
+            2,
+            2,
+        ),
+    ];
+
+    for (name, keys, notepad, elsewhere) in rows {
+        let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
+        let strokes = typed_from_q(&source, keys.len());
+        let on_screen = inject::OnScreen::as_typed(&strokes);
+
+        assert_eq!(
+            lefts_in_field(&strokes, &target, on_screen, true),
+            notepad,
+            "{name}: Shift+Left in Блокнот"
+        );
+        assert_eq!(
+            lefts_in_field(&strokes, &target, on_screen, false),
+            elsewhere,
+            "{name}: Shift+Left in every other field"
+        );
+    }
+}
+
+/// **What the program put on the screen itself keeps the count of `ScriptBreak` in Блокнот too** —
+/// `க்ஷஅ` inserted took two `Shift+Left` there (Test_VM). `Ta` typed in US and turned into
+/// Tamil by the first press is two letters to the second press.
+#[test]
+fn the_ksha_the_program_inserted_is_one_letter_in_notepad_as_well() {
+    let target = us();
+    let keys: &[&str] = &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"];
+    let previous = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
+    let strokes = typed_from_q(&target, keys.len());
+    let on_screen = inject::OnScreen::as_injected(&strokes, &previous);
+
+    assert_eq!(on_screen.ksha_keys(), 0);
+    assert_eq!(lefts_in_field(&strokes, &target, on_screen, true), 2);
+}
+
+/// **Only the field of Блокнот parts the conjunct** — by its class, case-insensitively, and an
+/// unreadable class answers no.
+#[test]
+fn only_the_field_of_notepad_parts_the_ksha_of_one_key() {
+    assert!(inject::parts_typed_ksha_in(Some("RichEditD2DPT")));
+    assert!(inject::parts_typed_ksha_in(Some("richeditd2dpt")));
+
+    for other in [
+        "Edit",
+        "RichEdit20W",
+        "RICHEDIT50W",
+        "Chrome_RenderWidgetHostHWND",
+        "",
+    ] {
+        assert!(!inject::parts_typed_ksha_in(Some(other)), "{other}");
+    }
+
+    assert!(!inject::parts_typed_ksha_in(None));
 }
