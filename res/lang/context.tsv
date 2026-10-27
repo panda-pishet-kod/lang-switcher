@@ -170,7 +170,7 @@ IDS_WIZARD_STEP	IDD_WIZARD	IDC_WZ_STEP	406x19	{0} = this step, «2»; {1} = the 
 IDS_WIZARD_CANCEL	IDD_WIZARD	IDC_WZ_CANCEL	98x30	-	-
 IDS_WIZARD_BACK	IDD_WIZARD	IDC_WZ_BACK	81x30	-	-
 IDS_WIZARD_NEXT	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	-
-IDS_WIZARD_DONE	IDD_WIZARD	IDC_WZ_NEXT,IDC_WZ_STEP	89x30	-	-
+IDS_WIZARD_DONE	IDD_WIZARD	IDC_WZ_STEP	406x19	-	the word in the place of «Step N of M» on the thanks; since 1.2.0 no button says it
 IDS_WIZARD_WHAT_TITLE	report,IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; also a heading of the report text of the letter
 IDS_WIZARD_WHAT_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CARD_WRONG	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -214,12 +214,8 @@ IDS_WIZARD_ATTACH_JOURNAL_SUB	IDD_WIZARD	IDC_WZ_ATTACH_V1	383x21	{0} = a count o
 IDS_WIZARD_ATTACH_FOOT	IDD_WIZARD	IDC_WZ_ATTACH_FOOT	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_PREVIEW_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_PREVIEW_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_COPY	IDD_WIZARD	IDC_WZ_COPY	228x30	-	-
 IDS_WIZARD_SAVE	IDD_WIZARD	IDC_WZ_SAVE	172x30	-	-
-IDS_WIZARD_COPIED_ONLY	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_MAIL_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_MAIL_ADDRESS	IDD_WIZARD	IDC_WZ_ADDRESS	406x21	{0} = the address, «send.me@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_MAIL_ADDRESS	IDD_WIZARD	IDC_WZ_ADDRESS	406x21	{0} = the address, «lang.switcher@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_COPY_TEXT	IDD_WIZARD	IDC_WZ_COPY	228x30	-	-
 IDS_WIZARD_COPY_ADDRESS	IDD_WIZARD	IDC_WZ_COPY_ADDRESS	172x30	-	-
 IDS_WIZARD_TEXT_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = code: address | links::MAIL_ADDRESS	the window is laid out when shown: the height grows with the text, the width does not
@@ -228,13 +224,18 @@ IDS_TOAST_UPDATED_TITLE	toast	title	balloon title: 63 characters	{0} = the new v
 IDS_TOAST_UPDATED	toast	text	balloon text: 255 characters	-	-
 IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_FAILED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKYOU_BUG_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKYOU_IDEA_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKYOU_BUG_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKYOU_IDEA_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_LIST_SEPARATOR	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	the separator of the list in {0} of IDS_LAYOUT_NOTE, «, » with its space; right to left: the separator of the language («،») is the translator's choice, the stand checks it
 IDS_CYCLE_ARROW	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	between the layouts of the cycle in {0} of IDS_STATE_CYCLE, « → » with its spaces; right to left: the direction of the arrow is the translator's choice, the stand checks it
 IDS_TIP_FORMAT	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	{0} = «Lang Switcher», not translated; {1} = IDS_TIP_ACTIVE or IDS_TIP_PAUSED (code: APP_NAME, &state)	the tooltip of the tray icon; the order and the joiner are the language's
+IDS_WIZARD_SEND	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the main button of the last step: the appeal goes to the site only when it is pressed (decision 199.5)
+IDS_WIZARD_SENDING	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the same button, grey, while the appeal is on its way (up to 15 seconds)
+IDS_WIZARD_RETRY	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the same button once the site did not answer: sends the same appeal again
+IDS_WIZARD_CONTACT	IDD_WIZARD	IDC_WZ_CONTACT_LABEL	406x21	-	the label above the one-line contact field, one ink; two lines allowed; Telegram is not translated; no promise to answer (decisions 199.10, 201.11a)
+IDS_WIZARD_CONTACT_LINE	report	-	the text of the report: no limit	-	a line of the report text, «label: contact», written only when a contact was typed (decision 199.10)
+IDS_WIZARD_FAILED_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_FAILED_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the two button names are IDS_WIZARD_RETRY and the letter is IDS_WIZARD_COPY_TEXT and IDS_WIZARD_COPY_ADDRESS
+IDS_WIZARD_SENT_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_SENT_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer
 IDS_MENU_SUSPEND	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME_RESTART	menu	-	menu: grows with the text	-	-

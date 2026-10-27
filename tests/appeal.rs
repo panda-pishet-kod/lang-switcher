@@ -280,6 +280,7 @@ fn the_appeal_goes_to_the_site_and_the_letter_to_the_box_of_the_appeals() {
         links::APPEAL_URL,
         "https://panda-pishet-kod.dev/langswitcher/feedback"
     );
+    assert_eq!(links::MAIL_ADDRESS, "lang.switcher@panda-pishet-kod.dev");
     assert_eq!(
         feed::split_https(links::APPEAL_URL),
         Some((
@@ -288,6 +289,7 @@ fn the_appeal_goes_to_the_site_and_the_letter_to_the_box_of_the_appeals() {
         )),
         "over HTTPS, port 443, no credentials"
     );
+    assert!(!links::is_allowed(links::MAIL_ADDRESS));
     assert_eq!(appeal::CONTENT_TYPE, "application/json; charset=utf-8");
 }
 

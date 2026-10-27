@@ -3369,11 +3369,13 @@ pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
 /// «Открыть группу» / «Open GitHub Issues» — the panel of «Спасибо», `letters::links::feedback_url`
 /// of the language of the letter. `IDS_CHANNEL_OPEN` stays with «Что нового» and FR-103.
 pub const IDS_FEEDBACK_OPEN: u16 = 3242;
-// Task T-103-7, решение 181.6: the last step of an appeal about a trouble — a letter to the author.
-// 3243…3247 close the block 3232…3247, 3248 opens the next. The address is `{0}` in every one of
-// them: the tables of fourteen languages hold no copy of `letters::links::MAIL_ADDRESS`.
-/// The note of the last step of a trouble: the journal and the computer go by letter.
-pub const IDS_WIZARD_MAIL_NOTE: u16 = 3243;
+// Task T-103-7, решение 181.6: the last step of an appeal about a trouble — a letter to the author;
+// since task T-107-3 (решение 199.3) the letter of any appeal the site did not take. 3243…3247
+// close the block 3232…3247, 3248 opens the next. The address is `{0}` in every one of them: the
+// tables of fourteen languages hold no copy of `letters::links::MAIL_ADDRESS`.
+// ⛔ 3243 is a hole since task T-107-3: «… отправьте его автору письмом — не в открытое
+// обсуждение» said why a trouble went by letter; every appeal goes to the site now, and the note of
+// the way back is [`IDS_WIZARD_FAILED_NOTE`].
 /// «Адрес для письма: {0}» — the line of the address.
 pub const IDS_WIZARD_MAIL_ADDRESS: u16 = 3244;
 /// «Скопировать текст» — the clipboard and nothing else.
@@ -3399,6 +3401,27 @@ pub const IDS_CYCLE_ARROW: u16 = 3252;
 /// The tooltip of the tray icon: `{0}` the name of the program, `{1}` [`IDS_TIP_ACTIVE`] or
 /// [`IDS_TIP_PAUSED`] — «{0} — {1}» until a translation gives its own order. Task T-L10N-10.
 pub const IDS_TIP_FORMAT: u16 = 3253;
+// Stage E107, task T-107-3 (решения 199.3, 199.10, 199.11, 201.11а): the appeal goes to the site
+// from the last step of the wizard. 3254…3262, the block 3248…3263 again.
+/// «Отправить» — the main button of the last step.
+pub const IDS_WIZARD_SEND: u16 = 3254;
+/// «Отправляется…» — the same button while the appeal is on its way.
+pub const IDS_WIZARD_SENDING: u16 = 3255;
+/// «Повторить» — the same button once the site did not take it.
+pub const IDS_WIZARD_RETRY: u16 = 3256;
+/// «Как с вами связаться — почта или Telegram, по желанию, если понадобится уточнить» — the label
+/// of the contact (201.11а: one ink, no hint inside the field).
+pub const IDS_WIZARD_CONTACT: u16 = 3257;
+/// «Для связи:» — the label of the contact's line in the text of the appeal (199.10).
+pub const IDS_WIZARD_CONTACT_LINE: u16 = 3258;
+/// «Не удалось отправить» — the heading of the last step when the site did not take the appeal.
+pub const IDS_WIZARD_FAILED_TITLE: u16 = 3259;
+/// Its note — check the connection and «Повторить», or the letter.
+pub const IDS_WIZARD_FAILED_NOTE: u16 = 3260;
+/// «Обращение отправлено» — the heading of «Готово».
+pub const IDS_WIZARD_SENT_TITLE: u16 = 3261;
+/// The owner's words of thanks, решение 199.10 — for a trouble and for an idea alike.
+pub const IDS_WIZARD_SENT_TEXT: u16 = 3262;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
 /// The line under the heading of the update entry of «Последние письма»: the date, the word
@@ -3548,30 +3571,22 @@ pub const IDS_WIZARD_ATTACH_FOOT: u16 = 3199;
 
 /// The last step: «Проверьте и отправьте».
 pub const IDS_WIZARD_PREVIEW_TITLE: u16 = 3200;
-/// Its note — nothing leaves the machine until the person pastes it.
+/// Its note — the text goes to the author only when the person presses «Отправить» (задача
+/// T-107-4, решение 199.5; until 1.2.0 — «nothing leaves the machine until the person pastes it»).
 pub const IDS_WIZARD_PREVIEW_NOTE: u16 = 3201;
-/// «Скопировать и открыть группу» / «Copy and open GitHub Issues» — the place of решение 181.1,
-/// `letters::links::feedback_url` of the language of the window (until `e102`, the channel).
-pub const IDS_WIZARD_COPY: u16 = 3202;
+// ⛔ 3202, 3204 and 3205 are holes since task T-107-3 (решение 199.3): «Скопировать и открыть
+// группу» / «Copy and open GitHub Issues» and its two answers left with the group and the issues,
+// which the wizard no longer opens. Holes are not walked.
 /// «Сохранить в папку журнала».
 pub const IDS_WIZARD_SAVE: u16 = 3203;
-/// What the status line says when the address that button opens is still a placeholder (П7).
-pub const IDS_WIZARD_COPIED_ONLY: u16 = 3204;
-/// And when it is not.
-pub const IDS_WIZARD_COPIED: u16 = 3205;
 /// «Сохранено: {0}» — the file that was written.
 pub const IDS_WIZARD_SAVED: u16 = 3206;
 /// The one thing that can go wrong on that step and be worth saying out loud.
 pub const IDS_WIZARD_FAILED: u16 = 3207;
 
-/// The window after «Готово» — its heading for a trouble.
-pub const IDS_THANKYOU_BUG_TITLE: u16 = 3208;
-/// And for an idea.
-pub const IDS_THANKYOU_IDEA_TITLE: u16 = 3209;
-/// Its text for a trouble.
-pub const IDS_THANKYOU_BUG_TEXT: u16 = 3210;
-/// And for an idea.
-pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
+// ⛔ 3208…3211 are holes since task T-107-3 (решение 199.10): the two headings and the two
+// paragraphs of the thanks — for a trouble and for an idea — gave way to one heading and one
+// paragraph of the owner's words for both, [`IDS_WIZARD_SENT_TITLE`] and [`IDS_WIZARD_SENT_TEXT`].
 
 // ⚠ The button that opens the wizard from the «Диагностика» section of the settings window
 // has **no string of its own**: it says exactly what the tray entry says, and that is
@@ -3632,7 +3647,13 @@ pub const IDS_THANKYOU_IDEA_TEXT: u16 = 3211;
 /// ⚠ **Two hundred and forty since stage L10N, task T-L10N-10** — решения 200.10 и 200.10а: the
 /// three pieces the code glued as literals became strings, [`IDS_LIST_SEPARATOR`],
 /// [`IDS_CYCLE_ARROW`] and [`IDS_TIP_FORMAT`] (3251…3253).
-pub const INTERFACE_STRINGS: [u16; 240] = [
+///
+/// ⚠ **Two hundred and forty-one since stage E107, task T-107-3** — решения 199.3, 199.10, 199.11:
+/// the appeal goes to the site from the last step of the wizard. Nine arrived,
+/// [`IDS_WIZARD_SEND`] … [`IDS_WIZARD_SENT_TEXT`] (3254…3262); eight left with the group, the
+/// issues, the note of the letter of a trouble and the two thanks — 3202, 3204, 3205, 3208…3211 and
+/// 3243 are holes that are not walked. 240 − 8 + 9.
+pub const INTERFACE_STRINGS: [u16; 241] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -3840,16 +3861,9 @@ pub const INTERFACE_STRINGS: [u16; 240] = [
     IDS_WIZARD_ATTACH_FOOT,
     IDS_WIZARD_PREVIEW_TITLE,
     IDS_WIZARD_PREVIEW_NOTE,
-    IDS_WIZARD_COPY,
     IDS_WIZARD_SAVE,
-    IDS_WIZARD_COPIED_ONLY,
-    IDS_WIZARD_COPIED,
     IDS_WIZARD_SAVED,
     IDS_WIZARD_FAILED,
-    IDS_THANKYOU_BUG_TITLE,
-    IDS_THANKYOU_IDEA_TITLE,
-    IDS_THANKYOU_BUG_TEXT,
-    IDS_THANKYOU_IDEA_TEXT,
     // Task T-43-9, finding Н23 — the notification of FR-82, in the language of Windows.
     IDS_ALREADY_RUNNING,
     // Task T-93-2, вопрос 157 — the line under the hotkey field at rest, and the one after a
@@ -3870,7 +3884,6 @@ pub const INTERFACE_STRINGS: [u16; 240] = [
     IDS_EXCLUSION_ALREADY,
     IDS_EXCLUSION_NOT_PICKED,
     IDS_FEEDBACK_OPEN,
-    IDS_WIZARD_MAIL_NOTE,
     IDS_WIZARD_MAIL_ADDRESS,
     IDS_WIZARD_COPY_TEXT,
     IDS_WIZARD_COPY_ADDRESS,
@@ -3883,6 +3896,16 @@ pub const INTERFACE_STRINGS: [u16; 240] = [
     IDS_LIST_SEPARATOR,
     IDS_CYCLE_ARROW,
     IDS_TIP_FORMAT,
+    // Stage E107, task T-107-3 — the appeal goes to the site from the last step of the wizard.
+    IDS_WIZARD_SEND,
+    IDS_WIZARD_SENDING,
+    IDS_WIZARD_RETRY,
+    IDS_WIZARD_CONTACT,
+    IDS_WIZARD_CONTACT_LINE,
+    IDS_WIZARD_FAILED_TITLE,
+    IDS_WIZARD_FAILED_NOTE,
+    IDS_WIZARD_SENT_TITLE,
+    IDS_WIZARD_SENT_TEXT,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

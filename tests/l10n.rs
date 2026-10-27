@@ -615,8 +615,10 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        240,
-        "the strings of 1.0.0 (premise П1) and the three of T-L10N-10"
+        241,
+        "the strings of 1.0.0 (premise П1), the three of T-L10N-10, and stage E107 (T-107-3): \
+         nine for the appeal that goes to the site, eight that left with the group, the issues \
+         and the two thanks"
     );
 
     let mut refused = Vec::new();

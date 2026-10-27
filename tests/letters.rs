@@ -1785,15 +1785,6 @@ fn plan_arm<'a>(source: &'a str, head: &str, next: &str) -> &'a str {
     &source[start..start + length]
 }
 
-/// Whether the body of «Скопировать и открыть…» opens the address of its window and not the channel.
-fn the_copy_opens_the_feedback_of_its_window(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    code.contains("state.feedback_url()")
-        && code.contains("open_link(url)")
-        && !code.contains("CHANNEL_URL")
-}
-
 /// Whether the arm of «Спасибо» gives its button the action and the address of решение 181.1.
 fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
     let code = squeezed_code(arm);
@@ -1805,22 +1796,24 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
         && !code.contains("IDS_CHANNEL_OPEN")
 }
 
-/// **Задача T-103-2, сторож (3), решение 181.1 — the two that ask a person to write go where they
-/// can, and the three that are about the news stay on the channel.**
+/// **Задача T-103-2, сторож (3), решение 181.1 — «Спасибо», which asks a person to write, sends
+/// them where they can, and the three that are about the news stay on the channel.**
 ///
 /// The half a pure function cannot show: which address the window's own code hands the shell. So
-/// the bodies are read — «Скопировать и открыть…» of the wizard and the arm of «Спасибо» in
-/// [`letters::plan_for`] must name [`links::feedback_url`] and not `CHANNEL_URL`; the action of
-/// «Спасибо» must open the address of its window; and «Что нового», the «От автора» of FR-103 and the
-/// thanks of the wizard (`IDC_WZ_CHANNEL`) are on the channel as before.
+/// the bodies are read — the arm of «Спасибо» in [`letters::plan_for`] must name
+/// [`links::feedback_url`] and not `CHANNEL_URL`; the action of «Спасибо» must open the address of
+/// its window; and «Что нового», the «От автора» of FR-103 and the thanks of the wizard
+/// (`IDC_WZ_CHANNEL`) are on the channel as before.
 ///
-/// ⚠ Controls: the copy back on the channel, and «Спасибо» back on «Открыть канал», are caught.
+/// ⭐ Until stage E107 the wizard's «Скопировать и открыть…» was the second of the two; решение
+/// 199.3 took the group and the issues out of the wizard, and `wizard_copy` is gone —
+/// `the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page` holds that.
+///
+/// ⚠ Control: «Спасибо» back on «Открыть канал» is caught.
 #[test]
-fn the_two_that_ask_a_person_to_write_go_where_they_can_and_the_news_stays_on_the_channel() {
+fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on_the_channel() {
     let source = letters_module_source();
 
-    let copy = letters_function_body(&source, "fn wizard_copy(")
-        .expect("src\\letters.rs must still declare `wizard_copy`");
     let thanks = plan_arm(
         &source,
         "Letter::Thanks => LetterPlan {",
@@ -1837,10 +1830,6 @@ fn the_two_that_ask_a_person_to_write_go_where_they_can_and_the_news_stays_on_th
     );
     let wizard_thanks = plan_arm(&source, "IDC_WZ_CHANNEL => {", "return true;");
 
-    assert!(
-        the_copy_opens_the_feedback_of_its_window(copy),
-        "181.1: «Скопировать и открыть…» must open the address of its window:\n{copy}"
-    );
     assert!(
         the_thanks_sends_a_person_to_write(thanks),
         "181.1: the button of «Спасибо» must send a person where they can write:\n{thanks}"
@@ -1870,14 +1859,7 @@ fn the_two_that_ask_a_person_to_write_go_where_they_can_and_the_news_stays_on_th
         "the thanks of the wizard opens the channel as before:\n{wizard_thanks}"
     );
 
-    // The controls.
-    let on_the_channel = copy.replace("state.feedback_url()", "links::CHANNEL_URL");
-    assert_ne!(on_the_channel, copy, "the control must change the body");
-    assert!(
-        !the_copy_opens_the_feedback_of_its_window(&on_the_channel),
-        "the sweep does not see a copy that opens the channel again"
-    );
-
+    // The control.
     let channel_again = thanks
         .replace("IDS_FEEDBACK_OPEN", "IDS_CHANNEL_OPEN")
         .replace("Action::OpenFeedback", "Action::OpenChannel");
@@ -1899,42 +1881,68 @@ fn copies_and_opens_nothing(body: &str) -> bool {
         && !code.contains("mailto")
 }
 
-/// **Задача T-103-7, сторож (2), решение 181.6 — an appeal about a trouble is copied and nothing is
-/// opened; an idea still opens its page.** «Скопировать текст» and «Скопировать адрес» write the
-/// clipboard and go no further: the person writes the letter. The one button `IDC_WZ_COPY` asks
-/// [`letters::destination`] which of the two ways it is, and the way of an idea is the body of
-/// 0.103.0. Not a line of the module's code says `mailto`.
+/// Whether the code of the wizard's buttons hands the shell nothing but the channel of its thanks —
+/// no group, no GitHub Issues, no page of the site (решение 199.3).
+fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
+    let code = squeezed_code(body);
+
+    code.matches("open_link(").count() == 1
+        && code.contains("open_link(links::CHANNEL_URL)")
+        && !code.contains("feedback_url")
+        && !code.contains("GROUP_URL")
+        && !code.contains("ISSUES_URL")
+}
+
+/// **Задача T-107-3, решение 199.3 (until 1.2.0 — задача T-103-7, сторож (2), решение 181.6) — the
+/// letter is copied and nothing is opened, and the wizard opens no page.** «Скопировать текст» and
+/// «Скопировать адрес» write the clipboard and go no further: the person writes the letter to the
+/// box of the appeals. The one button `IDC_WZ_COPY` is «Скопировать текст» for every appeal, and
+/// `wizard_copy` — «Скопировать и открыть группу» / «Copy and open GitHub Issues» — is gone; the
+/// buttons of the wizard hand the shell nothing but the channel of «Готово». Not a line of the
+/// module's code says `mailto`.
 ///
-/// ⚠ Control: «Скопировать текст» that opens the group as well is caught.
+/// ⚠ Controls: «Скопировать текст» that opens the group as well is caught; a button of the wizard
+/// that opens the issues is caught.
 #[test]
-fn a_trouble_copies_its_text_and_opens_nothing_and_an_idea_opens_its_page() {
+fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     let source = letters_module_source();
     let text = letters_function_body(&source, "fn wizard_copy_text(")
         .expect("src\\letters.rs must declare `wizard_copy_text`");
     let address = letters_function_body(&source, "fn wizard_copy_address(")
         .expect("src\\letters.rs must declare `wizard_copy_address`");
-    let page = letters_function_body(&source, "fn wizard_copy(")
-        .expect("src\\letters.rs must still declare `wizard_copy`");
+    let command = letters_function_body(&source, "fn wizard_command(")
+        .expect("src\\letters.rs must declare `wizard_command`");
     let button = squeezed_code(plan_arm(&source, "IDC_WZ_COPY => {", "return true;"));
 
     assert!(
         copies_and_opens_nothing(text),
-        "181.6: «Скопировать текст» must copy and open nothing:\n{text}"
+        "199.3: «Скопировать текст» must copy and open nothing:\n{text}"
     );
     assert!(
         copies_and_opens_nothing(address),
-        "181.6: «Скопировать адрес» must copy and open nothing:\n{address}"
+        "199.3: «Скопировать адрес» must copy and open nothing:\n{address}"
     );
     assert!(
-        the_copy_opens_the_feedback_of_its_window(page),
-        "181.1: the button of an idea still opens the page of its window:\n{page}"
+        letters_function_body(&source, "fn wizard_copy(").is_none(),
+        "199.3: «Скопировать и открыть группу» left the wizard"
     );
     assert!(
-        button.contains("state.wizard_destination()")
-            && button.contains("Some(Destination::Mail(address)) => wizard_copy_text(")
-            && button.contains("wizard_copy_text(hwnd, address),")
-            && button.contains("Some(Destination::Page(_)) => wizard_copy(hwnd),"),
-        "the one button asks the rule which way it is:\n{button}"
+        button.contains("wizard_copy_text(hwnd, links::MAIL_ADDRESS);"),
+        "the one button copies the text of the letter for every appeal:\n{button}"
+    );
+    assert!(
+        the_wizard_opens_no_page_but_its_channel(command),
+        "199.3: the buttons of the wizard open no page but the channel of «Готово»:\n{command}"
+    );
+
+    let issues = command.replace(
+        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);",
+        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);\n            open_link(links::ISSUES_URL);",
+    );
+    assert_ne!(issues, command, "the control must change the body");
+    assert!(
+        !the_wizard_opens_no_page_but_its_channel(&issues),
+        "the sweep does not see a button of the wizard that opens the issues"
     );
     assert!(
         code_lines(&source).all(|line| !line.contains("mailto")),
@@ -1952,15 +1960,75 @@ fn a_trouble_copies_its_text_and_opens_nothing_and_an_idea_opens_its_page() {
     );
 }
 
+/// **Stage E107, task T-107-3, решение 199.10 — the line of the contact follows the field.**
+/// «Для связи: …» after an empty line at the end of the text of the appeal, only when there is a
+/// contact, replaced as the contact is typed and taken away when it is erased; what the person
+/// wrote in the text stays. The label is the Russian table's, out of the built binary.
+///
+/// ⚠ Control: a text edited at its very end is not mistaken for the line of the contact — the line
+/// goes after the edit and the edit stays.
+#[test]
+fn the_line_of_the_contact_follows_the_field() {
+    use letters::report::{Draft, Facts, build, contact_line, with_contact};
+
+    with_product_strings();
+
+    let built = build(
+        &Draft {
+            idea: "Переключать раскладку двойным Ctrl".to_owned(),
+            trouble: letters::report::Trouble::Idea,
+            ..Draft::default()
+        },
+        &Facts {
+            version: "1.2.0".to_owned(),
+            ..Facts::default()
+        },
+    );
+
+    assert!(
+        built.ends_with("\r\n"),
+        "the text ends with its last line: {built:?}"
+    );
+    assert_eq!(contact_line(""), "");
+    assert_eq!(contact_line("   "), "");
+    assert_eq!(
+        contact_line(" ivan@example.com "),
+        "\r\nДля связи: ivan@example.com\r\n"
+    );
+
+    let one = with_contact(&built, "", "i");
+    let two = with_contact(&one, "i", "iv");
+    let none = with_contact(&two, "iv", "");
+
+    assert_eq!(one, format!("{built}\r\nДля связи: i\r\n"));
+    assert_eq!(
+        two,
+        format!("{built}\r\nДля связи: iv\r\n"),
+        "replaced, not added"
+    );
+    assert_eq!(none, built, "taken away with the contact");
+
+    let edited = format!("{one}P.S. спасибо");
+
+    assert_eq!(
+        with_contact(&edited, "i", "iv"),
+        format!("{edited}\r\nДля связи: iv\r\n"),
+        "the control: the edit stays and the line goes after it"
+    );
+}
+
 /// **Задача T-103-7, сторож (3), решение 181.6 — the address of the letter is the site's, it is not
 /// a link, and no string table carries it.** The address is written down here apart from the code;
 /// the gate of С52 does not let it through (nothing may open it); and `app.rc` names it nowhere —
 /// the fourteen tables carry `{0}`, so a fifteenth language cannot hold a stale copy.
 ///
+/// ⭐ Since stage E107 (решение 199.3) the address is the box of the appeals, `lang.switcher@…`, and
+/// no longer the author's own `send.me@…`.
+///
 /// ⚠ Control: the Russian line of the address with the address written into it is caught.
 #[test]
 fn the_address_of_the_letter_is_the_sites_and_no_table_carries_it() {
-    assert_eq!(links::MAIL_ADDRESS, "send.me@panda-pishet-kod.dev");
+    assert_eq!(links::MAIL_ADDRESS, "lang.switcher@panda-pishet-kod.dev");
     assert!(
         !links::is_allowed(links::MAIL_ADDRESS),
         "the address is not a link: nothing may hand it to the shell"

@@ -17354,7 +17354,12 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// ⚠ **240 since stage L10N, task T-L10N-10** — решения 200.10 и 200.10а: the three pieces the
 /// code glued as literals — the separator of a list, the arrow of a cycle, the form of the
 /// tooltip — 237 + 3, each the literal it replaced.
-const FR_94_STRINGS: [(u16, &str, &str); 240] = [
+///
+/// ⚠ **241 since stage E107, task T-107-3** — решения 199.3, 199.10, 199.11: the appeal goes to the
+/// site from the last step of the wizard. Nine arrived and eight left (the group, the issues, the
+/// note of the letter of a trouble, the two thanks) — 240 − 8 + 9, row for row with
+/// `settings::INTERFACE_STRINGS`.
+const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18256,30 +18261,19 @@ const FR_94_STRINGS: [(u16, &str, &str); 240] = [
     ),
     (
         settings::IDS_WIZARD_PREVIEW_NOTE,
-        "Это весь текст обращения. Правьте что угодно. Отправляете вы сами: текст попадёт в \
-         буфер обмена, а тема программы в группе откроется в браузере.",
-        "This is the whole text of the appeal. Edit anything you like. You send it yourself: \
-         the text goes to the clipboard and GitHub Issues opens in the browser.",
+        // Stage E107, task T-107-4 (решение 199.5): the appeal goes when the person presses
+        // «Отправить», and not by the clipboard and a page any more.
+        "Это весь текст обращения. Правьте что угодно. Он уйдёт автору, только когда вы нажмёте \
+         «Отправить».",
+        "This is the whole text of the appeal. Edit anything you like. It goes to the author \
+         only when you press «Send».",
     ),
-    (
-        settings::IDS_WIZARD_COPY,
-        "Скопировать и открыть группу",
-        "Copy and open GitHub Issues",
-    ),
+    // ⛔ IDS_WIZARD_COPY, IDS_WIZARD_COPIED_ONLY and IDS_WIZARD_COPIED left with the group and the
+    // issues (stage E107, task T-107-3, решение 199.3).
     (
         settings::IDS_WIZARD_SAVE,
         "Сохранить в папку журнала",
         "Save to the journal folder",
-    ),
-    (
-        settings::IDS_WIZARD_COPIED_ONLY,
-        "Скопировано. Адрес группы появится в следующей версии.",
-        "Copied. The address of GitHub Issues will appear in the next version.",
-    ),
-    (
-        settings::IDS_WIZARD_COPIED,
-        "Скопировано, группа открыта.",
-        "Copied, GitHub Issues is open.",
     ),
     (settings::IDS_WIZARD_SAVED, "Сохранено: {0}", "Saved: {0}"),
     (
@@ -18287,32 +18281,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 240] = [
         "Не получилось. Текст остался в окне — скопируйте его вручную.",
         "It did not work. The text is still in the window — copy it by hand.",
     ),
-    (
-        settings::IDS_THANKYOU_BUG_TITLE,
-        "Спасибо за сообщение об ошибке",
-        "Thank you for the bug report",
-    ),
-    (
-        settings::IDS_THANKYOU_IDEA_TITLE,
-        "Спасибо за идею",
-        "Thank you for the idea",
-    ),
-    (
-        settings::IDS_THANKYOU_BUG_TEXT,
-        "Я читаю каждое обращение сам. Ошибки чиню, а о важном для всех рассказываю письмом в \
-         программе или в канале. Здорово, что вы нашли на это время 🖤",
-        "I read every appeal myself. Bugs I fix, and what matters to everybody I tell about in \
-         a letter in the program or in the channel. It is good that you found the time 🖤",
-    ),
-    (
-        settings::IDS_THANKYOU_IDEA_TEXT,
-        "Я читаю каждое обращение сам. Идеи складываю в план и лучшие из них делаю, а о важном \
-         для всех рассказываю письмом в программе или в канале. Здорово, что вы нашли на это \
-         время 🖤",
-        "I read every appeal myself. Ideas go into the plan and the best of them get made, and \
-         what matters to everybody I tell about in a letter in the program or in the channel. \
-         It is good that you found the time 🖤",
-    ),
+    // ⛔ The four IDS_THANKYOU_* gave way to one thanks for both kinds, IDS_WIZARD_SENT_TITLE and
+    // IDS_WIZARD_SENT_TEXT at the end of this table (stage E107, решение 199.10).
     // FR-82, task T-43-9, finding Н23 — what a second copy says before it exits. The English row
     // is the literal `src\app.rs` carried until that task, word for word.
     (
@@ -18392,15 +18362,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 240] = [
         "Open GitHub Issues",
     ),
     // Task T-103-7, решение 181.6: an appeal about a trouble goes to the author by letter — the
-    // table of the addendum to TZ-E103, word for word; the address is `{0}`.
-    (
-        settings::IDS_WIZARD_MAIL_NOTE,
-        "Это весь текст обращения. Правьте что угодно. В нём журнал программы и сведения о \
-         компьютере, поэтому отправьте его автору письмом — не в открытое обсуждение.",
-        "This is the whole text of the appeal. Edit anything you like. It holds the program's \
-         journal and details of your computer, so send it to the author by email rather than to \
-         a public discussion.",
-    ),
+    // table of the addendum to TZ-E103, word for word; the address is `{0}`. Since stage E107
+    // (решение 199.3) the letter of any appeal the site did not take; IDS_WIZARD_MAIL_NOTE left.
     (
         settings::IDS_WIZARD_MAIL_ADDRESS,
         "Адрес для письма: {0}",
@@ -18441,6 +18404,42 @@ const FR_94_STRINGS: [(u16, &str, &str); 240] = [
     (settings::IDS_LIST_SEPARATOR, ", ", ", "),
     (settings::IDS_CYCLE_ARROW, " → ", " → "),
     (settings::IDS_TIP_FORMAT, "{0} — {1}", "{0} — {1}"),
+    // Stage E107, task T-107-3 — the appeal goes to the site from the last step of the wizard: the
+    // words of the mock-up «Шаг «Отправить» мастера» (version 2, variant Б), of решение 199.10
+    // («Готово», the owner's words) and of 201.11а (the label of the contact), word for word.
+    (settings::IDS_WIZARD_SEND, "Отправить", "Send"),
+    (settings::IDS_WIZARD_SENDING, "Отправляется…", "Sending…"),
+    (settings::IDS_WIZARD_RETRY, "Повторить", "Retry"),
+    (
+        settings::IDS_WIZARD_CONTACT,
+        "Как с вами связаться — почта или Telegram, по желанию, если понадобится уточнить",
+        "How to reach you — email or Telegram, optional, in case something needs clarifying",
+    ),
+    (settings::IDS_WIZARD_CONTACT_LINE, "Для связи:", "Contact:"),
+    (
+        settings::IDS_WIZARD_FAILED_TITLE,
+        "Не удалось отправить",
+        "Could not send",
+    ),
+    (
+        settings::IDS_WIZARD_FAILED_NOTE,
+        "Сайт автора не ответил. Проверьте связь и нажмите «Повторить» или отправьте письмом: \
+         скопируйте текст и адрес.",
+        "The author's site did not answer. Check your connection and press «Retry», or send it \
+         by email: copy the text and the address.",
+    ),
+    (
+        settings::IDS_WIZARD_SENT_TITLE,
+        "Обращение отправлено",
+        "Appeal sent",
+    ),
+    (
+        settings::IDS_WIZARD_SENT_TEXT,
+        "Спасибо, что отправили обращение! Я рад вашей активности в жизни проекта и обязательно \
+         всё прочитаю в свободное время.",
+        "Thank you for sending the appeal! I am glad you take part in the life of the project, \
+         and I will read it all in my free time.",
+    ),
 ];
 
 /// Serialises the tests that publish an interface locale.
@@ -18627,31 +18626,30 @@ fn holds_the_address_as_a_slot(text: &str) -> bool {
     text.matches("{0}").count() == 1 && !text.contains('@')
 }
 
-/// **Задача T-103-7, сторож (4), решение 181.6 — the six words of the letter are in every language,
+/// **Задача T-103-7, сторож (4), решение 181.6 — the words of the letter are in every language,
 /// and the address in them is a slot.** The line of the address and the two answers carry `{0}`
-/// once and no `@` of their own; the note and the two buttons carry neither; the note of a letter
-/// is not the note of a page. Ukrainian is word for word the table of the addendum (Russian and
-/// English are, through `FR_94_STRINGS`). Under the gate of [`LOCALE`].
+/// once and no `@` of their own; the note and the two buttons carry neither; the note of the letter
+/// is not the note of the step that sends. Ukrainian is word for word the table of the addendum
+/// (Russian and English are, through `FR_94_STRINGS`). Under the gate of [`LOCALE`].
+///
+/// ⭐ Since stage E107 (решение 199.3) the letter is the way back of any appeal the site did not
+/// take, and its note is `IDS_WIZARD_FAILED_NOTE` — `IDS_WIZARD_MAIL_NOTE` left with the rule
+/// «a trouble by letter».
 ///
 /// ⚠ Control: a button, which has no slot, is not taken for a line that holds one.
 #[test]
-fn the_six_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
+fn the_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
     const WITH_SLOT: [u16; 3] = [
         settings::IDS_WIZARD_MAIL_ADDRESS,
         settings::IDS_WIZARD_TEXT_COPIED,
         settings::IDS_WIZARD_ADDRESS_COPIED,
     ];
     const WITHOUT: [u16; 3] = [
-        settings::IDS_WIZARD_MAIL_NOTE,
+        settings::IDS_WIZARD_FAILED_NOTE,
         settings::IDS_WIZARD_COPY_TEXT,
         settings::IDS_WIZARD_COPY_ADDRESS,
     ];
-    const UKRAINIAN: [(u16, &str); 6] = [
-        (
-            settings::IDS_WIZARD_MAIL_NOTE,
-            "Це весь текст звернення. Правте що завгодно. У ньому журнал програми й відомості про \
-             комп'ютер, тож надішліть його авторові листом — не у відкрите обговорення.",
-        ),
+    const UKRAINIAN: [(u16, &str); 5] = [
         (settings::IDS_WIZARD_MAIL_ADDRESS, "Адреса для листа: {0}"),
         (settings::IDS_WIZARD_COPY_TEXT, "Скопіювати текст"),
         (settings::IDS_WIZARD_COPY_ADDRESS, "Скопіювати адресу"),
@@ -18685,11 +18683,11 @@ fn the_six_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot(
             }
         }
 
-        if settings::text(settings::IDS_WIZARD_MAIL_NOTE)
+        if settings::text(settings::IDS_WIZARD_FAILED_NOTE)
             == settings::text(settings::IDS_WIZARD_PREVIEW_NOTE)
         {
             wrong.push(format!(
-                "{language:?}: the note of a letter is the note of a page"
+                "{language:?}: the note of the letter is the note of the step that sends"
             ));
         }
 
@@ -18719,15 +18717,34 @@ fn the_six_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot(
     );
 }
 
-/// The six strings that say where a person is sent to write — решение 181.1, §0 п. 4 of TZ-E103.
-const STRINGS_OF_THE_PLACE: [(u16, &str); 6] = [
-    (settings::IDS_WIZARD_COPY, "IDS_WIZARD_COPY"),
-    (settings::IDS_WIZARD_PREVIEW_NOTE, "IDS_WIZARD_PREVIEW_NOTE"),
-    (settings::IDS_WIZARD_COPIED, "IDS_WIZARD_COPIED"),
-    (settings::IDS_WIZARD_COPIED_ONLY, "IDS_WIZARD_COPIED_ONLY"),
+/// The strings that say where a person is sent to write — решение 181.1, §0 п. 4 of TZ-E103. Six
+/// until stage E107; four of them were the wizard's, and решение 199.3 took the group and the
+/// issues out of the wizard — the two of «Спасибо» stay.
+const STRINGS_OF_THE_PLACE: [(u16, &str); 2] = [
     (settings::IDS_THANKS_PARA, "IDS_THANKS_PARA"),
     (settings::IDS_FEEDBACK_OPEN, "IDS_FEEDBACK_OPEN"),
 ];
+
+/// The words of the last step of the wizard and of its thanks — stage E107, решение 199.3: not one
+/// of them may send a person to the group or to GitHub Issues any more.
+const STRINGS_OF_THE_SENDING: [(u16, &str); 8] = [
+    (settings::IDS_WIZARD_PREVIEW_NOTE, "IDS_WIZARD_PREVIEW_NOTE"),
+    (settings::IDS_WIZARD_SEND, "IDS_WIZARD_SEND"),
+    (settings::IDS_WIZARD_SENDING, "IDS_WIZARD_SENDING"),
+    (settings::IDS_WIZARD_RETRY, "IDS_WIZARD_RETRY"),
+    (settings::IDS_WIZARD_FAILED_TITLE, "IDS_WIZARD_FAILED_TITLE"),
+    (settings::IDS_WIZARD_FAILED_NOTE, "IDS_WIZARD_FAILED_NOTE"),
+    (settings::IDS_WIZARD_SENT_TITLE, "IDS_WIZARD_SENT_TITLE"),
+    (settings::IDS_WIZARD_SENT_TEXT, "IDS_WIZARD_SENT_TEXT"),
+];
+
+/// Whether `text` names the group or GitHub Issues — the places решение 199.3 took out of the
+/// wizard.
+fn names_the_group_or_the_issues(text: &str) -> bool {
+    let lower = text.to_lowercase();
+
+    text.contains("GitHub") || lower.contains("груп")
+}
 
 /// The word each language called the channel by until `e102` — what none of the six may say now.
 fn the_channel_in(language: Language) -> &'static [&'static str] {
@@ -18761,19 +18778,23 @@ fn names_its_place(language: Language, text: &str) -> bool {
             .all(|word| !lower.contains(word))
 }
 
-/// **Задача T-103-3, решение 181.1 — each of the six strings names the place of its own language.**
-/// The button of the wizard, the note above the field, the two lines after the copy, the paragraph
-/// of «Спасибо» and its new button: in Russian and Ukrainian the group and not a word of the
-/// channel, in the other twelve «GitHub Issues» — the name is not translated — and not their word
-/// for the channel either. Under the gate of [`LOCALE`].
+/// **Задача T-103-3, решение 181.1 — each string of the place names the place of its own language.**
+/// The paragraph of «Спасибо» and its button: in Russian and Ukrainian the group and not a word of
+/// the channel, in the other twelve «GitHub Issues» — the name is not translated — and not their
+/// word for the channel either. Under the gate of [`LOCALE`].
 ///
-/// ⚠ Control: «Открыть канал» of «Что нового», which stays, names the channel in every language
-/// and is caught in every one of them.
+/// ⭐ **And, since stage E107 (решение 199.3), no word of the wizard's last step and of its thanks
+/// names the group or the issues** — the appeal goes to the site, and the way back is the letter.
+///
+/// ⚠ Controls: «Открыть канал» of «Что нового», which stays, names the channel in every language
+/// and is caught in every one of them; «Открыть группу» / «Open GitHub Issues» of «Спасибо» names
+/// the place in every language and is caught by the second check in every one of them.
 #[test]
-fn each_of_the_six_strings_names_the_place_of_its_own_language() {
+fn each_string_of_the_place_names_the_place_of_its_own_language() {
     let _guard = with_product_strings();
     let mut wrong = Vec::new();
     let mut control_caught = 0;
+    let mut place_caught = 0;
 
     for language in Language::ALL {
         settings::set_ui_language(language);
@@ -18786,8 +18807,22 @@ fn each_of_the_six_strings_names_the_place_of_its_own_language() {
             }
         }
 
+        for (id, name) in STRINGS_OF_THE_SENDING {
+            let text = settings::text(id);
+
+            if names_the_group_or_the_issues(&text) {
+                wrong.push(format!(
+                    "{language:?} {name} still sends to a place: «{text}»"
+                ));
+            }
+        }
+
         if !names_its_place(language, &settings::text(settings::IDS_CHANNEL_OPEN)) {
             control_caught += 1;
+        }
+
+        if names_the_group_or_the_issues(&settings::text(settings::IDS_FEEDBACK_OPEN)) {
+            place_caught += 1;
         }
     }
 
@@ -18797,9 +18832,66 @@ fn each_of_the_six_strings_names_the_place_of_its_own_language() {
         control_caught, 14,
         "the control: «Открыть канал» must be caught in every language"
     );
+    assert_eq!(
+        place_caught, 14,
+        "the control: «Открыть группу» / «Open GitHub Issues» must be caught in every language"
+    );
     assert!(
         wrong.is_empty(),
         "181.1: {} strings do not name the place of their language:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// **Stage E107, task T-107-3, решение 199.10 — the thanks of the wizard carries no number of the
+/// appeal and no invitation to ask about it, in any language.** The owner's words: «просто спасибо
+/// что отправили обращения … я обязательно все прочитаю в свободное время» — no `{0}`, no digit, and
+/// not the old promise of the four thanks («рассказываю письмом…»). Under the gate of [`LOCALE`].
+///
+/// ⚠ Control: the paragraph of the old thanks of a trouble, read as it stood, is caught — the
+/// check of «not the old promise» can fail. The words are out of the built binary of `e106`'s
+/// tables, written down here.
+#[test]
+fn the_thanks_of_the_wizard_carries_no_number_of_the_appeal() {
+    fn wrong_in(text: &str) -> bool {
+        text.trim().is_empty()
+            || text.contains("{0}")
+            || text.chars().any(|c| c.is_ascii_digit())
+            || text.contains("рассказываю")
+            || text.contains("I tell about")
+    }
+
+    let _guard = with_product_strings();
+    let mut wrong = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        for id in [
+            settings::IDS_WIZARD_SENT_TITLE,
+            settings::IDS_WIZARD_SENT_TEXT,
+        ] {
+            let text = settings::text(id);
+
+            if wrong_in(&text) {
+                wrong.push(format!("{language:?} {id}: «{text}»"));
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        wrong_in(
+            "Я читаю каждое обращение сам. Ошибки чиню, а о важном для всех рассказываю письмом в \
+             программе или в канале."
+        ),
+        "the control: the old promise must be caught"
+    );
+    assert!(
+        wrong.is_empty(),
+        "199.10: {} words of the thanks are not as they must be:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
@@ -25629,10 +25721,21 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         !settings::INTERFACE_STRINGS.contains(&3041),
         "3041 left the vocabulary with task T-93-2 and must not come back into it"
     );
+    // ⚠ **Eight more holes since stage E107, task T-107-3** — решения 199.3 и 199.10: the button
+    // that opened the group or the issues and its two answers (3202, 3204, 3205), the two thanks
+    // (3208…3211) and the note of the letter of a trouble (3243). Held by the same three checks.
+    for hole in [3202, 3204, 3205, 3208, 3209, 3210, 3211, 3243] {
+        assert!(
+            !settings::INTERFACE_STRINGS.contains(&hole),
+            "{hole} left the vocabulary with task T-107-3 and must not come back into it"
+        );
+    }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        240,
-        "two hundred and FORTY identifiers in use since stage L10N, task T-L10N-10 (решения \
+        241,
+        "two hundred and FORTY-ONE identifiers in use since stage E107, task T-107-3 (решения \
+         199.3, 199.10, 199.11): the appeal goes to the site — nine arrived (3254…3262), eight \
+         left. Two hundred and forty since stage L10N, task T-L10N-10 (решения \
          200.10, 200.10а): the separator of a list, the arrow of a cycle and the form of the \
          tooltip left the code for the tables (3251…3253). Two hundred and thirty-seven since \
          task T-104-7 (TZ E104 §0 п. 5 и \

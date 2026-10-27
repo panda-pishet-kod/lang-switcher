@@ -111,77 +111,106 @@ fn no_slot_of_the_pool_belongs_to_two_steps() {
 }
 
 // =========================================================================================
-// Where an appeal goes — решения 181.1 и 181.6, задача T-103-7
+// Where an appeal goes — решения 199.1, 199.3, 199.10, 199.11, задача T-107-3
 // =========================================================================================
 
-/// The address of решение 181.6, written down apart from the code: the email the site names.
-const MAIL_OF_DECISION_181_6: &str = "send.me@panda-pishet-kod.dev";
+// The slots of the last step, mirrored from `app.rc` — what the shapes below are written in.
+const IDC_WZ_PREVIEW: i32 = 1346;
+const IDC_WZ_COPY: i32 = 1347;
+const IDC_WZ_SAVE: i32 = 1348;
+const IDC_WZ_STATUS: i32 = 1349;
+const IDC_WZ_ADDRESS: i32 = 1355;
+const IDC_WZ_COPY_ADDRESS: i32 = 1356;
+const IDC_WZ_CONTACT_LABEL: i32 = 1357;
+const IDC_WZ_CONTACT: i32 = 1358;
 
-/// The page of решение 181.1 for an idea, by language, written down apart from the code: the topic
-/// of the group for Russian and Ukrainian, the issues on GitHub for the other twelve.
-fn page_of_decision_181_1(language: settings::Language) -> &'static str {
-    use settings::Language;
-
-    match language {
-        Language::Ru | Language::Uk => "https://t.me/panda_koding/45",
-        _ => "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    }
-}
-
-/// What `canon` says against what [`letters::destination`] answers — the pairs that disagree.
-fn destination_mismatches(
-    canon: impl Fn(Trouble, settings::Language) -> letters::Destination,
-) -> Vec<(Trouble, settings::Language)> {
-    let mut wrong = Vec::new();
-
-    for trouble in [
-        Trouble::WrongResult,
-        Trouble::NothingHappened,
-        Trouble::Idea,
-    ] {
-        for language in settings::Language::ALL {
-            if letters::destination(trouble, language) != canon(trouble, language) {
-                wrong.push((trouble, language));
-            }
-        }
-    }
-
-    wrong
-}
-
-/// **Задача T-103-7, сторож (1), решение 181.6 — an appeal about a trouble goes to the author by
-/// letter, an idea goes to the page of its language.** The two troubles carry the journal and the
-/// details of the computer, so they go to the email of the author in every one of the fourteen
-/// languages; an idea goes to the group or to GitHub Issues as in 0.103.0 (решение 181.1).
+/// **Задача T-107-3, решения 199.3 и 199.11 — every appeal goes to the site, and the letter is the
+/// way back.** Ready and on its way, the last step shows the text, the contact under it and
+/// «Сохранить в папку журнала», and its button says «Отправить», then «Отправляется…»; once the
+/// site did not take it, it says «Не удалось отправить», shows the address and the two buttons of
+/// the letter, and its button says «Повторить». The same for a trouble and for an idea, because
+/// neither the words nor the shape ask which (until 1.2.0 `destination` sent a trouble by letter
+/// and an idea to the group or GitHub Issues — решения 181.1 и 181.6).
 ///
-/// ⚠ Control: a canon that sends a trouble to the group is caught on all fourteen languages of the
-/// trouble it names.
+/// ⚠ Control: a shape that offers the letter before the site was asked is caught.
 #[test]
-fn every_appeal_goes_where_decisions_181_1_and_181_6_say() {
-    let canon = |trouble: Trouble, language| match trouble {
-        Trouble::WrongResult | Trouble::NothingHappened => {
-            letters::Destination::Mail(MAIL_OF_DECISION_181_6)
+fn every_appeal_goes_to_the_site_and_the_letter_is_the_way_back() {
+    use letters::{Post, StepWords, preview_controls, step_words};
+
+    let ready = step_words(Step::Preview, Post::Ready);
+    let sending = step_words(Step::Preview, Post::Sending(7));
+    let failed = step_words(Step::Preview, Post::Failed);
+
+    assert_eq!(
+        ready,
+        StepWords {
+            title: settings::IDS_WIZARD_PREVIEW_TITLE,
+            note: Some(settings::IDS_WIZARD_PREVIEW_NOTE),
+            next: settings::IDS_WIZARD_SEND,
         }
-        Trouble::Idea => letters::Destination::Page(page_of_decision_181_1(language)),
-    };
-
+    );
+    assert_eq!(sending.next, settings::IDS_WIZARD_SENDING);
+    assert_eq!((sending.title, sending.note), (ready.title, ready.note));
     assert_eq!(
-        destination_mismatches(canon),
-        Vec::new(),
-        "181.6: these appeals do not go where the decisions send them"
+        failed,
+        StepWords {
+            title: settings::IDS_WIZARD_FAILED_TITLE,
+            note: Some(settings::IDS_WIZARD_FAILED_NOTE),
+            next: settings::IDS_WIZARD_RETRY,
+        }
     );
 
-    let spoilt = |trouble: Trouble, language| match trouble {
-        Trouble::NothingHappened => letters::Destination::Page(page_of_decision_181_1(language)),
-        other => canon(other, language),
-    };
+    let with_contact = [
+        IDC_WZ_PREVIEW,
+        IDC_WZ_CONTACT_LABEL,
+        IDC_WZ_CONTACT,
+        IDC_WZ_SAVE,
+        IDC_WZ_STATUS,
+    ];
+    let with_letter = [
+        IDC_WZ_PREVIEW,
+        IDC_WZ_ADDRESS,
+        IDC_WZ_COPY,
+        IDC_WZ_COPY_ADDRESS,
+        IDC_WZ_SAVE,
+        IDC_WZ_STATUS,
+    ];
 
-    assert_eq!(
-        destination_mismatches(spoilt).len(),
-        14,
-        "the control: a canon that sends «Ничего не произошло» to a page must be caught in every \
-         language"
+    assert_eq!(preview_controls(Post::Ready), with_contact);
+    assert_eq!(preview_controls(Post::Sending(7)), with_contact);
+    assert_eq!(preview_controls(Post::Failed), with_letter);
+
+    // Every slot of the two shapes belongs to the step, so `layout_wizard` hides what is not
+    // named and never leaves a stranger on the screen.
+    for control in with_contact.iter().chain(&with_letter) {
+        assert!(
+            letters::controls_of(Step::Preview).contains(control),
+            "{control}"
+        );
+    }
+
+    assert_ne!(
+        preview_controls(Post::Ready),
+        with_letter,
+        "the control: the letter before the site was asked must be caught"
     );
+}
+
+/// **The thanks is one for a trouble and for an idea** — решение 199.10: one heading, no line of
+/// explanation, and its button closes the window, as it did. The words themselves — the owner's,
+/// with no number of the appeal — are read out of the built binary by `tests\settings.rs`
+/// (`FR_94_STRINGS` and `the_thanks_of_the_wizard_carries_no_number_of_the_appeal`).
+#[test]
+fn the_thanks_is_one_for_both_kinds_of_appeal() {
+    use letters::{Post, step_words};
+
+    for post in [Post::Ready, Post::Failed] {
+        let words = step_words(Step::Done, post);
+
+        assert_eq!(words.title, settings::IDS_WIZARD_SENT_TITLE);
+        assert_eq!(words.note, None);
+        assert_eq!(words.next, settings::IDS_CLOSE);
+    }
 }
 
 // =========================================================================================

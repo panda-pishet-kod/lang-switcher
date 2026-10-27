@@ -383,6 +383,10 @@
 // author's email and the button that copies it. Laid out at run time like every slot of the pool.
 #define IDC_WZ_ADDRESS         1355
 #define IDC_WZ_COPY_ADDRESS    1356
+// Stage E107, task T-107-3, decisions 199.10 and 199.11: «Как с вами связаться» -- the label and
+// the one-line field under the text of the appeal, where «Скопировать и открыть группу» stood.
+#define IDC_WZ_CONTACT_LABEL   1357
+#define IDC_WZ_CONTACT         1358
 
 // Window and control styles, spelled out numerically for the reason given at the top of this
 // file: there is no #include <windows.h> here, so every name below would otherwise be an
@@ -1406,6 +1410,10 @@ BEGIN
     LTEXT           "", IDC_WZ_ATTACH_V4, 25, 155, 219, 20, SS_OWNERDRAW
     LTEXT           "", IDC_WZ_ATTACH_FOOT, 12, 178, 232, 30, SS_OWNERDRAW
     EDITTEXT        IDC_WZ_PREVIEW, 12, 72, 232, 120, ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | NOT WS_BORDER
+    // Stage E107 (decision 199.11, variant B): the contact under the text -- in the tab order right
+    // after the text, as it stands on the screen.
+    LTEXT           "", IDC_WZ_CONTACT_LABEL, 12, 196, 232, 10, SS_OWNERDRAW
+    EDITTEXT        IDC_WZ_CONTACT, 12, 208, 232, 14, ES_AUTOHSCROLL | NOT WS_BORDER
     PUSHBUTTON      "", IDC_WZ_COPY, 12, 196, 130, 14, BS_OWNERDRAW
     PUSHBUTTON      "", IDC_WZ_SAVE, 146, 196, 98, 14, BS_OWNERDRAW
     LTEXT           "", IDC_WZ_STATUS, 12, 213, 232, 10, SS_OWNERDRAW
@@ -1759,16 +1767,13 @@ END
 #define IDS_WIZARD_ATTACH_FOOT  3199
 #define IDS_WIZARD_PREVIEW_TITLE 3200
 #define IDS_WIZARD_PREVIEW_NOTE 3201
-#define IDS_WIZARD_COPY         3202
+// Stage E107, task T-107-3 (decision 199.3): 3202, 3204 and 3205 are holes -- «Скопировать и
+// открыть группу» and its two answers left the wizard with the group and the issues.
 #define IDS_WIZARD_SAVE         3203
-#define IDS_WIZARD_COPIED_ONLY  3204
-#define IDS_WIZARD_COPIED       3205
 #define IDS_WIZARD_SAVED        3206
 #define IDS_WIZARD_FAILED       3207
-#define IDS_THANKYOU_BUG_TITLE  3208
-#define IDS_THANKYOU_IDEA_TITLE 3209
-#define IDS_THANKYOU_BUG_TEXT   3210
-#define IDS_THANKYOU_IDEA_TEXT  3211
+// Stage E107, task T-107-3 (decision 199.10): 3208...3211 are holes -- the two thanks gave way to
+// one, IDS_WIZARD_SENT_TITLE and IDS_WIZARD_SENT_TEXT.
 // ⛔ **Задача Т-33а-4, решение 104.4.** Уведомление письма «Что нового» несло слова уведомления
 // «Обновления» — «Вышла версия 0.43.0 · Три изменения и ссылка на загрузку». У «Что нового»
 // загружать нечего: версия уже стоит, письмо рассказывает, что в ней. Тело у него теперь своё.
@@ -1828,7 +1833,8 @@ END
 #define IDS_FEEDBACK_OPEN       3242
 // Task T-103-7, decision 181.6: the last step of an appeal about a trouble goes to the author by
 // letter. 3243...3247 close the block 3232...3247, 3248 opens the next. The address is {0}.
-#define IDS_WIZARD_MAIL_NOTE    3243
+// Since stage E107 (decision 199.3) the letter of any appeal the site did not take; 3243 (the note
+// of the letter of a trouble) is a hole.
 #define IDS_WIZARD_MAIL_ADDRESS 3244
 #define IDS_WIZARD_COPY_TEXT    3245
 #define IDS_WIZARD_COPY_ADDRESS 3246
@@ -1848,6 +1854,18 @@ END
 #define IDS_LIST_SEPARATOR      3251
 #define IDS_CYCLE_ARROW         3252
 #define IDS_TIP_FORMAT          3253
+// Stage E107, task T-107-3 (decisions 199.3, 199.10, 199.11, 201.11a): the appeal goes to the site
+// from the last step of the wizard -- the three faces of its button, the contact and its line in
+// the text, the step the site did not take, and «Готово». Block 3248..3263 again.
+#define IDS_WIZARD_SEND         3254
+#define IDS_WIZARD_SENDING      3255
+#define IDS_WIZARD_RETRY        3256
+#define IDS_WIZARD_CONTACT      3257
+#define IDS_WIZARD_CONTACT_LINE 3258
+#define IDS_WIZARD_FAILED_TITLE 3259
+#define IDS_WIZARD_FAILED_NOTE  3260
+#define IDS_WIZARD_SENT_TITLE   3261
+#define IDS_WIZARD_SENT_TEXT    3262
 // Task T-34-5, findings Н80, Н84 and С1 — the first line of «Состояние» says what the program
 // does NOW, in the words a person uses: four states, the health of the hook (silent removals,
 // not the recoveries the FR-80 timer counts every thirty seconds) shown only when the journal is
