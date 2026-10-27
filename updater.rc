@@ -5,11 +5,10 @@
 // the crate, and the updater would have carried the uiAccess manifest of the program.
 //
 // The version is NOT written here: build.rs passes the three numbers of [package] version of
-// Cargo.toml as LANGSW_VER_MAJOR, LANGSW_VER_MINOR and LANGSW_VER_PATCH, and since stage E105
-// (decision 192.1) the number of the delivery, [package.metadata.langswitcher] delivery, as
-// LANGSW_VER_DELIVERY -- the two sources of the version rule, and no place of its own here. The
-// string table of the version block carries no version for the same reason; the fixed block is
-// what the updater itself and Windows read.
+// Cargo.toml as LANGSW_VER_MAJOR, LANGSW_VER_MINOR and LANGSW_VER_PATCH, so the eleven places of
+// the version rule (version-equals-delivery-number) stay eleven. The string table of the version
+// block carries no version for the same reason; the fixed block is what the updater itself and
+// Windows read.
 #pragma code_page(65001)
 
 // As in app.rc: without this define rc.exe reads the word as a resource NAME (TOOLCHAIN.md 8.3).
@@ -18,8 +17,8 @@
 1 24 "updater.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-  FILEVERSION     LANGSW_VER_MAJOR,LANGSW_VER_MINOR,LANGSW_VER_PATCH,LANGSW_VER_DELIVERY
-  PRODUCTVERSION  LANGSW_VER_MAJOR,LANGSW_VER_MINOR,LANGSW_VER_PATCH,LANGSW_VER_DELIVERY
+  FILEVERSION     LANGSW_VER_MAJOR,LANGSW_VER_MINOR,LANGSW_VER_PATCH,0
+  PRODUCTVERSION  LANGSW_VER_MAJOR,LANGSW_VER_MINOR,LANGSW_VER_PATCH,0
   FILEFLAGSMASK   0x3fL
   FILEFLAGS       0x0L
   FILEOS          0x00040004L

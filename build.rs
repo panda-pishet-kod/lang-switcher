@@ -89,11 +89,8 @@ fn main() {
     // the only ones -- and the updater would have carried the manifest of the program, uiAccess
     // and all. The updater has no window and no uiAccess: updater.rc, with updater.manifest and a
     // version block whose numbers come from [package] version (no twelfth place of the version).
-    // ⭐ Stage E105 (decision 192.1): and the fourth from [package.metadata.langswitcher] delivery,
-    // the number of the delivery -- the second of the two sources of the version.
     println!("cargo:rerun-if-changed=updater.rc");
     println!("cargo:rerun-if-changed=updater.manifest");
-    println!("cargo:rerun-if-changed=Cargo.toml");
 
     embed_resource::compile_for("app.rc", ["LangSwitcher", "langsw-e2e"], macros)
         .manifest_required()
@@ -108,46 +105,9 @@ fn main() {
         format!("LANGSW_VER_MAJOR={}", numbers.next().unwrap_or(0)),
         format!("LANGSW_VER_MINOR={}", numbers.next().unwrap_or(0)),
         format!("LANGSW_VER_PATCH={}", numbers.next().unwrap_or(0)),
-        format!("LANGSW_VER_DELIVERY={}", delivery_of_the_manifest()),
     ];
 
     embed_resource::compile_for("updater.rc", ["LangSwitcherUpdate"], &version_macros)
         .manifest_required()
         .unwrap();
-}
-
-/// `delivery = N` of the `[package.metadata.langswitcher]` table of Cargo.toml -- decision 192.1.
-/// Read by hand because a build script has no TOML reader of its own (the build dependencies are
-/// one crate, SEC-03); a table or a key that is not there stops the build instead of passing a
-/// zero nobody wrote.
-fn delivery_of_the_manifest() -> u16 {
-    let manifest = std::path::Path::new(
-        &std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets the manifest dir"),
-    )
-    .join("Cargo.toml");
-    let text = std::fs::read_to_string(&manifest).expect("Cargo.toml must be readable");
-
-    let mut in_table = false;
-
-    for line in text.lines() {
-        let line = line.trim();
-
-        if line.starts_with('[') {
-            in_table = line == "[package.metadata.langswitcher]";
-            continue;
-        }
-
-        if let Some(value) = in_table
-            .then(|| line.strip_prefix("delivery"))
-            .flatten()
-            .and_then(|rest| rest.trim_start().strip_prefix('='))
-        {
-            return value
-                .trim()
-                .parse()
-                .unwrap_or_else(|_| panic!("delivery = {value} is not a number of 16 bits"));
-        }
-    }
-
-    panic!("Cargo.toml has no delivery in [package.metadata.langswitcher] (decision 192.1)")
 }
