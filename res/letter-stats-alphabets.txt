@@ -1,0 +1,12 @@
+# The alphabets of the letter statistics -- task T-106-5, decision 198.7 (src\letter_stats.rs, tools\make-letter-stats.ps1).
+#
+# One line per language: <tag> <primary language, hex> <class> <class> ...
+# A class is one symbol of the model: the code points of its LOWER-CASE letters joined by '+' -- a letter with a sign above
+# or below folds into its base letter (decision of the stage, TZ E106 p. 8: a table of 64 KB at most). Symbol 0 is the
+# boundary: anything that is not in a class, after lower-casing, ends a word. A table of N classes is (N + 1)^3 bytes.
+# Both readers take this file as it is: the generator counts by it, the program reads candidates by it -- one alphabet, so
+# the two cannot part. ASCII only.
+en 09 0061 0062 0063 0064 0065 0066 0067 0068 0069 006A 006B 006C 006D 006E 006F 0070 0071 0072 0073 0074 0075 0076 0077 0078 0079 007A
+fr 0C 0061+00E0+00E2+00E4+00E6 0062 0063+00E7 0064 0065+00E9+00E8+00EA+00EB 0066 0067 0068 0069+00EE+00EF 006A 006B 006C 006D 006E 006F+00F4+00F6+0153 0070 0071 0072 0073 0074 0075+00F9+00FB+00FC 0076 0077 0078 0079+00FF 007A
+es 0A 0061+00E1 0062 0063 0064 0065+00E9 0066 0067 0068 0069+00ED 006A 006B 006C 006D 006E 00F1 006F+00F3 0070 0071 0072 0073 0074 0075+00FA+00FC 0076 0077 0078 0079 007A
+ru 19 0430 0431 0432 0433 0434 0435+0451 0436 0437 0438 0439 043A 043B 043C 043D 043E 043F 0440 0441 0442 0443 0444 0445 0446 0447 0448 0449 044A 044B 044C 044D 044E 044F

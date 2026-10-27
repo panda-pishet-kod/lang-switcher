@@ -1,37 +1,57 @@
 <#
-    make-letter-stats.ps1 -- the trigram table of a language for src\letter_stats.rs (stage E105, decision 196.1).
+    make-letter-stats.ps1 -- the trigram table of a language for src\letter_stats.rs (stage E105, decision 196.1;
+    the languages besides English -- stage E106, task T-106-5, decision 198.7).
 
     Reads plain-text books -- DATA only: nothing in their folder is run, they are read as bytes by this
     script from its own folder -- strips the Project Gutenberg header and licence (everything outside
-    the "*** START OF" and "*** END OF" lines), splits the text into words of Latin letters (any other
-    character ends a word), and counts the trigrams of symbols of every word framed by boundaries:
-    0 0 w1 ... wn 0 (0 = the boundary, 1..26 = a..z, case folded). That is exactly what Reading of
-    src\letter_stats.rs feeds itself for a candidate.
+    the "*** START OF" and "*** END OF" lines), splits the text into words of the letters of the
+    language (any other character ends a word), and counts the trigrams of symbols of every word framed
+    by boundaries: 0 0 w1 ... wn 0 (0 = the boundary, 1..N = the classes of the alphabet, case folded).
+    That is exactly what Reading of src\letter_stats.rs feeds itself for a candidate.
 
-    The table is 27 x 27 x 27 bytes, at (a * 27 + b) * 27 + c: the cost of c after a b,
-    round(-log2 P(c | a b) * 4) capped at 255, with P = (count(a b c) + 1) / (count(a b .) + 27) --
+    The alphabet is the line of -Language in res\letter-stats-alphabets.txt -- the same file the
+    program reads, so the two cannot count by different letters. A class is the lower-case code points
+    of one symbol; a letter with a sign above or below folds into its base letter.
+
+    The table is S x S x S bytes for S = N + 1 symbols, at (a * S + b) * S + c: the cost of c after
+    a b, round(-log2 P(c | a b) * 4) capped at 255, with P = (count(a b c) + 1) / (count(a b .) + S) --
     add-one smoothing, so no trigram is impossible. Lower is more probable.
 
     The books of the table of English, stage E105 (decision 197.10a of the owner): Project Gutenberg,
     public domain in the USA -- https://www.gutenberg.org/cache/epub/<N>/pg<N>.txt for N = 1342
     (Pride and Prejudice), 1661 (The Adventures of Sherlock Holmes), 98 (A Tale of Two Cities),
-    84 (Frankenstein), 11 (Alice's Adventures in Wonderland). Their sizes and SHA-256 are in the
-    report of the stage; the books themselves are not in this tree and not in the image.
+    84 (Frankenstein), 11 (Alice's Adventures in Wonderland). The books of French, Spanish and
+    Russian -- stage E106, decisions 198.3, 198.7: see the report ITOG-E106. Their sizes and SHA-256
+    are in the reports of the stages; the books themselves are not in this tree and not in the image.
 
     Written for Windows PowerShell 5.1 without a Cyrillic character (decision R-05).
 
     Usage:
-      .\make-letter-stats.ps1 -Books <folder>\pg1342.txt,<folder>\pg1661.txt,... -Out res\letter-stats-en.bin
+      .\make-letter-stats.ps1 -Language en -Books <folder>\pg1342.txt,<folder>\pg1661.txt,... -Out res\letter-stats-en.bin
 #>
 [CmdletBinding()]
 param(
+    [Parameter(Mandatory = $true)][string]$Language,
     [Parameter(Mandatory = $true)][string[]]$Books,
-    [Parameter(Mandatory = $true)][string]$Out
+    [Parameter(Mandatory = $true)][string]$Out,
+    [string]$Alphabets = (Join-Path $PSScriptRoot '..\res\letter-stats-alphabets.txt')
 )
 
 $ErrorActionPreference = 'Stop'
 
-$symbols = 27
+# The classes of the language: code point -> symbol (1..N).
+$line = Get-Content $Alphabets | Where-Object { $_ -notmatch '^\s*#' -and $_.Split(' ')[0] -eq $Language } | Select-Object -First 1
+if (-not $line) {
+    Write-Host ("FAIL: no alphabet for '{0}' in {1}" -f $Language, $Alphabets)
+    exit 1
+}
+$classes = @($line.Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries) | Select-Object -Skip 2)
+$symbolOf = New-Object 'System.Collections.Generic.Dictionary[int,int]'
+for ($i = 0; $i -lt $classes.Count; $i++) {
+    foreach ($hex in $classes[$i].Split('+')) { $symbolOf.Add([Convert]::ToInt32($hex, 16), $i + 1) }
+}
+
+$symbols = $classes.Count + 1
 $counts = New-Object 'int[]' ($symbols * $symbols * $symbols)
 $words = 0
 $letters = 0
@@ -50,10 +70,10 @@ foreach ($book in $Books) {
     $a = 0
     $b = 0
     $inWord = $false
+    $s = 0
     foreach ($ch in $body.ToCharArray()) {
         $c = [int][char]::ToLowerInvariant($ch)
-        if ($c -ge 97 -and $c -le 122) {
-            $s = $c - 96
+        if ($symbolOf.TryGetValue($c, [ref]$s)) {
             if (-not $inWord) { $a = 0; $b = 0; $inWord = $true; $words = $words + 1 }
             $counts[($a * $symbols + $b) * $symbols + $s] = $counts[($a * $symbols + $b) * $symbols + $s] + 1
             $a = $b
@@ -81,4 +101,4 @@ for ($context = 0; $context -lt $symbols * $symbols; $context++) {
 
 [IO.File]::WriteAllBytes($Out, $table)
 $sha = (Get-FileHash $Out -Algorithm SHA256).Hash
-Write-Host ("table {0}: {1} bytes, sha256 {2}; {3} words, {4} letters" -f $Out, $table.Length, $sha, $words, $letters)
+Write-Host ("table {0} ({1}, {2} symbols): {3} bytes, sha256 {4}; {5} words, {6} letters" -f $Out, $Language, $symbols, $table.Length, $sha, $words, $letters)

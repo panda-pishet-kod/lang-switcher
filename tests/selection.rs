@@ -5821,6 +5821,9 @@ fn an_oversized_block_is_refused_before_the_copy_and_lands_on_no_text_with_the_s
 const ARABIC_101: LayoutId = LayoutId::from_raw(0x0401_0401);
 const US_E105: LayoutId = LayoutId::from_raw(0x0409_0409);
 const RUSSIAN_E105: LayoutId = LayoutId::from_raw(0x0419_0419);
+/// Ukrainian — a Cyrillic language this program carries no statistics of since stage Э106, when
+/// Russian got a table (task T-106-5); the letters on the keys of [`LIGATURE_KEYS`] are Russian's.
+const UKRAINIAN_E106: LayoutId = LayoutId::from_raw(0x0422_0422);
 
 /// The keys of the two words of the decision, by the US letter they carry.
 const LIGATURE_KEYS: [(char, u16); 7] = [
@@ -5953,13 +5956,29 @@ fn a_word_just_typed_is_converted_by_the_strokes_that_typed_it() {
 
 /// **(3) No memory and no table for the language of the target: the division by single keys**,
 /// as before Э105 — `لاث` into a layout of a language this program has no statistics of is the
-/// keys `G`, `H`, `E`.
+/// keys `G`, `H`, `E`. Ukrainian since stage Э106: Russian, the language of this case in Э105, has
+/// a table now (task T-106-5).
 #[test]
 fn without_the_memory_or_a_table_the_word_is_divided_by_single_keys() {
+    let ukrainian = plain(UKRAINIAN_E106, ['и', 'у', 'п', 'р', 'ш', 'д', 'е']);
+    let plan = arabic_plan(ukrainian, Vec::new());
+
+    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &plan), "пру");
+}
+
+/// **Task T-106-5, решение 198.7 — no memory, the target is Russian: the statistics of Russian
+/// read the division.** `пир` typed on Arabic 101 is `G`, `B`, `H` — `ل`, `لا`, `ا` — and the same
+/// four characters are `G`, `G`, `H`, `H`, `ппрр`; the table of Russian takes the word. Before the
+/// table the division by single keys gave `ппрр`.
+#[test]
+fn without_the_memory_the_statistics_of_russian_read_the_word() {
     let russian = plain(RUSSIAN_E105, ['и', 'у', 'п', 'р', 'ш', 'д', 'е']);
     let plan = arabic_plan(russian, Vec::new());
 
-    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &plan), "пру");
+    assert_eq!(
+        selected("\u{0644}\u{0644}\u{0627}\u{0627}", &plan),
+        "пир"
+    );
 }
 
 /// **(2) No memory — text pasted, not typed: the statistics of English read the division** —
