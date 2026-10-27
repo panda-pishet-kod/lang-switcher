@@ -601,11 +601,13 @@ fn english() -> LanguageFile {
 fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     let english = english();
     let langids = registry_langids();
+    // A translation of the stages after L10N is included before its language joins
+    // `Language::ALL`: at least one file per shipped language, every file a language of the
+    // registry — `the_files_of_res_lang_are_the_files_app_rc_includes`.
     let files = resource_script::language_files();
-    assert_eq!(
-        files.len(),
-        Language::ALL.len(),
-        "one included file per shipped language"
+    assert!(
+        files.len() >= Language::ALL.len(),
+        "at least one included file per shipped language"
     );
     assert_eq!(
         english.strings.len(),
@@ -625,9 +627,10 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
             .collect();
         if !same.is_empty() {
             println!(
-                "{tag}.rc: {} совпали с английскими — {:?}",
+                "{tag}.rc: {} совпали с английскими — {:?}{}",
                 same.len(),
-                same
+                &same[..same.len().min(20)],
+                if same.len() > 20 { " …" } else { "" }
             );
         }
     }
