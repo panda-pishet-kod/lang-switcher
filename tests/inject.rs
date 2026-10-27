@@ -3373,6 +3373,60 @@ fn the_refusal_of_the_classic_console_is_named_in_the_journal_and_handed_to_app(
     );
 }
 
+/// **Stage E107, task T-107-6 (г), решение 201.10а — a word beyond the model is refused, named in
+/// the journal and handed to `app` for the tone of a refusal.** Read off the source of
+/// `on_hotkey`, as the refusal of the classic console is: the branch takes the mark of
+/// `buffer::Recorder::beyond_the_model` out of the press, sends nothing, and sets the cell `app`
+/// reads beside the classic console's.
+#[test]
+fn a_word_beyond_the_model_is_refused_named_and_handed_to_app() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let name = "level stroke replacement refused";
+    let operation = Operation::from_name(name);
+
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» must be a name of the journal"
+    );
+    assert_eq!(operation.kind(), Kind::Process);
+
+    let source = source_of("inject.rs");
+    let remainder = source
+        .split("pub fn on_hotkey()")
+        .nth(1)
+        .expect("on_hotkey is in the module");
+    let body = &remainder[..remainder.find("\n}\n").expect("the body of on_hotkey")];
+    let at = |needle: &str| body.find(needle).unwrap_or(usize::MAX);
+
+    for needle in [
+        "beyond_the_model,",
+        "if beyond_the_model {",
+        "LEVEL_REFUSED.set(true)",
+        "Operation::from_name(LEVEL_REPLACEMENT_REFUSED)",
+        "let result = (!beyond_the_model).then(",
+    ] {
+        assert!(body.contains(needle), "on_hotkey must carry `{needle}`");
+    }
+
+    assert!(
+        at("if beyond_the_model {") < at("replace_with("),
+        "the refusal is decided before anything is sent"
+    );
+    assert!(source.contains(&format!(
+        "const LEVEL_REPLACEMENT_REFUSED: &str = \"{name}\";"
+    )));
+    assert!(
+        source_of("app.rs").contains("crate::inject::take_level_refusal()"),
+        "app asks for the refusal right after the press"
+    );
+    assert!(
+        !inject::take_level_refusal(),
+        "a thread that refused nothing hands nothing over"
+    );
+}
+
 /// The condition of the keystroke path, case by case — `inject::keys_repeat_the_conversion`: plain
 /// keys repeat; a dead key of the run, a key under `AltGr`, a key the target gives nothing for and
 /// a key that is dead in the target do not.

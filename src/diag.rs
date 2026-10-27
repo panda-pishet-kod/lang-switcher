@@ -829,6 +829,12 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("appeal refused", Kind::Process),
     ("WinHttpSetOption", Kind::Process),
     ("BCryptGenRandom", Kind::Process),
+    // ⭐ **Stage E107, task T-107-6 (г), решение 201.10а** — a press refused because a stroke of
+    // its word was typed on a level the model does not hold (the right `Ctrl` of Canadian
+    // Multilingual Standard): nothing erased, nothing sent, the tone of a refusal. Recorded by
+    // `inject::on_hotkey`. Appended at the end so that no index above it moves; a fact and no
+    // value (SEC-01, SEC-07), `Kind::Process`, no new `Kind`.
+    ("level stroke replacement refused", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

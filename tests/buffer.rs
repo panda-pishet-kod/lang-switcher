@@ -5135,6 +5135,94 @@ fn the_right_alt_with_a_dead_key_of_another_layout_is_a_stroke() {
     );
 }
 
+/// `VK_OEM_8` — the right `Ctrl` of Canadian Multilingual Standard, a level of that layout.
+const VK_OEM_8: u16 = 0xDF;
+/// The right `Ctrl`: scan `0x1D` with the `E0` prefix.
+const SCAN_RIGHT_CTRL: u16 = 0x1D;
+/// The `` ` `` key, which British English gives `VK_OEM_8`.
+const SCAN_GRAVE_KEY: u16 = 0x29;
+
+/// **Stage E107, task T-107-6 (г), BACKLOG Q-198-7, решение 201.10а — a word typed on the level
+/// of the right `Ctrl` of CMS is marked beyond the model, and the press over it is refused.** CMS
+/// gives `←` for the right `Ctrl` + `Y`; the model has three modifiers and recorded the stroke as a
+/// plain `Y`, so the word came back `tyt` (198.27 (г)). The level key is not a stroke; a stroke
+/// under it marks the ring; the mark goes with the ring.
+///
+/// ⚠ Controls: in British English `VK_OEM_8` is the `` ` `` key, writes, and is a stroke like any
+/// other — no mark; a word typed without the level carries no mark.
+#[test]
+fn a_word_typed_on_the_level_of_the_right_ctrl_is_beyond_the_model() {
+    let cms = map_of(
+        LayoutId::from_raw(0x0001_1009),
+        &[
+            (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('t')),
+            (0x15, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('y')),
+        ],
+    );
+    let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
+    recorder.set_cache(LayoutCache::from_maps(vec![cms]).expect("a non-empty map"));
+    recorder.set_active_layout(LayoutId::from_raw(0x0001_1009));
+
+    assert_eq!(press(&mut recorder, VK_A + 19, SCAN_T), Recorded::Stored);
+    assert!(
+        !recorder.beyond_the_model(),
+        "the control: no level, no mark"
+    );
+
+    let extended = LLKHF_EXTENDED.0;
+    assert_eq!(
+        deliver(
+            &mut recorder,
+            VK_OEM_8,
+            SCAN_RIGHT_CTRL,
+            extended,
+            SOME_TIME,
+            Edge::Down
+        ),
+        Recorded::Modifier,
+        "the level key is not a stroke"
+    );
+    assert_eq!(press(&mut recorder, VK_A + 24, 0x15), Recorded::Stored);
+    deliver(
+        &mut recorder,
+        VK_OEM_8,
+        SCAN_RIGHT_CTRL,
+        extended,
+        SOME_TIME,
+        Edge::Up,
+    );
+    assert_eq!(press(&mut recorder, VK_A + 19, SCAN_T), Recorded::Stored);
+
+    assert!(
+        recorder.beyond_the_model(),
+        "198.27 (г): a stroke under the level marks the word, and the press is refused"
+    );
+
+    recorder.reset();
+    assert!(!recorder.beyond_the_model(), "the mark goes with the ring");
+
+    // The control: British English, where `VK_OEM_8` writes.
+    let british = map_of(
+        LayoutId::from_raw(0x0809_0809),
+        &[(
+            SCAN_GRAVE_KEY,
+            MAIN_BLOCK,
+            Mods::NONE,
+            KeyMapping::from_char('`'),
+        )],
+    );
+    let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
+    recorder.set_cache(LayoutCache::from_maps(vec![british]).expect("a non-empty map"));
+    recorder.set_active_layout(LayoutId::from_raw(0x0809_0809));
+
+    assert_eq!(
+        press(&mut recorder, VK_OEM_8, SCAN_GRAVE_KEY),
+        Recorded::Stored,
+        "the control: the ` of British English is a key"
+    );
+    assert!(!recorder.beyond_the_model());
+}
+
 // =========================================================================================
 // Решение 196.1 (stage Э105) — the short memory of the typing
 // =========================================================================================

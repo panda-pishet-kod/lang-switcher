@@ -1001,7 +1001,17 @@ struct Held {
     /// the worst a stale `true` here can do is skip one flip — never latch the command row of
     /// FR-10, which is the defect that function exists for.
     caps_down: bool,
+    /// Whether the level key of the layout (`VK_OEM_8` where it writes nothing — the right `Ctrl`
+    /// of Canadian Multilingual Standard) is held — stage E107, task T-107-6 (г). Not a modifier
+    /// of the model: a stroke made under it marks the ring beyond the model
+    /// ([`Recorder::beyond_the_model`]). Outside [`Held::reconcile`]: a stale `true` can only refuse
+    /// one press, never turn text into a command.
+    level: bool,
 }
+
+/// `VK_OEM_8` — the key the level of Canadian Multilingual Standard comes as (stage E107, task
+/// T-107-6 (г)); in British English it is the `` ` `` key and writes.
+const VK_OEM_8: u16 = 0xDF;
 
 impl Held {
     /// Applies one modifier key event.
@@ -1468,6 +1478,13 @@ pub struct Recorder {
     /// Written **only** by [`Recorder::set_cycle`] — see there for why that matters — with the
     /// one named exception of the struct literal that builds a recorder (task T-69-3).
     cycle: usize,
+    /// **A stroke of the ring was typed on a level the model does not hold** — stage E107, task
+    /// T-107-6 (г), BACKLOG Q-198-7: the level of the right `Ctrl` of Canadian Multilingual
+    /// Standard (`VK_OEM_8`). The model knows `Shift`, `CapsLock` and `AltGr`; such a stroke is
+    /// recorded as the plain key and its conversion would be wrong (`t←t` → `tyt`, 198.27 (г)), so
+    /// the press over this ring is **refused** with the tone of FR-100 instead (решение 201.10а).
+    /// Lowered by [`Recorder::clear_ring`] with the ring, raised by [`Recorder::record`].
+    beyond_the_model: bool,
     /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
     /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
     /// before that task.
@@ -1673,6 +1690,7 @@ impl Recorder {
             held: Held::default(),
             converted: false,
             cycle: 0,
+            beyond_the_model: false,
             verify: None,
             stamp: None,
             last_edit: None,
@@ -2001,7 +2019,45 @@ impl Recorder {
     /// `Shift` is not text; and the conversion session of the last row is ended by the first
     /// key that is not a modifier, so that `Shift` and then a letter is one session end and
     /// not two.
+    ///
+    /// ⭐ **Stage E107, task T-107-6 (г) — the level key, before everything else.** In a layout
+    /// where `VK_OEM_8` writes nothing (Canadian Multilingual Standard: its right `Ctrl`), it is a
+    /// level of the layout and not a key: it is tracked as held and is not a stroke. A stroke made
+    /// while it is held marks the ring [`Recorder::beyond_the_model`], and the press over it is
+    /// refused. In a layout where `VK_OEM_8` writes (the `` ` `` of British English), it is the key
+    /// it always was. Two comparisons and, for this one key, one lookup — NFR-01…NFR-05 hold.
     pub fn record(&mut self, key: KeyEvent) -> Recorded {
+        if key.vk == VK_OEM_8 && self.is_a_level_key(key) {
+            self.held.level = matches!(key.edge, Edge::Down);
+            return Recorded::Modifier;
+        }
+
+        let recorded = self.record_key(key);
+
+        if recorded == Recorded::Stored && self.held.level {
+            self.beyond_the_model = true;
+        }
+
+        recorded
+    }
+
+    /// Whether a stroke of the ring was typed on a level the model does not hold — see
+    /// [`Recorder::beyond_the_model`]; the press over such a ring is refused.
+    pub fn beyond_the_model(&self) -> bool {
+        self.beyond_the_model
+    }
+
+    /// Whether `key` — a `VK_OEM_8` — is a level of the active layout: it writes nothing there. No
+    /// cache, or the active layout outside it: no, and the key is what it was.
+    fn is_a_level_key(&self, key: KeyEvent) -> bool {
+        let extended = self.mods_now(key.flags).extended();
+
+        self.active_map()
+            .is_some_and(|map| map.lookup(key.scan, extended, Mods::NONE).is_empty())
+    }
+
+    /// Records one key event — the rows of FR-10, after the level key of [`Recorder::record`].
+    fn record_key(&mut self, key: KeyEvent) -> Recorded {
         if let Some(role) = modifier_role(key.vk) {
             self.held.apply(role, key.edge);
             return Recorded::Modifier;
@@ -2704,6 +2760,8 @@ impl Recorder {
     fn clear_ring(&mut self) {
         self.ring.clear();
         self.set_cycle(0);
+        // Stage E107, task T-107-6 (г): a ring with nothing in it holds no stroke beyond the model.
+        self.beyond_the_model = false;
 
         // **FR-14** — task Т-48-2, and it is here for the reason the counter of FR-34 is: every
         // rule of the FR-10 table that empties the ring arrives at this one function, so there

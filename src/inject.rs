@@ -2851,6 +2851,7 @@ fn run_steps_ahead(
 pub fn on_hotkey() -> Option<Replaced> {
     // Stage Э96: the answer of the previous press is not this press's answer.
     CLASSIC_CONSOLE_REFUSED.set(false);
+    LEVEL_REFUSED.set(false);
 
     let Press {
         mut strokes,
@@ -2858,7 +2859,24 @@ pub fn on_hotkey() -> Option<Replaced> {
         on_screen,
         back,
         cycle_len,
+        beyond_the_model,
     } = take_press()?;
+
+    // ⭐ **Stage E107, task T-107-6 (г), решение 201.10а — a word typed on a level the model does
+    // not hold is refused, not converted.** The right `Ctrl` of Canadian Multilingual Standard is a
+    // level of that layout; the model has three modifiers and records such a stroke as the plain
+    // key, so the conversion would put a wrong letter on the screen (`t←t` → `tyt`, 198.27 (г)).
+    // Nothing is erased and nothing is sent; the journal gets the name and nothing beside it
+    // (SEC-07), and `app` answers with the tone of a refusal through [`take_level_refusal`]. The
+    // full model of the level is a stage of its own (BACKLOG Q-198-7). The copy of the strokes is
+    // zeroed by the one zeroing below, as on every other way out of this function.
+    if beyond_the_model {
+        LEVEL_REFUSED.set(true);
+        crate::diag::record(
+            crate::diag::Operation::from_name(LEVEL_REPLACEMENT_REFUSED),
+            crate::diag::OsCode::NONE,
+        );
+    }
 
     // **FR-42а.** The configured method is read once per press, and `auto` is resolved against
     // the foreground window here — the input thread's message loop, after the handoff, never
@@ -2873,20 +2891,23 @@ pub fn on_hotkey() -> Option<Replaced> {
     #[cfg(feature = "testing")]
     crate::control::note_replacement_method(delivery);
 
-    let result = replace_with(
-        &strokes,
-        &target,
-        on_screen,
-        back,
-        inter_event_delay_ms(),
-        delivery,
-    );
+    // A word beyond the model sends nothing at all (task T-107-6 (г)).
+    let result = (!beyond_the_model).then(|| {
+        replace_with(
+            &strokes,
+            &target,
+            on_screen,
+            back,
+            inter_event_delay_ms(),
+            delivery,
+        )
+    });
 
     // ⭐ **Stage Э96 — the refusal of the classic console is a fact worth a line and a tone.** Its
     // keys would not repeat the conversion, so nothing was sent at all; the journal gets the name
     // and nothing beside it (SEC-07), and `app` answers the press with the tone of a refusal
     // through [`take_classic_console_refusal`] — decision 160.8, «запасной — не стирать».
-    if result == Err(InjectError::KeysCannotRepeat) {
+    if result == Some(Err(InjectError::KeysCannotRepeat)) {
         CLASSIC_CONSOLE_REFUSED.set(true);
         crate::diag::record(
             crate::diag::Operation::from_name(CLASSIC_CONSOLE_REPLACEMENT_REFUSED),
@@ -2894,7 +2915,7 @@ pub fn on_hotkey() -> Option<Replaced> {
         );
     }
 
-    let outcome = result.ok();
+    let outcome = result.and_then(Result::ok);
 
     // The copy holds the user's text; it is zeroed before it is released — SEC-01, SEC-02, with
     // the volatile write of `crate::buffer::zero_slice` so that the store in front of the `drop`
@@ -2928,6 +2949,25 @@ thread_local! {
 /// with the tone of a refusal instead of the idle click (FR-100, decision 160.8).
 pub fn take_classic_console_refusal() -> bool {
     CLASSIC_CONSOLE_REFUSED.replace(false)
+}
+
+/// The name the journal records a refusal of a word beyond the model under — stage E107, task
+/// T-107-6 (г). A fact and no value (SEC-01, SEC-07).
+const LEVEL_REPLACEMENT_REFUSED: &str = "level stroke replacement refused";
+
+thread_local! {
+    /// **Whether the last press on this thread was refused because a stroke of its word was typed
+    /// on a level the model does not hold** — stage E107, task T-107-6 (г). The shape of
+    /// [`CLASSIC_CONSOLE_REFUSED`]: set by [`on_hotkey`], cleared at the start of every press and
+    /// by the one reader, [`take_level_refusal`].
+    static LEVEL_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// **Whether the press [`on_hotkey`] just answered was refused for a stroke beyond the model**,
+/// and the answer taken — stage E107, task T-107-6 (г). Read by `app` right after the press,
+/// beside [`take_classic_console_refusal`], to answer it with the tone of a refusal (FR-100).
+pub fn take_level_refusal() -> bool {
+    LEVEL_REFUSED.replace(false)
 }
 
 /// **What one press leaves behind in the typing buffer** — the last row of FR-10 and the position
@@ -2993,6 +3033,9 @@ struct Press {
     /// How many layouts the cycle walks, so that the counter can be advanced by the same number
     /// the target was chosen with.
     cycle_len: usize,
+    /// ⭐ Stage E107, task T-107-6 (г): a stroke of the run was typed on a level the model does not
+    /// hold ([`crate::buffer::Recorder::beyond_the_model`]) — the press is refused, nothing is sent.
+    beyond_the_model: bool,
 }
 
 /// Copies the strokes out and chooses the layout this press renders them into — **section 4.4**.
@@ -3098,6 +3141,7 @@ fn take_press() -> Option<Press> {
             // Stage Э96: the layout the text on the screen is in — see `Press::back`.
             back: previous.unwrap_or(origin),
             cycle_len: cycle.len(),
+            beyond_the_model: recorder.beyond_the_model(),
         })
     })
     .flatten()

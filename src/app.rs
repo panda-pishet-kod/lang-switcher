@@ -3567,10 +3567,12 @@ unsafe extern "system" fn window_proc(
                     // ⭐ Stage Э96: a press the classic console refused — its keys would not
                     // repeat the conversion, so nothing was sent — is the knock of a refusal and
                     // not the idle click (decision 160.8). See `refusal_of_the_classic_console`.
-                    let press = refusal_of_the_classic_console(
-                        press,
-                        crate::inject::take_classic_console_refusal(),
-                    );
+                    // Stage E107, task T-107-6 (г): a word typed on a level the model does not
+                    // hold is refused the same way — nothing sent, the knock of a refusal. Both
+                    // cells are taken, so neither answer outlives its press.
+                    let classic = crate::inject::take_classic_console_refusal();
+                    let level = crate::inject::take_level_refusal();
+                    let press = refusal_of_the_classic_console(press, classic || level);
 
                     // Task T-37-1: dropped — a refused post costs one click of FR-100 that
                     // is not heard, and nothing of the press itself, which is already done.
