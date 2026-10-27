@@ -610,6 +610,14 @@ pub struct LayoutMap {
     /// [`Mods::ALL`] — what the reverse index keeps dead keys out of. See
     /// [`LayoutMap::find_dead_key`].
     dead_keys: Box<[(u16, KeyPress)]>,
+    /// The keys whose one press puts **several characters** on the screen — the ligature keys of
+    /// section 11.1 (`لا` on the `B` of Arabic 101) — with what they put there; решение 196.1,
+    /// see [`LayoutMap::ligature_keys`].
+    ligatures: Box<[(KeyPress, KeyMapping)]>,
+    /// Whether one of [`Self::ligatures`] also comes out of a sequence of other keys of the
+    /// layout — `لا` is `B`, and `G` then `H` — so that text alone does not tell which keys typed
+    /// it. See [`LayoutMap::has_ambiguous_ligatures`].
+    ambiguous: bool,
 }
 
 /// **One composition of a dead key** — `DEADTRANS(base, accent, composed, flags)` of the layout's
@@ -661,6 +669,24 @@ impl LayoutMap {
     /// The compositions of the layout, as [`LayoutMap::compose`] reads them.
     pub fn dead_transitions(&self) -> &[DeadTransition] {
         &self.dead
+    }
+
+    /// **The ligature keys of the layout and what each puts on the screen** — the keys of
+    /// section 11.1 whose one press is several characters (`لا` on `B` of Arabic 101, `क्ष` on
+    /// `Shift+7` of Hindi InScript). The selection path divides a word by them (решение 196.1);
+    /// the reverse index, which answers one character, does not hold them.
+    pub fn ligature_keys(&self) -> &[(KeyPress, KeyMapping)] {
+        &self.ligatures
+    }
+
+    /// **Whether text typed in this layout may have been typed by two different sets of keys** —
+    /// a ligature key whose characters every one also has a key of its own: `لا` is `B`, and it
+    /// is `G` then `H` (посылка П7). Решение 196.1: the short memory of the typing is kept for the
+    /// strokes of such a layout **only** — Russian, English and every layout without such a key
+    /// keep the rule of SEC-02, and nothing of their typing outlives a reset. Decided once, by
+    /// [`LayoutMapBuilder::finish`], out of the sweep of FR-20 — never a list written by hand.
+    pub const fn has_ambiguous_ligatures(&self) -> bool {
+        self.ambiguous
     }
 
     /// **Whether the layout has `AltGr` at all** — whether any key of it gives a character, or a
@@ -883,7 +909,43 @@ impl LayoutMapBuilder {
             altgr,
             dead: dead.into_boxed_slice(),
             dead_keys: dead_keys.into_boxed_slice(),
+            ligatures: Box::new([]),
+            ambiguous: false,
         }
+        .with_ligatures()
+    }
+}
+
+impl LayoutMap {
+    /// Fills [`LayoutMap::ligature_keys`] and [`LayoutMap::has_ambiguous_ligatures`] out of the
+    /// forward table and the reverse index just made — решение 196.1. The plainest key first, in
+    /// the order of [`key_index`] and [`Mods::ALL`], as everywhere in this module.
+    fn with_ligatures(mut self) -> Self {
+        let mut ligatures = Vec::new();
+
+        for key in 0..KEY_SLOTS {
+            for mods in Mods::ALL {
+                let mapping = self.forward[key * MOD_COMBINATIONS + mods.index()];
+
+                if mapping.is_ligature() && mapping.single_char().is_none() {
+                    ligatures.push((
+                        KeyPress {
+                            scan: (key & 0xFF) as u16,
+                            extended: key & EXTENDED_BIT != 0,
+                            mods,
+                        },
+                        mapping,
+                    ));
+                }
+            }
+        }
+
+        self.ambiguous = ligatures.iter().any(|(_, mapping)| {
+            char::decode_utf16(mapping.units().iter().copied())
+                .all(|ch| ch.is_ok_and(|ch| self.find_key(ch).is_some()))
+        });
+        self.ligatures = ligatures.into_boxed_slice();
+        self
     }
 }
 

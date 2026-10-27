@@ -5068,3 +5068,184 @@ fn the_left_alt_and_the_right_alt_without_a_letter_still_flush() {
         "a right Alt without Ctrl in a layout that has AltGr is a command"
     );
 }
+
+// =========================================================================================
+// Решение 196.1 (stage Э105) — the short memory of the typing
+// =========================================================================================
+
+/// Arabic 101 as far as these tests need it: `B` is the ligature `لا`, `G` is `ل`, `H` is `ا` —
+/// the ligature comes out of two other keys as well (посылка П7) — and `D` is `ث`.
+fn arabic_101() -> LayoutMap {
+    map_of(
+        LayoutId::from_raw(0x0401_0401),
+        &[
+            (
+                SCAN_B,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_to_unicode(2, &[0x0644, 0x0627]),
+            ),
+            (
+                SCAN_G,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('\u{0644}'),
+            ),
+            (
+                SCAN_H,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('\u{0627}'),
+            ),
+            (
+                SCAN_D,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('\u{062B}'),
+            ),
+        ],
+    )
+}
+
+/// A recorder typing in Arabic 101, with US in the session.
+fn typing_in_arabic() -> Recorder {
+    let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
+    recorder.set_cache(
+        LayoutCache::from_maps(vec![english(), arabic_101()]).expect("two non-empty maps"),
+    );
+    recorder.set_active_layout(LayoutId::from_raw(0x0401_0401));
+    recorder.verify_held_with(everything_is_physically_held);
+    recorder
+}
+
+/// **The ambiguity is the layout's, decided from the cache** — Arabic 101 has a ligature key
+/// whose characters every one has a key of its own; the English and Russian halves of the stand
+/// have no ligature key at all.
+#[test]
+fn a_layout_whose_ligature_comes_out_of_other_keys_is_ambiguous_and_no_other() {
+    assert!(arabic_101().has_ambiguous_ligatures());
+    assert!(!english().has_ambiguous_ligatures());
+    assert!(!russian().has_ambiguous_ligatures());
+
+    // A ligature with a character no other key makes is the only way to type it: not ambiguous.
+    let only_way = map_of(
+        LayoutId::from_raw(0x0439_0439),
+        &[
+            (
+                SCAN_B,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_to_unicode(2, &[0x0915, 0x094D]),
+            ),
+            (
+                SCAN_G,
+                MAIN_BLOCK,
+                Mods::NONE,
+                KeyMapping::from_char('\u{0915}'),
+            ),
+        ],
+    );
+    assert!(!only_way.has_ambiguous_ligatures());
+}
+
+/// **The short memory keeps the strokes of Arabic 101 through the flushes that select a word,
+/// and nothing of English** — решение 196.1: `Ctrl+Shift+Left` and a click of the mouse empty
+/// the ring (FR-10) but not the memory; the pair of the stand records nothing in it (the negative
+/// control — SEC-02 stands for it).
+#[test]
+fn the_short_memory_outlives_the_selection_and_holds_nothing_of_english() {
+    let mut recorder = typing_in_arabic();
+
+    assert_eq!(press(&mut recorder, VK_B, SCAN_B), Recorded::Stored);
+    assert_eq!(press(&mut recorder, VK_D, SCAN_D), Recorded::Stored);
+    assert_eq!(recorder.recent_len(), 2, "لا ث — two strokes of Arabic 101");
+
+    // `Ctrl+Shift+Left` — the selection of the word — flushes the ring and leaves the memory.
+    hold(&mut recorder, VK_LCONTROL);
+    hold(&mut recorder, VK_LSHIFT);
+    assert_eq!(press(&mut recorder, VK_LEFT, 0x4B), Recorded::Flushed);
+    release(&mut recorder, VK_LSHIFT);
+    release(&mut recorder, VK_LCONTROL);
+    assert_eq!(recorder.len(), 0, "the ring is gone");
+    assert_eq!(recorder.recent_len(), 2, "the memory is not");
+
+    // A click of the mouse (FR-12) — the selection by the mouse — leaves it too.
+    let _ = recorder.reset_up_to(SOME_TIME + 1);
+    assert_eq!(recorder.recent_len(), 2);
+
+    let remembered = recorder.recent_keystrokes(SOME_TIME + 1);
+    assert_eq!(remembered.len(), 2);
+    assert_eq!(remembered[0].scan(), SCAN_B, "the key B, not G and H");
+
+    // The negative control: English typing keeps nothing.
+    let mut english_only = Recorder::with_capacity(DEFAULT_CAPACITY);
+    english_only.set_cache(cache());
+    english_only.set_active_layout(EN);
+    fill(&mut english_only, 5);
+    assert_eq!(
+        english_only.recent_len(),
+        0,
+        "SEC-02 stands for the pair ru / en"
+    );
+}
+
+/// **The memory lives a minute without a stroke, and goes with the field** — решение 196.1: at
+/// 59 999 ms after the last stroke it answers, at 60 000 it is zeroed; the change of window or
+/// field (`forget_recent`) and the wipe of a lock, a park or a pause (`buffer::reset`) zero it.
+#[test]
+fn the_short_memory_lives_a_minute_and_goes_with_the_field() {
+    let mut recorder = typing_in_arabic();
+    press(&mut recorder, VK_B, SCAN_B);
+
+    assert_eq!(recorder.recent_keystrokes(SOME_TIME + 59_999).len(), 1);
+    assert!(recorder.recent_keystrokes(SOME_TIME + 60_000).is_empty());
+    assert_eq!(recorder.recent_len(), 0, "zeroed at its minute");
+
+    press(&mut recorder, VK_B, SCAN_B);
+    let _ = recorder.flush_if_idle(SOME_TIME + 60_000);
+    assert_eq!(recorder.recent_len(), 0, "the tick of FR-80 zeroes it too");
+
+    press(&mut recorder, VK_B, SCAN_B);
+    recorder.forget_recent();
+    assert_eq!(recorder.recent_len(), 0, "the window or the field changed");
+
+    let mut installed = typing_in_arabic();
+    press(&mut installed, VK_B, SCAN_B);
+    buffer::install_recorder(installed);
+    assert!(buffer::reset(), "a buffer is installed");
+    assert_eq!(
+        buffer::with(|recorder| recorder.recent_len()),
+        Some(0),
+        "lock, park, pause"
+    );
+    buffer::uninstall();
+}
+
+/// **The two ends of the short memory outside this module** — решение 196.1: the change of window
+/// or field (`WM_APP_FLUSH` of `watchdog::apply_flush`, and not the click of `WM_INPUT`) and the
+/// pause of FR-90 (the `true → false` edge of `hook::set_active`, a wipe) zero it. Read off the
+/// source, as the order of the flush rows is elsewhere in this file.
+#[test]
+fn the_field_change_and_the_pause_zero_the_short_memory() {
+    let watchdog = source_of("watchdog.rs");
+    let start = watchdog.find("pub fn apply_flush(").expect("apply_flush");
+    let body = &watchdog[start..start + watchdog[start..].find("\n}").expect("its end")];
+    let forget = body
+        .find("crate::buffer::forget_recent()")
+        .expect("the field change forgets");
+    let gate = body
+        .find("if message == WM_APP_FLUSH {")
+        .expect("on WM_APP_FLUSH only");
+    assert!(gate < forget, "the click of WM_INPUT does not forget");
+
+    let hook = source_of("hook.rs");
+    let start = hook.find("pub fn set_active(").expect("set_active");
+    let body = &hook[start..start + hook[start..].find("\n}").expect("its end")];
+    let edge = body
+        .find("if !active && was_active {")
+        .expect("the pause edge");
+    let wipe = body
+        .find("crate::watchdog::request_wipe();")
+        .expect("a wipe");
+    assert!(edge < wipe, "the pause wipes the buffer and the memory");
+}

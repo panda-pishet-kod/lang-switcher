@@ -356,6 +356,60 @@ pub fn converted_len(strokes: &[Keystroke], target: &LayoutMap) -> usize {
     needed
 }
 
+/// **The run of the short memory that typed `text` in `layout`** — решение 196.1 (1), stage Э105:
+/// selected text that the user has just typed is converted by the strokes that really typed it.
+///
+/// `recent` is the memory as `buffer::Recorder::recent_keystrokes` hands it over, oldest first,
+/// a zeroed stroke between two runs. The answer is the **newest** contiguous run whose strokes
+/// were all typed in `layout` and put on the screen exactly the code units of `text`, one after
+/// another — nothing more, nothing less. A run with a dead stroke or with a stroke that put
+/// nothing on the screen is not taken: what stood on the screen is then not the concatenation of
+/// what the strokes produced, and the exact comparison would be a comparison with something else.
+///
+/// Compares in place, against `text` itself: no copy of the text and none of the strokes is
+/// made (SEC-01). On the UI thread, in the selection path; never in the hook.
+pub fn remembered_run<'recent>(
+    text: &str,
+    layout: LayoutId,
+    recent: &'recent [Keystroke],
+) -> Option<&'recent [Keystroke]> {
+    let wanted = text.encode_utf16().count();
+
+    if wanted == 0 {
+        return None;
+    }
+
+    (0..recent.len()).rev().find_map(|start| {
+        let mut matched = 0usize;
+
+        for (offset, stroke) in recent[start..].iter().enumerate() {
+            let produced = stroke.produced();
+            let units = produced.units();
+
+            if stroke.layout() != layout || stroke.is_dead() || units.is_empty() {
+                return None;
+            }
+
+            if !text
+                .encode_utf16()
+                .skip(matched)
+                .take(units.len())
+                .eq(units.iter().copied())
+            {
+                return None;
+            }
+
+            matched += units.len();
+
+            if matched == wanted {
+                return Some(&recent[start..=start + offset]);
+            }
+        }
+
+        None
+    })
+}
+
 /// Buffer length that fits the conversion of `strokes` strokes whatever the target layout.
 ///
 /// `const`, so a caller can size a fixed array with it: the ring buffer of FR-07 holds 256

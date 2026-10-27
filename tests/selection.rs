@@ -5263,11 +5263,17 @@ const TEXT_COPIES: [TextCopy; 9] = [
 ];
 
 /// Every other buffer the product half of the module makes, with the reason it holds no text.
-const NOT_THE_TEXT: [NotTheText; 12] = [
+const NOT_THE_TEXT: [NotTheText; 13] = [
     NotTheText {
         function: "fn formats(&self)",
         made_by: "Vec::new()",
         why: "format numbers — constants of the system, not content",
+    },
+    NotTheText {
+        function: "pub fn new(",
+        made_by: "Vec::new()",
+        why: "the short memory of a plan made without one (решение 196.1) — empty; the memory a \
+              press hands over comes from the recorder and is zeroed by the `Drop` of the plan",
     },
     NotTheText {
         function: "impl Snapshot {",
@@ -5805,4 +5811,197 @@ fn an_oversized_block_is_refused_before_the_copy_and_lands_on_no_text_with_the_s
         "the snapshot goes back on the refusal path of Э18: {:?}",
         bench.steps
     );
+}
+
+// =========================================================================================
+// Решение 196.1 (stage Э105) — the selection with ligatures: the division, the memory, the
+// statistics
+// =========================================================================================
+
+const ARABIC_101: LayoutId = LayoutId::from_raw(0x0401_0401);
+const US_E105: LayoutId = LayoutId::from_raw(0x0409_0409);
+const RUSSIAN_E105: LayoutId = LayoutId::from_raw(0x0419_0419);
+
+/// The keys of the two words of the decision, by the US letter they carry.
+const LIGATURE_KEYS: [(char, u16); 7] = [
+    ('b', 0x30),
+    ('e', 0x12),
+    ('g', 0x22),
+    ('h', 0x23),
+    ('i', 0x17),
+    ('l', 0x26),
+    ('t', 0x14),
+];
+
+/// Arabic 101 as far as `لاث` and `مهلاف` need it: `B` is the ligature `لا`, `G` is `ل`, `H` is
+/// `ا`, `E` is `ث`, `L` is `م`, `I` is `ه`, `T` is `ف` (посылка П7).
+fn arabic_with_the_ligature() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(ARABIC_101);
+    let letters = [
+        ('e', '\u{062B}'),
+        ('g', '\u{0644}'),
+        ('h', '\u{0627}'),
+        ('i', '\u{0647}'),
+        ('l', '\u{0645}'),
+        ('t', '\u{0641}'),
+    ];
+
+    for (latin, arabic) in letters {
+        let scan = LIGATURE_KEYS
+            .iter()
+            .find(|(key, _)| *key == latin)
+            .expect("a key")
+            .1;
+        builder.set(scan, false, Mods::NONE, KeyMapping::from_char(arabic));
+    }
+
+    builder.set(
+        0x30,
+        false,
+        Mods::NONE,
+        KeyMapping::from_to_unicode(2, &[0x0644, 0x0627]),
+    );
+    builder.finish()
+}
+
+/// A layout giving `letters[i]` on the keys of [`LIGATURE_KEYS`] — US with Latin, the stand-in for
+/// a language without a table with Cyrillic.
+fn plain(layout: LayoutId, letters: [char; 7]) -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(layout);
+
+    for (&(_, scan), letter) in LIGATURE_KEYS.iter().zip(letters) {
+        builder.set(scan, false, Mods::NONE, KeyMapping::from_char(letter));
+    }
+
+    builder.finish()
+}
+
+fn us_for_ligatures() -> LayoutMap {
+    plain(US_E105, ['b', 'e', 'g', 'h', 'i', 'l', 't'])
+}
+
+/// Arabic 101 and `other`, Arabic in front, with `recent` as the short memory.
+fn arabic_plan(other: LayoutMap, recent: Vec<convert::Keystroke>) -> Plan {
+    let ids = [ARABIC_101, other.layout()];
+    let cycle = Cycle::from_layouts(&ids).expect("a cycle of two layouts");
+
+    Plan::new(
+        vec![arabic_with_the_ligature(), other],
+        cycle,
+        ARABIC_101,
+        Duration::from_millis(300),
+        Duration::from_millis(200),
+        0,
+    )
+    .with_recent(recent)
+}
+
+/// The strokes of `keys` (US letters) typed in Arabic 101 — what the short memory would hold.
+fn typed_in_arabic(keys: &str) -> Vec<convert::Keystroke> {
+    let arabic = arabic_with_the_ligature();
+
+    keys.chars()
+        .map(|key| {
+            let scan = LIGATURE_KEYS
+                .iter()
+                .find(|(known, _)| *known == key)
+                .expect("a key")
+                .1;
+            convert::Keystroke::recorded_in(&arabic, scan, false, Mods::NONE)
+        })
+        .collect()
+}
+
+/// What the selection path writes for `selected` under `plan`.
+fn selected(selected: &str, plan: &Plan) -> String {
+    let mut bench = Bench::with_selection(selected);
+    let _ = selection::run(&mut bench, plan);
+    bench.written.unwrap_or_default()
+}
+
+/// **The layout of the decision is ambiguous, and the walk of the selection knows it** — посылка
+/// П7 on the synthetic Arabic 101: `لا` is `B` and `G` + `H`.
+#[test]
+fn arabic_101_is_a_layout_with_an_ambiguous_ligature() {
+    let arabic = arabic_with_the_ligature();
+
+    assert!(arabic.has_ambiguous_ligatures());
+    assert_eq!(arabic.ligature_keys().len(), 1);
+    assert!(!us_for_ligatures().has_ambiguous_ligatures());
+}
+
+/// **(1) The short memory: the strokes that typed the selected word are what is converted** —
+/// case 9b of 187 (`be` typed in Arabic, selected by `Ctrl+Shift+Left`, came back `ghe`), and its
+/// mirror: what was typed `G`, `H` stays `gh`, whatever any statistics would say.
+#[test]
+fn a_word_just_typed_is_converted_by_the_strokes_that_typed_it() {
+    let be = arabic_plan(us_for_ligatures(), typed_in_arabic("be"));
+    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &be), "be", "case 9b");
+
+    let ghe = arabic_plan(us_for_ligatures(), typed_in_arabic("ghe"));
+    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &ghe), "ghe");
+
+    let light = arabic_plan(us_for_ligatures(), typed_in_arabic("light"));
+    assert_eq!(
+        selected("\u{0645}\u{0647}\u{0644}\u{0627}\u{0641}", &light),
+        "light"
+    );
+
+    // Only the run that made the selected text: `لا` of `be` is `b`.
+    assert_eq!(selected("\u{0644}\u{0627}", &be), "b");
+}
+
+/// **(3) No memory and no table for the language of the target: the division by single keys**,
+/// as before Э105 — `لاث` into a layout of a language this program has no statistics of is the
+/// keys `G`, `H`, `E`.
+#[test]
+fn without_the_memory_or_a_table_the_word_is_divided_by_single_keys() {
+    let russian = plain(RUSSIAN_E105, ['и', 'у', 'п', 'р', 'ш', 'д', 'е']);
+    let plan = arabic_plan(russian, Vec::new());
+
+    assert_eq!(selected("\u{0644}\u{0627}\u{062B}", &plan), "пру");
+}
+
+/// **One division: taken** — a ligature whose characters are not all on keys of their own is
+/// the one way the text was typed, wherever it stands in the word.
+#[test]
+fn a_ligature_that_is_the_only_division_is_taken() {
+    let mut builder = LayoutMapBuilder::new(ARABIC_101);
+    // `B` is `ل` + `ئ`, and `ئ` has no key of its own; `G` is `ل`.
+    builder.set(
+        0x30,
+        false,
+        Mods::NONE,
+        KeyMapping::from_to_unicode(2, &[0x0644, 0x0626]),
+    );
+    builder.set(0x22, false, Mods::NONE, KeyMapping::from_char('\u{0644}'));
+    builder.set(0x12, false, Mods::NONE, KeyMapping::from_char('\u{062B}'));
+    let only = builder.finish();
+    assert!(!only.has_ambiguous_ligatures());
+
+    let ids = [ARABIC_101, US_E105];
+    let plan = Plan::new(
+        vec![only, us_for_ligatures()],
+        Cycle::from_layouts(&ids).expect("a cycle"),
+        ARABIC_101,
+        Duration::from_millis(300),
+        Duration::from_millis(200),
+        0,
+    );
+
+    assert_eq!(selected("\u{062B}\u{0644}\u{0626}", &plan), "eb");
+}
+
+/// **The memory is kept for layouts with an ambiguous ligature only** — the negative control of
+/// решение 196.1 at the selection path: the pair of the stand (FR-25) has none, and its plans
+/// carry no memory the walk could take.
+#[test]
+fn the_pair_ru_en_has_no_ligature_and_no_memory_to_take() {
+    for id in [convert::FALLBACK_US, convert::FALLBACK_RUSSIAN] {
+        let map = convert::fallback_map(id).expect("the hardwired map of FR-25");
+        assert!(!map.has_ambiguous_ligatures(), "{id:?}");
+        assert!(map.ligature_keys().is_empty(), "{id:?}");
+    }
+
+    assert_eq!(step_five("ghbdtn", convert::FALLBACK_US), "привет");
 }

@@ -1657,6 +1657,13 @@ pub fn hotkey_yields() -> bool {
 pub fn set_active(active: bool) {
     let was_active = ACTIVE.swap(active, Ordering::Relaxed);
 
+    // ⭐ Решение 196.1 (stage Э105): the pause of FR-90 ends the short memory of the typing. The
+    // `true → false` edge only, for the reason above; the wipe zeroes the ring and the memory on
+    // the input thread (`buffer::reset`), and a refused post is a debt `watchdog` replays.
+    if !active && was_active {
+        crate::watchdog::request_wipe();
+    }
+
     if active && !was_active {
         // Task T-37-1: the answer is dropped, for the reason the last sentence above gives and one
         // more — a queue that refuses the post belongs to an input thread that has stopped taking

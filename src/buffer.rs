@@ -1534,6 +1534,124 @@ pub struct Recorder {
     /// value is set is one multiplication instead of one on every check. The conversion cannot
     /// overflow — [`MAX_IDLE_TIMEOUT_S`] is a day, which is 86 400 000 milliseconds.
     idle_timeout_ms: u32,
+    /// The short memory of the typing — решение 196.1; see [`Recent`].
+    recent: Recent,
+}
+
+/// How many strokes the short memory of the typing keeps — a few words (решение 196.1).
+pub const RECENT_STROKES: usize = 64;
+
+/// How long the short memory lives without a stroke — «≈ минуты без набора» (решение 196.1).
+pub const RECENT_LIFE_MS: u32 = 60_000;
+
+/// **The short memory of the typing** — решение 196.1, stage Э105, and the one exception to SEC-02
+/// this program has.
+///
+/// Text selected in Arabic 101 does not tell which keys typed it: `لا` is the key `B`, and it is
+/// `G` then `H` (посылка П7), so the selection path, which has only text, cannot know whether
+/// `لاث` was `be` or `ghe`. The typing path knows — it holds the strokes (FR-04) — but the buffer
+/// is gone by then: the arrows, `Ctrl+Shift+Left` and the click that select the word are all
+/// flushes of FR-10, and SEC-02 zeroes the ring on each. This keeps the strokes of the last few
+/// words **apart from the ring** for the selection path to find: selected text that some run of
+/// these strokes produced exactly is converted by those strokes.
+///
+/// # What it holds, and for how long — the whole of the exception
+///
+/// * **Only strokes typed in a layout with an ambiguous ligature**
+///   ([`crate::layouts::LayoutMap::has_ambiguous_ligatures`], decided from the cache, never a list
+///   by hand). Russian, English and every other layout put nothing here: their typing is reset
+///   by SEC-02 as it always was (the owner's word: «только для тех языков где она действительно
+///   необходима»).
+/// * **At most [`RECENT_STROKES`]**, the oldest dropped first; a stroke of another layout leaves a
+///   break, so no run joins across it.
+/// * **Zeroed** ([`Recent::clear`], the volatile zeroing of [`zero_slice`]) when the window or the
+///   field changes, the session is locked or the buffer parked (FR-70), the program is paused
+///   (FR-90), and after [`RECENT_LIFE_MS`] without a stroke. A click of the mouse, the arrows and
+///   the command keys do **not** zero it — they are how a word is selected.
+/// * **Never on disk and never in a dump** (SEC-01): it has no `Debug`, nothing journals it, and
+///   no dump reads it.
+///
+/// Fed from the hook callback with one array write per stroke (NFR-01 to NFR-05: no allocation, no
+/// lock, no I/O, no Win32 call); read on the input thread when a press builds the plan of the
+/// selection path.
+struct Recent {
+    strokes: [Stroke; RECENT_STROKES],
+    len: usize,
+    last: Option<u32>,
+}
+
+impl Default for Recent {
+    fn default() -> Self {
+        Self {
+            strokes: [Stroke::ZEROED; RECENT_STROKES],
+            len: 0,
+            last: None,
+        }
+    }
+}
+
+impl Recent {
+    /// Keeps `stroke`, typed at `time` in a layout with an ambiguous ligature.
+    fn push(&mut self, stroke: Stroke, time: u32) {
+        if self.len == RECENT_STROKES {
+            self.strokes.copy_within(1.., 0);
+            self.len -= 1;
+        }
+
+        self.strokes[self.len] = stroke;
+        self.len += 1;
+        self.last = Some(time);
+    }
+
+    /// A stroke of another layout: a break, so that no run of the memory joins across it.
+    fn interrupt(&mut self) {
+        if self.len > 0 && self.strokes[self.len - 1].hkl() != LayoutId::default() {
+            self.push(Stroke::ZEROED, self.last.unwrap_or(0));
+        }
+    }
+
+    /// Zeroes every slot, the free ones included — SEC-02, by the volatile write
+    /// [`Ring::zero_slot`] uses and for its reason: a plain store into memory about to be reused
+    /// or dropped is a dead store the compiler may delete.
+    fn clear(&mut self) {
+        for slot in &mut self.strokes {
+            let slot: *mut Stroke = slot;
+
+            // SAFETY: `slot` comes from a mutable borrow of an element of `self.strokes` taken one
+            // line above — non-null, aligned, in bounds, valid for one write of a `Stroke`, and
+            // read by nobody else while `self` is borrowed exclusively. `Stroke::ZEROED` is a
+            // value of the type.
+            unsafe { ptr::write_volatile(slot, Stroke::ZEROED) };
+        }
+
+        compiler_fence(Ordering::SeqCst);
+        self.len = 0;
+        self.last = None;
+    }
+
+    /// Zeroes the memory when its minute without a stroke has passed at `now_ms`.
+    fn expire(&mut self, now_ms: u32) {
+        if let Some(last) = self.last
+            && !is_newer_than(last.wrapping_add(RECENT_LIFE_MS), now_ms)
+        {
+            self.clear();
+        }
+    }
+
+    /// The live strokes as keystrokes of the conversion, oldest first.
+    fn keystrokes(&self) -> Vec<Keystroke> {
+        self.strokes[..self.len]
+            .iter()
+            .map(|stroke| stroke.keystroke())
+            .collect()
+    }
+}
+
+impl Drop for Recent {
+    /// SEC-02 at the end of the recorder's life, as [`Ring`] does.
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 
 impl Recorder {
@@ -1561,7 +1679,30 @@ impl Recorder {
             // FR-15, task T-52-4. A recorder built without a configuration behaves as section 7
             // describes the program, which is what every other default in this constructor does.
             idle_timeout_ms: settings::Buffer::default().idle_timeout_s * MS_PER_SECOND,
+            recent: Recent::default(),
         }
+    }
+
+    /// **The strokes of the short memory, oldest first, if it is still alive at `now_ms`** —
+    /// решение 196.1, for the selection path (`selection::plan_for_press`). A memory past its
+    /// minute without typing is zeroed here and answers nothing. The copy is the caller's to
+    /// zero (SEC-01, SEC-02); every stroke of it was typed in a layout with an ambiguous ligature,
+    /// and a zeroed stroke in it is a break between two runs.
+    pub fn recent_keystrokes(&mut self, now_ms: u32) -> Vec<Keystroke> {
+        self.recent.expire(now_ms);
+        self.recent.keystrokes()
+    }
+
+    /// Zeroes the short memory — решение 196.1: the window or the field changed, the session was
+    /// locked, the buffer was parked, the program was paused. The FR-10 flushes of the ring do
+    /// **not** come here.
+    pub fn forget_recent(&mut self) {
+        self.recent.clear();
+    }
+
+    /// How many strokes the short memory holds — for `tests\buffer.rs`; never their content.
+    pub fn recent_len(&self) -> usize {
+        self.recent.len
     }
 
     /// Gives this recorder a way to check its belief about the modifiers against the system —
@@ -2321,6 +2462,18 @@ impl Recorder {
 
         let stroke = Stroke::new(key.vk, key.scan, mods, self.active, key.time, produced);
 
+        // ⭐ **Решение 196.1 — the short memory, for a layout with an ambiguous ligature only.**
+        // One boolean read and one array write (NFR-01, NFR-03); a stroke of any other layout
+        // leaves a break and keeps nothing. See [`Recent`].
+        if self
+            .active_map()
+            .is_some_and(crate::layouts::LayoutMap::has_ambiguous_ligatures)
+        {
+            self.recent.push(stroke, key.time);
+        } else {
+            self.recent.interrupt();
+        }
+
         // **FR-14** — task Т-48-2. The moment of the edit, beside the ring. One store of an
         // `Option<u32>` on the path of a key that writes, no allocation (NFR-03), no lock
         // (NFR-04), no I/O (NFR-05); see [`Recorder::last_edit`] for why the ring alone could
@@ -2476,6 +2629,10 @@ impl Recorder {
     /// that already has a thirty-second heartbeat to ride on would be a second thing to keep
     /// alive.
     pub fn flush_if_idle(&mut self, now_ms: u32) -> bool {
+        // Решение 196.1: the short memory has its own minute, whatever FR-15 says of the ring —
+        // and the tick of FR-80 is what zeroes it in time even when no press asks for it.
+        self.recent.expire(now_ms);
+
         if self.idle_timeout_ms == 0 || self.ring.len() == 0 {
             return false;
         }
@@ -3047,8 +3204,21 @@ pub fn set_caps_lock(probe: CapsProbe) -> bool {
 /// Flushes and zeroes the buffer of the calling thread — FR-10, SEC-02.
 ///
 /// The public flush the other sources of the FR-10 table attach to; see [`Recorder::reset`].
+/// ⭐ Its callers are the wipe of rows 8 and 9 (the session locked, `WM_APP_WIPE`), the parking
+/// of FR-70 and the pause of FR-90 — so it zeroes the short memory of решение 196.1 as well
+/// ([`Recorder::forget_recent`]); the ring's own flushes of FR-10 do not.
 pub fn reset() -> bool {
-    with(Recorder::reset).is_some()
+    with(|recorder| {
+        recorder.reset();
+        recorder.forget_recent();
+    })
+    .is_some()
+}
+
+/// Zeroes the short memory of the calling thread's buffer — решение 196.1: the window or the
+/// field changed (`watchdog::apply_flush` on `WM_APP_FLUSH`). See [`Recorder::forget_recent`].
+pub fn forget_recent() -> bool {
+    with(Recorder::forget_recent).is_some()
 }
 
 /// Empties the buffer of the calling thread if it has stood untouched for `idle_timeout_s` —

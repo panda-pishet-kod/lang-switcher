@@ -2974,6 +2974,10 @@ enum Keys {
     /// A dead key and a key after it composed it — решение 195.1 (stage Э105): `ê` of French is
     /// the dead `^` and `e`, and goes into US as `[e`, the two keys it was typed with.
     Composed(KeyPress, KeyPress),
+    /// A ligature key typed this character **and the ones after it** — `usize` characters in all
+    /// (решение 196.1: the word divided by the outputs of the keys of the source). Taken only for
+    /// a character no key of its own makes, so it is the one division there is.
+    Ligature(KeyPress, usize),
     /// No key of `source` makes it; it is carried over as it stands (FR-23 read backwards).
     None,
 }
@@ -2986,9 +2990,50 @@ enum Keys {
 /// ⚠ **The one place the keys are picked**, as [`key_between`] is for one key: [`recode_into`]
 /// writes by it and [`units_bound`] bounds by it; [`recoded_len`] counts through [`recode_into`]
 /// itself (`tests\selection.rs`).
-fn keys_between(source: &LayoutMap, before: Option<char>, ch: char, after: Option<char>) -> Keys {
+fn keys_between(
+    source: &LayoutMap,
+    before: Option<char>,
+    ch: char,
+    after: Option<char>,
+    rest: &str,
+    ligatures_first: bool,
+) -> Keys {
+    // Решение 196.1: a ligature key that makes this character with the ones after it (`rest`
+    // starts with `ch`) — the longest such key. Asked first in the walk that divides the word by
+    // ligatures first, and after the key of the one character in the walk by single keys.
+    let ligature = || {
+        source
+            .ligature_keys()
+            .iter()
+            .filter_map(|(key, mapping)| {
+                let mut made = char::decode_utf16(mapping.units().iter().copied());
+                let mut text = rest.chars();
+                let mut chars = 0usize;
+
+                loop {
+                    match made.next() {
+                        None => return (chars > 1).then_some(Keys::Ligature(*key, chars)),
+                        Some(Ok(wanted)) if text.next() == Some(wanted) => chars += 1,
+                        Some(_) => return None,
+                    }
+                }
+            })
+            .max_by_key(|keys| match keys {
+                Keys::Ligature(_, chars) => *chars,
+                _ => 0,
+            })
+    };
+
+    if ligatures_first && let Some(keys) = ligature() {
+        return keys;
+    }
+
     if let Some(key) = key_between(source, before, ch, after) {
         return Keys::One(key);
+    }
+
+    if let Some(keys) = ligature() {
+        return keys;
     }
 
     let composition = u16::try_from(u32::from(ch))
@@ -3058,7 +3103,7 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
     // `MAX_UNITS` code units — a ligature grew this vector twice, leaving the text behind each time.
     let mut units: Vec<u16> = Vec::with_capacity(recoded_len(text, source, target));
 
-    let (mapped, carried) = recode_into(text, source, target, &mut |piece| {
+    let walked = recode_into(text, source, target, false, &mut |piece| {
         units.extend_from_slice(piece)
     });
 
@@ -3071,24 +3116,43 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
     Recoded {
         text: recoded,
         target: target.layout(),
-        mapped,
-        carried,
+        mapped: walked.mapped,
+        carried: walked.carried,
     }
 }
 
-/// Appends `text` recoded from `source` into `target` onto `units`, and answers the two counts.
+/// What one walk of [`recode_into`] came to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Walked {
+    /// Characters converted by keys of the source.
+    mapped: usize,
+    /// Characters no key of the source makes, carried over as they stand.
+    carried: usize,
+    /// Ligature keys the walk divided the text by — решение 196.1.
+    ligatures: usize,
+}
+
+/// Appends `text` recoded from `source` into `target` onto `units`, and answers the counts.
 ///
 /// The two lookups of [`recode`] and nothing else, in a shape both [`recode`] and
 /// [`recode_words`] can call: the first converts a whole selection in one direction, the second
 /// calls this once per word with a direction of that word's own. Task **Т-48-3**.
+///
+/// ⭐ `ligatures_first` — решение 196.1: the text is divided by the outputs of the keys of the
+/// source, and where a ligature key and single keys both make the same characters (`لا` is `B`,
+/// and `G` then `H`) the walk takes the ligature first or the single keys first. The walk by
+/// single keys is the answer of decision 196.1 (3) and the one every layout without ligature keys
+/// gets; [`recode_words`] decides when the other one is the division.
 fn recode_into(
     text: &str,
     source: &LayoutMap,
     target: &LayoutMap,
+    ligatures_first: bool,
     emit: &mut impl FnMut(&[u16]),
-) -> (usize, usize) {
+) -> Walked {
     let mut mapped = 0usize;
     let mut carried = 0usize;
+    let mut ligatures = 0usize;
 
     // ⭐ Решение 195.1 (stage Э105): a dead key of the target composes with the key after it, as
     // Windows does — the one [`Composer`] the typing path renders by.
@@ -3104,8 +3168,16 @@ fn recode_into(
         );
     };
 
-    for (before, ch, after) in with_neighbours(text) {
-        match keys_between(source, before, ch, after) {
+    // The characters a ligature key of the source made together with the one before them.
+    let mut covered = 0usize;
+
+    for ((index, _), (before, ch, after)) in text.char_indices().zip(with_neighbours(text)) {
+        if covered > 0 {
+            covered -= 1;
+            continue;
+        }
+
+        match keys_between(source, before, ch, after, &text[index..], ligatures_first) {
             Keys::One(key) => {
                 push(key, &mut composer, emit);
                 mapped += 1;
@@ -3114,6 +3186,12 @@ fn recode_into(
                 push(dead, &mut composer, emit);
                 push(base, &mut composer, emit);
                 mapped += 1;
+            }
+            Keys::Ligature(key, chars) => {
+                push(key, &mut composer, emit);
+                mapped += chars;
+                ligatures += 1;
+                covered = chars - 1;
             }
             Keys::None => {
                 composer.finish(emit);
@@ -3126,7 +3204,11 @@ fn recode_into(
 
     composer.finish(emit);
 
-    (mapped, carried)
+    Walked {
+        mapped,
+        carried,
+        ligatures,
+    }
 }
 
 /// The number of code units [`recode`] writes for `text` — **the walk of [`recode_into`] itself**,
@@ -3136,8 +3218,58 @@ fn recode_into(
 /// writing, being the same walk.
 fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
     let mut needed = 0usize;
-    let _ = recode_into(text, source, target, &mut |units| needed += units.len());
+    let _ = recode_into(text, source, target, false, &mut |units| {
+        needed += units.len();
+    });
     needed
+}
+
+/// **Whether `word` of `source` is divided by its ligature keys first** — решение 196.1, for a
+/// word the short memory did not have.
+///
+/// The two divisions are walked without writing: by single keys (`لا` as `G`, `H`) and by
+/// ligatures first (`لا` as `B`). **One division** — they agree, or only one of them makes every
+/// character — and it is taken. **Two** — both make every character and the second used more
+/// ligature keys — and the reading is the statistics' of the language of `target`
+/// ([`crate::letter_stats`]): the more probable of the two texts. No table for that language —
+/// the division by single keys, as before Э105 (196.1 (3)). A layout without ligature keys never
+/// gets here with a question: single keys are its only division.
+fn division_by_ligatures(word: &str, source: &LayoutMap, target: &LayoutMap) -> bool {
+    if source.ligature_keys().is_empty() {
+        return false;
+    }
+
+    let singles = recode_into(word, source, target, false, &mut |_| {});
+    let ligatures = recode_into(word, source, target, true, &mut |_| {});
+
+    if ligatures.ligatures == singles.ligatures {
+        return false;
+    }
+
+    match (singles.carried == 0, ligatures.carried == 0) {
+        (true, true) => crate::letter_stats::for_layout(target.layout())
+            .is_some_and(|table| prefers_the_ligatures(word, source, target, &table)),
+        (false, true) => true,
+        _ => ligatures.carried < singles.carried,
+    }
+}
+
+/// Whether the statistics `table` read the division by ligatures as the more probable text.
+fn prefers_the_ligatures(
+    word: &str,
+    source: &LayoutMap,
+    target: &LayoutMap,
+    table: &crate::letter_stats::Trigrams,
+) -> bool {
+    let score = |ligatures_first: bool| {
+        let mut reading = table.reading();
+        let _ = recode_into(word, source, target, ligatures_first, &mut |units| {
+            reading.feed(units);
+        });
+        reading.cost()
+    };
+
+    score(true) < score(false)
 }
 
 /// The most code units [`recode_words`] can write for `text` under the layouts of a plan — **task
@@ -3161,33 +3293,51 @@ fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
 /// refusal it makes. A counting pass that decided every word a second time would count every
 /// refused word twice. This bound decides nothing and counts nothing.
 fn units_bound(text: &str, maps: &[LayoutMap]) -> usize {
-    with_neighbours(text)
-        .map(|(before, ch, after)| {
+    text.char_indices()
+        .zip(with_neighbours(text))
+        .map(|((index, _), (before, ch, after))| {
             maps.iter()
                 .map(|source| {
-                    let keys = match keys_between(source, before, ch, after) {
-                        Keys::One(key) => [Some(key), None],
+                    let keys = match keys_between(source, before, ch, after, &text[index..], false)
+                    {
+                        Keys::One(key) | Keys::Ligature(key, _) => [Some(key), None],
                         Keys::Composed(dead, base) => [Some(dead), Some(base)],
                         Keys::None => [None, None],
                     };
 
-                    // Each key at the most any target makes of it. A dead key of a target that is
-                    // composed later moves its one unit to the character after it, and a
-                    // composition makes fewer units than its two keys: the sum stays a bound.
-                    keys.iter()
-                        .flatten()
-                        .map(|key| {
-                            let stroke =
-                                Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+                    // ⭐ Решение 196.1: a word of a layout with ligature keys may be converted by
+                    // the strokes of the short memory instead — at most two strokes per character
+                    // (each put at least one code unit on the screen), each at most `MAX_UNITS`.
+                    let remembered = if source.ligature_keys().is_empty() {
+                        0
+                    } else {
+                        2 * crate::layouts::MAX_UNITS
+                    };
 
-                            maps.iter()
-                                .map(|target| {
-                                    crate::convert::convert_stroke(stroke, target).units().len()
-                                })
-                                .max()
-                                .unwrap_or(0)
-                        })
-                        .sum::<usize>()
+                    // Each key at the most any target makes of it. A dead key of a target that is
+                    // composed later moves its one unit to the character after it, a composition
+                    // makes fewer units than its two keys, and a ligature key is counted on its
+                    // first character while the others count their own: the sum stays a bound.
+                    remembered.max(
+                        keys.iter()
+                            .flatten()
+                            .map(|key| {
+                                let stroke = Keystroke::recorded_in(
+                                    source,
+                                    key.scan,
+                                    key.extended,
+                                    key.mods,
+                                );
+
+                                maps.iter()
+                                    .map(|target| {
+                                        crate::convert::convert_stroke(stroke, target).units().len()
+                                    })
+                                    .max()
+                                    .unwrap_or(0)
+                            })
+                            .sum::<usize>(),
+                    )
                 })
                 .fold(ch.len_utf16(), usize::max)
         })
@@ -3284,14 +3434,29 @@ fn recode_words(text: &str, plan: &Plan, fallback: &LayoutMap, target: &LayoutMa
                 .and_then(|index| plan.maps.get(index));
 
             match source.and_then(|source| target_for(source, plan)) {
+                // ⭐ Решение 196.1 (1): the word was just typed — the short memory has the strokes
+                // that put exactly it on the screen, and they are what is converted, whatever the
+                // text alone would allow (`لاث` typed as `B`, `E` is `be`, not `ghe`). The memory
+                // holds strokes of layouts with an ambiguous ligature only, so for any other
+                // source this finds nothing and the walk below is the whole of it.
+                Some((source, word_target))
+                    if let Some(run) =
+                        crate::convert::remembered_run(word, source.layout(), &plan.recent) =>
+                {
+                    crate::convert::render_strokes(run, word_target, |piece| {
+                        units.extend_from_slice(piece);
+                    });
+                    mapped += word.chars().count();
+                }
                 Some((source, word_target)) => {
-                    let (word_mapped, word_carried) =
-                        recode_into(word, source, word_target, &mut |piece| {
+                    let ligatures_first = division_by_ligatures(word, source, word_target);
+                    let walked =
+                        recode_into(word, source, word_target, ligatures_first, &mut |piece| {
                             units.extend_from_slice(piece);
                         });
 
-                    mapped += word_mapped;
-                    carried += word_carried;
+                    mapped += walked.mapped;
+                    carried += walked.carried;
                 }
                 // Answer 3: no source, or a source the cycle has no target for. The word is the
                 // user's text and is handed back as it stands rather than dropped.
@@ -3367,6 +3532,18 @@ pub struct Plan {
     restore_delay: Duration,
     /// FR-44, so that the two chords are paced the way every other injection of this program is.
     delay_ms: u32,
+    /// ⭐ **The short memory of the typing**, as the press found it — решение 196.1: the strokes
+    /// of the last words typed in a layout with an ambiguous ligature (only those; empty for
+    /// Russian and English). A copy of the user's typing made by
+    /// `buffer::Recorder::recent_keystrokes`, zeroed by the `Drop` of this plan (SEC-01, SEC-02).
+    recent: Vec<Keystroke>,
+}
+
+impl Drop for Plan {
+    /// SEC-02: the copy of the short memory goes back to the allocator as zeroes.
+    fn drop(&mut self) {
+        crate::buffer::zero_slice(&mut self.recent);
+    }
 }
 
 impl Plan {
@@ -3386,7 +3563,17 @@ impl Plan {
             timeout,
             restore_delay,
             delay_ms,
+            recent: Vec::new(),
         }
+    }
+
+    /// The plan with `recent` as the short memory of the typing — решение 196.1. Public for
+    /// `tests\selection.rs`, which states the memory a test means.
+    #[must_use]
+    pub fn with_recent(mut self, recent: Vec<Keystroke>) -> Self {
+        crate::buffer::zero_slice(&mut self.recent);
+        self.recent = recent;
+        self
     }
 }
 
@@ -3480,6 +3667,11 @@ pub(crate) fn plan_for_press() -> Option<Plan> {
             maps.push(cache.get(layout)?.clone());
         }
 
+        // Решение 196.1: the short memory as of this press. The tick of the message being handled
+        // is the clock its minute is counted by — the choice `watchdog::message_tick` makes.
+        // SAFETY: takes no arguments, writes no memory of ours and cannot fail.
+        let now = (unsafe { windows::Win32::UI::WindowsAndMessaging::GetMessageTime() }) as u32;
+
         Some(Plan {
             maps,
             cycle,
@@ -3487,6 +3679,7 @@ pub(crate) fn plan_for_press() -> Option<Plan> {
             timeout: published_timeout(),
             restore_delay: published_restore_delay(),
             delay_ms: crate::inject::inter_event_delay_ms(),
+            recent: recorder.recent_keystrokes(now),
         })
     })
     .flatten()

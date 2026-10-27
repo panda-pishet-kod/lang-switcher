@@ -1474,6 +1474,14 @@ pub fn apply_flush(message: u32, lparam: LPARAM) -> Option<ResetOutcome> {
     }
 
     let event_time = flush_time(message, lparam)?;
+
+    // ⭐ Решение 196.1: the window or the field changed — the short memory of the typing goes
+    // with it. A click of the mouse (`WM_INPUT`) does not take it: the click is how a word is
+    // selected, and the memory exists for exactly that selection.
+    if message == WM_APP_FLUSH {
+        let _ = crate::buffer::forget_recent();
+    }
+
     let outcome = crate::buffer::reset_up_to(event_time)?;
 
     note_flush_outcome(message, outcome);
