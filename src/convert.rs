@@ -215,33 +215,97 @@ impl std::error::Error for ConvertError {}
 
 /// What one stroke becomes in `target` — FR-22, FR-23, FR-24.
 ///
-/// The whole engine, in four branches:
+/// The whole engine, in three branches:
 ///
-/// 1. a dead stroke is carried through unchanged (FR-24). Its own characters are the answer,
-///    and the target layout is not even consulted: a dead key is a half-finished
-///    composition, and re-deciding half a composition in another layout is not a
-///    translation of it;
-/// 2. otherwise the target layout is asked what the same physical key gives (FR-22);
-/// 3. if it gives nothing, the stroke keeps its own characters and conversion goes on
+/// 1. the target layout is asked what the same physical key gives (FR-22) — **a dead stroke of
+///    the source included** (решение 195.1 (а), stage Э105): `^` + `e` typed in French as `ê`
+///    is the key `[` and the key `e` in US, `[e`. Until Э105 a dead stroke was carried over as
+///    it was, and `ê` came back as `^e`;
+/// 2. if it gives nothing, the stroke keeps its own characters and conversion goes on
 ///    (FR-23). Absence is an ordinary answer here, not a failure and not a reason to drop a
 ///    character;
-/// 4. if the same key is a *dead* key in the target layout, the stroke also keeps its own
-///    characters. Emitting the dead character as if it were a letter would start a
-///    composition in the user's application instead of inserting text, so as far as this
-///    stroke is concerned the target layout offers no character — case 3 again. Module
-///    `layouts` keeps dead keys out of its reverse index for the same reason.
+/// 3. if the same key is a **dead** key in the target layout, the answer is that dead mapping,
+///    and the stroke after it decides what goes on the screen — [`Composer`], решение 195.1 (б):
+///    `[etre` typed in US is `être` in French. Until Э105 the stroke kept its own character
+///    there, and `[etre` stayed `[etre`. Module `layouts` keeps dead keys out of its reverse
+///    index still: a dead key is never the answer to «which key typed this character».
 ///
 /// Returns a [`KeyMapping`] by value: ten bytes of `Copy` data, no allocation, no borrow of
-/// either argument.
+/// either argument. ⚠ A dead answer is half of what goes on the screen — text is made out of
+/// these by [`render_strokes`] and its [`Composer`], never by taking the units of one.
 pub fn convert_stroke(stroke: Keystroke, target: &LayoutMap) -> KeyMapping {
-    if stroke.produced.is_dead() {
-        return stroke.produced;
-    }
     let candidate = target.lookup(stroke.scan, stroke.extended, stroke.mods);
-    if candidate.is_empty() || candidate.is_dead() {
+    if candidate.is_empty() {
         return stroke.produced;
     }
     candidate
+}
+
+/// **A dead key of the target waiting for the stroke after it** — решение 195.1 (б), stage
+/// Э105. Windows composes a dead key with the next key by the layout's table (`^` + `e` = `ê`),
+/// and puts the accent and the next character side by side when the table has nothing for the
+/// pair (`^t`); `KEYEVENTF_UNICODE` composes nothing, so this program does it itself, by the
+/// table of the target ([`LayoutMap::compose`]).
+///
+/// Fed one converted mapping at a time ([`Composer::push`]) and closed by [`Composer::finish`]:
+/// a dead key at the very end goes out as its accent, the visible way. Holds at most the one
+/// accent, on the stack — no copy of the text (SEC-01).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Composer {
+    pending: Option<u16>,
+}
+
+impl Composer {
+    /// Hands `mapping` — a stroke converted into `target` — on to `emit`, composing it with a
+    /// dead key of `target` waiting before it.
+    pub fn push(&mut self, mapping: KeyMapping, target: &LayoutMap, emit: &mut impl FnMut(&[u16])) {
+        let units = mapping.units();
+
+        if let Some(accent) = self.pending.take() {
+            if let [base] = units
+                && let Some(composed) = target.compose(accent, *base)
+            {
+                emit(&[composed]);
+                return;
+            }
+
+            // No composition: as Windows does, the accent and what came after it, side by side —
+            // a second dead key included.
+            emit(&[accent]);
+            emit(units);
+            return;
+        }
+
+        if mapping.is_dead()
+            && let [accent] = units
+        {
+            self.pending = Some(*accent);
+            return;
+        }
+
+        emit(units);
+    }
+
+    /// The end of the run: a dead key still waiting goes out as its accent.
+    pub fn finish(&mut self, emit: &mut impl FnMut(&[u16])) {
+        if let Some(accent) = self.pending.take() {
+            emit(&[accent]);
+        }
+    }
+}
+
+/// **Renders `strokes` into `target`, piece by piece, into `emit`** — [`convert_stroke`] for each
+/// stroke and the [`Composer`] over the run (решение 195.1). The one walk [`convert_strokes`],
+/// [`converted_len`] and the count of what a press put on the screen
+/// (`inject::OnScreen::as_injected`) are made of, so that the three cannot disagree.
+pub fn render_strokes(strokes: &[Keystroke], target: &LayoutMap, mut emit: impl FnMut(&[u16])) {
+    let mut composer = Composer::default();
+
+    for &stroke in strokes {
+        composer.push(convert_stroke(stroke, target), target, &mut emit);
+    }
+
+    composer.finish(&mut emit);
 }
 
 /// Renders `strokes` into `target` and writes the result into `out` — FR-22, NFR-03.
@@ -266,17 +330,15 @@ pub fn convert_strokes(
     let mut needed = 0usize;
     let mut written = 0usize;
 
-    for &stroke in strokes {
-        let mapping = convert_stroke(stroke, target);
-        let units = mapping.units();
+    render_strokes(strokes, target, |units| {
         needed += units.len();
-        // `needed` only grows, so this is false for every later stroke once one has
+        // `needed` only grows, so this is false for every later piece once one has
         // overflowed: `written` cannot fall behind and then be used as a start index.
         if needed <= out.len() {
             out[written..needed].copy_from_slice(units);
             written = needed;
         }
-    }
+    });
 
     if needed > out.len() {
         return Err(ConvertError::BufferTooSmall { needed });
@@ -289,10 +351,9 @@ pub fn convert_strokes(
 /// The same walk without the writing, for a caller that wants to size a buffer exactly.
 /// Allocates nothing.
 pub fn converted_len(strokes: &[Keystroke], target: &LayoutMap) -> usize {
-    strokes
-        .iter()
-        .map(|&stroke| convert_stroke(stroke, target).units().len())
-        .sum()
+    let mut needed = 0usize;
+    render_strokes(strokes, target, |units| needed += units.len());
+    needed
 }
 
 /// Buffer length that fits the conversion of `strokes` strokes whatever the target layout.
@@ -761,10 +822,16 @@ mod tests {
         assert!(converted_len(&strokes, &target) <= max_units(strokes.len()));
     }
 
-    // -- section 11.1, position 6, FR-24 --------------------------------------------------
+    // -- section 11.1, position 6, FR-24 — rewritten by решение 195.1 (stage Э105) -------------
 
+    /// ⭐ **Решение 195.1:** until Э105 a dead stroke was carried through unchanged and a key dead
+    /// in the target kept the stroke's own character — case 11 of 187 (`ê` → `^e`) and case 10
+    /// (`[etre` stayed `[etre`). Now (а) the dead stroke is the character of its key in the target,
+    /// and (б) a key dead in the target is its dead mapping, which the [`Composer`] composes with
+    /// the stroke after it — or, as here with no table and nothing after it, puts out as its
+    /// accent. The whole of the composition is `tests\dead_keys.rs`.
     #[test]
-    fn a_dead_stroke_is_carried_through_unchanged() {
+    fn a_dead_stroke_is_converted_as_the_character_of_its_key() {
         let mut source = LayoutMapBuilder::new(LayoutId::from_raw(0xF001_0409));
         source.set(
             SCANS[0],
@@ -782,21 +849,23 @@ mod tests {
         let dead = Keystroke::recorded_in(&source, SCANS[0], MAIN_BLOCK, Mods::NONE);
         assert!(dead.is_dead());
         let converted = convert_stroke(dead, &target);
-        assert_eq!(converted, dead.produced());
-        assert_eq!(converted.kind(), MappingKind::Dead);
-        assert_eq!(converted.units(), [0x0300]);
+        assert_eq!(
+            converted.single_char(),
+            Some('ф'),
+            "(а): the character of its key"
+        );
+        assert_eq!(converted.kind(), MappingKind::Char);
 
-        // The stroke next to it is converted normally: FR-24 is about one stroke, not about
-        // giving up on the sequence.
+        // The stroke next to it is converted normally.
         let strokes = [
             dead,
             Keystroke::recorded_in(&source, SCANS[1], MAIN_BLOCK, Mods::NONE),
         ];
-        assert_eq!(render(&strokes, &target), "\u{0300}ы");
+        assert_eq!(render(&strokes, &target), "фы");
 
-        // The mirror case: an ordinary stroke whose key is a dead key in the target. Emitting
-        // the dead character would start a composition in the user's application, so the
-        // target offers this stroke no character and FR-23 applies.
+        // The mirror case: an ordinary stroke whose key is a dead key in the target. The answer
+        // is that dead mapping (б); alone and with no table it goes out as its accent — text,
+        // since `KEYEVENTF_UNICODE` inserts and composes nothing.
         let mut dead_target = LayoutMapBuilder::new(LayoutId::from_raw(0xF003_0409));
         dead_target.set(
             SCANS[1],
@@ -806,7 +875,11 @@ mod tests {
         );
         let dead_target = dead_target.finish();
         let ordinary = Keystroke::recorded_in(&source, SCANS[1], MAIN_BLOCK, Mods::NONE);
-        assert_eq!(convert_stroke(ordinary, &dead_target), ordinary.produced());
+        assert_eq!(
+            convert_stroke(ordinary, &dead_target).kind(),
+            MappingKind::Dead
+        );
+        assert_eq!(render(&[ordinary], &dead_target), "\u{0301}");
     }
 
     // -- beyond section 11.1, position 7 --------------------------------------------------

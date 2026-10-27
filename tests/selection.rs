@@ -4230,6 +4230,12 @@ fn away_from_two_digits_the_separator_keeps_the_answer_it_had() {
 ///
 /// Read without comment lines. The negative control is the text of `e85` and `e86`: three direct
 /// calls, one in each body. The growth itself is measured in `tests\selection_growth.rs`.
+///
+/// ⭐ **Stage Э105 (решение 195.1) — by name.** A character may now be typed by two keys (`ê` is
+/// the dead `^` and `e`), so the keys are picked by `keys_between`, which asks `key_between` for
+/// the character and, for a composition, for its base; `recode_into` and `units_bound` ask
+/// `keys_between` once each and nothing below it, and `recoded_len` asks none of them — it counts
+/// through `recode_into` itself, the writing walk, and so cannot pick another key.
 #[test]
 fn the_three_walks_of_step_five_pick_the_key_in_one_function() {
     let source = source_of("selection.rs");
@@ -4246,12 +4252,39 @@ fn the_three_walks_of_step_five_pick_the_key_in_one_function() {
             ));
         }
 
-        let shared = code_lines_with(&body, "key_between(").len();
-        if shared != 1 {
+        let single = code_lines_with(&body, " key_between(");
+        if !single.is_empty() {
             failures.push(format!(
-                "`{signature}` asks `key_between` {shared} times, and once is owed"
+                "`{signature}` asks `key_between` itself: {single:?}"
             ));
         }
+
+        let (wanted, owed) = if signature == "fn recoded_len(" {
+            ("recode_into(", "counts through the writing walk")
+        } else {
+            ("keys_between(", "picks the keys in one function")
+        };
+        let shared = code_lines_with(&body, wanted).len();
+        if shared != 1 {
+            failures.push(format!(
+                "`{signature}` asks `{wanted}` {shared} times — it {owed}, once"
+            ));
+        }
+    }
+
+    if product.contains("fn keys_between(") {
+        let body = body_after(product, "fn keys_between(");
+        let singles = code_lines_with(&body, "key_between(source").len();
+        let direct = code_lines_with(&body, "find_key(").len();
+
+        if singles != 2 || direct != 0 {
+            failures.push(format!(
+                "`keys_between` asks `key_between` {singles} times (two are owed: the character and \
+                 the base of a composition) and the reverse index {direct} times (none)"
+            ));
+        }
+    } else {
+        failures.push("there is no `fn keys_between(` in the module".to_owned());
     }
 
     if product.contains("fn key_between(") {

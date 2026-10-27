@@ -172,7 +172,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error as WinError, Free, PCWSTR, Result as WinResult, w};
 
-use crate::convert::Keystroke;
+use crate::convert::{Composer, Keystroke};
 use crate::hook::INJECTED_SIGNATURE;
 use crate::inject::{Dispatched, Modifiers};
 use crate::layouts::{Cycle, KeyPress, LayoutId, LayoutMap, Mods};
@@ -2965,6 +2965,47 @@ fn key_between(
     source.find_key(ch)
 }
 
+/// **The keys of `source` that typed `ch`** — what the walks of step 5 put through the
+/// conversion for one character.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Keys {
+    /// One key typed it — [`key_between`].
+    One(KeyPress),
+    /// A dead key and a key after it composed it — решение 195.1 (stage Э105): `ê` of French is
+    /// the dead `^` and `e`, and goes into US as `[e`, the two keys it was typed with.
+    Composed(KeyPress, KeyPress),
+    /// No key of `source` makes it; it is carried over as it stands (FR-23 read backwards).
+    None,
+}
+
+/// **Which keys of `source` typed `ch`, standing between `before` and `after`** — [`key_between`]
+/// first, and for a character no one key makes, the dead key and the base it composes of by the
+/// layout's own table ([`LayoutMap::decompose`], [`LayoutMap::find_dead_key`]) — решение 195.1,
+/// stage Э105, without any memory of the typing: the table says how Windows composed it.
+///
+/// ⚠ **The one place the keys are picked**, as [`key_between`] is for one key: [`recode_into`]
+/// writes by it and [`units_bound`] bounds by it; [`recoded_len`] counts through [`recode_into`]
+/// itself (`tests\selection.rs`).
+fn keys_between(source: &LayoutMap, before: Option<char>, ch: char, after: Option<char>) -> Keys {
+    if let Some(key) = key_between(source, before, ch, after) {
+        return Keys::One(key);
+    }
+
+    let composition = u16::try_from(u32::from(ch))
+        .ok()
+        .and_then(|unit| source.decompose(unit))
+        .and_then(|(accent, base)| {
+            let dead = source.find_dead_key(accent)?;
+            let base = char::from_u32(u32::from(base))?;
+            Some((dead, key_between(source, None, base, None)?))
+        });
+
+    match composition {
+        Some((dead, base)) => Keys::Composed(dead, base),
+        None => Keys::None,
+    }
+}
+
 /// Every character of `text` with the one before it and the one after it — what [`key_between`]
 /// decides by. Task **T-87-1**.
 ///
@@ -3017,7 +3058,9 @@ pub fn recode(text: &str, source: &LayoutMap, target: &LayoutMap) -> Recoded {
     // `MAX_UNITS` code units — a ligature grew this vector twice, leaving the text behind each time.
     let mut units: Vec<u16> = Vec::with_capacity(recoded_len(text, source, target));
 
-    let (mapped, carried) = recode_into(text, source, target, &mut units);
+    let (mapped, carried) = recode_into(text, source, target, &mut |piece| {
+        units.extend_from_slice(piece)
+    });
 
     let recoded = string_from_units(&units);
 
@@ -3042,44 +3085,59 @@ fn recode_into(
     text: &str,
     source: &LayoutMap,
     target: &LayoutMap,
-    units: &mut Vec<u16>,
+    emit: &mut impl FnMut(&[u16]),
 ) -> (usize, usize) {
     let mut mapped = 0usize;
     let mut carried = 0usize;
 
+    // ⭐ Решение 195.1 (stage Э105): a dead key of the target composes with the key after it, as
+    // Windows does — the one [`Composer`] the typing path renders by.
+    let mut composer = Composer::default();
+    let push = |key: KeyPress, composer: &mut Composer, emit: &mut dyn FnMut(&[u16])| {
+        let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+        composer.push(
+            crate::convert::convert_stroke(stroke, target),
+            target,
+            &mut |units| {
+                emit(units);
+            },
+        );
+    };
+
     for (before, ch, after) in with_neighbours(text) {
-        match key_between(source, before, ch, after) {
-            Some(key) => {
-                let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
-                units.extend_from_slice(crate::convert::convert_stroke(stroke, target).units());
+        match keys_between(source, before, ch, after) {
+            Keys::One(key) => {
+                push(key, &mut composer, emit);
                 mapped += 1;
             }
-            None => {
+            Keys::Composed(dead, base) => {
+                push(dead, &mut composer, emit);
+                push(base, &mut composer, emit);
+                mapped += 1;
+            }
+            Keys::None => {
+                composer.finish(emit);
                 let mut buffer = [0u16; 2];
-                units.extend_from_slice(ch.encode_utf16(&mut buffer));
+                emit(ch.encode_utf16(&mut buffer));
                 carried += 1;
             }
         }
     }
 
+    composer.finish(emit);
+
     (mapped, carried)
 }
 
-/// The number of code units [`recode`] writes for `text` — the walk of [`recode_into`] without the
-/// writing, the question [`crate::convert::converted_len`] answers for strokes. **Task T-38-9B,
-/// finding Н34**: a vector made at this capacity is filled without growing.
+/// The number of code units [`recode`] writes for `text` — **the walk of [`recode_into`] itself**,
+/// with a count in place of the writing, the question [`crate::convert::converted_len`] answers
+/// for strokes. **Task T-38-9B, finding Н34**: a vector made at this capacity is filled without
+/// growing — and since stage Э105 the count cannot pick other keys or compose otherwise than the
+/// writing, being the same walk.
 fn recoded_len(text: &str, source: &LayoutMap, target: &LayoutMap) -> usize {
-    with_neighbours(text)
-        .map(
-            |(before, ch, after)| match key_between(source, before, ch, after) {
-                Some(key) => {
-                    let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
-                    crate::convert::convert_stroke(stroke, target).units().len()
-                }
-                None => ch.len_utf16(),
-            },
-        )
-        .sum()
+    let mut needed = 0usize;
+    let _ = recode_into(text, source, target, &mut |units| needed += units.len());
+    needed
 }
 
 /// The most code units [`recode_words`] can write for `text` under the layouts of a plan — **task
@@ -3106,15 +3164,30 @@ fn units_bound(text: &str, maps: &[LayoutMap]) -> usize {
     with_neighbours(text)
         .map(|(before, ch, after)| {
             maps.iter()
-                .filter_map(|source| {
-                    key_between(source, before, ch, after).map(|key| (source, key))
-                })
-                .flat_map(|(source, key)| {
-                    let stroke = Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+                .map(|source| {
+                    let keys = match keys_between(source, before, ch, after) {
+                        Keys::One(key) => [Some(key), None],
+                        Keys::Composed(dead, base) => [Some(dead), Some(base)],
+                        Keys::None => [None, None],
+                    };
 
-                    maps.iter().map(move |target| {
-                        crate::convert::convert_stroke(stroke, target).units().len()
-                    })
+                    // Each key at the most any target makes of it. A dead key of a target that is
+                    // composed later moves its one unit to the character after it, and a
+                    // composition makes fewer units than its two keys: the sum stays a bound.
+                    keys.iter()
+                        .flatten()
+                        .map(|key| {
+                            let stroke =
+                                Keystroke::recorded_in(source, key.scan, key.extended, key.mods);
+
+                            maps.iter()
+                                .map(|target| {
+                                    crate::convert::convert_stroke(stroke, target).units().len()
+                                })
+                                .max()
+                                .unwrap_or(0)
+                        })
+                        .sum::<usize>()
                 })
                 .fold(ch.len_utf16(), usize::max)
         })
@@ -3213,7 +3286,9 @@ fn recode_words(text: &str, plan: &Plan, fallback: &LayoutMap, target: &LayoutMa
             match source.and_then(|source| target_for(source, plan)) {
                 Some((source, word_target)) => {
                     let (word_mapped, word_carried) =
-                        recode_into(word, source, word_target, &mut units);
+                        recode_into(word, source, word_target, &mut |piece| {
+                            units.extend_from_slice(piece);
+                        });
 
                     mapped += word_mapped;
                     carried += word_carried;

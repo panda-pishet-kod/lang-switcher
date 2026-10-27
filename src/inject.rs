@@ -484,20 +484,22 @@ pub fn typed_chars(strokes: &[Keystroke]) -> usize {
 /// From the second press on, what stands on the screen is not what the user typed: it is what
 /// this program injected last time, rendered into `previous`. The two lengths are equal only
 /// while every stroke converts one character to one character, and a dead key breaks that on
-/// the very first press — `convert_stroke` carries a dead stroke over unchanged (FR-24), and
-/// `KEYEVENTF_UNICODE` composes nothing, so the accent that the OS had folded into `é` while
-/// the user typed comes back out as a character of its own.
+/// the very first press: the OS had folded the accent into `é` while the user typed, and the
+/// injection puts on the screen what `previous` gives for each key.
 ///
-/// Measured live on `00020409`: `c a f ' e` typed as `café` is **four** characters, and the
-/// same strokes injected into Russian stand as `сфа'у` — **five**. Same strokes, two different
-/// `N`, which is why this count exists separately from [`typed_chars`] and why a dead stroke is
-/// **1** here and **0** there. Nothing is composed on this side, so every unit that went out is
-/// a character standing on the screen.
+/// Measured live on `00020409` (stage Э20): `c a f ' e` typed as `café` is **four** characters,
+/// and the same strokes injected into Russian stand as five. Same strokes, two different `N`,
+/// which is why this count exists separately from [`typed_chars`].
+///
+/// ⭐ **Counted over the very text the press injected — решение 195.1, stage Э105.** Since Э105
+/// the conversion composes a dead key of the target with the stroke after it, as Windows does
+/// (`[etre` into French is `être`, five strokes and four characters), so the count is taken off
+/// [`convert::render_strokes`], the walk the injected text itself is made by, and not stroke by
+/// stroke.
 fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
-    strokes
-        .iter()
-        .map(|&stroke| chars_in(convert::convert_stroke(stroke, previous).units()))
-        .sum()
+    let mut count = 0usize;
+    convert::render_strokes(strokes, previous, |units| count += chars_in(units));
+    count
 }
 
 /// **The `N` of FR-41 and FR-42 — how much of this run is on the screen right now**, counted the

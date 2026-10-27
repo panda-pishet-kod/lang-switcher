@@ -602,9 +602,67 @@ pub struct LayoutMap {
     filled: u32,
     /// Whether any key gives anything under `AltGr` — решение 194.1, see [`LayoutMap::has_altgr`].
     altgr: bool,
+    /// The compositions of the layout's dead keys, sorted by `(accent, base)` — решение 195.1,
+    /// see [`LayoutMap::compose`]. Empty for a layout without dead keys, and for one whose table
+    /// could not be read and checked (then a dead key composes with nothing).
+    dead: Box<[DeadTransition]>,
+    /// The plainest key of each dead accent of the layout, in the order of [`key_index`] and
+    /// [`Mods::ALL`] — what the reverse index keeps dead keys out of. See
+    /// [`LayoutMap::find_dead_key`].
+    dead_keys: Box<[(u16, KeyPress)]>,
+}
+
+/// **One composition of a dead key** — `DEADTRANS(base, accent, composed, flags)` of the layout's
+/// own table (`KBDTABLES::pDeadKey`): the dead key whose accent is `accent`, then a key giving
+/// `base`, puts `composed` on the screen. Решение 195.1, stage Э105.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DeadTransition {
+    /// The character the dead key reports — `^` for the circumflex key of French.
+    pub accent: u16,
+    /// The character the next key gives — `e`.
+    pub base: u16,
+    /// What Windows puts on the screen for the two — `ê`.
+    pub composed: u16,
 }
 
 impl LayoutMap {
+    /// **What the dead key of `accent` and a key giving `base` compose into** — решение 195.1,
+    /// out of the layout's own table (посылка П3: `^`+`e` = `ê` in French, `´`+`o` = `ó` in
+    /// Spanish, `~`+`a` = `ã` in Portuguese). `None`: Windows composes nothing, and puts the accent
+    /// and the letter side by side (`^t`).
+    pub fn compose(&self, accent: u16, base: u16) -> Option<u16> {
+        self.dead
+            .binary_search_by(|entry| (entry.accent, entry.base).cmp(&(accent, base)))
+            .ok()
+            .map(|index| self.dead[index].composed)
+    }
+
+    /// **The dead key and the base `composed` was typed with** — the backward half of
+    /// [`LayoutMap::compose`], for the selection path (решение 195.1: `ê` → `^` + `e`). The first
+    /// entry of the table, in the order of `(accent, base)`. On the UI thread, never in the hook.
+    pub fn decompose(&self, composed: u16) -> Option<(u16, u16)> {
+        self.dead
+            .iter()
+            .find(|entry| entry.composed == composed)
+            .map(|entry| (entry.accent, entry.base))
+    }
+
+    /// **The plainest key that is the dead key of `accent`** — what [`LayoutMap::find_key`] does
+    /// not answer, because a dead key is kept out of the reverse index (replaying it starts a
+    /// composition). The selection path asks for it only together with the key of the base that
+    /// completes the composition (решение 195.1).
+    pub fn find_dead_key(&self, accent: u16) -> Option<KeyPress> {
+        self.dead_keys
+            .iter()
+            .find(|(dead, _)| *dead == accent)
+            .map(|&(_, key)| key)
+    }
+
+    /// The compositions of the layout, as [`LayoutMap::compose`] reads them.
+    pub fn dead_transitions(&self) -> &[DeadTransition] {
+        &self.dead
+    }
+
     /// **Whether the layout has `AltGr` at all** — whether any key of it gives a character, or a
     /// dead key, with `Ctrl` and the right `Alt` held. Решение 194.1 (stage Э105).
     ///
@@ -697,15 +755,44 @@ pub struct LayoutMapBuilder {
     layout: LayoutId,
     forward: Box<[KeyMapping]>,
     filled: u32,
+    dead: Vec<DeadTransition>,
 }
 
 impl LayoutMapBuilder {
+    /// Records one composition of a dead key — решение 195.1. The live sweep adds the layout's
+    /// own table here ([`dead_transitions_of`]); a test adds the compositions it states.
+    pub fn add_dead_transition(&mut self, accent: char, base: char, composed: char) {
+        let unit = |ch: char| u16::try_from(u32::from(ch)).unwrap_or(0);
+
+        self.dead.push(DeadTransition {
+            accent: unit(accent),
+            base: unit(base),
+            composed: unit(composed),
+        });
+    }
+
+    /// The accents of the dead keys the sweep found — what the table of the layout's file has to
+    /// cover before it is believed ([`dead_transitions_of`]).
+    fn swept_accents(&self) -> Vec<u16> {
+        let mut accents: Vec<u16> = self
+            .forward
+            .iter()
+            .filter(|mapping| mapping.is_dead())
+            .filter_map(|mapping| mapping.units().first().copied())
+            .collect();
+
+        accents.sort_unstable();
+        accents.dedup();
+        accents
+    }
+
     /// An empty builder for `layout`.
     pub fn new(layout: LayoutId) -> Self {
         Self {
             layout,
             forward: vec![KeyMapping::EMPTY; KEY_SLOTS * MOD_COMBINATIONS].into_boxed_slice(),
             filled: 0,
+            dead: Vec::new(),
         }
     }
 
@@ -744,11 +831,26 @@ impl LayoutMapBuilder {
         });
 
         let mut reverse = vec![ReverseSlot::FREE; REVERSE_CAPACITY].into_boxed_slice();
+        let mut dead_keys: Vec<(u16, KeyPress)> = Vec::new();
         // Ascending key index, so the whole plain half is walked before the extended one and
         // the main block wins every reverse slot it shares with the keypad.
         for key in 0..KEY_SLOTS {
             for mods in Mods::ALL {
                 let mapping = self.forward[key * MOD_COMBINATIONS + mods.index()];
+                if mapping.is_dead()
+                    && let Some(&accent) = mapping.units().first()
+                    && !dead_keys.iter().any(|(known, _)| *known == accent)
+                {
+                    // The plainest key of each accent, by the same order as the reverse index.
+                    dead_keys.push((
+                        accent,
+                        KeyPress {
+                            scan: (key & 0xFF) as u16,
+                            extended: key & EXTENDED_BIT != 0,
+                            mods,
+                        },
+                    ));
+                }
                 if mapping.is_empty() || mapping.is_dead() {
                     continue;
                 }
@@ -767,12 +869,20 @@ impl LayoutMapBuilder {
                 );
             }
         }
+        let mut dead = self.dead;
+        dead.sort_unstable();
+        dead.dedup_by(|later, earlier| {
+            (later.accent, later.base) == (earlier.accent, earlier.base)
+        });
+
         LayoutMap {
             layout: self.layout,
             forward: self.forward,
             reverse,
             filled: self.filled,
             altgr,
+            dead: dead.into_boxed_slice(),
+            dead_keys: dead_keys.into_boxed_slice(),
         }
     }
 }
@@ -964,6 +1074,259 @@ fn decode(vk: u32, scan: u16, state: &[u8; 256], layout: LayoutId) -> KeyMapping
     KeyMapping::from_to_unicode(produced, &buffer)
 }
 
+/// The key of the layouts under `HKEY_LOCAL_MACHINE`.
+const KEYBOARD_LAYOUTS: &str = r"SYSTEM\CurrentControlSet\Control\Keyboard Layouts";
+
+/// A `REG_SZ` value of `HKEY_LOCAL_MACHINE\<subkey>`, or `None`.
+fn machine_string(subkey: &str, value: &str) -> Option<String> {
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    use windows::core::PCWSTR;
+
+    let subkey: Vec<u16> = subkey.encode_utf16().chain(Some(0)).collect();
+    let value: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+    let mut buffer = [0u16; 128];
+    let mut bytes = u32::try_from(size_of_val(&buffer)).unwrap_or(0);
+
+    // SAFETY: two NUL-terminated names of this frame; `buffer` is a live local of `bytes` bytes,
+    // and the call writes at most that many and says how many it wrote. A value longer than the
+    // buffer is refused by the call (ERROR_MORE_DATA), examined below (NFR-13).
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+
+    if status.is_err() {
+        return None;
+    }
+
+    let units = usize::try_from(bytes).unwrap_or(0) / 2;
+    let text = &buffer[..units.min(buffer.len())];
+    let end = text
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(text.len());
+
+    String::from_utf16(&text[..end]).ok()
+}
+
+/// **The `KLID` of a loaded layout** — the subkey of [`KEYBOARD_LAYOUTS`] its file is named
+/// under. Решение 195.1, stage Э105 (197.12).
+///
+/// The convention every layout of Windows is loaded by: the high word of the handle is the
+/// layout's own language id (`0x04090409` → `00000409`), or `0xFnnn` for a further layout of a
+/// language, which is the subkey whose `Layout Id` is `nnn` (`0xF0020409` → the subkey with
+/// `Layout Id` = `0002`, `00010409`). Undocumented, and that is why its answer is not believed
+/// on its own: [`dead_transitions_of`] checks the file it leads to against the sweep of FR-20
+/// and takes nothing from a file that does not match. Read-only: no layout is activated, and
+/// nothing of the person's keyboard state is touched.
+fn klid_of(layout: LayoutId) -> Option<String> {
+    use windows::Win32::System::Registry::{
+        HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW,
+    };
+    use windows::core::{PCWSTR, PWSTR};
+
+    let high = (layout.raw() >> 16) & 0xFFFF;
+
+    if high & 0xF000 != 0xF000 {
+        return Some(format!("{high:08X}"));
+    }
+
+    let wanted = high & 0x0FFF;
+    let root: Vec<u16> = KEYBOARD_LAYOUTS.encode_utf16().chain(Some(0)).collect();
+    let mut key = HKEY::default();
+
+    // SAFETY: a NUL-terminated name of this frame and a live local the call fills; the key is
+    // closed below.
+    if unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(root.as_ptr()),
+            None,
+            KEY_READ,
+            &mut key,
+        )
+    }
+    .is_err()
+    {
+        return None;
+    }
+
+    let mut found = None;
+
+    // Two hundred and some layouts on a Windows 11; the bound is a guard, not an expectation.
+    for index in 0..1024u32 {
+        let mut name = [0u16; 16];
+        let mut length = u32::try_from(name.len()).unwrap_or(0);
+
+        // SAFETY: `key` is open; `name` is a live local of `length` units, and the call writes
+        // at most that many and says how many it wrote.
+        let status = unsafe {
+            RegEnumKeyExW(
+                key,
+                index,
+                Some(PWSTR(name.as_mut_ptr())),
+                &mut length,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+
+        if status.is_err() {
+            break;
+        }
+
+        let Ok(klid) = String::from_utf16(&name[..usize::try_from(length).unwrap_or(0)]) else {
+            continue;
+        };
+
+        let id = machine_string(&format!(r"{KEYBOARD_LAYOUTS}\{klid}"), "Layout Id")
+            .and_then(|text| usize::from_str_radix(text.trim(), 16).ok());
+
+        if id == Some(wanted) {
+            found = Some(klid);
+            break;
+        }
+    }
+
+    // SAFETY: closes exactly the key opened above, once.
+    let _ = unsafe { RegCloseKey(key) };
+
+    found
+}
+
+/// **The compositions of the dead keys of `layout`, out of its own file** — решение 195.1,
+/// посылка П3 (197.11), the path chosen in 197.12.
+///
+/// `swept` are the accents of the dead keys the sweep of FR-20 found in the layout. Empty — the
+/// layout has no dead key, and nothing is read at all. Otherwise: the `KLID` ([`klid_of`]), its
+/// `Layout File`, the file loaded **out of System32 only** (`LOAD_LIBRARY_SEARCH_SYSTEM32`; a
+/// name with a path in it is refused), `KbdLayerDescriptor`, and the table `pDeadKey` read until
+/// its zero entry and copied before the file is freed. Without a keyboard state — FR-06 holds:
+/// no `ToUnicodeEx` with state, so no accent is ever left hanging over another application.
+///
+/// **Believed only when it matches the sweep:** every accent the sweep found must be an accent
+/// of the table. A file of another layout — the convention of [`klid_of`] misread — answers
+/// nothing, and the dead keys of the layout then compose with nothing (the accent and the letter
+/// side by side), which is what this program did before Э105, not something new and wrong.
+/// Entries that make a dead key of their own (`DKF_DEAD`, a chained accent) are left out.
+///
+/// Runs where the cache is built — the message path of FR-20 and FR-21, never the hook callback.
+fn dead_transitions_of(layout: LayoutId, swept: &[u16]) -> Vec<DeadTransition> {
+    if swept.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(file) = klid_of(layout)
+        .and_then(|klid| machine_string(&format!(r"{KEYBOARD_LAYOUTS}\{klid}"), "Layout File"))
+    else {
+        return Vec::new();
+    };
+
+    believed_against(read_dead_table(&file), swept)
+}
+
+/// **The table of a layout file, believed only when it covers every accent the sweep found** —
+/// the check of [`dead_transitions_of`]; empty otherwise. Public for `tests\layouts.rs`.
+pub fn believed_against(table: Vec<DeadTransition>, swept: &[u16]) -> Vec<DeadTransition> {
+    if !swept.is_empty()
+        && swept
+            .iter()
+            .all(|accent| table.iter().any(|entry| entry.accent == *accent))
+    {
+        table
+    } else {
+        Vec::new()
+    }
+}
+
+/// **The dead-key table of the layout file `file`** — `KbdLayerDescriptor` → `pDeadKey`, copied
+/// before the file is freed (посылка П3, 197.11). The file is looked for **in System32 only**,
+/// and a name with a path in it is refused; empty for a file that is not there or not a layout.
+/// No keyboard state is read or written (FR-06). Public for `tests\layouts.rs`, which reads
+/// `KBDFR.DLL` of the machine without loading the layout into the session.
+pub fn read_dead_table(file: &str) -> Vec<DeadTransition> {
+    use windows::Win32::Foundation::FreeLibrary;
+    use windows::Win32::System::LibraryLoader::{
+        GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{DEADKEY, KBDTABLES};
+    use windows::core::{PCWSTR, s};
+
+    /// `DKF_DEAD` of `kbd.h`: the composition is itself a dead key.
+    const CHAINED: u16 = 0x0001;
+    /// A guard on the walk of the table; the layouts of Windows have up to a few hundred.
+    const MOST_ENTRIES: usize = 4096;
+
+    if file.is_empty() || file.contains(['\\', '/', ':']) {
+        return Vec::new();
+    }
+
+    let name: Vec<u16> = file.encode_utf16().chain(Some(0)).collect();
+
+    // SAFETY: a NUL-terminated bare file name, searched for in System32 only; the module is
+    // freed below.
+    let Ok(module) =
+        (unsafe { LoadLibraryExW(PCWSTR(name.as_ptr()), None, LOAD_LIBRARY_SEARCH_SYSTEM32) })
+    else {
+        return Vec::new();
+    };
+
+    let mut table = Vec::new();
+
+    // SAFETY: the export every keyboard layout file has, by its documented name.
+    if let Some(descriptor) = unsafe { GetProcAddress(module, s!("KbdLayerDescriptor")) } {
+        // SAFETY: `KbdLayerDescriptor` takes nothing and returns the address of the file's static
+        // `KBDTABLES` (kbd.h); the cast gives the export that signature.
+        let descriptor: unsafe extern "system" fn() -> *const KBDTABLES =
+            unsafe { core::mem::transmute(descriptor) };
+
+        // SAFETY: the address of a static of the module, which stays loaded until `FreeLibrary`
+        // below; read only.
+        let tables = unsafe { descriptor() };
+
+        // SAFETY: as above; `pDeadKey` is null or an array ended by an entry of zeroes.
+        let mut entry = if tables.is_null() {
+            core::ptr::null()
+        } else {
+            unsafe { (*tables).pDeadKey.cast_const() }
+        };
+
+        while !entry.is_null() && table.len() < MOST_ENTRIES {
+            // SAFETY: `entry` points into the array of the module, before its zero entry.
+            let dead: DEADKEY = unsafe { entry.read() };
+
+            if dead.dwBoth == 0 {
+                break;
+            }
+
+            if dead.uFlags & CHAINED == 0 {
+                table.push(DeadTransition {
+                    accent: (dead.dwBoth >> 16) as u16,
+                    base: (dead.dwBoth & 0xFFFF) as u16,
+                    composed: dead.wchComposed,
+                });
+            }
+
+            // SAFETY: the next entry of the same array; the zero entry ends it.
+            entry = unsafe { entry.add(1) };
+        }
+    }
+
+    // SAFETY: frees exactly the module loaded above, once, after the table was copied out.
+    let _ = unsafe { FreeLibrary(module) };
+
+    table
+}
+
 /// Sweeps every virtual key and modifier combination of FR-20 for one layout.
 fn build_layout_map(layout: LayoutId) -> LayoutMap {
     let states: [[u8; 256]; MOD_COMBINATIONS] = core::array::from_fn(|index| {
@@ -989,6 +1352,12 @@ fn build_layout_map(layout: LayoutId) -> LayoutMap {
             );
         }
     }
+
+    // Решение 195.1: the compositions of the dead keys the sweep found, out of the layout's own
+    // file and checked against them — nothing at all for a layout without dead keys.
+    let swept = builder.swept_accents();
+    builder.dead.extend(dead_transitions_of(layout, &swept));
+
     builder.finish()
 }
 
