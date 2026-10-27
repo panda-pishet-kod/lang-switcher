@@ -68,7 +68,10 @@ pub fn resource_script() -> String {
 }
 
 fn expand(root: &Path, name: &str, depth: usize) -> String {
-    assert!(depth < 4, "{name}: #include nested deeper than any script of this crate");
+    assert!(
+        depth < 4,
+        "{name}: #include nested deeper than any script of this crate"
+    );
     let mut out = String::new();
     for line in read(&root.join(name)).lines() {
         match included(line) {
