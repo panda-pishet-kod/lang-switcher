@@ -6,7 +6,26 @@
 # boundary: anything that is not in a class, after lower-casing, ends a word. A table of N classes is (N + 1)^3 bytes.
 # Both readers take this file as it is: the generator counts by it, the program reads candidates by it -- one alphabet, so
 # the two cannot part. ASCII only.
+#
+# Stage E107, task T-107-5 (decisions 198.22a, 198.22g): the six target languages out of the Leipzig Corpora Collection.
+# A token '~' followed by code points joined by '+' lists the marks read as NOTHING -- neither a letter nor a boundary: the
+# word goes on across them (the zero-width joiners of Sinhala, Hindi and Persian, the vowel marks and the tatweel of Arabic,
+# the nukta of Devanagari). The scripts of Hindi, Tamil and Sinhala have more letters than a table of 64 KB holds (40^3 =
+# 64 000 is the most), so their vowel signs fold into their vowels and the rarest consonants into their nearest ones:
+#   hi -- 39 classes: the long vowels into the short (ii > i, uu > u, ai > e, au > o), the nasals ng, ny, nn and nnna into na,
+#         the nukta forms into their bases, candrabindu and visarga into anusvara;
+#   ta -- 36: each vowel sign into its vowel, sha (0BB6) into ssa;
+#   si -- 35: each vowel sign into its vowel, long into short, the aspirated and the prenasalised consonants into their plain
+#         ones, fa into pa;
+#   ar -- 30: the forms of alef into alef, waw and yeh with hamza into waw and yeh, alef maksura into yeh; fa -- 33: the same,
+#         Arabic kaf and yeh into Persian keheh and yeh, teh marbuta and heh with yeh above into heh; id -- the 26 of English.
 en 09 0061 0062 0063 0064 0065 0066 0067 0068 0069 006A 006B 006C 006D 006E 006F 0070 0071 0072 0073 0074 0075 0076 0077 0078 0079 007A
 fr 0C 0061+00E0+00E2+00E4+00E6 0062 0063+00E7 0064 0065+00E9+00E8+00EA+00EB 0066 0067 0068 0069+00EE+00EF 006A 006B 006C 006D 006E 006F+00F4+00F6+0153 0070 0071 0072 0073 0074 0075+00F9+00FB+00FC 0076 0077 0078 0079+00FF 007A
 es 0A 0061+00E1 0062 0063 0064 0065+00E9 0066 0067 0068 0069+00ED 006A 006B 006C 006D 006E 00F1 006F+00F3 0070 0071 0072 0073 0074 0075+00FA+00FC 0076 0077 0078 0079 007A
 ru 19 0430 0431 0432 0433 0434 0435+0451 0436 0437 0438 0439 043A 043B 043C 043D 043E 043F 0440 0441 0442 0443 0444 0445 0446 0447 0448 0449 044A 044B 044C 044D 044E 044F
+ar 01 ~064B+064C+064D+064E+064F+0650+0651+0652+0670+0640 0627+0622+0623+0625+0671 0628 062A 062B 062C 062D 062E 062F 0630 0631 0632 0633 0634 0635 0636 0637 0638 0639 063A 0641 0642 0643 0644 0645 0646 0647 0648+0624 064A+0626+0649 0621 0629
+fa 29 ~064B+064C+064D+064E+064F+0650+0651+0652+0670+0640+200C 0627+0622+0623+0625+0671 0628 067E 062A 062B 062C 0686 062D 062E 062F 0630 0631 0632 0698 0633 0634 0635 0636 0637 0638 0639 063A 0641 0642 06A9+0643 06AF 0644 0645 0646 0648+0624 0647+0629+06C0 06CC+064A+0649+0626 0621
+id 21 0061 0062 0063 0064 0065 0066 0067 0068 0069 006A 006B 006C 006D 006E 006F 0070 0071 0072 0073 0074 0075 0076 0077 0078 0079 007A
+hi 39 ~093C+200C+200D 0905 0906+093E 0907+0908+093F+0940 0909+090A+0941+0942 090B+0943 090F+0910+0947+0948+090D+0945 0913+0914+094B+094C+0911+0949 0915+0958 0916+0959 0917+095A 0918 091A 091B 091C+095B 091D 091F 0920 0921+095C 0922+095D 0924 0925 0926 0927 0928+0919+091E+0923+0929 092A 092B+095E 092C 092D 092E 092F+095F 0930+0931 0932+0933 0935 0936 0937 0938 0939 094D 0902+0901+0903
+ta 49 ~200C+200D 0B85 0B86+0BBE 0B87+0BBF 0B88+0BC0 0B89+0BC1 0B8A+0BC2 0B8E+0BC6 0B8F+0BC7 0B90+0BC8 0B92+0BCA 0B93+0BCB 0B94+0BCC+0BD7 0B95 0B99 0B9A 0B9E 0B9F 0BA3 0BA4 0BA8 0BAA 0BAE 0BAF 0BB0 0BB2 0BB5 0BB4 0BB3 0BB1 0BA9 0B9C 0BB7+0BB6 0BB8 0BB9 0BCD 0B83
+si 5B ~200C+200D 0D85 0D86+0DCF 0D87+0D88+0DD0+0DD1 0D89+0D8A+0DD2+0DD3 0D8B+0D8C+0DD4+0DD6 0D8D+0D8E+0DD8+0DF2+0D8F+0D90+0DDF+0DF3 0D91+0D92+0DD9+0DDA 0D93+0DDB 0D94+0D95+0DDC+0DDD 0D96+0DDE 0D9A+0D9B 0D9C+0D9D+0D9F+0D9E 0DA0+0DA1 0DA2+0DA3+0DA6 0DA4+0DA5 0DA7+0DA8 0DA9+0DAA+0DAC 0DAB 0DAD+0DAE 0DAF+0DB0+0DB3 0DB1 0DB4+0DB5+0DC6 0DB6+0DB7+0DB9 0DB8 0DBA 0DBB 0DBD 0DC5 0DC0 0DC1 0DC2 0DC3 0DC4 0DCA 0D82+0D83

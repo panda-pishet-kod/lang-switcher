@@ -22,8 +22,17 @@
 //! `S × S × S` bytes for `S` symbols (the boundary and the classes), and the byte at
 //! `(a × S + b) × S + c` is the cost of `c` after `a b` — the negative binary logarithm of its
 //! probability, in quarters of a bit, capped at 255. Lower is more probable. English and French
-//! are 27 symbols (19 683 bytes), Spanish 28 (21 952), Russian 33 (35 937): under the 64 KB of
-//! one table and the 1 MB of all of them (ТЗ Э106 п. 8).
+//! are 27 symbols (19 683 bytes), Spanish 28 (21 952), Russian 33 (35 937); since stage Э107
+//! Arabic 31 (29 791), Persian 34 (39 304), Indonesian 27 (19 683), Hindi 40 (64 000), Tamil 37
+//! (50 653) and Sinhala 36 (46 656) — under the 64 KB of one table and the 1 MB of all of them
+//! (ТЗ Э106 п. 8): 347 342 bytes together.
+//!
+//! # The marks read as nothing
+//!
+//! A token `~…` of an alphabet lists the marks that are neither a letter nor a boundary — the
+//! joiners of Sinhala, Hindi and Persian, the vowel marks and the tatweel of Arabic, the nukta of
+//! Devanagari (task T-107-5). The generator and [`Reading`] both skip them, so a word written with
+//! a joiner is the same word as without it, and no word is cut in two at one.
 //!
 //! # What it reads, and what it keeps
 //!
@@ -54,12 +63,25 @@ const ALPHABETS: &str = include_str!("../res/letter-stats-alphabets.txt");
 ///   three of Russian (all Gutenberg has in modern spelling); the books, their sizes and SHA-256
 ///   are in `reports\ITOG-E106.md`.
 ///
-/// The books are not in the tree and not in the image — the tables are.
-const TABLES: [(&str, &[u8]); 4] = [
+/// - `ar`, `fa`, `id`, `hi`, `ta`, `si` — stage Э107, task T-107-5, решения 198.22а и 198.22г: the
+///   six target languages Gutenberg had no corpus of, out of the Leipzig Corpora Collection
+///   (Universität Leipzig, CC BY; the Sinhala corpus is of Wikipedia, CC BY-SA) —
+///   `ara_news_2005-2009_300K`, `fas_news_2019_300K`, `ind_mixed_2013_300K`, `hin_mixed_2019_300K`,
+///   `tam_newscrawl_2011_300K`, `sin_wikipedia_2021_100K`; their sizes, SHA-256 and counts are in
+///   `reports\ITOG-E107.md`.
+///
+/// The books and the corpora are not in the tree and not in the image — the tables are.
+const TABLES: [(&str, &[u8]); 10] = [
     ("en", include_bytes!("../res/letter-stats-en.bin")),
     ("fr", include_bytes!("../res/letter-stats-fr.bin")),
     ("es", include_bytes!("../res/letter-stats-es.bin")),
     ("ru", include_bytes!("../res/letter-stats-ru.bin")),
+    ("ar", include_bytes!("../res/letter-stats-ar.bin")),
+    ("fa", include_bytes!("../res/letter-stats-fa.bin")),
+    ("id", include_bytes!("../res/letter-stats-id.bin")),
+    ("hi", include_bytes!("../res/letter-stats-hi.bin")),
+    ("ta", include_bytes!("../res/letter-stats-ta.bin")),
+    ("si", include_bytes!("../res/letter-stats-si.bin")),
 ];
 
 /// **The letters of one language** — one line of [`ALPHABETS`].
@@ -70,9 +92,19 @@ pub struct Alphabet {
     symbols: usize,
     /// Every lower-case letter and its symbol, sorted by the letter.
     letters: Vec<(char, u8)>,
+    /// The marks that are **neither a letter nor a boundary** — the token `~…` of the line, task
+    /// T-107-5: the joiners of Sinhala, Hindi and Persian (U+200C, U+200D), the vowel marks and the
+    /// tatweel of Arabic, the nukta of Devanagari. Read as nothing at all: the word goes on across
+    /// them. Sorted.
+    skip: Vec<char>,
 }
 
 impl Alphabet {
+    /// Whether `ch` is one of the marks this alphabet reads as nothing — see [`Alphabet::skip`].
+    fn skips(&self, ch: char) -> bool {
+        self.skip.binary_search(&ch).is_ok()
+    }
+
     /// The symbol of `ch`: its class, after lower-casing, or 0 — the boundary.
     fn symbol(&self, ch: char) -> usize {
         let mut lower = ch.to_lowercase();
@@ -100,9 +132,19 @@ fn alphabets() -> &'static [Alphabet] {
                 let tag = fields.next()?;
                 let primary = usize::from_str_radix(fields.next()?, 16).ok()?;
                 let mut letters = Vec::new();
+                let mut skip = Vec::new();
                 let mut symbols = 1;
 
                 for class in fields {
+                    // `~` — the marks read as nothing (task T-107-5); no symbol of their own.
+                    if let Some(marks) = class.strip_prefix('~') {
+                        for hex in marks.split('+') {
+                            skip.push(char::from_u32(u32::from_str_radix(hex, 16).ok()?)?);
+                        }
+
+                        continue;
+                    }
+
                     let symbol = u8::try_from(symbols).ok()?;
 
                     for hex in class.split('+') {
@@ -113,12 +155,14 @@ fn alphabets() -> &'static [Alphabet] {
                 }
 
                 letters.sort_unstable();
+                skip.sort_unstable();
 
                 Some(Alphabet {
                     tag,
                     primary,
                     symbols,
                     letters,
+                    skip,
                 })
             })
             .collect()
@@ -194,8 +238,9 @@ pub fn tables() -> Vec<Trigrams> {
 
 /// **The table of the language of `layout`**, if this program carries one: the primary language
 /// of the layout decides (every English layout reads by the table of English). English, French,
-/// Spanish and Russian since stage Э106; any other language gets none, and the selection path
-/// then divides by single keys (196.1 (3)).
+/// Spanish and Russian since stage Э106; Arabic, Persian, Indonesian, Hindi, Tamil and Sinhala
+/// since stage Э107; any other language gets none, and the selection path then divides by single
+/// keys (196.1 (3)).
 pub fn for_layout(layout: LayoutId) -> Option<Trigrams> {
     let language = layout.raw() & 0x3FF;
 
@@ -221,6 +266,11 @@ impl Reading<'_> {
     /// Reads the next code units of the candidate.
     pub fn feed(&mut self, units: &[u16]) {
         for ch in char::decode_utf16(units.iter().copied()) {
+            // A joiner or a mark of the alphabet's `~` is not a step at all (task T-107-5).
+            if ch.as_ref().is_ok_and(|&ch| self.table.alphabet.skips(ch)) {
+                continue;
+            }
+
             let symbol = ch.map_or(0, |ch| self.table.alphabet.symbol(ch));
 
             self.step(symbol);

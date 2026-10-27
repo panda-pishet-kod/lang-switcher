@@ -72,6 +72,16 @@ fn every_language_of_decision_198_7_reads_by_its_own_table() {
         (0x0C0A_0C0A, "es"),
         (0x080A_080A, "es"),
         (0x0419_0419, "ru"),
+        // Stage E107, task T-107-5 (решения 198.22а, 198.22г): the six of the Leipzig corpora —
+        // Arabic of the East and of the Maghreb, Persian, Indonesian on the US keys, Hindi, Tamil,
+        // Sinhala.
+        (0x0401_0401, "ar"),
+        (0x1401_1401, "ar"),
+        (0x0429_0429, "fa"),
+        (0x0409_0421, "id"),
+        (0x0439_0439, "hi"),
+        (0x0449_0449, "ta"),
+        (0x045B_045B, "si"),
     ] {
         let table = letter_stats::for_layout(LayoutId::from_raw(layout));
 
@@ -82,7 +92,7 @@ fn every_language_of_decision_198_7_reads_by_its_own_table() {
         );
     }
 
-    for layout in [0x0401_0401, 0x0407_0407, 0x0422_0422, 0x041E_041E] {
+    for layout in [0x0407_0407, 0x0422_0422, 0x041E_041E] {
         assert!(
             letter_stats::for_layout(LayoutId::from_raw(layout)).is_none(),
             "layout {layout:#010x}: no table is carried for its language"
@@ -99,7 +109,7 @@ fn every_table_matches_its_alphabet_and_the_limits() {
 
     assert_eq!(
         languages,
-        ["en", "fr", "es", "ru"],
+        ["en", "fr", "es", "ru", "ar", "fa", "id", "hi", "ta", "si"],
         "a table whose length does not match its alphabet is left out"
     );
 
@@ -121,9 +131,11 @@ fn every_table_matches_its_alphabet_and_the_limits() {
     assert!(total <= 1024 * 1024, "all tables: {total} bytes");
     assert_eq!(
         tables.iter().map(Trigrams::symbols).collect::<Vec<_>>(),
-        [27, 27, 28, 33],
-        "the alphabets of decision 198.7: English and French 26 classes, Spanish 27, Russian 32"
+        [27, 27, 28, 33, 31, 34, 27, 40, 37, 36],
+        "the alphabets of decision 198.7: English and French 26 classes, Spanish 27, Russian 32; \
+         of stage E107: Arabic 30, Persian 33, Indonesian 26, Hindi 39, Tamil 36, Sinhala 35"
     );
+    assert_eq!(total, 347_342, "the ten tables together");
 }
 
 /// **Посылка П6 — the table of English reads the two words of decision 196.1 the way English is
@@ -281,5 +293,159 @@ fn a_sentence_costs_least_under_the_table_of_its_language() {
     assert!(
         wrong.is_empty(),
         "решение 198.7: a table is not the table of its language: {wrong:#?}"
+    );
+}
+
+// =========================================================================================
+// Stage E107, task T-107-5 — the six target languages of the Leipzig corpora (198.22а, 198.22г)
+// =========================================================================================
+
+/// The layouts of the six, one each, and their names.
+const SIX: [(usize, &str); 6] = [
+    (0x0401_0401, "Arabic"),
+    (0x0429_0429, "Persian"),
+    (0x0409_0421, "Indonesian"),
+    (0x0439_0439, "Hindi"),
+    (0x0449_0449, "Tamil"),
+    (0x045B_045B, "Sinhala"),
+];
+
+/// **The marks of the `~` of an alphabet are read as nothing** — task T-107-5: a word written with
+/// a joiner, a nukta or a vowel mark is the same word as without it, under its own table. The
+/// Sinhala corpus holds 111 802 zero-width joiners (`ශ්‍රී`), and a mark read as a boundary would cut
+/// every such word in two.
+///
+/// ⚠ Control: under the table of English, which skips nothing, the joiner is a boundary and the
+/// two costs part — the check of «the same» can fail.
+#[test]
+fn the_marks_of_the_tilde_are_read_as_nothing() {
+    for (layout, language, with, without) in [
+        (0x045B_045B, "Sinhala", "ශ්\u{200D}රී ලංකාව", "ශ්රී ලංකාව"),
+        (0x0439_0439, "Hindi", "ज\u{093C}रूर", "जरूर"),
+        (0x0429_0429, "Persian", "می\u{200C}روم", "میروم"),
+        (0x0401_0401, "Arabic", "كِتَابٌ", "كتاب"),
+    ] {
+        let table = table_of(layout, language);
+        let (marked, plain) = (cost(&table, with), cost(&table, without));
+
+        println!("{language}: {with} {marked:.2} — {without} {plain:.2}");
+        assert!(
+            (marked - plain).abs() < f32::EPSILON,
+            "{language}: the marks of «{with}» must be read as nothing"
+        );
+    }
+
+    let english = table_of(0x0409_0409, "English");
+
+    assert!(
+        (cost(&english, "ab\u{200D}cd") - cost(&english, "abcd")).abs() > 0.5,
+        "the control: a table that skips nothing reads the joiner as a boundary"
+    );
+}
+
+/// **Task T-107-5 — the table of each of the six prefers a word of its language to the word spoilt
+/// by one letter.** Words of everyday writing; the spoilt letter makes a sequence the language does
+/// not write.
+#[test]
+fn the_tables_of_the_six_prefer_the_word_of_their_language() {
+    /// A layout, the name of its language, and its pairs `(word, spoilt)`.
+    type Pairs = (usize, &'static str, &'static [(&'static str, &'static str)]);
+
+    let pairs: [Pairs; 6] = [
+        (
+            0x0401_0401,
+            "Arabic",
+            &[("مدرسة", "مدرثظ"), ("الكتاب", "الكتظب")],
+        ),
+        (
+            0x0429_0429,
+            "Persian",
+            &[("کتاب", "کتظب"), ("خانه", "خانظ")],
+        ),
+        (
+            0x0409_0421,
+            "Indonesian",
+            &[("terima", "terxma"), ("sekolah", "sekqlah")],
+        ),
+        (0x0439_0439, "Hindi", &[("नमस्ते", "नमस्ठे"), ("भारत", "भाढत")]),
+        (
+            0x0449_0449,
+            "Tamil",
+            &[("வணக்கம்", "வணக்ஙம்"), ("தமிழ்", "தமிஞ்")],
+        ),
+        // ⚠ Not «ආයුබෝඩන්»: `ඩ` there is as probable as `ව` — the two sums are one, 45 and 45
+        // (scratchpad-E107\stats\probe-cost.pl); a pair that cannot tell is no pair.
+        (
+            0x045B_045B,
+            "Sinhala",
+            &[("ආයුබෝවන්", "ආයුබෝඤන්"), ("ලංකාව", "ලංකාඤ")],
+        ),
+    ];
+
+    for (layout, language, words) in pairs {
+        assert_prefers(&table_of(layout, language), language, words);
+    }
+}
+
+/// **Task T-107-5 — every table of the six is the table of its own language**, measured on a
+/// sentence of each, as `a_sentence_costs_least_under_the_table_of_its_language` measures the four:
+/// the sentence costs least under its own table. Arabic and Persian share a script, Indonesian
+/// shares its letters with English — the two places a table put under another language would hide.
+#[test]
+fn a_sentence_of_the_six_costs_least_under_its_own_table() {
+    let samples = [
+        (
+            0x0401_0401,
+            "Arabic",
+            "ذهب الأطفال إلى المدرسة صباحا مع أصدقائهم",
+        ),
+        (
+            0x0429_0429,
+            "Persian",
+            "بچه‌ها صبح با دوستانشان به مدرسه رفتند",
+        ),
+        (
+            0x0409_0421,
+            "Indonesian",
+            "anak anak pergi ke sekolah bersama teman mereka pagi ini",
+        ),
+        (0x0439_0439, "Hindi", "बच्चे सुबह अपने दोस्तों के साथ स्कूल गए"),
+        (
+            0x0449_0449,
+            "Tamil",
+            "குழந்தைகள் காலையில் நண்பர்களுடன் பள்ளிக்குச் சென்றனர்",
+        ),
+        (0x045B_045B, "Sinhala", "ළමයි උදේ යාළුවන් එක්ක පාසලට ගියා"),
+    ];
+    let others = SIX
+        .iter()
+        .copied()
+        .chain([(0x0409_0409, "English"), (0x040C_040C, "French")]);
+
+    let mut wrong = Vec::new();
+
+    for &(own, language, sentence) in &samples {
+        let mine = cost(&table_of(own, language), sentence);
+
+        for (other, other_language) in others.clone() {
+            if other == own {
+                continue;
+            }
+
+            let theirs = cost(&table_of(other, other_language), sentence);
+
+            if mine >= theirs {
+                wrong.push(format!(
+                    "the {language} sentence: own table {mine:.2}, {other_language} {theirs:.2}"
+                ));
+            }
+        }
+
+        println!("{language} sentence: own {mine:.2}");
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "T-107-5: a table is not the table of its language: {wrong:#?}"
     );
 }

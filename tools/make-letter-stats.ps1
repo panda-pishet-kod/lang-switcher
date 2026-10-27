@@ -24,16 +24,28 @@
     Russian -- stage E106, decisions 198.3, 198.7: see the report ITOG-E106. Their sizes and SHA-256
     are in the reports of the stages; the books themselves are not in this tree and not in the image.
 
+    Stage E107, task T-107-5 (decisions 198.22a, 198.22g): the six target languages -- Arabic, Persian,
+    Indonesian, Hindi, Tamil, Sinhala -- out of the Leipzig Corpora Collection (Universitaet Leipzig,
+    CC BY; the Sinhala corpus is of Wikipedia, CC BY-SA): -Format leipzig reads a file
+    <name>-sentences.txt of a corpus, one sentence a line after its number and a tab, every line a
+    text of its own (its end ends a word); there is no frame to strip. The corpora: ara_news_2005-2009_300K,
+    fas_news_2019_300K, ind_mixed_2013_300K, hin_mixed_2019_300K, tam_newscrawl_2011_300K,
+    sin_wikipedia_2021_100K of https://downloads.wortschatz-leipzig.de/corpora/ -- their sizes and
+    SHA-256 are in the report ITOG-E107. A token '~...' of the alphabet lists the marks read as
+    nothing: skipped, the word goes on across them.
+
     Written for Windows PowerShell 5.1 without a Cyrillic character (decision R-05).
 
     Usage:
       .\make-letter-stats.ps1 -Language en -Books <folder>\pg1342.txt,<folder>\pg1661.txt,... -Out res\letter-stats-en.bin
+      .\make-letter-stats.ps1 -Language si -Format leipzig -Books <folder>\sin_wikipedia_2021_100K-sentences.txt -Out res\letter-stats-si.bin
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Language,
     [Parameter(Mandatory = $true)][string[]]$Books,
     [Parameter(Mandatory = $true)][string]$Out,
+    [ValidateSet('gutenberg', 'leipzig')][string]$Format = 'gutenberg',
     [string]$Alphabets = (Join-Path $PSScriptRoot '..\res\letter-stats-alphabets.txt')
 )
 
@@ -45,7 +57,13 @@ if (-not $line) {
     Write-Host ("FAIL: no alphabet for '{0}' in {1}" -f $Language, $Alphabets)
     exit 1
 }
-$classes = @($line.Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries) | Select-Object -Skip 2)
+$tokens = @($line.Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries) | Select-Object -Skip 2)
+# The marks read as nothing -- the tokens '~...' (stage E107); every other token is a class.
+$skip = New-Object 'System.Collections.Generic.HashSet[int]'
+foreach ($token in @($tokens | Where-Object { $_.StartsWith('~') })) {
+    foreach ($hex in $token.Substring(1).Split('+')) { [void]$skip.Add([Convert]::ToInt32($hex, 16)) }
+}
+$classes = @($tokens | Where-Object { -not $_.StartsWith('~') })
 $symbolOf = New-Object 'System.Collections.Generic.Dictionary[int,int]'
 for ($i = 0; $i -lt $classes.Count; $i++) {
     foreach ($hex in $classes[$i].Split('+')) { $symbolOf.Add([Convert]::ToInt32($hex, 16), $i + 1) }
@@ -57,15 +75,27 @@ $words = 0
 $letters = 0
 
 foreach ($book in $Books) {
-    $text = [IO.File]::ReadAllText($book, [Text.Encoding]::UTF8)
-    $start = $text.IndexOf('*** START OF')
-    $end = $text.IndexOf('*** END OF')
-    if ($start -lt 0 -or $end -le $start) {
-        Write-Host ("FAIL: {0} has no Project Gutenberg frame (*** START OF / *** END OF)" -f $book)
-        exit 1
+    if ($Format -eq 'leipzig') {
+        # One sentence a line, after its number and a tab; the line breaks stay between them, so the
+        # end of every sentence ends its last word.
+        $sentences = New-Object System.Text.StringBuilder
+        foreach ($row in [IO.File]::ReadLines($book, [Text.Encoding]::UTF8)) {
+            $tab = $row.IndexOf("`t")
+            [void]$sentences.Append($row.Substring($tab + 1)).Append("`n")
+        }
+        $body = $sentences.ToString()
+        $sentences = $null
+    } else {
+        $text = [IO.File]::ReadAllText($book, [Text.Encoding]::UTF8)
+        $start = $text.IndexOf('*** START OF')
+        $end = $text.IndexOf('*** END OF')
+        if ($start -lt 0 -or $end -le $start) {
+            Write-Host ("FAIL: {0} has no Project Gutenberg frame (*** START OF / *** END OF)" -f $book)
+            exit 1
+        }
+        $start = $text.IndexOf("`n", $start) + 1
+        $body = $text.Substring($start, $end - $start)
     }
-    $start = $text.IndexOf("`n", $start) + 1
-    $body = $text.Substring($start, $end - $start)
 
     $a = 0
     $b = 0
@@ -73,6 +103,7 @@ foreach ($book in $Books) {
     $s = 0
     foreach ($ch in $body.ToCharArray()) {
         $c = [int][char]::ToLowerInvariant($ch)
+        if ($skip.Contains($c)) { continue }
         if ($symbolOf.TryGetValue($c, [ref]$s)) {
             if (-not $inWord) { $a = 0; $b = 0; $inWord = $true; $words = $words + 1 }
             $counts[($a * $symbols + $b) * $symbols + $s] = $counts[($a * $symbols + $b) * $symbols + $s] + 1
