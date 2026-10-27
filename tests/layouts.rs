@@ -208,6 +208,48 @@ fn the_cache_covers_both_layouts_and_neither_map_is_empty() {
 
 // -- criterion 16 ------------------------------------------------------------------------
 
+/// **Stage E107, task T-107-6 (а), BACKLOG Q-198-4 — the reverse index takes the plainest press of
+/// a character over every key, not inside one.** The Ukrainian (Enhanced) layout has `ґ` twice: on
+/// the 102nd key (`0x56`) with no modifier, and on `Г` (`0x22`) with `AltGr`. The walk «by keys,
+/// and inside a key by modifiers» met `AltGr`+`Г` first, so a selected `ґ` read back as `AltGr`+`Г`
+/// — and US has nothing on `AltGr`, so `ґанок` came out `ґfyjr` (manual sheet of Э106, case 4,
+/// 198.27 (а)). A press without `AltGr` beats one with it, wherever the keys stand.
+///
+/// ⚠ Controls: a character that only `AltGr` gives is still found on `AltGr`; among presses without
+/// `AltGr` the order is the old one — `*` of the main block (`Shift`+`8`) still beats the `*` of the
+/// keypad (`0x37`), which a walk «by modifiers first» would have moved.
+#[test]
+fn the_reverse_index_prefers_a_press_without_altgr_over_every_key() {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0000_0422));
+
+    builder.set(0x22, false, Mods::ALTGR, KeyMapping::from_char('ґ'));
+    builder.set(0x22, false, Mods::NONE, KeyMapping::from_char('п'));
+    builder.set(0x56, false, Mods::NONE, KeyMapping::from_char('ґ'));
+    builder.set(0x12, false, Mods::ALTGR, KeyMapping::from_char('€'));
+    builder.set(0x09, false, Mods::SHIFT, KeyMapping::from_char('*'));
+    builder.set(0x37, false, Mods::NONE, KeyMapping::from_char('*'));
+
+    let map = builder.finish();
+    let found = |ch: char| map.find_key(ch).map(|press| (press.scan, press.mods));
+
+    assert_eq!(
+        found('ґ'),
+        Some((0x56, Mods::NONE)),
+        "198.27 (а): the 102nd key with no modifier, not AltGr+Г"
+    );
+    assert_eq!(found('п'), Some((0x22, Mods::NONE)));
+    assert_eq!(
+        found('€'),
+        Some((0x12, Mods::ALTGR)),
+        "the control: a character of AltGr alone is still found"
+    );
+    assert_eq!(
+        found('*'),
+        Some((0x09, Mods::SHIFT)),
+        "the control: without AltGr the old order stands — Shift+8 before the keypad"
+    );
+}
+
 #[test]
 fn the_reverse_index_finds_the_key_that_produces_the_character() {
     let cache = cache();

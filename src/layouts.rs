@@ -860,40 +860,56 @@ impl LayoutMapBuilder {
         let mut dead_keys: Vec<(u16, KeyPress)> = Vec::new();
         // Ascending key index, so the whole plain half is walked before the extended one and
         // the main block wins every reverse slot it shares with the keypad.
-        for key in 0..KEY_SLOTS {
-            for mods in Mods::ALL {
-                let mapping = self.forward[key * MOD_COMBINATIONS + mods.index()];
-                if mapping.is_dead()
-                    && let Some(&accent) = mapping.units().first()
-                    && !dead_keys.iter().any(|(known, _)| *known == accent)
-                {
-                    // The plainest key of each accent, by the same order as the reverse index.
-                    dead_keys.push((
-                        accent,
-                        KeyPress {
-                            scan: (key & 0xFF) as u16,
-                            extended: key & EXTENDED_BIT != 0,
-                            mods,
-                        },
-                    ));
-                }
-                if mapping.is_empty() || mapping.is_dead() {
-                    continue;
-                }
-                let Some(ch) = mapping.single_char() else {
-                    // A ligature of several scalar values has no single character to be
-                    // found by, and matching a sequence is the business of the selection
-                    // path, not of a constant time index.
-                    continue;
-                };
-                insert_reverse(
-                    &mut reverse,
-                    ch as u32,
-                    (key & 0xFF) as u16,
-                    key & EXTENDED_BIT != 0,
-                    mods,
-                );
+        //
+        // ⭐ **Two passes, the presses without `AltGr` first — stage E107, task T-107-6 (а),
+        // BACKLOG Q-198-4.** One walk «by keys, inside a key by modifiers» kept the rule «the
+        // plainest press wins» only inside a key: the `ґ` of Ukrainian (Enhanced) is on the 102nd
+        // key with no modifier and on `Г` with `AltGr`, and `Г` comes first — a selected `ґ` read
+        // back as `AltGr`+`Г`, which US has nothing on (`ґанок` → `ґfyjr`, 198.27 (а)). Now no
+        // press with `AltGr` takes a character a press without it has; among the presses without
+        // it the order is the old one, so nothing else moves (`*` stays `Shift`+`8` and does not go
+        // to the keypad). The dead keys follow the same order, as they always did.
+        let order = [false, true].into_iter().flat_map(|altgr| {
+            (0..KEY_SLOTS).flat_map(move |key| {
+                Mods::ALL
+                    .into_iter()
+                    .filter(move |mods| mods.altgr() == altgr)
+                    .map(move |mods| (key, mods))
+            })
+        });
+
+        for (key, mods) in order {
+            let mapping = self.forward[key * MOD_COMBINATIONS + mods.index()];
+            if mapping.is_dead()
+                && let Some(&accent) = mapping.units().first()
+                && !dead_keys.iter().any(|(known, _)| *known == accent)
+            {
+                // The plainest key of each accent, by the same order as the reverse index.
+                dead_keys.push((
+                    accent,
+                    KeyPress {
+                        scan: (key & 0xFF) as u16,
+                        extended: key & EXTENDED_BIT != 0,
+                        mods,
+                    },
+                ));
             }
+            if mapping.is_empty() || mapping.is_dead() {
+                continue;
+            }
+            let Some(ch) = mapping.single_char() else {
+                // A ligature of several scalar values has no single character to be
+                // found by, and matching a sequence is the business of the selection
+                // path, not of a constant time index.
+                continue;
+            };
+            insert_reverse(
+                &mut reverse,
+                ch as u32,
+                (key & 0xFF) as u16,
+                key & EXTENDED_BIT != 0,
+                mods,
+            );
         }
         let mut dead = self.dead;
         dead.sort_unstable();
