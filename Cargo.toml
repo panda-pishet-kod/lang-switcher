@@ -4,6 +4,14 @@ version = "0.104.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+# The second source of the version — решение 192.1 (stage Э105): the number of the delivery, the
+# fourth field of every version resource and manifest (`1.0.0.105` for the delivery tagged
+# `e105`). `[package] version` above is the first source and the three fields before it. Zero is
+# what every delivery up to `e104` (0.104.0) carried there, under the old rule «MINOR is the tag».
+# build.rs reads it for the updater; tools\verify-version.ps1 holds the other places to it.
+[package.metadata.langswitcher]
+delivery = 0
+
 # Two targets on purpose. Integration tests under tests\ can only link against a library
 # target, so a bin-only crate would make that directory useless and force a rebuild of the
 # crate layout at stage E3. Decision R-11.

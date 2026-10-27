@@ -679,6 +679,15 @@ fn a_newer_version_is_newer_by_number_and_not_by_spelling() {
     assert!(letters::version_is_newer("0.39", "0.38.0"));
     assert!(!letters::version_is_newer("не версия", "0.38.0"));
     assert!(!letters::version_is_newer("", "0.0.0"));
+
+    // ⭐ Решение 192.1 (stage Э105, посылка П4): 1.0.0 follows 0.104.0, and the installed
+    // 0.88…0.104 and their updater compare the same way; then the ordinary rule.
+    assert!(letters::version_is_newer("1.0.0", "0.104.0"));
+    assert!(letters::version_is_newer("1.0.0", "0.88.0"));
+    assert!(!letters::version_is_newer("1.0.0", "1.0.0"));
+    assert!(!letters::version_is_newer("0.104.0", "1.0.0"));
+    assert!(letters::version_is_newer("1.0.1", "1.0.0"));
+    assert!(letters::version_is_newer("1.1.0", "1.0.9"));
 }
 
 /// One letter per announced version, and the menu entry outlives the letter.

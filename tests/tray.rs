@@ -6395,14 +6395,16 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
         bytes.len()
     );
 
-    // ⭐ **The number moves with every delivery now.** Решение 8 fixed `0.1.0` as the *starting*
-    // version and it stood, unmoved, for thirty-two deliveries. The rule adopted on 2026-09-03
-    // is «MINOR is the number of the delivery tag»: the build tagged `e36` is `0.36.0`, `e38` is
-    // `0.38.0`, and PATCH exists for a second delivery under one tag. `Cargo.toml` is the single
-    // reference and `tools\verify-version.ps1` is what makes the other nine places agree with
-    // it — this assertion is the tenth reader, the only one that reads the bytes `rc.exe`
-    // really produced, and the only one the instrument cannot see: it is raised **by hand**,
-    // and that is what makes it the honest red before a version bump.
+    // ⭐ **The number moves with every delivery.** Решение 8 fixed `0.1.0` as the *starting*
+    // version and it stood, unmoved, for thirty-two deliveries; the rule of 2026-09-03 made
+    // MINOR the number of the delivery tag, up to `e104` = `0.104.0.0`. ⭐⭐ **Решение 192.1
+    // (stage Э105):** from `e105` the version is an ordinary `X.Y.Z` (`1.0.0`: X for a big
+    // change, Y for new abilities, Z for repairs) and the **fourth field is the number of the
+    // delivery tag** — `e105` is `1.0.0.105`. Two sources in `Cargo.toml` (`[package] version`
+    // and `[package.metadata.langswitcher] delivery`) and `tools\verify-version.ps1`, which holds
+    // the ten places to them — this assertion is the reader of the bytes `rc.exe` really
+    // produced, and the one the instrument cannot see: it is raised **by hand**, and that is
+    // what makes it the honest red before a version bump.
     assert_eq!(
         version,
         Some((0, 104, 0, 0)),

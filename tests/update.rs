@@ -778,3 +778,39 @@ fn raise_and_check_answers_by_the_window_helper_and_not_by_the_process() {
         "a process in the session is not the answer any more"
     );
 }
+
+/// **The updater's version resource carries the two sources of the version** — решение 192.1
+/// (stage Э105): `[package] version` in the first three fields and the delivery in the fourth,
+/// from build.rs, and the updater compares the feed with the three (§0 п. 15, посылка П4). Read
+/// off the file cargo really built; raised **by hand** with every delivery, the honest red before
+/// a bump, like the reader of `app.rc` in `tests\tray.rs`.
+#[test]
+fn the_updater_carries_the_version_and_the_delivery_in_its_resource() {
+    use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW};
+    use windows::core::PCWSTR;
+
+    let path = std::path::Path::new(env!("CARGO_BIN_EXE_LangSwitcherUpdate"));
+    let name: Vec<u16> = std::os::windows::ffi::OsStrExt::encode_wide(path.as_os_str())
+        .chain(Some(0))
+        .collect();
+
+    // SAFETY: a NUL-terminated name of this frame; no handle is asked for.
+    let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(name.as_ptr()), None) };
+    assert!(size > 0, "the updater has a version resource");
+
+    let mut bytes = vec![0u8; size as usize];
+    // SAFETY: `bytes` holds `size` bytes and lives for this frame.
+    unsafe { GetFileVersionInfoW(PCWSTR(name.as_ptr()), None, size, bytes.as_mut_ptr().cast()) }
+        .expect("the resource is read");
+
+    assert_eq!(
+        lang_switcher::tray::parse_fixed_file_version(&bytes),
+        Some((0, 104, 0, 0)),
+        "the updater must carry 0.104.0 and the delivery 0 of the old rule"
+    );
+    assert_eq!(
+        update::version_of_file(path).as_deref(),
+        Some("0.104.0"),
+        "the updater compares three fields"
+    );
+}
