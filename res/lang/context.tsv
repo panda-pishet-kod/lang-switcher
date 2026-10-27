@@ -85,11 +85,11 @@ IDS_ABOUT_LINE_1	IDD_AUTHOR,IDD_ABOUT	IDC_ABOUT_LINE_1	354x21	-	-
 IDS_ABOUT_LINE_2	IDD_AUTHOR,IDD_ABOUT	IDC_ABOUT_LINE_2	354x21	-	-
 IDS_ABOUT_OK	IDD_ABOUT	IDOK	81x30	-	-
 IDS_ABOUT_HELP	IDD_ABOUT	IDC_ABOUT_HELP	406x376 (22 lines)	-	-
-IDS_ABOUT_HELP_1	IDD_ABOUT	IDC_ABOUT_HELP_1,IDC_ABOUT_HELP_N1	362x62 (3 lines)	{0}	-
-IDS_ABOUT_HELP_2	IDD_ABOUT	IDC_ABOUT_HELP_2,IDC_ABOUT_HELP_N2	362x40 (2 lines)	{0}	-
-IDS_ABOUT_HELP_3	IDD_ABOUT	IDC_ABOUT_HELP_3,IDC_ABOUT_HELP_N3	362x62 (3 lines)	{0}	key names as on the keyboards of the country
-IDS_ABOUT_HELP_4	IDD_ABOUT	IDC_ABOUT_HELP_4,IDC_ABOUT_HELP_N4	362x40 (2 lines)	-	-
-IDS_ABOUT_HELP_5	IDD_ABOUT	IDC_ABOUT_HELP_5,IDC_ABOUT_HELP_N5	362x21	-	-
+IDS_ABOUT_HELP_1	IDD_ABOUT	IDC_ABOUT_HELP_1	362x62 (3 lines)	{0}	the number «1.» beside it is IDC_ABOUT_HELP_N1, not this string
+IDS_ABOUT_HELP_2	IDD_ABOUT	IDC_ABOUT_HELP_2	362x40 (2 lines)	{0}	the number «2.» beside it is IDC_ABOUT_HELP_N2, not this string
+IDS_ABOUT_HELP_3	IDD_ABOUT	IDC_ABOUT_HELP_3	362x62 (3 lines)	{0}	key names as on the keyboards of the country; the number «3.» beside it is IDC_ABOUT_HELP_N3, not this string
+IDS_ABOUT_HELP_4	IDD_ABOUT	IDC_ABOUT_HELP_4	362x40 (2 lines)	-	the number «4.» beside it is IDC_ABOUT_HELP_N4, not this string
+IDS_ABOUT_HELP_5	IDD_ABOUT	IDC_ABOUT_HELP_5	362x21	-	the number «5.» beside it is IDC_ABOUT_HELP_N5, not this string
 IDS_CAPTURE_HINT	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on the keyboards of the country
 IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip, after «Lang Switcher — »
 IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip, after «Lang Switcher — »
