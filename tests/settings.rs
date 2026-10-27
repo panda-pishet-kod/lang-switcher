@@ -14705,6 +14705,118 @@ fn the_about_template_says_what_the_russian_table_says() {
     }
 }
 
+/// **Task T-106-2, решение 198.11 — the about window speaks the language of the interface on
+/// every control, «От автора…» included.**
+///
+/// The button stood out of `fill_about` from task Т-32-4 on, and its Russian template literal
+/// showed in every other language — the English window of 1.0.0 on the stand `Test_VM`,
+/// 2026-10-27. Read without raising the window: [`settings::about_texts`] is the one list the
+/// window fills itself from, and the template is read out of the built binary. Every control
+/// that carries a Russian literal there must be overwritten from the table of the language in
+/// force, and «От автора…» must get that language's own row — decoded by this file, not by the
+/// crate.
+///
+/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
+#[test]
+fn every_russian_literal_of_the_about_template_is_replaced_in_all_fourteen_languages() {
+    let _guard = with_product_strings();
+
+    let product = ProductImage::shared();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
+
+    let russian: Vec<(u32, String)> = template
+        .captions
+        .iter()
+        .filter(|(_, caption)| {
+            caption
+                .chars()
+                .any(|letter| ('\u{0400}'..='\u{04FF}').contains(&letter))
+        })
+        .cloned()
+        .collect();
+
+    println!("Russian literals of the about template: {russian:?}");
+
+    // Контроль прибора: the defect of 198.11 stands on a Russian literal, and a filter that saw
+    // none would pass every window.
+    assert!(
+        russian.iter().any(|(id, _)| *id == 1136),
+        "the instrument does not see the literal «От автора…» on 1136"
+    );
+    assert_eq!(Language::ALL.len(), 14, "the sweep names fourteen languages");
+
+    let mut wrong = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let texts = settings::about_texts(None);
+
+        for (id, literal) in &russian {
+            match texts
+                .iter()
+                .find(|(control, _)| u32::try_from(*control).ok() == Some(*id))
+            {
+                None => wrong.push(format!("{language:?}: control {id} keeps «{literal}»")),
+                Some((_, shown)) if shown.trim().is_empty() => {
+                    wrong.push(format!("{language:?}: control {id} gets an empty text"));
+                }
+                Some(_) => {}
+            }
+        }
+
+        let author = texts
+            .iter()
+            .find(|(control, _)| *control == 1136)
+            .map(|(_, shown)| shown.clone());
+        let row = product.string(language, settings::IDS_ABOUT_AUTHOR);
+
+        println!("{language:?}: 1136 shows {author:?}, the row of the language is «{row}»");
+
+        if author.as_deref() != Some(row.as_str()) {
+            wrong.push(format!(
+                "{language:?}: 1136 shows {author:?}, the row of the language is «{row}»"
+            ));
+        }
+
+        if language != Language::Ru && row == "От автора…" {
+            wrong.push(format!(
+                "{language:?}: the row itself is the Russian literal"
+            ));
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(
+        wrong.is_empty(),
+        "решение 198.11 — a Russian literal of the about template shows in another language: \
+         {wrong:#?}"
+    );
+}
+
+/// **Task T-106-2 — the table the sweep above reads is the one the window is filled from.**
+///
+/// The sweep reads [`settings::about_texts`] and not the window, so it holds only while
+/// `fill_about` puts every row of that table on its control and sets no text of its own beside
+/// it. Read off `src\settings.rs` — the shape of the function, not its output.
+#[test]
+fn the_about_window_takes_every_text_out_of_the_one_table() {
+    let source = settings_module_source();
+    let fill = function_body(&source, "fn fill_about(");
+
+    assert!(
+        fill.contains("in about_texts(version)") && fill.contains("set_text(hwnd, control,"),
+        "fill_about must put every row of about_texts on its control — the sweep of решение \
+         198.11 reads that table"
+    );
+    assert_eq!(
+        fill.matches("set_text(").count(),
+        1,
+        "a text set beside the table is a text the sweep does not see"
+    );
+}
+
 #[test]
 fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
     // Criterion 10 of T-11-11, the numbering half: the five identifiers continue the row
@@ -16931,6 +17043,9 @@ struct DialogTemplate {
     size: (i32, i32),
     /// Every non-empty control caption, in template order.
     text: Vec<String>,
+    /// The same captions paired with the identifier of their control — task T-106-2, which has
+    /// to say *which* control a Russian literal stands on.
+    captions: Vec<(u32, String)>,
     /// The identifier of every control.
     controls: Vec<u32>,
     /// The style of every control, paired with its identifier, in template order — task
@@ -17035,6 +17150,7 @@ impl DialogTemplate {
         });
 
         let mut text = Vec::new();
+        let mut captions = Vec::new();
         let mut controls = Vec::new();
         let mut styles = Vec::new();
         let mut bounds = Vec::new();
@@ -17070,6 +17186,7 @@ impl DialogTemplate {
             if let Some(title) = title
                 && !title.is_empty()
             {
+                captions.push((id, title.clone()));
                 text.push(title);
             }
         }
@@ -17078,6 +17195,7 @@ impl DialogTemplate {
             caption,
             size,
             text,
+            captions,
             controls,
             styles,
             bounds,

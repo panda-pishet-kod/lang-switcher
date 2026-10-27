@@ -18082,17 +18082,32 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
         crate::app::report_non_critical("SetWindowTextW", &error);
     }
 
-    set_text(hwnd, IDC_ABOUT_VERSION, &about_version_line(version));
-    set_text(hwnd, IDC_ABOUT_LINE_1, &text(IDS_ABOUT_LINE_1));
-    set_text(hwnd, IDC_ABOUT_LINE_2, &text(IDS_ABOUT_LINE_2));
+    for (control, caption) in about_texts(version) {
+        set_text(hwnd, control, &caption);
+    }
+}
 
-    // FR-92а, task Т-23-4, решение 82.5 — the «Как пользоваться» panel.
-    //
-    // The caption goes on the hidden control the block is drawn from: the window's own
-    // background reads it back off that control with `GetDlgItemTextW`, exactly as the
-    // settings dialog reads the captions of its six panels, so FR-94 reaches a panel heading
-    // by the same one road it reaches every other piece of text.
-    set_text(hwnd, IDC_ABOUT_HELP, &text(IDS_ABOUT_HELP));
+/// Every text [`fill_about`] puts on a control of the about window, in the locale in force —
+/// task T-106-2, решение 198.11.
+///
+/// One table for the window and for its sweep: the window takes its texts from nothing else,
+/// so `tests\settings.rs` reads what the window shows in each of the fourteen languages without
+/// raising it. The button «От автора…» came with task Т-32-4 and stood out of this list for
+/// thirty-five deliveries — its template literal, Russian, showed in every other language (the
+/// English window of 1.0.0 on the stand, 2026-10-27).
+pub fn about_texts(version: Option<(u16, u16, u16, u16)>) -> Vec<(i32, String)> {
+    let mut texts = vec![
+        (IDC_ABOUT_VERSION, about_version_line(version)),
+        (IDC_ABOUT_LINE_1, text(IDS_ABOUT_LINE_1)),
+        (IDC_ABOUT_LINE_2, text(IDS_ABOUT_LINE_2)),
+        // FR-92а, task Т-23-4, решение 82.5 — the «Как пользоваться» panel.
+        //
+        // The caption goes on the hidden control the block is drawn from: the window's own
+        // background reads it back off that control with `GetDlgItemTextW`, exactly as the
+        // settings dialog reads the captions of its six panels, so FR-94 reaches a panel
+        // heading by the same one road it reaches every other piece of text.
+        (IDC_ABOUT_HELP, text(IDS_ABOUT_HELP)),
+    ];
 
     // The numerals are already on their controls — template literals, the same in both
     // locales — so only the five sentences are set here.
@@ -18103,10 +18118,14 @@ fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
     // `draw_about_help_row` splits the caption at `theme::KEY_PLACEHOLDER` and writes the key
     // itself inside the figure.
     for (_, row, string) in ABOUT_HELP_ROWS {
-        set_text(hwnd, row, &text(string));
+        texts.push((row, text(string)));
     }
 
-    set_text(hwnd, OK_COMMAND, &text(IDS_ABOUT_OK));
+    // Task T-106-2, решение 198.11: the button of FR-103 says it in the language of the window.
+    texts.push((IDC_ABOUT_AUTHOR, text(IDS_ABOUT_AUTHOR)));
+    texts.push((OK_COMMAND, text(IDS_ABOUT_OK)));
+
+    texts
 }
 
 /// Lays the «Как пользоваться» panel under the **measured** height of its five sentences —
