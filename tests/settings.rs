@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+/// The resource script with its language files — the one reader of the string tables (T-L10N-2).
+#[path = "support/resource_script.rs"]
+mod resource_script;
+
 use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
     QUARANTINE_SUFFIX, Quarantined, ReadOutcome, ReplacementMethod, SavePolicy,
@@ -28633,10 +28637,9 @@ fn both_names_of_the_program_get_one_and_the_same_pair_of_colours() {
 /// that gave it a number — so a comment about the removal does not read as the removal undone.
 #[test]
 fn the_authors_signature_left_the_resource_with_all_fourteen_translations() {
-    let resource = Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
-    let text = fs::read_to_string(&resource)
-        .expect("app.rc must be readable")
-        .replace("\r\n", "\n");
+    // Since stage L10N the tables are res/lang/<tag>.rc: app.rc alone would answer zero for the
+    // wrong reason, and the mutant below is what told (red before T-L10N-2 switched to this).
+    let text = resource_script::resource_script();
 
     let statements = |body: &str| -> usize {
         body.lines()
@@ -28662,7 +28665,8 @@ fn the_authors_signature_left_the_resource_with_all_fourteen_translations() {
     assert_eq!(
         statements(&text),
         0,
-        "all fourteen translations of the author's signature must be gone from app.rc"
+        "all fourteen translations of the author's signature must be gone from app.rc and its \
+         language files"
     );
     assert_eq!(defines(&text), 0, "and so must the number that named it");
 

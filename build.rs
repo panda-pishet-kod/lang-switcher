@@ -29,6 +29,10 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=app.rc");
+    // Stage L10N, task T-L10N-2: the string tables live in res/lang/<tag>.rc, included by app.rc.
+    // rc.exe follows the #include, cargo does not: without this line an edited translation would
+    // leave the old strings in the binary. A folder is watched whole, any file below it.
+    println!("cargo:rerun-if-changed=res/lang");
     println!("cargo:rerun-if-changed=app.manifest");
     println!("cargo:rerun-if-changed=app-dev.manifest");
     println!("cargo:rerun-if-changed=res/langswitcher-active.ico");

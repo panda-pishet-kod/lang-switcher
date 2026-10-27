@@ -20,6 +20,10 @@ use std::path::Path;
 use std::sync::OnceLock;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::LibraryLoader::{LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW};
+
+/// The resource script with its language files — the one reader of the string tables (T-L10N-2).
+#[path = "support/resource_script.rs"]
+mod resource_script;
 use windows::core::PCWSTR;
 
 /// The built `LangSwitcher.exe`, mapped once so that the string tables of FR-94 can be read.
@@ -1962,9 +1966,7 @@ fn the_address_of_the_letter_is_the_sites_and_no_table_carries_it() {
         "the address is not a link: nothing may hand it to the shell"
     );
 
-    let rc = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
-        .expect("app.rc must be readable")
-        .replace("\r\n", "\n");
+    let rc = resource_script::resource_script();
     let carrying = |text: &str| {
         text.lines()
             .filter(|line| line.contains(links::MAIL_ADDRESS))
@@ -1974,7 +1976,8 @@ fn the_address_of_the_letter_is_the_sites_and_no_table_carries_it() {
     assert_eq!(
         carrying(&rc),
         0,
-        "181.6: no line of app.rc may carry the address — the tables hold it as {{0}}"
+        "181.6: no line of app.rc and its language files may carry the address — the tables hold \
+         it as {{0}}"
     );
 
     let spoilt = rc.replacen(

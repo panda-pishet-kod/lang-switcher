@@ -49,8 +49,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The folders read whole: every file below them, at any depth.
-const FOLDERS: [&str; 5] = ["src", "tests", "tools", "installer", ".github"];
+/// The folders read whole: every file below them, at any depth. `res` since stage L10N
+/// (T-L10N-2): the strings of the interface are text there now, `res/lang/<tag>.rc`.
+const FOLDERS: [&str; 6] = ["src", "tests", "tools", "installer", ".github", "res"];
 
 /// The files of the root this sweep insists on finding — a list that no longer matches the root
 /// is a list that has stopped describing what it reads. Every other file of the root is read as
@@ -82,14 +83,16 @@ const ROOT_FILES: [&str; 14] = [
 const NOT_OF_THE_TREE: [&str; 2] = [".git", "tools/local.ps1"];
 
 /// File kinds that are not text: the icons and sounds of `res\`, and whatever a build or an
-/// installer compile may leave under a folder of [`FOLDERS`].
-const BINARY_EXTENSIONS: [&str; 10] = [
-    "ico", "png", "bmp", "wav", "exe", "dll", "pdb", "lib", "exp", "res",
+/// installer compile may leave under a folder of [`FOLDERS`]; `bin` is the table of letter
+/// statistics, `res/letter-stats-en.bin`.
+const BINARY_EXTENSIONS: [&str; 11] = [
+    "ico", "png", "bmp", "wav", "exe", "dll", "pdb", "lib", "exp", "res", "bin",
 ];
 
 /// Files of the tree that the walk must have read, or the walk is not the walk this test claims.
-const MUST_BE_READ: [&str; 7] = [
+const MUST_BE_READ: [&str; 8] = [
     "README.md",
+    "res/lang/en.rc",
     "SPEC.md",
     "installer/LangSwitcher.iss",
     "tools/release.ps1",
