@@ -907,3 +907,535 @@ fn the_context_has_one_row_for_every_string_and_names_real_places() {
     );
     assert!(wrong.is_empty(), "context.tsv:\n{}", wrong.join("\n"));
 }
+
+// -----------------------------------------------------------------------------------------------
+// The fit of the strings without a screen — task T-L10N-6
+// -----------------------------------------------------------------------------------------------
+//
+// Every string of a language file against the element `context.tsv` names, in a memory DC with
+// the face of the window — no window is created. The face is the one the dialog manager makes of
+// `FONT 10, "Segoe UI"` at every pair (DPI, step) of FR-92 whose face is at least 11 px, made
+// smooth by `theme::smoothed_logfont` as the program draws it; the room is the element of the
+// template in dialog units of that face. What is measured, by kind of element:
+//
+// * a label (`LTEXT`, drawn by `theme::paint_label`): the height by `theme::measure_label` — the
+//   program's own measuring body — against the height of the element in the two windows laid
+//   out from the template (settings, about); in the windows laid out when shown (the letters,
+//   «От автора», the wizard) the height grows and only the width is held: a word wider than the
+//   element (`DT_WORDBREAK` does not break inside a word);
+// * an element with a glyph (check box, radio): one line from 12 dialog units on
+//   (`settings::GLYPH_TEXT_INSET_DLU`), two lines where the element is two lines tall;
+// * a push button: one line inside 2 dialog units of margin on each side — **a model, not a
+//   measurement of the button's own drawing**;
+// * a combo box item: one line between 3 units of text inset and the chevron
+//   (`COMBO_CHEVRON_INSET_X` + `COMBO_CHEVRON_TEXT_GAP` at the DPI);
+// * a panel caption (`IDC_GROUP_*`, `*_PANEL`): one line inside 4 units on each side — a model;
+// * a balloon, the tooltip: the characters of their fields (63, 255, 127 with «Lang Switcher — »).
+//
+// Not measured: the window captions (the system draws them), the menu (it grows), the report.
+// A substitution `{n}` is measured as «0000». ⚠ The height of a line is the face's: a script whose
+// glyphs stand above or below it (Myanmar, Tamil, Khmer) is not seen here — the eye on the stand.
+
+/// The pairs (DPI, points) of FR-92 the program can draw with: the step of the font is one of
+/// 10, 9, 8, 7, 6 pt, and the face is never under 11 px.
+fn fit_scales() -> Vec<(i32, i32)> {
+    let mut scales = Vec::new();
+    for dpi in [96, 120, 144] {
+        for points in [10, 9, 8, 7, 6] {
+            if (points * dpi + 36) / 72 >= 11 {
+                scales.push((dpi, points));
+            }
+        }
+    }
+    scales
+}
+
+/// An element of a template: its statement and its size in dialog units.
+struct Element {
+    kind: String,
+    width: i32,
+    height: i32,
+}
+
+/// Every element of every template of `app.rc`, by (dialog, control).
+fn elements() -> BTreeMap<(String, String), Element> {
+    let mut out = BTreeMap::new();
+    let mut dialog: Option<String> = None;
+    for line in resource_script::resource_script().lines() {
+        if let Some((name, _)) = line.split_once(" DIALOGEX") {
+            dialog = Some(name.trim().to_owned());
+            continue;
+        }
+        if line.trim() == "END" {
+            dialog = None;
+        }
+        let Some(dialog) = &dialog else { continue };
+        let trimmed = line.trim_start();
+        let kind: String = trimmed
+            .chars()
+            .take_while(char::is_ascii_uppercase)
+            .collect();
+        if kind.is_empty() || kind == "BEGIN" || kind == "FONT" || kind == "STYLE" {
+            continue;
+        }
+        // The cells between commas outside quotes: [text,] id, [class, style,] x, y, w, h.
+        let mut cells = Vec::new();
+        let (mut cell, mut quoted) = (String::new(), false);
+        for c in trimmed[kind.len()..].chars() {
+            match c {
+                '"' => quoted = !quoted,
+                ',' if !quoted => cells.push(std::mem::take(&mut cell)),
+                _ => cell.push(c),
+            }
+        }
+        cells.push(cell);
+        let cells: Vec<String> = cells.iter().map(|c| c.trim().to_owned()).collect();
+        let (id, rect) = if kind == "CONTROL" {
+            (1, 4)
+        } else if trimmed[kind.len()..].trim_start().starts_with('"') {
+            (1, 2)
+        } else {
+            (0, 1)
+        };
+        let number = |i: usize| cells.get(i).and_then(|c| c.parse::<i32>().ok());
+        if let (Some(name), Some(width), Some(height)) =
+            (cells.get(id), number(rect + 2), number(rect + 3))
+        {
+            out.insert(
+                (dialog.clone(), name.clone()),
+                Element {
+                    kind: kind.clone(),
+                    width,
+                    height,
+                },
+            );
+        }
+    }
+    out
+}
+
+/// The text of a string as the program draws it: the escapes undone, a substitution as «0000».
+fn drawn(raw: &str) -> String {
+    let text = raw
+        .replace("\"\"", "\"")
+        .replace("\\\\", "\u{1}")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace('\u{1}', "\\");
+    let mut out = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('{') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let digits = after.chars().take_while(char::is_ascii_digit).count();
+        if digits > 0 && after[digits..].starts_with('}') {
+            out.push_str("0000");
+            rest = &after[digits + 1..];
+        } else {
+            out.push('{');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The face of the windows at one pair (DPI, points), selected into a memory DC.
+struct Face {
+    dc: windows::Win32::Graphics::Gdi::HDC,
+    font: windows::Win32::Graphics::Gdi::HFONT,
+    previous: windows::Win32::Graphics::Gdi::HGDIOBJ,
+    dpi: i32,
+    base_x: i32,
+    base_y: i32,
+    line: i32,
+}
+
+impl Face {
+    fn new(dpi: i32, points: i32) -> Self {
+        use windows::Win32::Graphics::Gdi::{
+            CreateCompatibleDC, CreateFontIndirectW, DEFAULT_CHARSET, FW_NORMAL,
+            GetTextExtentPoint32W, GetTextMetricsW, LOGFONTW, SelectObject, TEXTMETRICW,
+        };
+        let mut logical = LOGFONTW {
+            lfHeight: -((points * dpi + 36) / 72),
+            lfWeight: FW_NORMAL.0 as i32,
+            lfCharSet: DEFAULT_CHARSET,
+            ..Default::default()
+        };
+        for (slot, unit) in logical.lfFaceName.iter_mut().zip("Segoe UI".encode_utf16()) {
+            *slot = unit;
+        }
+        let logical = lang_switcher::theme::smoothed_logfont(logical);
+        // SAFETY: a memory DC compatible with the screen, a font made of a filled LOGFONTW, both
+        // released in `Drop`; the metric calls write into locals of this frame.
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+            let font = CreateFontIndirectW(&raw const logical);
+            assert!(
+                !dc.is_invalid() && !font.is_invalid(),
+                "a memory DC and the face"
+            );
+            let previous = SelectObject(dc, font.into());
+            let alphabet: Vec<u16> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                .encode_utf16()
+                .collect();
+            let mut size = windows::Win32::Foundation::SIZE::default();
+            let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
+            let mut metrics = TEXTMETRICW::default();
+            let _ = GetTextMetricsW(dc, &mut metrics);
+            Self {
+                dc,
+                font,
+                previous,
+                // What the program draws at in a window of this step: screen × step / 10
+                // (`theme::drawing_dpi_at`, решение 143.4) — the pitch of lines and the insets.
+                dpi: lang_switcher::theme::drawing_dpi_at(dpi, points as u16),
+                base_x: (size.cx / 26 + 1) / 2,
+                base_y: metrics.tmHeight,
+                line: metrics.tmHeight,
+            }
+        }
+    }
+
+    /// Dialog units across and down, in pixels of this face — `MapDialogRect`.
+    fn x(&self, units: i32) -> i32 {
+        (units * self.base_x + 2) / 4
+    }
+
+    fn y(&self, units: i32) -> i32 {
+        (units * self.base_y + 4) / 8
+    }
+
+    /// The width of one line of the text.
+    fn single(&self, text: &str) -> i32 {
+        use windows::Win32::Graphics::Gdi::{DT_CALCRECT, DT_SINGLELINE, DrawTextW};
+        let mut wide: Vec<u16> = text.encode_utf16().collect();
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        // SAFETY: a live DC with the face selected, a live buffer and rectangle of this frame;
+        // DT_CALCRECT writes the rectangle and paints nothing.
+        unsafe { DrawTextW(self.dc, &mut wide, &mut rect, DT_SINGLELINE | DT_CALCRECT) };
+        rect.right - rect.left
+    }
+
+    /// The height the program's own body asks for the text at this width, and the width the
+    /// wrapped text actually takes (more than `width` when a word does not break).
+    fn wrapped(&self, text: &str, width: i32) -> (i32, i32) {
+        use lang_switcher::theme::{LABEL_TEXT_FORMAT, measure_label};
+        use windows::Win32::Graphics::Gdi::{DT_CALCRECT, DrawTextW};
+        let mut wide: Vec<u16> = text.encode_utf16().collect();
+        // The pitch of the window at this scale, given outright: a memory DC reads the step of ten
+        // (`theme::drawing_dpi`), not the step measured (finding 143б).
+        let pitch = lang_switcher::theme::scaled(lang_switcher::theme::LABEL_LINE_PITCH, self.dpi);
+        // SAFETY: as in `single`; `measure_label` asks for a DC with the face already selected.
+        let height = unsafe { measure_label(self.dc, width, &mut wide, Some(pitch)) };
+        let mut rect = windows::Win32::Foundation::RECT {
+            right: width,
+            ..Default::default()
+        };
+        // SAFETY: as above.
+        unsafe {
+            DrawTextW(
+                self.dc,
+                &mut wide,
+                &mut rect,
+                LABEL_TEXT_FORMAT | DT_CALCRECT,
+            )
+        };
+        (height, rect.right - rect.left)
+    }
+}
+
+impl Drop for Face {
+    fn drop(&mut self) {
+        use windows::Win32::Graphics::Gdi::{DeleteDC, DeleteObject, SelectObject};
+        // SAFETY: the objects `new` made, released once.
+        unsafe {
+            SelectObject(self.dc, self.previous);
+            let _ = DeleteObject(self.font.into());
+            let _ = DeleteDC(self.dc);
+        }
+    }
+}
+
+/// One string that does not fit, in the words of the table of T-L10N-6.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Overflow {
+    file: String,
+    id: String,
+    place: String,
+    scale: String,
+    need: i32,
+    room: i32,
+    what: &'static str,
+}
+
+/// The windows laid out from the template, where a label cannot grow.
+const FIXED_WINDOWS: [&str; 2] = ["IDD_SETTINGS", "IDD_ABOUT"];
+
+/// The width of the wizard's content in dialog units: the window of 256 less its margins of 12
+/// (the family of windows, решение 142.1) — the width of `IDC_WZ_TITLE` in the template.
+const WIZARD_CONTENT_DLU: i32 = 232;
+
+/// Everything of one language file that does not fit, at every scale.
+fn overflows(
+    file: &str,
+    strings: &BTreeMap<String, String>,
+    faces: &[(String, Face)],
+) -> Vec<Overflow> {
+    let elements = elements();
+    let mut out = Vec::new();
+    for row in context() {
+        let Some(raw) = strings.get(&row[0]) else {
+            continue;
+        };
+        let text = drawn(raw);
+        let id = row[0].clone();
+        let limit = |what: &'static str, need: usize, room: usize| Overflow {
+            file: file.to_owned(),
+            id: id.clone(),
+            place: row[1].clone(),
+            scale: "-".to_owned(),
+            need: need as i32,
+            room: room as i32,
+            what,
+        };
+        let characters = text.encode_utf16().count();
+        if row[3].starts_with("balloon title") && characters > 63 {
+            out.push(limit("characters of the balloon title", characters, 63));
+        }
+        if row[3].starts_with("balloon text") && characters > 255 {
+            out.push(limit("characters of the balloon text", characters, 255));
+        }
+        if row[1] == "tray_tip" && characters + "Lang Switcher — ".chars().count() > 127 {
+            out.push(limit("characters of the tooltip", characters + 16, 127));
+        }
+        for window in row[1].split(',') {
+            for control in row[2].split(',') {
+                let Some(element) = elements.get(&(window.to_owned(), control.to_owned())) else {
+                    continue;
+                };
+                for (scale, face) in faces {
+                    let (width, height) = (face.x(element.width), face.y(element.height));
+                    let mut push = |what: &'static str, need: i32, room: i32| {
+                        out.push(Overflow {
+                            file: file.to_owned(),
+                            id: id.clone(),
+                            place: format!("{window} {control}"),
+                            scale: scale.clone(),
+                            need,
+                            room,
+                            what,
+                        })
+                    };
+                    match element.kind.as_str() {
+                        "LTEXT" | "RTEXT" | "CTEXT" => {
+                            // The wizard places every label across the width of its content
+                            // (`layout_wizard`: `width = client.right - pad * 2`) or, in a row, by
+                            // the width of its words — the template's width is not its limit.
+                            let width = if window == "IDD_WIZARD" {
+                                face.x(WIZARD_CONTENT_DLU)
+                            } else {
+                                width
+                            };
+                            let (need, taken) = face.wrapped(&text, width);
+                            if taken > width {
+                                push("width: a word wider than the label", taken, width);
+                            }
+                            if FIXED_WINDOWS.contains(&window) && need > height {
+                                push("height of the label", need, height);
+                            }
+                        }
+                        // The windows laid out when shown size their buttons to the words
+                        // (first run of the instrument: 45 «overflows» of en.rc there, all of
+                        // them the template's width, none on the screen). A button of the two
+                        // template windows draws its words across the whole of itself —
+                        // `text_rect = rect`, DT_CENTER | DT_SINGLELINE (settings.rs, the draw
+                        // of a push button) — so its room is its width.
+                        "PUSHBUTTON" | "DEFPUSHBUTTON" if FIXED_WINDOWS.contains(&window) => {
+                            let need = face.single(&text);
+                            if need > width {
+                                push("width of the button", need, width);
+                            }
+                        }
+                        "COMBOBOX" => {
+                            let room =
+                                width - face.x(3) - lang_switcher::theme::scaled(14 + 4, face.dpi);
+                            let need = face.single(&text);
+                            if need > room {
+                                push("width of the combo box item", need, room);
+                            }
+                        }
+                        "CONTROL" if control.contains("CARD") => {}
+                        "CONTROL"
+                            if control.starts_with("IDC_GROUP_") || control.ends_with("_PANEL") =>
+                        {
+                            let room = width - 2 * face.x(4);
+                            let need = face.single(&text);
+                            if need > room {
+                                push("width of the panel caption (model)", need, room);
+                            }
+                        }
+                        "CONTROL" => {
+                            let room = width - face.x(12);
+                            let need = face.single(&text);
+                            if need > room {
+                                if height >= 2 * face.line {
+                                    let (tall, _) = face.wrapped(&text, room);
+                                    if tall > height {
+                                        push("height beside the glyph", tall, height);
+                                    }
+                                } else {
+                                    push("width beside the glyph", need, room);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The faces of every scale of FR-92, named «125 % · 8 pt».
+fn fit_faces() -> Vec<(String, Face)> {
+    fit_scales()
+        .into_iter()
+        .map(|(dpi, points)| {
+            (
+                format!("{} % · {points} pt", dpi * 100 / 96),
+                Face::new(dpi, points),
+            )
+        })
+        .collect()
+}
+
+/// The overflows already known on the shipped files — findings of stage L10N (condition C5,
+/// record 200.11), recorded and not mended there; the eye on the stand decides them:
+///
+/// * `cs.rc` `IDS_LOG_DIR_LABEL` — two lines in a label of one, at 100 % · 8 pt only;
+/// * `el.rc` `IDS_WRITE_TO_AUTHOR` — 136 px of words in a button of 132, at 100 % · 8 pt only;
+/// * `el.rc` `IDS_NEWS_SWITCH` — one line beside the glyph of «От автора», 7 scales of 12
+///   (495 px in 464 at 125 % · 10 pt); the drawing of that glyph was not read against the model.
+const KNOWN_OVERFLOWS: [(&str, &str); 3] = [
+    ("cs.rc", "IDS_LOG_DIR_LABEL"),
+    ("el.rc", "IDS_WRITE_TO_AUTHOR"),
+    ("el.rc", "IDS_NEWS_SWITCH"),
+];
+
+/// **Every string of every language file fits its element at every scale of FR-92** — the
+/// instrument of T-L10N-6, without a screen.
+///
+/// The positive control is part of the test: English lengthened by 40 % — the length a
+/// translation may reach — must not fit somewhere, or the instrument cannot redden. Further
+/// files (the pseudo-language of the scripts, `scratchpad-L10N`) are measured and printed when
+/// `LANGSW_L10N_FIT_EXTRA` names them, separated by `;`; `LANGSW_L10N_FIT_OUT` writes the whole
+/// table there.
+#[test]
+fn every_string_fits_its_element_at_every_scale_of_fr_92() {
+    let faces = fit_faces();
+    let english = english();
+    let mut table = Vec::new();
+
+    for (tag, text) in resource_script::language_files() {
+        let read = read_language_file(&format!("{tag}.rc"), &text);
+        table.extend(overflows(&format!("{tag}.rc"), &read.strings, &faces));
+    }
+    let unexpected: Vec<&Overflow> = table
+        .iter()
+        .filter(|o| {
+            !KNOWN_OVERFLOWS
+                .iter()
+                .any(|(file, id)| o.file == *file && o.id == *id)
+        })
+        .collect();
+
+    let longer: BTreeMap<String, String> = english
+        .strings
+        .iter()
+        .map(|(id, raw)| {
+            let extra = (raw.chars().count() * 2).div_ceil(5);
+            let tail: String = raw
+                .chars()
+                .filter(|c| *c != '\\')
+                .cycle()
+                .take(extra)
+                .collect();
+            (id.clone(), format!("{raw} {tail}"))
+        })
+        .collect();
+    let control = overflows("en+40%", &longer, &faces);
+
+    let mut extra = Vec::new();
+    if let Ok(paths) = std::env::var("LANGSW_L10N_FIT_EXTRA") {
+        for path in paths.split(';').filter(|p| !p.is_empty()) {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("{path} must be readable: {e}"))
+                .replace("\r\n", "\n");
+            let name = std::path::Path::new(path)
+                .file_name()
+                .map_or(path.to_owned(), |n| n.to_string_lossy().into_owned());
+            let read = read_language_file(&name, &text);
+            extra.extend(overflows(&name, &read.strings, &faces));
+        }
+    }
+
+    let line = |o: &Overflow| {
+        format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            o.file, o.id, o.place, o.scale, o.need, o.room, o.what
+        )
+    };
+    let mut summary: BTreeMap<String, usize> = BTreeMap::new();
+    for o in table.iter().chain(&control).chain(&extra) {
+        *summary.entry(o.file.clone()).or_default() += 1;
+    }
+    println!(
+        "fit: {} scales, {} language files; overflows by file: {summary:?}",
+        faces.len(),
+        resource_script::language_files().len()
+    );
+    for o in table
+        .iter()
+        .chain(control.iter().take(12))
+        .chain(extra.iter().take(40))
+    {
+        println!("{}", line(o));
+    }
+    if let Ok(out) = std::env::var("LANGSW_L10N_FIT_OUT") {
+        let all: Vec<String> =
+            std::iter::once("file\tid\tplace\tscale\tneed_px\troom_px\twhat".to_owned())
+                .chain(table.iter().chain(&control).chain(&extra).map(line))
+                .collect();
+        std::fs::write(&out, all.join("\n") + "\n").expect("the table must be writable");
+    }
+
+    for kind in [
+        "height of the label",
+        "width of the button",
+        "width beside the glyph",
+    ] {
+        assert!(
+            control.iter().any(|o| o.what == kind),
+            "the positive control: English lengthened by 40 % must redden «{kind}» somewhere"
+        );
+    }
+    for (file, id) in KNOWN_OVERFLOWS {
+        assert!(
+            table.iter().any(|o| o.file == file && o.id == id),
+            "{file} {id} is listed as a known overflow and fits now: take it off the list"
+        );
+    }
+    assert!(
+        unexpected.is_empty(),
+        "{} строк не влезают:\n{}",
+        unexpected.len(),
+        unexpected
+            .iter()
+            .map(|o| line(o))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
