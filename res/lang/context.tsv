@@ -4,7 +4,7 @@
 id	window	control	room_px	placeholders	note
 IDS_DIALOG_CAPTION	IDD_SETTINGS	caption	window caption: 753 px wide	-	Lang Switcher is not translated
 IDS_GROUP_GENERAL	IDD_SETTINGS	IDC_GROUP_GENERAL	368x17	-	-
-IDS_AUTOSTART	IDD_SETTINGS	IDC_AUTOSTART	343x21	-	-
+IDS_AUTOSTART	IDD_SETTINGS	IDC_AUTOSTART	343x21	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
 IDS_LANGUAGE_LABEL	IDD_SETTINGS	IDC_LANGUAGE_LABEL	119x19	-	-
 IDS_GROUP_HOTKEY	IDD_SETTINGS	IDC_GROUP_HOTKEY	368x17	-	-
 IDS_HOTKEY_LABEL	report,IDD_SETTINGS	IDC_HOTKEY_LABEL	70x19	-	-
@@ -98,8 +98,8 @@ IDS_CLOSE	IDD_LETTER,IDD_LETTERS_LIST,IDD_AUTHOR,IDD_WIZARD	IDC_LETTERS_CLOSE,ID
 IDS_CHANNEL_OPEN	IDD_LETTER,IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CHANNEL,IDC_WZ_CHANNEL	110x30	-	-
 IDS_FEEDBACK_OPEN	IDD_LETTER	IDC_LETTER_PANEL_BTN_1	151x30	-	-
 IDS_SUPPORT_OPEN	IDD_LETTER,IDD_AUTHOR	IDC_AUTHOR_SUPPORT	193x30	-	-
-IDS_HELLO_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; «Panda» is the author's name in the letters (decision 155.2)
-IDS_HELLO_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated
+IDS_HELLO_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; «Panda» is the author's name in the letters (decision 155.2); voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
+IDS_HELLO_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
 IDS_HELLO_DEMO_CAP	IDD_LETTER	IDC_LETTER_DEMO_CAP	406x43 (2 lines)	{0} = the hotkey, «Pause»	the window is laid out when shown: the height grows with the text, the width does not
 IDS_HELLO_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_HELLO_ROW_1	IDD_LETTER	IDC_LETTER_ROW_1	362x19	{0} = the hotkey, «Pause»	the window is laid out when shown: the height grows with the text, the width does not
@@ -108,11 +108,11 @@ IDS_HELLO_ROW_3	IDD_LETTER	IDC_LETTER_ROW_3	362x19	-	the window is laid out when
 IDS_HELLO_SETTINGS	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	-
 IDS_HELLO_OK	IDD_LETTER	IDC_LETTER_ACCENT	72x30	-	-
 IDS_THANKS_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKS_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated
-IDS_THANKS_PARA	IDD_LETTER	IDC_LETTER_PARA	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_THANKS_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
+IDS_THANKS_PARA	IDD_LETTER	IDC_LETTER_PARA	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
 IDS_SUPPORT_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_SUPPORT_TEXT	IDD_LETTER	IDC_LETTER_PANEL_TEXT	382x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKS_SNOOZE	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	-
+IDS_THANKS_SNOOZE	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
 IDS_THANKS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WHATSNEW_TITLE	IDD_LETTER,toast	IDC_LETTER_TITLE,title	354x47 (2 lines)	{0} = the version, «1.1.0» (code: &context.version)	the window is laid out when shown: the height grows with the text, the width does not; also the title of a balloon (toast)
 IDS_WHATSNEW_FROM	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	{0} = the version before the update (code: &context.previous_version)	the window is laid out when shown: the height grows with the text, the width does not
@@ -164,7 +164,7 @@ IDS_UPDATE_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	{0} = the new version (code: &
 IDS_NEWS_LETTER_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_NEWS_LATER	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	-
 IDS_NEWS_OPEN_LINK	IDD_LETTER	IDC_LETTER_PANEL_BTN_1	151x30	-	-
-IDS_NEWS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
 IDS_WIZARD_CAPTION	IDD_WIZARD	caption	window caption: 448 px wide	-	-
 IDS_WIZARD_STEP	IDD_WIZARD	IDC_WZ_STEP	406x19	{0} = this step, «2»; {1} = the number of steps, «5» (code: &(wizard.step + 1).to_string(), &road.len().to_string())	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CANCEL	IDD_WIZARD	IDC_WZ_CANCEL	98x30	-	-
@@ -177,7 +177,7 @@ IDS_WIZARD_CARD_WRONG	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is la
 IDS_WIZARD_CARD_WRONG_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CARD_NOTHING	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CARD_NOTHING_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CARD_IDEA	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CARD_IDEA	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the user — «I» is the person using the program, no gender (RULES 14)
 IDS_WIZARD_CARD_IDEA_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_WHERE_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_WHERE_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -189,7 +189,7 @@ IDS_WIZARD_WHERE_FIELD	report	-	the text of the report: no limit	-	a line of the
 IDS_WIZARD_FIELD_NORMAL	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
 IDS_WIZARD_FIELD_PASSWORD	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
 IDS_WIZARD_FIELD_PASSWORD_SUB	IDD_WIZARD	IDC_WZ_FIELD_2_SUB	383x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_FIELD_UNKNOWN	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
+IDS_WIZARD_FIELD_UNKNOWN	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
 IDS_WIZARD_DID_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_DID_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_TYPED_IN	report,IDD_WIZARD	IDC_WZ_TYPED_LABEL	175x21	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -235,7 +235,7 @@ IDS_WIZARD_CONTACT_LINE	report	-	the text of the report: no limit	-	a line of th
 IDS_WIZARD_FAILED_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_FAILED_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the two button names are IDS_WIZARD_RETRY and the letter is IDS_WIZARD_COPY_TEXT and IDS_WIZARD_COPY_ADDRESS
 IDS_WIZARD_SENT_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_SENT_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer
+IDS_WIZARD_SENT_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
 IDS_MENU_SUSPEND	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME	menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME_RESTART	menu	-	menu: grows with the text	-	-
