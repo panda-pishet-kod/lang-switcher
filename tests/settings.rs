@@ -8416,6 +8416,89 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "Útgáfa 0.97.0 er komin út",
         "Nánari upplýsingar eru á niðurhalssíðunni.\n",
     ),
+    (
+        Language::Vi,
+        "Chương trình giờ đây tự cập nhật",
+        concat!(
+            "Từ phiên bản 0.104.0, Lang Switcher tự cập nhật.\n",
+            "Chương trình tự tải các phiên bản mới từ trang web của tác giả và\n",
+            "cài đặt chúng sau khi kiểm tra chữ ký. Chỉ cần cài phiên bản mới một lần —\n",
+            "các bản cập nhật sau đó sẽ tự đến. Phiên bản này cũng sửa lỗi khởi động\n",
+            "trên Windows không có gói Visual C++: các phiên bản 0.90.0–0.103.0 không\n",
+            "chạy được ở đó.\n",
+        ),
+        "Đã ra mắt phiên bản 0.97.0",
+        "Chi tiết có trên trang tải xuống.\n",
+    ),
+    (
+        Language::Ro,
+        "Programul se actualizează acum singur",
+        concat!(
+            "Lang Switcher descarcă și instalează singur versiunile noi.\n",
+            "Începând cu versiunea 0.104.0, le descarcă de pe site-ul autorului și\n",
+            "le instalează după ce verifică semnătura digitală. Instalați noua\n",
+            "versiune o singură dată, iar actualizările vor veni de la sine. Această\n",
+            "versiune repară și pornirea pe un Windows fără pachetul Visual C++:\n",
+            "versiunile 0.90.0–0.103.0 nu porneau acolo.\n",
+        ),
+        "A apărut versiunea 0.97.0",
+        "Detaliile se găsesc pe pagina de descărcare.\n",
+    ),
+    (
+        Language::Hu,
+        "A program mostantól magától frissül",
+        concat!(
+            "A Lang Switcher mostantól maga tölti le és telepíti az új verziókat.\n",
+            "A 0.104.0 verziótól kezdve a szerző webhelyéről tölti le őket, és az\n",
+            "aláírás ellenőrzése után telepíti. Telepítse az új verziót egyszer,\n",
+            "és a frissítések attól kezdve maguktól jönnek. Ez a verzió azt is\n",
+            "javítja, hogy a program elinduljon olyan Windowson, amelyen nincs\n",
+            "Visual C++ csomag: a 0.90.0–0.103.0 verziók ott nem indultak el.\n",
+        ),
+        "Megjelent a(z) 0.97.0 verzió",
+        "A részletek a letöltési oldalon találhatók.\n",
+    ),
+    (
+        Language::Sq,
+        "Programi tani përditësohet vetë",
+        concat!(
+            "Që nga 0.104.0, Lang Switcher i shkarkon vetë versionet e reja.\n",
+            "I merr nga faqja e autorit dhe i instalon, pasi kontrollon nënshkrimin.\n",
+            "Instaloni versionin e ri një herë dhe përditësimet do të vijnë vetë.\n",
+            "Ky version rregullon edhe nisjen në Windows pa paketën Visual C++:\n",
+            "versionet 0.90.0–0.103.0 nuk niseshin atje.\n",
+        ),
+        "Doli versioni 0.97.0",
+        "Detajet janë në faqen e shkarkimit.\n",
+    ),
+    (
+        Language::Mt,
+        "Il-programm issa jaġġorna lilu nnifsu",
+        concat!(
+            "Mill-verżjoni 0.104.0 Lang Switcher jniżżel il-verżjonijiet il-ġodda waħdu.\n",
+            "Jieħdhom mis-sit tal-awtur u jinstallahom, wara li jivverifika l-firma.\n",
+            "Installa l-verżjoni l-ġdida darba waħda u l-aġġornamenti jaslu waħedhom.\n",
+            "Din il-verżjoni ssewwi wkoll il-bidu fuq Windows mingħajr il-pakkett\n",
+            "Visual C++: il-verżjonijiet 0.90.0–0.103.0 ma kinux jibdew hemm.\n",
+        ),
+        "Ħarġet il-verżjoni 0.97.0",
+        "Id-dettalji jinsabu fil-paġna tat-tniżżil.\n",
+    ),
+    (
+        Language::Mi,
+        "Ka whakahou aunoa te hōtaka ināianei",
+        concat!(
+            "Mai i te putanga 0.104.0, ka whakahou aunoa a Lang Switcher.\n",
+            "Ka tikiake te hōtaka i ngā putanga hou mai i te pae tukutuku a te kaituhi,\n",
+            "ā, ka whakauru i aua putanga mā ia anō i muri i te arotake i te waitohu.\n",
+            "Kotahi noa iho te whakauru i te putanga hou, ā, ka tae mai ngā whakahou\n",
+            "o muri mā rātou anō. Kua whakatikaina hoki e tēnei putanga te tīmatanga\n",
+            "i runga i a Windows kāore he mōkī Visual C++: kāore ngā putanga\n",
+            "0.90.0–0.103.0 i tīmata ki reira.\n",
+        ),
+        "Kua tae mai te putanga 0.97.0",
+        "Kei te whārangi tikiake ngā taipitopito.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and
@@ -28034,10 +28117,14 @@ fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
                 | '\u{FE70}'..='\u{FEFF}'
         ),
         // ʻ (U+02BB) and ʼ (U+02BC) are letters of Uzbek in Latin — oʻ, gʻ — and stand in the block
-        // of the spacing modifiers (stage E108).
+        // of the spacing modifiers (stage E108). Stage E109: Vietnamese writes its letters with two
+        // marks — ợ, ở, ạ — out of Latin Extended Additional.
         "Latn" => {
             letter.is_ascii_alphabetic()
-                || matches!(letter, '\u{00C0}'..='\u{02AF}' | '\u{02BB}' | '\u{02BC}')
+                || matches!(
+                    letter,
+                    '\u{00C0}'..='\u{02AF}' | '\u{02BB}' | '\u{02BC}' | '\u{1E00}'..='\u{1EFF}'
+                )
         }
         "Armn" => matches!(letter, '\u{0530}'..='\u{058F}'),
         "Deva" => matches!(letter, '\u{0900}'..='\u{097F}' | '\u{A8E0}'..='\u{A8FF}'),

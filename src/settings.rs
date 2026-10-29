@@ -5871,7 +5871,7 @@ const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
 /// Tamil and Malayalam a fifth taller («От автора» with the quiet line), Telugu and Kannada a few
 /// units, Serbian and Uzbek in Cyrillic at some faces only — each table is that language's own
 /// tallest, so at a face where it is shorter than the fourteen's the language may keep a larger step.
-const TALLER_LANGUAGES: [(Language, [i32; 30]); 13] = [
+const TALLER_LANGUAGES: [(Language, [i32; 30]); 14] = [
     (
         Language::Te,
         [
@@ -5980,6 +5980,15 @@ const TALLER_LANGUAGES: [(Language, [i32; 30]); 13] = [
             407, 408, 399, 399, 397, 396, 395, 400, 412, 396, // 11 … 20 px
             395, 399, 403, 404, 395, 396, 401, 403, 404, 401, // 21 … 30 px
             401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
+        ],
+    ),
+    // With all sixty-six (`scratchpad-E109\t109-3-w7-testing.log`): Maori at most faces.
+    (
+        Language::Mi,
+        [
+            432, 408, 407, 407, 405, 396, 420, 408, 412, 404, // 11 … 20 px
+            403, 416, 411, 412, 403, 404, 409, 429, 421, 409, // 21 … 30 px
+            409, 403, 406, 409, 409, 426, 412, 412, 415, 412, // 31 … 40 px
         ],
     ),
 ];

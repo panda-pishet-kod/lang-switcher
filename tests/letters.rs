@@ -2177,6 +2177,12 @@ const PAIRS_OF_DECISION_178_6: &[(Language, &str, &str, [&str; 2])] = &[
     (Language::Lb, "\"ddi", "äddi", ["EN", "LB"]),
     (Language::Cy, "рудщ", "helo", ["RU", "CY"]),
     (Language::Is, "h;", "hæ", ["EN", "IS"]),
+    (Language::Vi, "al4", "alô", ["EN", "VI"]),
+    (Language::Ro, "bun[", "bună", ["EN", "RO"]),
+    (Language::Hu, "-dv", "üdv", ["EN", "HU"]),
+    (Language::Sq, "mir;dita", "mirëdita", ["EN", "SQ"]),
+    (Language::Mt, "bon[u", "bonġu", ["EN", "MT"]),
+    (Language::Mi, "фкщрф", "aroha", ["RU", "MI"]),
 ];
 
 /// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение

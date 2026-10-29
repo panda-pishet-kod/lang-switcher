@@ -627,7 +627,7 @@ rtl = false
 inno = "Vietnamese"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "nl"
@@ -653,7 +653,7 @@ rtl = false
 inno = "Romanian"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "hu"
@@ -666,7 +666,7 @@ rtl = false
 inno = "Hungarian"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "sv"
@@ -692,7 +692,7 @@ rtl = false
 inno = "Albanian"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "da"
@@ -849,7 +849,7 @@ rtl = false
 inno = "Maltese"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "is"
@@ -888,7 +888,7 @@ rtl = false
 inno = "Maori"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "nn"

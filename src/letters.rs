@@ -2358,12 +2358,42 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "hæ",
             badge: ["EN", "IS"],
         },
-        //
-        // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
-        // from the translator, the keys off the file of the layout).
-        Language::Vi | Language::Ro | Language::Hu | Language::Sq | Language::Mt | Language::Mi => {
-            PAIR_TO_COME
-        }
+        // Vietnamese: KBDVNTC, the layout of vi-VN; its tones are combining marks, so «chào» of the
+        // translator would not come out as one precomposed letter (NFC, TZ E109 §0 п. 5) — «alô», the
+        // «hello» of the telephone, `ô` on the key of `4`. KBDROST and KBDRO (Romanian, `ă` on the
+        // key of `[`), KBDHU (`ü` on the key of `-`), KBDAL (Albanian, `ë` on the key of `;`),
+        // KBDMLT47 (Maltese, `ġ` on the key of `[`). Maori: KBDMAORI writes `ō` of «mōrena» only
+        // behind a dead key — the other way of 178.5, «aroha» typed while the Russian layout was on.
+        Language::Vi => DemoPair {
+            typed: "al4",
+            fixed: "alô",
+            badge: ["EN", "VI"],
+        },
+        Language::Ro => DemoPair {
+            typed: "bun[",
+            fixed: "bună",
+            badge: ["EN", "RO"],
+        },
+        Language::Hu => DemoPair {
+            typed: "-dv",
+            fixed: "üdv",
+            badge: ["EN", "HU"],
+        },
+        Language::Sq => DemoPair {
+            typed: "mir;dita",
+            fixed: "mirëdita",
+            badge: ["EN", "SQ"],
+        },
+        Language::Mt => DemoPair {
+            typed: "bon[u",
+            fixed: "bonġu",
+            badge: ["EN", "MT"],
+        },
+        Language::Mi => DemoPair {
+            typed: "фкщрф",
+            fixed: "aroha",
+            badge: ["RU", "MI"],
+        },
     }
 }
 
