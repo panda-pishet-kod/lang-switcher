@@ -5652,8 +5652,13 @@ const TALLEST_FIRST_FACE: i32 = FONT_STEP_FLOOR;
 /// ⭐ **12 px: 399 → 389 with task T-108-0** (решение 202.5): the panel «Обратная связь» no longer
 /// tells of five steps and the clipboard, and the shorter words took a row off the window that was
 /// the tallest at this one face. Measured by the test above; no face went up.
+///
+/// ⭐ **11 px: 407 → 412 with stage E108, wave 1** (task T-108-4): Serbian in Cyrillic — «От автора»
+/// with the quiet line — is five units taller than the Greek one at the floor of the rule, and at
+/// no other face. Measured by the test above with the twenty-four languages of the wave; the face
+/// of 11 px is the last step, so the rule only meets it on the smallest screens.
 const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
-    407, 389, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
+    412, 389, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
     386, 399, 403, 404, 386, 396, 401, 412, 404, 392, // 21 … 30 px
     401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
 ];

@@ -2066,35 +2066,84 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "سلام",
             badge: ["EN", "UR"],
         },
+        // Wave 1 — KBDTH0.DLL (Kedmanee) and KBDLAO.DLL against KBDUS.DLL, with the way back
+        // (`scratchpad-E108\pairs-th-lo.out.txt`); the words of the translators.
+        Language::Th => DemoPair {
+            typed: "l;ylfu",
+            fixed: "สวัสดี",
+            badge: ["EN", "TH"],
+        },
+        Language::Lo => DemoPair {
+            typed: "lt[kpfu",
+            fixed: "ສະບາຍດີ",
+            badge: ["EN", "LO"],
+        },
+        // KBDINBEN, KBDINBE1 and KBDINBE2 (the same keys), KBDINMAR, KBDINASA, KBDYCC and KBDYCL
+        // against KBDUS (`scratchpad-E108\pairs-wave1a.out.txt`).
+        Language::Bn => DemoPair {
+            typed: "vcmdkej",
+            fixed: "নমস্কার",
+            badge: ["EN", "BN"],
+        },
+        Language::Mr => DemoPair {
+            typed: "vcmdkej",
+            fixed: "नमस्कार",
+            badge: ["EN", "MR"],
+        },
+        // ⚠ The layout Windows gives Nepali is «Nepali» (KBDNEPR.DLL), not the INSCRIPT of Hindi:
+        // the virama is `Shift`+`\`. The translator wrote the INSCRIPT keys «vcmdls» from memory.
+        Language::Ne => DemoPair {
+            typed: "gd;|t]",
+            fixed: "नमस्ते",
+            badge: ["EN", "NE"],
+        },
+        Language::As => DemoPair {
+            typed: "vcmdkej",
+            fixed: "নমস্কাৰ",
+            badge: ["EN", "AS"],
+        },
+        // Serbian is QWERTZ in both scripts: «з»/«z» stands on the key of the US «y».
+        Language::Sr => DemoPair {
+            typed: "ydravo",
+            fixed: "здраво",
+            badge: ["EN", "SR"],
+        },
+        Language::SrLatn => DemoPair {
+            typed: "ydravo",
+            fixed: "zdravo",
+            badge: ["EN", "SR"],
+        },
+        // KBDFA and KBDFAR, KBDUGHR and KBDUGHR1 — the same keys in both layouts of each
+        // (`scratchpad-E108\pairs-fa-ug.out.txt`).
+        Language::Fa => DemoPair {
+            typed: "sghl",
+            fixed: "سلام",
+            badge: ["EN", "FA"],
+        },
+        Language::Ug => DemoPair {
+            typed: "sflfm",
+            fixed: "سالام",
+            badge: ["EN", "UG"],
+        },
         // Stage E108: a language of group A gets its pair when its translation comes — the
         // translator names the word, the keys are taken off the layouts by the instrument of
         // 178.4 (§0 п. 6 of TZ-E108). Until then the build does not offer the language
         // (`Language::is_shipped`) and the pair is never drawn; `tests\letters.rs` refuses a
         // shipped language that is still in this arm.
-        Language::Bn
-        | Language::Pa
-        | Language::Mr
+        Language::Pa
         | Language::Te
         | Language::Ta
-        | Language::Fa
         | Language::Gu
-        | Language::Th
         | Language::Kn
         | Language::Or
         | Language::Ml
         | Language::Uz
         | Language::UzCyrl
-        | Language::Ne
-        | Language::As
         | Language::Az
         | Language::Km
         | Language::Kk
-        | Language::Sr
-        | Language::SrLatn
-        | Language::Ug
         | Language::Bg
         | Language::Hy
-        | Language::Lo
         | Language::Be
         | Language::Tt
         | Language::Ka

@@ -239,7 +239,7 @@ rtl = false
 inno = "Bengali"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "one language, the LANGID of the LIP bn-IN (200б.1, as recommended); bn-BD (0x0845) not taken: the primary tag bn takes both countries"
 
 [[language]]
@@ -280,7 +280,7 @@ rtl = false
 inno = "Marathi"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "te"
@@ -319,7 +319,7 @@ rtl = true
 inno = "Persian"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "gu"
@@ -345,7 +345,7 @@ rtl = false
 inno = "Thai"
 inno_official = true
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "kn"
@@ -425,7 +425,7 @@ rtl = false
 inno = "Nepali"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "as"
@@ -438,7 +438,7 @@ rtl = false
 inno = "Assamese"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "az"
@@ -491,7 +491,7 @@ rtl = false
 inno = "SerbianCyrillic"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "two languages (200б.1): Cyrillic the main one (this entry, the LIP sr-Cyrl-RS) and Latin (sr-Latn, the language pack of Windows); the primary tag sr does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers sr-Cyrl-RS or sr-Latn-RS) belongs to the stage of translations A"
 
 [[language]]
@@ -505,7 +505,7 @@ rtl = false
 inno = "SerbianLatin"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "two languages (200б.1): Latin the second (this entry, the language pack of Windows) and Cyrillic (sr); the primary tag sr does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers sr-Cyrl-RS or sr-Latn-RS) belongs to the stage of translations A"
 
 [[language]]
@@ -519,7 +519,7 @@ rtl = true
 inno = "Uyghur"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "bg"
@@ -558,7 +558,7 @@ rtl = false
 inno = "Lao"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "be"

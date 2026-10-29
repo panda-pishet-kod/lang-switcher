@@ -2112,7 +2112,7 @@ fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
 /// memory — the lesson of Э87, «цреф» is not «what» — and the instrument
 /// `scratchpad-E102\pairs\pairs-e102.ps1 -Canon` reads this very array and holds it against the
 /// keys again.
-const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 16] = [
+const PAIRS_OF_DECISION_178_6: &[(Language, &str, &str, [&str; 2])] = &[
     (Language::Ru, "ghbdtn", "привет", ["EN", "RU"]),
     (Language::En, "руддщ", "hello", ["RU", "EN"]),
     (Language::Uk, "ghbdsn", "привіт", ["EN", "UK"]),
@@ -2130,6 +2130,17 @@ const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 16] = [
     // Stage E108, group A: the word of the translator, the keys off the layouts (pairs-e108.ps1).
     (Language::Hi, "vcmdls", "नमस्ते", ["EN", "HI"]),
     (Language::Ur, "vgja", "سلام", ["EN", "UR"]),
+    // Wave 1 (pairs-wave.ps1, with the way back).
+    (Language::Th, "l;ylfu", "สวัสดี", ["EN", "TH"]),
+    (Language::Lo, "lt[kpfu", "ສະບາຍດີ", ["EN", "LO"]),
+    (Language::Bn, "vcmdkej", "নমস্কার", ["EN", "BN"]),
+    (Language::Mr, "vcmdkej", "नमस्कार", ["EN", "MR"]),
+    (Language::Ne, "gd;|t]", "नमस्ते", ["EN", "NE"]),
+    (Language::As, "vcmdkej", "নমস্কাৰ", ["EN", "AS"]),
+    (Language::Sr, "ydravo", "здраво", ["EN", "SR"]),
+    (Language::SrLatn, "ydravo", "zdravo", ["EN", "SR"]),
+    (Language::Fa, "sghl", "سلام", ["EN", "FA"]),
+    (Language::Ug, "sflfm", "سالام", ["EN", "UG"]),
 ];
 
 /// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение
@@ -2179,7 +2190,7 @@ fn every_language_shows_the_pair_of_decision_178_6() {
             }
         };
 
-    for entry in PAIRS_OF_DECISION_178_6 {
+    for &entry in PAIRS_OF_DECISION_178_6 {
         assert_eq!(
             letters::demo_pair(entry.0),
             pair_of(entry),
@@ -2188,7 +2199,7 @@ fn every_language_shows_the_pair_of_decision_178_6() {
         );
     }
 
-    let mut swapped = PAIRS_OF_DECISION_178_6;
+    let mut swapped = PAIRS_OF_DECISION_178_6.to_vec();
     let german = (swapped[3].1, swapped[3].2, swapped[3].3);
     (swapped[3].1, swapped[3].2, swapped[3].3) = (swapped[4].1, swapped[4].2, swapped[4].3);
     (swapped[4].1, swapped[4].2, swapped[4].3) = german;

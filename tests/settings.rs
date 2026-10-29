@@ -7770,6 +7770,138 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "ورژن 0.97.0 جاری ہو گیا",
         "تفصیلات ڈاؤن لوڈ کے صفحے پر ہیں۔\n",
     ),
+    (
+        Language::Th,
+        "โปรแกรมอัปเดตตัวเองได้แล้ว",
+        concat!(
+            "ตั้งแต่เวอร์ชัน 0.104.0 Lang Switcher ดาวน์โหลดเวอร์ชันใหม่เองได้แล้ว\n",
+            "จากเว็บไซต์ของผู้พัฒนา แล้วติดตั้งให้เองหลังตรวจสอบลายเซ็น\n",
+            "ติดตั้งเวอร์ชันใหม่เพียงครั้งเดียว แล้วการอัปเดตต่อไปจะมาเอง\n",
+            "เวอร์ชันนี้ยังแก้การเริ่มทำงานบน Windows ที่ไม่มีแพ็กเกจ Visual C++ ด้วย\n",
+            "เวอร์ชัน 0.90.0–0.103.0 เริ่มทำงานบนเครื่องแบบนั้นไม่ได้\n",
+        ),
+        "เวอร์ชัน 0.97.0 ออกแล้ว",
+        "ดูรายละเอียดได้ที่หน้าดาวน์โหลด\n",
+    ),
+    (
+        Language::Lo,
+        "ໂປຣແກຣມອັບເດດຕົວເອງໄດ້ແລ້ວ",
+        concat!(
+            "ຕັ້ງແຕ່ເວີຊັນ 0.104.0 Lang Switcher ດາວໂຫຼດເວີຊັນໃໝ່ເອງໄດ້ແລ້ວ\n",
+            "ຈາກເວັບໄຊຂອງຜູ້ພັດທະນາ ແລ້ວຕິດຕັ້ງໃຫ້ເອງຫຼັງກວດສອບລາຍເຊັນ\n",
+            "ຕິດຕັ້ງເວີຊັນໃໝ່ພຽງເທື່ອດຽວ ແລ້ວການອັບເດດຕໍ່ໄປຈະມາເອງ\n",
+            "ເວີຊັນນີ້ຍັງແກ້ການເລີ່ມເຮັດວຽກໃນ Windows ທີ່ບໍ່ມີແພັກເກດ Visual C++ ນຳ\n",
+            "ເວີຊັນ 0.90.0–0.103.0 ເລີ່ມເຮັດວຽກໃນເຄື່ອງແບບນັ້ນບໍ່ໄດ້\n",
+        ),
+        "ເວີຊັນ 0.97.0 ອອກແລ້ວ",
+        "ເບິ່ງລາຍລະອຽດໄດ້ທີ່ໜ້າດາວໂຫຼດ\n",
+    ),
+    (
+        Language::Bn,
+        "প্রোগ্রাম এখন নিজেই আপডেট হয়",
+        concat!(
+            "সংস্করণ 0.104.0 থেকে Lang Switcher নতুন সংস্করণ নিজেই ডাউনলোড ও ইনস্টল করে।\n",
+            "ফাইল আসে নির্মাতার সাইট থেকে, আর ইনস্টলের আগে স্বাক্ষর যাচাই করা হয়।\n",
+            "নতুন সংস্করণ একবার ইনস্টল করে নিন — পরের আপডেটগুলো নিজে থেকেই আসবে।\n",
+            "এই সংস্করণে Visual C++ প্যাকেজ ছাড়া Windows-এ চালু হওয়ার সমস্যাও ঠিক\n",
+            "করা হয়েছে: সংস্করণ 0.90.0–0.103.0 সেখানে চালু হত না।\n",
+        ),
+        "সংস্করণ 0.97.0 এসেছে",
+        "বিস্তারিত ডাউনলোড পৃষ্ঠায় আছে।\n",
+    ),
+    (
+        Language::Mr,
+        "प्रोग्राम आता स्वतःच अद्यतनित होतो",
+        concat!(
+            "आवृत्ती 0.104.0 पासून Lang Switcher नवीन आवृत्त्या स्वतःच इन्स्टॉल करतो.\n",
+            "त्या लेखकाच्या साइटवरून डाउनलोड होतात आणि स्वाक्षरी तपासल्यानंतरच\n",
+            "इन्स्टॉल होतात. नवीन आवृत्ती एकदा इन्स्टॉल करा, पुढची अद्यतने आपोआप\n",
+            "येतील. या आवृत्तीत Visual C++ पॅकेज नसलेल्या Windows वर प्रोग्राम सुरू\n",
+            "न होण्याचीही दुरुस्ती केली आहे: आवृत्त्या 0.90.0 ते 0.103.0 तिथे सुरू\n",
+            "होत नव्हत्या.\n",
+        ),
+        "आवृत्ती 0.97.0 आली आहे",
+        "तपशील डाउनलोड पृष्ठावर आहेत.\n",
+    ),
+    (
+        Language::Ne,
+        "प्रोग्राम अब आफैँ अद्यावधिक हुन्छ",
+        concat!(
+            "संस्करण 0.104.0 देखि Lang Switcher नयाँ संस्करण आफैँ स्थापना गर्छ।\n",
+            "ती लेखकको साइटबाट डाउनलोड हुन्छन् र हस्ताक्षर जाँचेपछि मात्र स्थापना\n",
+            "हुन्छन्। नयाँ संस्करण एक पटक स्थापना गर्नुहोस्, उप्रान्तका अद्यावधिक\n",
+            "आफैँ आउनेछन्। यो संस्करणमा Visual C++ प्याकेज नभएको Windows मा पनि\n",
+            "प्रोग्राम सुरु हुने गरी सच्याइएको छ: संस्करण 0.90.0 देखि 0.103.0 सम्म\n",
+            "त्यहाँ सुरु हुँदैनथे।\n",
+        ),
+        "संस्करण 0.97.0 आएको छ",
+        "विवरण डाउनलोड पृष्ठमा छन्।\n",
+    ),
+    (
+        Language::As,
+        "প্ৰগ্ৰামটো এতিয়া নিজেই আপডেট হয়",
+        concat!(
+            "0.104.0-ৰ পৰা Lang Switcher-এ নতুন সংস্কৰণ নিজেই ডাউনলোড আৰু ইনষ্টল কৰে।\n",
+            "ফাইল নিৰ্মাতাৰ ছাইটৰ পৰা আহে, আৰু ইনষ্টলৰ আগতে স্বাক্ষৰ পৰীক্ষা কৰা হয়।\n",
+            "নতুন সংস্কৰণ এবাৰ ইনষ্টল কৰি লওক — পিছৰ আপডেটবোৰ নিজেই আহিব।\n",
+            "এই সংস্কৰণত Visual C++ পেকেজ নথকা Windows-ত আৰম্ভ হোৱাৰ সমস্যাও শুধৰোৱা\n",
+            "হৈছে: সংস্কৰণ 0.90.0–0.103.0 তাত আৰম্ভ হোৱা নাছিল।\n",
+        ),
+        "সংস্কৰণ 0.97.0 ওলাল",
+        "বিৱৰণ ডাউনলোড পৃষ্ঠাত আছে।\n",
+    ),
+    (
+        Language::Sr,
+        "Програм се сада ажурира сам",
+        concat!(
+            "Од верзије 0.104.0 Lang Switcher сам преузима нове верзије са сајта аутора\n",
+            "и инсталира их пошто провери потпис. Инсталирајте нову верзију једном —\n",
+            "убудуће ће ажурирања стизати сама. У овој верзији је исправљено и\n",
+            "покретање на систему Windows без пакета Visual C++: верзије 0.90.0–0.103.0\n",
+            "тамо нису могле да се покрену.\n",
+        ),
+        "Изашла је верзија 0.97.0",
+        "Детаљи су на страници за преузимање.\n",
+    ),
+    (
+        Language::SrLatn,
+        "Program se sada ažurira sam",
+        concat!(
+            "Od verzije 0.104.0 Lang Switcher sam preuzima nove verzije sa sajta autora\n",
+            "i instalira ih pošto proveri potpis. Instalirajte novu verziju jednom —\n",
+            "ubuduće će ažuriranja stizati sama. U ovoj verziji je ispravljeno i\n",
+            "pokretanje na sistemu Windows bez paketa Visual C++: verzije 0.90.0–0.103.0\n",
+            "tamo nisu mogle da se pokrenu.\n",
+        ),
+        "Izašla je verzija 0.97.0",
+        "Detalji su na stranici za preuzimanje.\n",
+    ),
+    (
+        Language::Fa,
+        "برنامه اکنون خودش به‌روزرسانی می‌شود",
+        concat!(
+            "از نسخه‌ی 0.104.0، Lang Switcher نسخه‌های جدید را خودش بارگیری و نصب می‌کند.\n",
+            "نسخه‌ها از سایت سازنده می‌آیند و پیش از نصب، امضا بررسی می‌شود.\n",
+            "نسخه‌ی جدید را فقط یک بار نصب کنید — از آن پس به‌روزرسانی‌ها خودشان می‌رسند.\n",
+            "در این نسخه، اجرا روی Windows بدون بسته‌ی Visual C++ هم درست شده است:\n",
+            "نسخه‌های 0.90.0 تا 0.103.0 آنجا اجرا نمی‌شدند.\n",
+        ),
+        "نسخه‌ی 0.97.0 منتشر شد",
+        "جزئیات در صفحه‌ی بارگیری است.\n",
+    ),
+    (
+        Language::Ug,
+        "پروگرامما ئەمدى ئۆزى يېڭىلىنىدۇ",
+        concat!(
+            "0.104.0 نەشرىدىن باشلاپ Lang Switcher يېڭى نەشرلەرنى ئۆزى چۈشۈرۈپ ئورنىتىدۇ.\n",
+            "ئۇلار ئاپتورنىڭ تور بېكىتىدىن كېلىدۇ، ئورنىتىشتىن بۇرۇن ئىمزا تەكشۈرۈلىدۇ.\n",
+            "يېڭى نەشرىنى بىر قېتىم ئورنىتىڭ — ئۇنىڭدىن كېيىن يېڭىلانمىلار ئۆزى كېلىدۇ.\n",
+            "بۇ نەشرىدە Visual C++ بوغچىسى يوق Windows سىستېمىسىدا ئىجرا بولماسلىق\n",
+            "مەسىلىسىمۇ تۈزىتىلدى: 0.90.0 – 0.103.0 نەشرلىرى ئۇ يەردە ئىجرا بولمايتتى.\n",
+        ),
+        "يېڭى نەشرى چىقتى: 0.97.0",
+        "تەپسىلاتى چۈشۈرۈش بېتىدە.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and
@@ -19367,27 +19499,40 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
 
         // Stage E108: a language of group A has no stem written here — its word for the hook is
         // in the glossary of its translator, outside the crate. What is held for it is the same
-        // fact without the word: the two lines share a word of three letters or more, the subject.
+        // fact without the word: the two lines share a run of three letters or more, the subject.
+        // ⚠ A run and not a word: Thai, Lao and Khmer put no space between words (wave 1 of
+        // stage E108 — «การดักจับ» stood in both Thai lines inside longer runs); and three, not
+        // four: the Urdu word for the hook is «ہُک», three code points with its damma.
         let Some(stem) = subject.iter().find(|(t, _)| *t == tag).map(|(_, s)| *s) else {
-            let words = |id| -> std::collections::BTreeSet<String> {
+            let letters = |id| -> Vec<char> {
                 product
                     .string_of_langid(langid, id)
                     .to_lowercase()
-                    .split(|c: char| !c.is_alphanumeric() && !is_a_mark(c))
-                    .filter(|word| word.chars().count() >= 3)
-                    .map(str::to_owned)
+                    .chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || is_a_mark(c) {
+                            c
+                        } else {
+                            ' '
+                        }
+                    })
                     .collect()
             };
-            let health = words(settings::IDS_STATE_HEALTH);
-            let absent = words(settings::IDS_STATE_HOOK_ABSENT);
-            println!(
-                "{tag}: shared {:?}",
-                health.intersection(&absent).collect::<Vec<_>>()
-            );
+            let health = letters(settings::IDS_STATE_HEALTH);
+            let absent: String = letters(settings::IDS_STATE_HOOK_ABSENT)
+                .into_iter()
+                .collect();
+            let shared = health
+                .windows(3)
+                .filter(|run| run.iter().all(|c| *c != ' '))
+                .map(|run| run.iter().collect::<String>())
+                .find(|run| absent.contains(run.as_str()));
+            println!("{tag}: shared {shared:?}");
 
-            if health.is_disjoint(&absent) {
+            if shared.is_none() {
                 missing.push(format!(
-                    "{tag}: the two lines share no word — {health:?} / {absent:?}"
+                    "{tag}: the two lines share no run of three letters — «{}» / «{absent}»",
+                    health.iter().collect::<String>()
                 ));
             }
             continue;

@@ -303,7 +303,17 @@ Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl,lang\Hebrew.isl"
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl,lang\Arabic.isl"
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl,lang\BrazilianPortuguese.isl"
 Name: "hindi"; MessagesFile: "compiler:Default.isl,lang\Hindi.isl"
+Name: "bengali"; MessagesFile: "compiler:Default.isl,lang\Bengali.isl"
 Name: "urdu"; MessagesFile: "compiler:Default.isl,lang\Urdu.isl"
+Name: "marathi"; MessagesFile: "compiler:Default.isl,lang\Marathi.isl"
+Name: "persian"; MessagesFile: "compiler:Default.isl,lang\Persian.isl"
+Name: "thai"; MessagesFile: "compiler:Languages\Thai.isl,lang\Thai.isl"
+Name: "nepali"; MessagesFile: "compiler:Default.isl,lang\Nepali.isl"
+Name: "assamese"; MessagesFile: "compiler:Default.isl,lang\Assamese.isl"
+Name: "serbiancyrillic"; MessagesFile: "compiler:Default.isl,lang\SerbianCyrillic.isl"
+Name: "serbianlatin"; MessagesFile: "compiler:Default.isl,lang\SerbianLatin.isl"
+Name: "uyghur"; MessagesFile: "compiler:Default.isl,lang\Uyghur.isl"
+Name: "lao"; MessagesFile: "compiler:Default.isl,lang\Lao.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
