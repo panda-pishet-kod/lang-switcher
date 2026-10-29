@@ -2053,14 +2053,25 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "مرحبا",
             badge: ["EN", "AR"],
         },
+        // Stage E108, the trial of решение 202.1 — the words of the translators, the keys taken
+        // off the tables of KBDINHIN.DLL (and KBDINDEV.DLL, the same keys) and KBDURDU.DLL against
+        // KBDUS.DLL (`scratchpad-E108\pairs-e108.out.txt`).
+        Language::Hi => DemoPair {
+            typed: "vcmdls",
+            fixed: "नमस्ते",
+            badge: ["EN", "HI"],
+        },
+        Language::Ur => DemoPair {
+            typed: "vgja",
+            fixed: "سلام",
+            badge: ["EN", "UR"],
+        },
         // Stage E108: a language of group A gets its pair when its translation comes — the
         // translator names the word, the keys are taken off the layouts by the instrument of
         // 178.4 (§0 п. 6 of TZ-E108). Until then the build does not offer the language
         // (`Language::is_shipped`) and the pair is never drawn; `tests\letters.rs` refuses a
         // shipped language that is still in this arm.
-        Language::Hi
-        | Language::Bn
-        | Language::Ur
+        Language::Bn
         | Language::Pa
         | Language::Mr
         | Language::Te

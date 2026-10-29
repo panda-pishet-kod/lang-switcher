@@ -51,7 +51,7 @@ IDS_CAPTURE_NAMELESS	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	-
 IDS_CAPTURE_RESERVED	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	-
 IDS_CAPTURE_TYPING	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	-
 IDS_HOTKEY_HINT	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on the keyboards of the country
-IDS_CAPTURE_COMBO_NOTE	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	{0} = a modifier, «Alt»; {1} = a key, «F» (code: &key, &modifier_label(modifiers))	-
+IDS_CAPTURE_COMBO_NOTE	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	{0} = a key, «F»; {1} = a modifier, «Alt» (code: &key, &modifier_label(modifiers))	-
 IDS_CAPTURE_SHIFT_AGAIN	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on the keyboards of the country
 IDS_CAPTURE_DOUBLE_NOTE	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on the keyboards of the country
 IDS_ALREADY_RUNNING	message_box	-	message box: grows with the text	-	Lang Switcher is not translated

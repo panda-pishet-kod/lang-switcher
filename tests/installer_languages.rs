@@ -14,7 +14,11 @@
 use std::fs;
 use std::path::Path;
 
-/// The internal names of [Languages], in order: English first — it is the fallback.
+/// The registry of the languages — the languages of group A join the installer by it (stage E108).
+#[path = "support/registry.rs"]
+mod registry;
+
+/// The internal names of [Languages] of 1.2.0, in order: English first — it is the fallback.
 const LANGUAGES: [&str; 14] = [
     "english",
     "russian",
@@ -36,6 +40,24 @@ const LANGUAGES: [&str; 14] = [
 /// every official `.isl` (`LaunchProgram` is the caption of the [Run] entry, decision 155.12).
 const INNO_OWN: [&str; 1] = ["LaunchProgram"];
 
+/// The `[CustomMessages]` of Inno's own `Default.isl` (6.7.3) — a language without an official
+/// translation carries them in its own file, translated with the rest of Inno's messages (stage
+/// E108, decision 202.2); an official file carries them in its own half, so ours does not.
+const INNO_DEFAULT_CUSTOM: [&str; 12] = [
+    "NameAndVersion",
+    "AdditionalIcons",
+    "CreateDesktopIcon",
+    "CreateQuickLaunchIcon",
+    "ProgramOnTheWeb",
+    "UninstallProgram",
+    "LaunchProgram",
+    "AssocFileExtension",
+    "AssocingFileExtension",
+    "AutoStartProgramGroupDescription",
+    "AutoStartProgram",
+    "AddonHostProgramNotFound",
+];
+
 /// The languages whose messages must carry letters of their own script — a translation that came
 /// out as Latin letters or as question marks is not one. (char range, language file)
 const SCRIPTS: [(&str, char, char); 4] = [
@@ -44,6 +66,23 @@ const SCRIPTS: [(&str, char, char); 4] = [
     ("Hebrew.isl", '\u{0590}', '\u{05FF}'),
     ("Arabic.isl", '\u{0600}', '\u{06FF}'),
 ];
+
+/// Stage E108, decision 202.2: the languages of group A the build ships, after the fourteen, in the
+/// order of the registry — `(internal name, Inno has its own translation, the file of lang\)`. The
+/// name is the `inno` of the entry in lower case, the file is `<inno>.isl`.
+fn group_a_of_the_installer() -> Vec<(String, bool, String)> {
+    registry::shipped()
+        .into_iter()
+        .filter(|entry| entry.group == "A")
+        .map(|entry| {
+            (
+                entry.inno.to_lowercase(),
+                entry.inno_official,
+                format!("{}.isl", entry.inno),
+            )
+        })
+        .collect()
+}
 
 fn installer() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/installer"))
@@ -121,9 +160,16 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
     let entries = language_entries(&script);
 
     let names: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();
+    let group_a = group_a_of_the_installer();
+    let wanted: Vec<&str> = LANGUAGES
+        .iter()
+        .copied()
+        .chain(group_a.iter().map(|(name, _, _)| name.as_str()))
+        .collect();
     assert_eq!(
-        names, LANGUAGES,
-        "[Languages] is not the fourteen languages of decision 155.10, English first"
+        names, wanted,
+        "[Languages] is not the fourteen languages of decision 155.10, English first, and the \
+         shipped languages of group A after them (202.2)"
     );
 
     let sample = messages("English.isl");
@@ -148,7 +194,12 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
             continue;
         }
         let file = &ours[0]["lang\\".len()..];
-        let official = if name == "english" {
+        // Stage E108: a language of group A without a translation of Inno's own starts from
+        // Default.isl, and its own file carries all of Inno's messages (202.2).
+        let unofficial = group_a
+            .iter()
+            .any(|(of, official, _)| of == name && !official);
+        let official = if name == "english" || unofficial {
             "compiler:Default.isl".to_owned()
         } else {
             format!("compiler:Languages\\{file}")
@@ -173,8 +224,18 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
             }
         }
         for extra in &own_names {
-            if !sample_names.contains(extra) {
+            let inno_default = unofficial && INNO_DEFAULT_CUSTOM.contains(extra);
+            if !sample_names.contains(extra) && !inno_default {
                 problems.push(format!("{file}: the message {extra} is not in English.isl"));
+            }
+        }
+        // Stage E108: without an official file, Inno's own custom messages come from ours alone —
+        // every one of them, or the wizard shows them in English.
+        if unofficial {
+            for inno in INNO_DEFAULT_CUSTOM {
+                if !own_names.contains(&inno) {
+                    problems.push(format!("{file}: Inno's own message {inno} is missing"));
+                }
             }
         }
         for (message, value) in &own {

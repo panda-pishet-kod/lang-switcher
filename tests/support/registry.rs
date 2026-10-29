@@ -67,6 +67,31 @@ pub fn shipped() -> Vec<Entry> {
         .collect()
 }
 
+/// The script (ISO 15924) the registry names for `tag`, if `tag` is an entry — read once per test
+/// process, because a sweep asks it letter by letter.
+pub fn script_of(tag: &str) -> Option<String> {
+    static SCRIPTS: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+
+    SCRIPTS
+        .get_or_init(|| {
+            registry()
+                .into_iter()
+                .map(|entry| (entry.tag, entry.script))
+                .collect()
+        })
+        .iter()
+        .find(|(of, _)| of == tag)
+        .map(|(_, script)| script.clone())
+}
+
+/// Whether `tag` is a language of group A — one that came after 1.2.0 (stage E108) and so after
+/// every mandate that wrote a table of the fourteen.
+pub fn of_group_a(tag: &str) -> bool {
+    registry()
+        .iter()
+        .any(|entry| entry.tag == tag && entry.group == "A")
+}
+
 /// `(tag, LANGID, the name of the chooser)` of each entry — the shape of the old tables.
 pub fn locales(entries: &[Entry]) -> Vec<(String, u16, String)> {
     entries

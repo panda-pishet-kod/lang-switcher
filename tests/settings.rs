@@ -7578,7 +7578,13 @@ const PAST_THE_FEED: &str = "0.98.0";
 /// in the fourteen languages of the program; `(language, title and text of the news, title and
 /// text of the update)`. Literals and not a read of the file: a test does not read the author's
 /// machine (решение 166.2).
-const PUBLISHED_FEED: [(Language, &str, &str, &str, &str); 14] = [
+///
+/// ⭐ **Stage E108: a language of group A joins with the texts its translator wrote for the feed**
+/// (`l10n\feed\<тег>.txt` of the control folder, copied here as literals) — the news «Программа
+/// теперь обновляется сама» (id 12) and the entry of the update, its version written as the
+/// update of this table, 0.97.0: nothing of `e98` was ever published in them, and these are the
+/// words the windows will hold. A slice, so that a language is one row.
+const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
     (
         Language::Ru,
         "Лента заработала",
@@ -7734,6 +7740,37 @@ const PUBLISHED_FEED: [(Language, &str, &str, &str, &str); 14] = [
         ),
         "صدر الإصدار 0.97.0",
         "التفاصيل في صفحة التنزيل.\n",
+    ),
+    (
+        Language::Hi,
+        "प्रोग्राम अब अपने-आप अपडेट होता है",
+        concat!(
+            "संस्करण 0.104.0 से Lang Switcher लेखक की साइट से नए संस्करण खुद\n",
+            "डाउनलोड करता है और डिजिटल हस्ताक्षर जाँचकर उन्हें इंस्टॉल कर लेता है।\n",
+            "नया संस्करण एक बार इंस्टॉल कर लें — आगे अपडेट अपने-आप आ जाएँगे।\n",
+            "इस संस्करण में उस Windows पर प्रोग्राम का शुरू न होना भी ठीक किया गया है\n",
+            "जिसमें Visual C++ पैकेज नहीं है: संस्करण 0.90.0–0.103.0 वहाँ शुरू नहीं होते थे।\n",
+        ),
+        "संस्करण 0.97.0 आ गया है",
+        concat!(
+            "नया: इंटरफ़ेस अब 30 और भाषाओं में उपलब्ध है, जिनमें हिन्दी भी शामिल है।\n",
+            "विवरण डाउनलोड पृष्ठ पर हैं।\n",
+        ),
+    ),
+    (
+        Language::Ur,
+        "پروگرام اب خود کو اپ ڈیٹ کرتا ہے",
+        // ⚠ In lines, as the feed is written: «Последние письма» shows the first line of a text
+        // as its excerpt, and the translator's one paragraph made the excerpt the whole text —
+        // the list grew from 719 to 928 px at 13 px (stage E108, `scratchpad-E108\t108-3-run2.log`).
+        concat!(
+            "ورژن 0.104.0 سے Lang Switcher نئے ورژن ڈویلپر کی سائٹ سے خود ڈاؤن لوڈ کرتا ہے\n",
+            "اور دستخط جانچنے کے بعد انہیں انسٹال کر لیتا ہے۔ 0.104.0 ایک بار انسٹال کر لیں —\n",
+            "اس کے بعد اپ ڈیٹس خود آ جائیں گی۔ اس ورژن میں Visual C++ پیکیج کے بغیر Windows پر\n",
+            "شروع ہونے کی خرابی بھی دور کر دی گئی ہے: ورژن 0.90.0 سے 0.103.0 وہاں شروع نہیں ہوتے تھے۔\n",
+        ),
+        "ورژن 0.97.0 جاری ہو گیا",
+        "تفصیلات ڈاؤن لوڈ کے صفحے پر ہیں۔\n",
     ),
 ];
 
@@ -8466,8 +8503,8 @@ fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
 
     assert_eq!(
         measured,
-        14 * 3 * 8,
-        "fourteen languages, three states, eight faces"
+        Language::shipped().count() * 3 * 8,
+        "every language the build offers, three states, eight faces"
     );
     assert!(
         differences.is_empty(),
@@ -8524,7 +8561,11 @@ fn the_model_of_the_full_list_is_the_live_window_at_every_reachable_face() {
 
     println!("{measured} windows measured, differences: {differences:?}");
 
-    assert_eq!(measured, 14 * 8, "fourteen languages, eight faces");
+    assert_eq!(
+        measured,
+        Language::shipped().count() * 8,
+        "every language the build offers, eight faces"
+    );
     assert!(
         differences.is_empty(),
         "the model of layout_list is not the window: {differences:?}"
@@ -18583,8 +18624,12 @@ fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
 fn the_caption_of_hello_names_the_pair_of_its_own_language() {
     let _guard = with_product_strings();
 
+    // The quotation marks of the language (RULES п. 3): « » of the fourteen (French with its
+    // spaces), and since stage E108 “ ” of Hindi and „ “ of the languages that write them.
     let quoted = |caption: &str, word: &str| {
-        caption.contains(&format!("«{word}»")) || caption.contains(&format!("« {word} »"))
+        [("«", "»"), ("« ", " »"), ("“", "”"), ("„", "“")]
+            .iter()
+            .any(|(open, close)| caption.contains(&format!("{open}{word}{close}")))
     };
     let russian = letters::demo_pair(Language::Ru);
     let mut captions = Vec::new();
@@ -19321,11 +19366,34 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
 
     for (tag, langid, _) in shipped_locales() {
         let tag = tag.as_str();
-        let stem = subject
-            .iter()
-            .find(|(t, _)| *t == tag)
-            .map(|(_, s)| *s)
-            .unwrap_or_else(|| panic!("no subject for locale {tag} in this test"));
+
+        // Stage E108: a language of group A has no stem written here — its word for the hook is
+        // in the glossary of its translator, outside the crate. What is held for it is the same
+        // fact without the word: the two lines share a word of three letters or more, the subject.
+        let Some(stem) = subject.iter().find(|(t, _)| *t == tag).map(|(_, s)| *s) else {
+            let words = |id| -> std::collections::BTreeSet<String> {
+                product
+                    .string_of_langid(langid, id)
+                    .to_lowercase()
+                    .split(|c: char| !c.is_alphanumeric() && !is_a_mark(c))
+                    .filter(|word| word.chars().count() >= 3)
+                    .map(str::to_owned)
+                    .collect()
+            };
+            let health = words(settings::IDS_STATE_HEALTH);
+            let absent = words(settings::IDS_STATE_HOOK_ABSENT);
+            println!(
+                "{tag}: shared {:?}",
+                health.intersection(&absent).collect::<Vec<_>>()
+            );
+
+            if health.is_disjoint(&absent) {
+                missing.push(format!(
+                    "{tag}: the two lines share no word — {health:?} / {absent:?}"
+                ));
+            }
+            continue;
+        };
 
         for id in [settings::IDS_STATE_HEALTH, settings::IDS_STATE_HOOK_ABSENT] {
             let line = product.string_of_langid(langid, id).to_lowercase();
@@ -27047,6 +27115,10 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
                      e64 «{before}»"
                 ));
             }
+        } else if registry::of_group_a(tag) && !line.trim().is_empty() {
+            // Stage E108: a language of group A came after the mandate of T-43-8 and is in
+            // neither table — its line is the translator's, read line by line by the reviewer
+            // (решение 202.4); here it is held to be there.
         } else {
             defects.push(format!(
                 "{tag}: the locale is in neither table of this test"
@@ -27069,6 +27141,26 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
     );
 }
 
+/// Whether `c` is a mark that belongs inside a word of a script with vowel signs — a virama, a
+/// nukta, a vowel sign of the Indic scripts, Thai, Lao, Khmer, a haraka of the Arabic script —
+/// which `char::is_alphanumeric` does not always answer `true` for. Their punctuation (the danda,
+/// the Khmer full stops) is not a mark.
+fn is_a_mark(c: char) -> bool {
+    let in_a_block = matches!(
+        c,
+        '\u{0300}'..='\u{036F}'
+            | '\u{0610}'..='\u{061A}'
+            | '\u{064B}'..='\u{065F}'
+            | '\u{0670}'
+            | '\u{06D6}'..='\u{06ED}'
+            | '\u{0900}'..='\u{0DFF}'
+            | '\u{0E00}'..='\u{0EFF}'
+            | '\u{1780}'..='\u{17FF}'
+    );
+
+    in_a_block && !matches!(c, '\u{0964}' | '\u{0965}' | '\u{17D4}'..='\u{17DA}')
+}
+
 /// Whether `letter` belongs to the script the string table of `tag` is written in.
 ///
 /// Four scripts besides Latin, by their Unicode blocks: Cyrillic for `ru` and `uk`, Greek (with
@@ -27076,12 +27168,20 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
 /// Arabic (with its supplement, extended block and presentation forms, where the harakat of `ًا`
 /// live) for `ar`. Every other locale of the program writes in Latin — ASCII letters and the
 /// Latin-1 supplement and Extended-A/B blocks that carry `ü`, `ç`, `ł`, `ř`, `ş`, `ı`.
+///
+/// ⭐ **Stage E108: the script is the one the registry names for `tag`** (`res\lang\languages.toml`,
+/// field `script`), and the blocks are the scripts', not the languages': Urdu, Persian and Uyghur
+/// write in the Arabic blocks, Kazakh in the Cyrillic one, Azerbaijani in Latin with `ə` of the IPA
+/// block, Hindi in Devanagari with its vowel signs — the fourteen answer exactly as before.
 fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
-    match tag {
-        "ru" | "uk" => matches!(letter, '\u{0400}'..='\u{04FF}'),
-        "el" => matches!(letter, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}'),
-        "he" => matches!(letter, '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}'),
-        "ar" => matches!(
+    let script =
+        registry::script_of(tag).unwrap_or_else(|| panic!("«{tag}» is not in the registry"));
+
+    match script.as_str() {
+        "Cyrl" => matches!(letter, '\u{0400}'..='\u{04FF}' | '\u{0500}'..='\u{052F}'),
+        "Grek" => matches!(letter, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}'),
+        "Hebr" => matches!(letter, '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}'),
+        "Arab" => matches!(
             letter,
             '\u{0600}'..='\u{06FF}'
                 | '\u{0750}'..='\u{077F}'
@@ -27089,7 +27189,22 @@ fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
                 | '\u{FB50}'..='\u{FDFF}'
                 | '\u{FE70}'..='\u{FEFF}'
         ),
-        _ => letter.is_ascii_alphabetic() || matches!(letter, '\u{00C0}'..='\u{024F}'),
+        "Latn" => letter.is_ascii_alphabetic() || matches!(letter, '\u{00C0}'..='\u{02AF}'),
+        "Armn" => matches!(letter, '\u{0530}'..='\u{058F}'),
+        "Deva" => matches!(letter, '\u{0900}'..='\u{097F}' | '\u{A8E0}'..='\u{A8FF}'),
+        "Beng" => matches!(letter, '\u{0980}'..='\u{09FF}'),
+        "Guru" => matches!(letter, '\u{0A00}'..='\u{0A7F}'),
+        "Gujr" => matches!(letter, '\u{0A80}'..='\u{0AFF}'),
+        "Orya" => matches!(letter, '\u{0B00}'..='\u{0B7F}'),
+        "Taml" => matches!(letter, '\u{0B80}'..='\u{0BFF}'),
+        "Telu" => matches!(letter, '\u{0C00}'..='\u{0C7F}'),
+        "Knda" => matches!(letter, '\u{0C80}'..='\u{0CFF}'),
+        "Mlym" => matches!(letter, '\u{0D00}'..='\u{0D7F}'),
+        "Thai" => matches!(letter, '\u{0E00}'..='\u{0E7F}'),
+        "Laoo" => matches!(letter, '\u{0E80}'..='\u{0EFF}'),
+        "Geor" => matches!(letter, '\u{10A0}'..='\u{10FF}' | '\u{1C90}'..='\u{1CBF}'),
+        "Khmr" => matches!(letter, '\u{1780}'..='\u{17FF}' | '\u{19E0}'..='\u{19FF}'),
+        other => panic!("the script {other} of «{tag}» has no blocks in this test"),
     }
 }
 
@@ -27167,11 +27282,18 @@ fn the_selection_help_line_carries_its_caveat_in_every_locale() {
 
     for (tag, langid, _) in shipped_locales() {
         let tag = tag.as_str();
+        // Stage E108: a language of group A had no line in `e64` — it is written with the caveat
+        // from the start, and the comparison with the old line is the fourteen's alone; every
+        // other check below holds it as it holds them.
         let before = BEFORE
             .iter()
             .find(|(locale, _)| *locale == tag)
-            .map(|(_, line)| *line)
-            .expect("every locale has its line of e64 in the table");
+            .map_or("", |(_, line)| *line);
+        if before.is_empty() && !registry::of_group_a(tag) {
+            defects.push(format!(
+                "{tag}: a language of 1.0.0 without its line of e64"
+            ));
+        }
         let now = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_3);
 
         let letters = |line: &str| {

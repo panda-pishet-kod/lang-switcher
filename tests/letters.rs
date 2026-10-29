@@ -2112,7 +2112,7 @@ fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
 /// memory — the lesson of Э87, «цреф» is not «what» — and the instrument
 /// `scratchpad-E102\pairs\pairs-e102.ps1 -Canon` reads this very array and holds it against the
 /// keys again.
-const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 14] = [
+const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 16] = [
     (Language::Ru, "ghbdtn", "привет", ["EN", "RU"]),
     (Language::En, "руддщ", "hello", ["RU", "EN"]),
     (Language::Uk, "ghbdsn", "привіт", ["EN", "UK"]),
@@ -2127,6 +2127,9 @@ const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 14] = [
     (Language::El, "geia", "γεια", ["EN", "EL"]),
     (Language::He, "akuo", "שלום", ["EN", "HE"]),
     (Language::Ar, "lvpfh", "مرحبا", ["EN", "AR"]),
+    // Stage E108, group A: the word of the translator, the keys off the layouts (pairs-e108.ps1).
+    (Language::Hi, "vcmdls", "नमस्ते", ["EN", "HI"]),
+    (Language::Ur, "vgja", "سلام", ["EN", "UR"]),
 ];
 
 /// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение
