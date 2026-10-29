@@ -140,8 +140,9 @@ fn defaults_match_section_7_field_by_field() {
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
     // Schema 8 — task T-95-1, вопрос 159: `[hotkey] trigger`, the double press of `Shift`.
     // Schema 9 — stage E108, task T-108-2: the thirty languages of group A in `general.language`.
-    assert_eq!(config.schema_version, 9);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 9);
+    // Schema 10 — stage E109, task T-109-1: the twenty-two languages of group B.
+    assert_eq!(config.schema_version, 10);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 10);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -1100,9 +1101,10 @@ fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves
     // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
     // Task T-93-1 put a fifth rung on top (6 → 7), and the file climbs that one too — and task
     // T-95-1 a sixth (7 → 8, the stamp of `[hotkey] trigger`), and stage E108 a seventh (8 → 9, the
-    // stamp of the thirty languages of group A).
+    // stamp of the thirty languages of group A), and stage E109 an eighth (9 → 10, the stamp of the
+    // twenty-two of group B).
     assert_eq!(
-        config.schema_version, 9,
+        config.schema_version, 10,
         "and it climbed the whole ladder, not one rung of it"
     );
 
@@ -1168,7 +1170,7 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
     // asserted by `a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new`.
     // ⚠ Task T-93-1: three rungs now, 4 → 5 → 6 → 7 — the stamp of `[hotkey] modifiers` on top;
     // task T-95-1: four, the stamp of `[hotkey] trigger` (7 → 8) above it.
-    assert_eq!(config.schema_version, 9, "and that version is nine");
+    assert_eq!(config.schema_version, 10, "and that version is ten");
 
     assert!(
         !config.general.enabled,
@@ -1235,7 +1237,7 @@ fn a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new() {
     // ⚠ Task T-93-1: the file climbs on past six to the stamp of `[hotkey] modifiers`, which
     // carries nothing of the letters — what this rung decided arrives at seven untouched; and on
     // past seven to the stamp of `[hotkey] trigger` (task T-95-1), which carries nothing either.
-    assert_eq!(config.schema_version, 9, "and that version is nine");
+    assert_eq!(config.schema_version, 10, "and that version is ten");
 
     // What the rung carries — the three decisions of the rung, in order.
     assert!(
@@ -2699,9 +2701,12 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
         }
     }
 
-    println!("--- 44 × 44 pairs: relabel {relabel}, reopen {reopen} ---");
+    println!(
+        "--- {n} × {n} pairs: relabel {relabel}, reopen {reopen} ---",
+        n = Language::ALL.len()
+    );
 
-    // Since stage E108 the whole closed set: thirty-nine left-to-right values and five
+    // Since stage E108 the whole closed set — since E109 sixty-one left-to-right values and five
     // right-to-left ones (Hebrew, Arabic, Urdu, Persian, Uyghur). Only the languages that share the
     // table of the fourteen relabel among themselves (решение 202.40): l of them left to right and
     // r right to left give l × (l − 1) + r × (r − 1) pairs, every other pair of different languages
@@ -2717,7 +2722,7 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     let expected_relabel = shared_ltr * (shared_ltr - 1) + shared_rtl * (shared_rtl - 1);
     println!("--- shared table: {shared_ltr} left to right, {shared_rtl} right to left ---");
     assert!(
-        shared_rtl == 5 && shared_ltr < 39,
+        shared_rtl == 5 && shared_ltr < 61,
         "the five right-to-left languages share the table, and some left-to-right ones have their own"
     );
     assert_eq!(
@@ -2726,7 +2731,7 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     );
     assert_eq!(
         reopen,
-        44 * 43 - expected_relabel,
+        Language::ALL.len() * (Language::ALL.len() - 1) - expected_relabel,
         "pairs that cross one or the other"
     );
 }
@@ -15795,7 +15800,7 @@ fn a_file_of_schema_six_is_raised_to_seven_and_its_hotkey_is_the_bare_key() {
     // ⚠ Task T-95-1: the file climbs on past seven to the stamp of `[hotkey] trigger`, which
     // carries nothing of the hotkey but its default `press` — what this rung decided arrives at
     // eight untouched.
-    assert_eq!(config.schema_version, 9, "and that version is nine");
+    assert_eq!(config.schema_version, 10, "and that version is ten");
 
     assert_eq!(
         config.hotkey,
@@ -16058,7 +16063,7 @@ fn a_file_of_schema_seven_is_raised_to_eight_and_its_hotkey_is_pressed() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 7 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 9, "and that version is nine");
+    assert_eq!(config.schema_version, 10, "and that version is ten");
 
     assert_eq!(config.hotkey, combination(&["Ctrl"], "F12"));
     assert_eq!(config.hotkey.trigger, settings::TRIGGER_PRESS);
@@ -26731,10 +26736,54 @@ fn a_file_of_group_a_carries_a_stamp_no_fourteen_locale_build_wrote() {
     }
 
     let dir = TestDir::new("group_a_stamp");
-    let group_a: Vec<Language> = Language::ALL.into_iter().skip(14).collect();
+    let group_a: Vec<Language> = Language::ALL.into_iter().skip(14).take(30).collect();
     assert_eq!(group_a.len(), 30, "the thirty of group A");
 
     for language in group_a {
+        let mut ours = Config::default();
+        ours.general.language = language;
+
+        let text = ours.to_toml_string().expect("the file must serialise");
+
+        assert!(
+            text.contains(&format!("language = \"{}\"", language.tag()))
+                && text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+            "{language:?}: the word and the stamp are in the file: {text}"
+        );
+
+        let path = write_file(&dir, &text);
+        let (back, outcome) = settings::read_or_default(&path);
+
+        assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
+        assert_eq!(back.general.language, language, "{language:?} reads back");
+    }
+}
+
+/// The last schema a build that knew **forty-four** locales stamped a file with — 1.3.0 (stage
+/// E108, the thirty languages of group A).
+const LAST_FORTY_FOUR_LOCALE_SCHEMA: u32 = 9;
+
+/// **Stage E109, task T-109-1 — the coin of вопрос 94.1 spent a fourth time: a file naming a
+/// language of group B carries a stamp no build of forty-four wrote.**
+///
+/// The test of group A above, on the twenty-two: every one of them, written by this build, carries
+/// `schema_version = 10` — above the 9 of 1.3.0 — and reads back as current. ⚠ The `const` block
+/// makes lowering the schema a build that does not compile.
+#[test]
+fn a_file_of_group_b_carries_a_stamp_no_forty_four_locale_build_wrote() {
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_FORTY_FOUR_LOCALE_SCHEMA,
+            "a file naming a language of group B must be stamped with a schema no build of \
+             forty-four had — without it 1.3.0 quarantines the file"
+        );
+    }
+
+    let dir = TestDir::new("group_b_stamp");
+    let group_b: Vec<Language> = Language::ALL.into_iter().skip(44).collect();
+    assert_eq!(group_b.len(), 22, "the twenty-two of group B");
+
+    for language in group_b {
         let mut ours = Config::default();
         ours.general.language = language;
 
@@ -26880,14 +26929,15 @@ fn a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining
 ///
 /// ⚠ **The one place the count itself is a literal.** Everything else takes its length from
 /// `Language::ALL`; here the number is the thing under test, so it is typed out — twelve of
-/// решение 93, the two of вопрос 97 and the thirty of group A (stage E108).
+/// решение 93, the two of вопрос 97 and the thirty of group A (stage E108), the twenty-two of group B
+/// (stage E109).
 #[test]
 fn every_value_of_the_closed_set_has_its_name_and_its_position() {
     assert_eq!(
         Language::ALL.len(),
-        44,
+        66,
         "решение 93 names twelve locales for tier one, вопрос 97 adds Hebrew and Arabic, stage \
-         E108 the thirty of group A"
+         E108 the thirty of group A, stage E109 the twenty-two of group B"
     );
 
     for (position, (tag, _, native)) in all_locales().iter().enumerate() {
@@ -26918,7 +26968,7 @@ fn every_value_of_the_closed_set_has_its_name_and_its_position() {
 
     // Out of range in both directions is the default of section 7, not a panic and not a
     // neighbouring language.
-    assert_eq!(Language::from_index(44), Language::Ru);
+    assert_eq!(Language::from_index(66), Language::Ru);
     assert_eq!(Language::from_index(u32::MAX), Language::Ru);
 }
 
@@ -26933,17 +26983,23 @@ fn every_value_of_the_closed_set_has_its_name_and_its_position() {
 ///
 /// The order under the line is held to the mock-up itself — its forty rows, written out here from
 /// the page (`LANGS` of the artifact) — and not to `Language::BY_NAME`, the answer under test.
+/// Stage E109: the twenty-two of group B, which the mock-up does not have, stand where the
+/// instrument of the mock-up's order puts them (the root collation of ICU over the sixty-six
+/// names, `scratchpad-E109\by-name.out.txt`); the forty rows of the mock-up keep their order.
 ///
 /// ⚠ Controls: a top group in the wrong order (Russian before English) and a rest in the order of
 /// `Language::ALL` are both told apart from the answer.
 #[test]
 fn the_language_combo_puts_the_group_of_the_person_on_top_and_the_rest_by_name() {
     // The mock-up of решение 202.7, below its line: «Письма идут в порядке владельца, внутри
-    // письма — по алфавиту самоназвания»; the four on top of it are ru, en, uk, kk.
-    const MOCK_UP: [&str; 40] = [
-        "az", "cs", "de", "es", "fr", "it", "uz", "pl", "pt", "sr-Latn", "tr", "el", "be", "bg",
-        "mk", "sr", "tt", "uz-Cyrl", "hy", "he", "ug", "ur", "ar", "fa", "ne", "mr", "hi", "as",
-        "bn", "pa", "gu", "or", "ta", "te", "kn", "ml", "th", "lo", "km", "ka",
+    // письма — по алфавиту самоназвания»; the four on top of it are ru, en, uk, kk. Group B
+    // (stage E109) among the Latin rows, by the measure.
+    const MOCK_UP: [&str; 62] = [
+        "az", "bs", "cs", "cy", "da", "de", "et", "es", "fr", "hr", "is", "it", "lv", "lb", "lt",
+        "hu", "mt", "mi", "nl", "nb", "nn", "uz", "pl", "pt", "ro", "sq", "sk", "sl", "sr-Latn",
+        "fi", "sv", "vi", "tr", "el", "be", "bg", "mk", "sr", "tt", "uz-Cyrl", "hy", "he", "ug",
+        "ur", "ar", "fa", "ne", "mr", "hi", "as", "bn", "pa", "gu", "or", "ta", "te", "kn", "ml",
+        "th", "lo", "km", "ka",
     ];
 
     let shipped = |tags: &[&str]| -> Vec<String> {
@@ -26970,6 +27026,18 @@ fn the_language_combo_puts_the_group_of_the_person_on_top_and_the_rest_by_name()
         tags(&order.languages[order.top..]),
         shipped(&MOCK_UP),
         "under the line: the rest in the order of the mock-up"
+    );
+
+    // Stage E109: the order of the whole closed set, shipped or not — a language that is not a row
+    // yet must already stand in its place when its translation comes.
+    let by_name: Vec<&str> = Language::BY_NAME
+        .iter()
+        .map(|language| language.tag())
+        .filter(|tag| !["ru", "en", "uk", "kk"].contains(tag))
+        .collect();
+    assert_eq!(
+        by_name, MOCK_UP,
+        "Language::BY_NAME over the closed set: the mock-up and the measure of group B"
     );
 
     // Every language the build offers is a row, once.
@@ -27383,14 +27451,15 @@ fn only_the_five_right_to_left_languages_are_read_right_to_left() {
         );
     }
 
-    // And the other thirty-nine are not mirrored — stated from the other side so that a
-    // predicate that answered `true` for everything could not pass the check above by accident.
+    // And the other sixty-one (since stage E109) are not mirrored — stated from the other side so
+    // that a predicate that answered `true` for everything could not pass the check above by
+    // accident.
     assert_eq!(
         Language::ALL
             .into_iter()
             .filter(|language| !language.is_rtl())
             .count(),
-        39
+        61
     );
 }
 
@@ -27658,8 +27727,8 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
                      e64 «{before}»"
                 ));
             }
-        } else if registry::of_group_a(tag) && !line.trim().is_empty() {
-            // Stage E108: a language of group A came after the mandate of T-43-8 and is in
+        } else if registry::after_the_fourteen(tag) && !line.trim().is_empty() {
+            // Stage E108: a language of group A (and since E109 of group B) came after the mandate of T-43-8 and is in
             // neither table — its line is the translator's, read line by line by the reviewer
             // (решение 202.4); here it is held to be there.
         } else {
@@ -27830,14 +27899,14 @@ fn the_selection_help_line_carries_its_caveat_in_every_locale() {
 
     for (tag, langid, _) in shipped_locales() {
         let tag = tag.as_str();
-        // Stage E108: a language of group A had no line in `e64` — it is written with the caveat
+        // Stage E108: a language of group A (since E109, of group B too) had no line in `e64` — it is written with the caveat
         // from the start, and the comparison with the old line is the fourteen's alone; every
         // other check below holds it as it holds them.
         let before = BEFORE
             .iter()
             .find(|(locale, _)| *locale == tag)
             .map_or("", |(_, line)| *line);
-        if before.is_empty() && !registry::of_group_a(tag) {
+        if before.is_empty() && !registry::after_the_fourteen(tag) {
             defects.push(format!(
                 "{tag}: a language of 1.0.0 without its line of e64"
             ));
@@ -28308,6 +28377,60 @@ fn serbian_and_uzbek_are_chosen_by_the_script_of_the_full_tag() {
     }
 }
 
+/// **Stage E109, task T-109-1 — Norwegian is Bokmål and Nynorsk, the old macrolanguage `no` is
+/// Bokmål, and Bosnian is one language in the Latin script.**
+///
+/// `nb-NO` and `nn-NO` carry primary subtags of their own; a Windows of an older day, or a tag
+/// copied out of somewhere, may still name the macrolanguage `no` — the program answers it with
+/// Bokmål, the main Norwegian (решение 200б.1, TZ E109 §0 п. 2). Bosnian in either script is the
+/// Latin `bs`. Driven by tag over the whole closed set, so the rule is held whatever the registry
+/// ships today.
+///
+/// ⚠ Control: the rule of the primary subtag alone answers nothing for `no-NO` and is caught.
+#[test]
+fn norwegian_is_bokmal_and_nynorsk_and_the_old_no_is_bokmal() {
+    let among_all =
+        |tag: &str| settings::language_of_tag_among(tag, Language::ALL).map(Language::tag);
+
+    for (tag, wanted) in [
+        ("nb-NO", "nb"),
+        ("nb", "nb"),
+        ("nn-NO", "nn"),
+        ("nn", "nn"),
+        ("no", "nb"),
+        ("no-NO", "nb"),
+        ("NO_no", "nb"),
+        ("bs-Latn-BA", "bs"),
+        ("bs-Cyrl-BA", "bs"),
+        ("bs", "bs"),
+        // The other languages of group B by their primary subtag, as the fourteen.
+        ("hr-HR", "hr"),
+        ("sl-SI", "sl"),
+        ("vi-VN", "vi"),
+        ("mi-NZ", "mi"),
+        ("lb-LU", "lb"),
+        ("is-IS", "is"),
+    ] {
+        assert_eq!(among_all(tag), Some(wanted), "`{tag}` must be `{wanted}`");
+    }
+
+    assert_eq!(among_all("nob"), None, "`nob` is not the subtag `no`");
+
+    // The rule of the primary subtag alone — the control.
+    let primary_only = |tag: &str| {
+        let primary = tag.split(['-', '_']).next().unwrap_or_default();
+        Language::ALL
+            .into_iter()
+            .find(|language| language.tag().eq_ignore_ascii_case(primary))
+            .map(Language::tag)
+    };
+    assert_eq!(
+        primary_only("no-NO"),
+        None,
+        "the control: the primary subtag alone does not know `no`"
+    );
+}
+
 /// **The fall-through, and the English at the end of it — вопрос 95.**
 ///
 /// Windows keeps an **ordered list**, not one language: a person may have Japanese first and
@@ -28770,10 +28893,11 @@ fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
     // stamp of `[hotkey] modifiers` (вопрос 157), and the number here says so rather than six.
     // ⚠ Task T-95-1 moved it once more: the stamp of `[hotkey] trigger` (вопрос 159) is the second.
     // ⚠ Stage E108 a third time: the stamp of the thirty languages of group A.
+    // ⚠ Stage E109 a fourth time: the stamp of the twenty-two languages of group B.
     assert_eq!(
-        CURRENT_SCHEMA_VERSION, 9,
+        CURRENT_SCHEMA_VERSION, 10,
         "FR-15 не поднимал схему (была 6); 7 — штамп `[hotkey] modifiers` Э93, 8 — штамп \
-         `[hotkey] trigger` Э95, 9 — штамп группы А Э108, и только они"
+         `[hotkey] trigger` Э95, 9 — штамп группы А Э108, 10 — штамп группы Б Э109, и только они"
     );
 
     // And the far side of that promise: a file stamped above the current schema *would* be read

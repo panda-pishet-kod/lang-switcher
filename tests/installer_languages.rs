@@ -14,7 +14,8 @@
 use std::fs;
 use std::path::Path;
 
-/// The registry of the languages — the languages of group A join the installer by it (stage E108).
+/// The registry of the languages — the languages of groups A and B join the installer by it (stages
+/// E108, E109).
 #[path = "support/registry.rs"]
 mod registry;
 
@@ -75,13 +76,14 @@ const SCRIPTS: [(&str, char, char); 4] = [
     ("Arabic.isl", '\u{0600}', '\u{06FF}'),
 ];
 
-/// Stage E108, decision 202.2: the languages of group A the build ships, after the fourteen, in the
+/// Stage E108, decision 202.2: the languages of group A the build ships — and since stage E109 those
+/// of group B — after the fourteen, in the
 /// order of the registry — `(internal name, Inno has its own translation, the file of lang\)`. The
 /// name is the `inno` of the entry in lower case, the file is `<inno>.isl`.
-fn group_a_of_the_installer() -> Vec<(String, bool, String)> {
+fn groups_a_and_b_of_the_installer() -> Vec<(String, bool, String)> {
     registry::shipped()
         .into_iter()
-        .filter(|entry| entry.group == "A")
+        .filter(|entry| matches!(entry.group.as_str(), "A" | "B"))
         .map(|entry| {
             (
                 entry.inno.to_lowercase(),
@@ -168,16 +170,16 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
     let entries = language_entries(&script);
 
     let names: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();
-    let group_a = group_a_of_the_installer();
+    let added = groups_a_and_b_of_the_installer();
     let wanted: Vec<&str> = LANGUAGES
         .iter()
         .copied()
-        .chain(group_a.iter().map(|(name, _, _)| name.as_str()))
+        .chain(added.iter().map(|(name, _, _)| name.as_str()))
         .collect();
     assert_eq!(
         names, wanted,
         "[Languages] is not the fourteen languages of decision 155.10, English first, and the \
-         shipped languages of group A after them (202.2)"
+         shipped languages of groups A and B after them (202.2)"
     );
 
     let sample = messages("English.isl");
@@ -202,9 +204,9 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
             continue;
         }
         let file = &ours[0]["lang\\".len()..];
-        // Stage E108: a language of group A without a translation of Inno's own starts from
+        // Stage E108: a language of group A or B without a translation of Inno's own starts from
         // Default.isl, and its own file carries all of Inno's messages (202.2).
-        let unofficial = group_a
+        let unofficial = added
             .iter()
             .any(|(of, official, _)| of == name && !official);
         let official = if name == "english" || unofficial {
@@ -725,6 +727,9 @@ fn the_wizard_wears_the_look_of_the_site_and_its_signature_opens_the_site_as_the
 /// **Stage E108, decision 202.2 — every language of group A speaks its own language in the
 /// installer, and the installer knows which language it is.**
 ///
+/// Stage E109: the languages of group B as well — all Latin, so the sweep of the script stands
+/// aside for them, as it does for every Latin language; the options and the messages of Inno do not.
+///
 /// For a language without an official translation of Inno, our file is the whole translation:
 /// `[LangOptions]` names the language by the LANGID of the registry (Inno picks the language of
 /// the wizard by it), reads right to left exactly when the registry says so, and `[Messages]`
@@ -822,15 +827,15 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
         out
     }
 
-    let group_a: Vec<registry::Entry> = registry::shipped()
+    let added: Vec<registry::Entry> = registry::shipped()
         .into_iter()
-        .filter(|entry| entry.group == "A")
+        .filter(|entry| matches!(entry.group.as_str(), "A" | "B"))
         .collect();
 
     let mut problems = Vec::new();
     let mut names_of_unofficial: Option<(String, Vec<String>)> = None;
 
-    for entry in &group_a {
+    for entry in &added {
         let file = format!("{}.isl", entry.inno);
         let text = fs::read_to_string(installer().join("lang").join(&file))
             .unwrap_or_else(|error| panic!("{file}: {error}"));
@@ -849,7 +854,7 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
     }
 
     // The controls, on the first language of group A read right to left and not in Latin.
-    if let Some(entry) = group_a
+    if let Some(entry) = added
         .iter()
         .find(|entry| entry.rtl && !entry.inno_official && entry.script != "Latn")
     {
@@ -883,7 +888,7 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
 
     assert!(
         problems.is_empty(),
-        "{} problem(s) with the languages of group A in the installer:\n  {}",
+        "{} problem(s) with the languages of groups A and B in the installer:\n  {}",
         problems.len(),
         problems.join("\n  ")
     );

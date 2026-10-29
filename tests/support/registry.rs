@@ -49,14 +49,11 @@ pub fn registry() -> Vec<Entry> {
         .language
 }
 
-/// The values of the closed set of `general.language` — the fourteen of 1.0.0 and group A (stage
-/// E108), in the order of the registry, which is the order of `Language::ALL`. Group B is the
-/// stage after (E109) and not a value yet.
+/// The values of the closed set of `general.language` — the fourteen of 1.0.0, group A (stage
+/// E108) and group B (stage E109): since E109 every entry of the registry, in its order, which is
+/// the order of `Language::ALL`.
 pub fn closed_set() -> Vec<Entry> {
     registry()
-        .into_iter()
-        .filter(|entry| entry.group != "B")
-        .collect()
 }
 
 /// The languages the build offers — `state = "shipped"` — in the order of the registry.
@@ -84,12 +81,12 @@ pub fn script_of(tag: &str) -> Option<String> {
         .map(|(_, script)| script.clone())
 }
 
-/// Whether `tag` is a language of group A — one that came after 1.2.0 (stage E108) and so after
-/// every mandate that wrote a table of the fourteen.
-pub fn of_group_a(tag: &str) -> bool {
+/// Whether `tag` is a language of group A or B — one that came after 1.2.0 (stages E108, E109) and
+/// so after every mandate that wrote a table of the fourteen.
+pub fn after_the_fourteen(tag: &str) -> bool {
     registry()
         .iter()
-        .any(|entry| entry.tag == tag && entry.group == "A")
+        .any(|entry| entry.tag == tag && entry.group != "shipped")
 }
 
 /// `(tag, LANGID, the name of the chooser)` of each entry — the shape of the old tables.

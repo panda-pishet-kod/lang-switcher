@@ -219,7 +219,11 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// closed set of `general.language`. [`step_8_to_9`] is a bare stamp, and the number is spent on
 /// 1.2.0 and the builds before it — they meet a stamp they do not know and leave a file that says
 /// `language = "hi"` alone instead of quarantining it.
-pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+///
+/// Version 10 arrived with **stage E109**, task T-109-1: the twenty-two languages of group B in
+/// the closed set. [`step_9_to_10`] is a bare stamp, and the number is spent on 1.3.0 and the
+/// builds before it, which would otherwise quarantine a file that says `language = "nb"`.
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -236,9 +240,10 @@ fn pre_version_schema() -> u32 {
     PRE_VERSION_SCHEMA
 }
 
-/// Interface language, `general.language` of section 7. Forty-four values — the twelve of решение
-/// 93, tier one, the two right-to-left locales of вопрос 97, and since stage E108 the thirty of
-/// group A (решения 198.13, 198.14, 200б.1; Serbian and Uzbek in both of their scripts).
+/// Interface language, `general.language` of section 7. Sixty-six values — the twelve of решение
+/// 93, tier one, the two right-to-left locales of вопрос 97, since stage E108 the thirty of group A
+/// (решения 198.13, 198.14, 200б.1; Serbian and Uzbek in both of their scripts), and since stage
+/// E109 the twenty-two of group B (Latin with letters of its own; Norwegian in both of its forms).
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
 ///
@@ -384,6 +389,52 @@ pub enum Language {
     Ka,
     /// Macedonian.
     Mk,
+    /// Vietnamese — group B, stage E109 (решения 198.13, 198.14): Latin with letters of its own.
+    /// Its tones are precomposed letters (NFC), never a letter and a combining mark.
+    Vi,
+    /// Dutch.
+    Nl,
+    /// Romanian — `ș` and `ț` with the comma below (U+0219, U+021B), not the cedilla.
+    Ro,
+    /// Hungarian.
+    Hu,
+    /// Swedish.
+    Sv,
+    /// Albanian.
+    Sq,
+    /// Danish.
+    Da,
+    /// Finnish.
+    Fi,
+    /// Croatian.
+    Hr,
+    /// Slovak.
+    Sk,
+    /// Norwegian Bokmål — the main Norwegian of this program (решение 200б.1), `nb-NO`; a Windows
+    /// that still names the old macrolanguage `no` is answered with it ([`language_of_tag_among`]).
+    Nb,
+    /// Lithuanian.
+    Lt,
+    /// Slovenian.
+    Sl,
+    /// Bosnian — in the Latin script, `bs-Latn-BA`; the only Bosnian of this program.
+    Bs,
+    /// Latvian.
+    Lv,
+    /// Estonian.
+    Et,
+    /// Welsh.
+    Cy,
+    /// Maltese.
+    Mt,
+    /// Icelandic.
+    Is,
+    /// Luxembourgish.
+    Lb,
+    /// Maori.
+    Mi,
+    /// Norwegian Nynorsk — the second Norwegian (решение 200б.1), `nn-NO`.
+    Nn,
 }
 
 /// The tags of the languages this build offers — `build.rs` out of `res\lang\languages.toml`
@@ -394,13 +445,13 @@ mod shipped_registry {
 
 impl Language {
     /// Every value of the closed set, in the order of the registry `res\lang\languages.toml` —
-    /// Russian, English, the ten of решение 93, the two right-to-left locales of вопрос 97, and
-    /// the thirty of group A (stage E108).
+    /// Russian, English, the ten of решение 93, the two right-to-left locales of вопрос 97, the
+    /// thirty of group A (stage E108) and the twenty-two of group B (stage E109).
     ///
     /// [`Self::index`] is a position in this array and the atomic of [`set_ui_language`] stores
     /// that position — in the process only: the file holds the tag (замер L10N). The combo of the
     /// dialog no longer walks this array: since решение 202.7 its order is [`language_order`].
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 66] = [
         Self::Ru,
         Self::En,
         Self::Uk,
@@ -445,6 +496,28 @@ impl Language {
         Self::Tt,
         Self::Ka,
         Self::Mk,
+        Self::Vi,
+        Self::Nl,
+        Self::Ro,
+        Self::Hu,
+        Self::Sv,
+        Self::Sq,
+        Self::Da,
+        Self::Fi,
+        Self::Hr,
+        Self::Sk,
+        Self::Nb,
+        Self::Lt,
+        Self::Sl,
+        Self::Bs,
+        Self::Lv,
+        Self::Et,
+        Self::Cy,
+        Self::Mt,
+        Self::Is,
+        Self::Lb,
+        Self::Mi,
+        Self::Nn,
     ];
 
     /// **Every value in the order of its name — the part of the combo under the line**, решение
@@ -459,18 +532,44 @@ impl Language {
     /// (`CompareStringEx`, the invariant locale) puts Georgian after Armenian and Uyghur after
     /// Persian — 22 of 40 — and was not taken. Latin, Greek, Cyrillic, Armenian, Hebrew, Arabic, the
     /// Indic scripts, Thai, Lao, Khmer, Georgian.
-    pub const BY_NAME: [Self; 44] = [
+    ///
+    /// Stage E109: the twenty-two of group B by the same instrument over the sixty-six names; the
+    /// rule gives the forty-four of E108 back in their order, row for row
+    /// (`scratchpad-E109\by-name.out.txt`). All twenty-two are Latin and fall among the Latin rows.
+    pub const BY_NAME: [Self; 66] = [
         Self::Az,
+        Self::Bs,
         Self::Cs,
+        Self::Cy,
+        Self::Da,
         Self::De,
+        Self::Et,
         Self::En,
         Self::Es,
         Self::Fr,
+        Self::Hr,
+        Self::Is,
         Self::It,
+        Self::Lv,
+        Self::Lb,
+        Self::Lt,
+        Self::Hu,
+        Self::Mt,
+        Self::Mi,
+        Self::Nl,
+        Self::Nb,
+        Self::Nn,
         Self::Uz,
         Self::Pl,
         Self::Pt,
+        Self::Ro,
+        Self::Sq,
+        Self::Sk,
+        Self::Sl,
         Self::SrLatn,
+        Self::Fi,
+        Self::Sv,
+        Self::Vi,
         Self::Tr,
         Self::El,
         Self::Be,
@@ -593,6 +692,29 @@ impl Language {
             Self::Tt => 0x0444,
             Self::Ka => 0x0437,
             Self::Mk => 0x042F,
+            // Group B, stage E109 — the `langid` of the registry, measured there as group A's.
+            Self::Vi => 0x042A,
+            Self::Nl => 0x0413,
+            Self::Ro => 0x0418,
+            Self::Hu => 0x040E,
+            Self::Sv => 0x041D,
+            Self::Sq => 0x041C,
+            Self::Da => 0x0406,
+            Self::Fi => 0x040B,
+            Self::Hr => 0x041A,
+            Self::Sk => 0x041B,
+            Self::Nb => 0x0414,
+            Self::Lt => 0x0427,
+            Self::Sl => 0x0424,
+            Self::Bs => 0x141A,
+            Self::Lv => 0x0426,
+            Self::Et => 0x0425,
+            Self::Cy => 0x0452,
+            Self::Mt => 0x043A,
+            Self::Is => 0x040F,
+            Self::Lb => 0x046E,
+            Self::Mi => 0x0481,
+            Self::Nn => 0x0814,
         }
     }
 
@@ -663,6 +785,28 @@ impl Language {
             Self::Tt => "tt",
             Self::Ka => "ka",
             Self::Mk => "mk",
+            Self::Vi => "vi",
+            Self::Nl => "nl",
+            Self::Ro => "ro",
+            Self::Hu => "hu",
+            Self::Sv => "sv",
+            Self::Sq => "sq",
+            Self::Da => "da",
+            Self::Fi => "fi",
+            Self::Hr => "hr",
+            Self::Sk => "sk",
+            Self::Nb => "nb",
+            Self::Lt => "lt",
+            Self::Sl => "sl",
+            Self::Bs => "bs",
+            Self::Lv => "lv",
+            Self::Et => "et",
+            Self::Cy => "cy",
+            Self::Mt => "mt",
+            Self::Is => "is",
+            Self::Lb => "lb",
+            Self::Mi => "mi",
+            Self::Nn => "nn",
         }
     }
 
@@ -731,6 +875,29 @@ impl Language {
             Self::Tt => "Татар",
             Self::Ka => "ქართული",
             Self::Mk => "Македонски",
+            // Group B, stage E109 — the `endonym` of the registry, as group A.
+            Self::Vi => "Tiếng Việt",
+            Self::Nl => "Nederlands",
+            Self::Ro => "Română",
+            Self::Hu => "Magyar",
+            Self::Sv => "Svenska",
+            Self::Sq => "Shqip",
+            Self::Da => "Dansk",
+            Self::Fi => "Suomi",
+            Self::Hr => "Hrvatski",
+            Self::Sk => "Slovenčina",
+            Self::Nb => "Norsk bokmål",
+            Self::Lt => "Lietuvių",
+            Self::Sl => "Slovenščina",
+            Self::Bs => "Bosanski",
+            Self::Lv => "Latviešu",
+            Self::Et => "Eesti",
+            Self::Cy => "Cymraeg",
+            Self::Mt => "Malti",
+            Self::Is => "Íslenska",
+            Self::Lb => "Lëtzebuergesch",
+            Self::Mi => "Māori",
+            Self::Nn => "Norsk nynorsk",
         }
     }
 
@@ -826,6 +993,10 @@ fn primary_subtag(tag: &str) -> &str {
     }
 }
 
+/// The primary subtag of Norwegian as one macrolanguage — `no`, older than the two tags of its two
+/// written forms, `nb` and `nn` (stage E109). [`language_of_tag_among`] answers it as Bokmål.
+pub const NORWEGIAN_MACROLANGUAGE: &str = "no";
+
 /// The locale one BCP-47 language tag names, if this build has it — **вопрос 95**.
 ///
 /// The mapping is by [`primary_subtag`] and by nothing else: `de-DE`, `de-AT` and a bare `de`
@@ -853,6 +1024,12 @@ fn primary_subtag(tag: &str) -> &str {
 /// none — `sr`, `sr-RS`, `uz-UZ` — is the main one, whose tag is the bare subtag (Serbian
 /// Cyrillic, Uzbek Latin). Only languages the build offers ([`Language::shipped`]) are answered;
 /// if the main one is not among them, the other one of the same language is better than English.
+///
+/// ⭐ **Stage E109, task T-109-1 — Norwegian is two languages with two primary subtags of their
+/// own**, `nb` (Bokmål, the main one) and `nn` (Nynorsk), so `nb-NO` and `nn-NO` need no rule. The
+/// one rule is for the old macrolanguage `no` (`no`, `no-NO`), which a Windows or a copied tag may
+/// still name: it is Bokmål, the form [`NORWEGIAN_MACROLANGUAGE`] stands for. Bosnian is one
+/// language here, in the Latin script: `bs-Latn-BA` and `bs-Cyrl-BA` alike are `bs`.
 pub fn language_of_ui_tag(tag: &str) -> Option<Language> {
     language_of_tag_among(tag, Language::shipped())
 }
@@ -864,7 +1041,12 @@ pub fn language_of_tag_among(
     tag: &str,
     offered: impl IntoIterator<Item = Language>,
 ) -> Option<Language> {
-    let primary = primary_subtag(tag);
+    let primary = match primary_subtag(tag) {
+        macrolanguage if macrolanguage.eq_ignore_ascii_case(NORWEGIAN_MACROLANGUAGE) => {
+            Language::Nb.tag()
+        }
+        primary => primary,
+    };
 
     // An empty primary subtag is not «no preference», it is a tag that was never a tag —
     // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for every language
@@ -2399,6 +2581,9 @@ impl Config {
         if self.schema_version < 9 {
             step_8_to_9(self);
         }
+        if self.schema_version < 10 {
+            step_9_to_10(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -2590,6 +2775,16 @@ fn step_7_to_8(config: &mut Config) {
 /// word and moving the whole configuration to `.bad`.
 fn step_8_to_9(config: &mut Config) {
     config.schema_version = 9;
+}
+
+/// Raises a file from schema 9 to schema 10 — **stage E109**, task T-109-1: the twenty-two
+/// languages of group B in the closed set of `general.language`.
+///
+/// **A bare stamp** for the reason of [`step_8_to_9`]: a schema 9 file names one of the forty-four,
+/// and they are all still here. 1.3.0 and the builds before it meet `language = "nb"` under a stamp
+/// they have never written and leave the file alone instead of moving it to `.bad`.
+fn step_9_to_10(config: &mut Config) {
+    config.schema_version = 10;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.

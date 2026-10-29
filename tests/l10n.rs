@@ -170,6 +170,9 @@ fn registry() -> Vec<Entry> {
 /// forty-four, each held to its entry — tag, LANGID, direction, name; the languages the build
 /// offers (`Language::shipped`, read by `build.rs` out of this very file) are the entries with
 /// `state = "shipped"`, the fourteen and whichever of group A have come; group B is planned (E109).
+///
+/// ⭐ **Stage E109, task T-109-1:** group B joins the closed set — all sixty-six entries are values
+/// of `Language::ALL`, and a language of group B may be shipped once its translation has come.
 #[test]
 fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs() {
     let registry = registry();
@@ -179,11 +182,11 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
         "the registry: 14 shipped, then A and B, in this order"
     );
 
-    let values: Vec<&Entry> = registry.iter().filter(|e| e.group != "B").collect();
+    let values: Vec<&Entry> = registry.iter().collect();
     assert_eq!(
         values.len(),
         Language::ALL.len(),
-        "one entry per value of the closed set: the fourteen and group A"
+        "one entry per value of the closed set: the fourteen, group A and group B"
     );
     for (entry, language) in values.iter().zip(Language::ALL) {
         assert_eq!(entry.tag, language.tag(), "the order of Language::ALL");
@@ -213,8 +216,8 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
         *groups.entry(entry.group.as_str()).or_insert(0) += 1;
         let state_is_admissible = match entry.group.as_str() {
             "shipped" => entry.state == "shipped",
-            "A" => entry.state == "shipped" || entry.state == "planned",
-            _ => entry.state == "planned",
+            "A" | "B" => entry.state == "shipped" || entry.state == "planned",
+            _ => false,
         };
         assert!(
             state_is_admissible,

@@ -927,6 +927,7 @@ pub mod links {
     /// ⭐ **Stage E108, решение 202.6** — дословно: «Делаем так, пока нет адаптированных страниц
     /// сайта под каждый из языков»: Kazakh, Belarusian, Tatar and Uzbek in Cyrillic read the
     /// Russian side too; the other twenty-six of group A — the English one.
+    /// Stage E109: all twenty-two of group B — the English one (TZ E109 §0 п. 3).
     fn reads_the_russian_side(language: Language) -> bool {
         match language {
             Language::Ru
@@ -972,7 +973,29 @@ pub mod links {
             | Language::Hy
             | Language::Lo
             | Language::Ka
-            | Language::Mk => false,
+            | Language::Mk
+            | Language::Vi
+            | Language::Nl
+            | Language::Ro
+            | Language::Hu
+            | Language::Sv
+            | Language::Sq
+            | Language::Da
+            | Language::Fi
+            | Language::Hr
+            | Language::Sk
+            | Language::Nb
+            | Language::Lt
+            | Language::Sl
+            | Language::Bs
+            | Language::Lv
+            | Language::Et
+            | Language::Cy
+            | Language::Mt
+            | Language::Is
+            | Language::Lb
+            | Language::Mi
+            | Language::Nn => false,
         }
     }
 
@@ -2236,10 +2259,35 @@ pub fn demo_pair(language: Language) -> DemoPair {
         // instrument of 178.4; until then it may stand in an arm of `PAIR_TO_COME`, which the build
         // never draws (`Language::is_shipped`), and `tests\letters.rs` refuses a shipped language
         // that is still there.
+        //
+        // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
+        // from the translator, the keys off the file of the layout).
+        Language::Vi
+        | Language::Nl
+        | Language::Ro
+        | Language::Hu
+        | Language::Sv
+        | Language::Sq
+        | Language::Da
+        | Language::Fi
+        | Language::Hr
+        | Language::Sk
+        | Language::Nb
+        | Language::Lt
+        | Language::Sl
+        | Language::Bs
+        | Language::Lv
+        | Language::Et
+        | Language::Cy
+        | Language::Mt
+        | Language::Is
+        | Language::Lb
+        | Language::Mi
+        | Language::Nn => PAIR_TO_COME,
     }
 }
 
-/// The pair of a language of group A whose translation has not come yet — the English pair, so a
+/// The pair of a language whose translation has not come yet — the English pair, so a
 /// stray drawing shows a real example and not an empty field. Never the pair of a shipped language
 /// but English and Polish (which show it by решение 178.5): `tests\letters.rs` holds that.
 pub const PAIR_TO_COME: DemoPair = DemoPair {

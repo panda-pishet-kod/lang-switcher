@@ -584,7 +584,7 @@ HKL служит записью о наборе; направление конв
 Каталог программы (`%ProgramFiles%`) недоступен на запись обычному пользователю — конфигурация в нём не хранится.
 
 ```toml
-schema_version = 9
+schema_version = 10
 
 [general]
 enabled   = true
@@ -595,7 +595,10 @@ autostart = true              # умолчание true. FR-93: при кажд�
 language  = "ru"              # ru | en | uk | de | fr | es | pt | it | pl | cs | tr | el | he | ar
                               # | hi | bn | ur | pa | mr | te | ta | fa | gu | th | kn | or | ml
                               # | uz | uz-Cyrl | ne | as | az | km | kk | sr | sr-Latn | ug | bg
-                              # | hy | lo | be | tt | ka | mk — группа А с Э108 (schema 9). Сборка
+                              # | hy | lo | be | tt | ka | mk — группа А с Э108 (schema 9)
+                              # | vi | nl | ro | hu | sv | sq | da | fi | hr | sk | nb | lt | sl
+                              # | bs | lv | et | cy | mt | is | lb | mi | nn — группа Б с Э109
+                              # (schema 10). Сборка
                               # предлагает языки res\lang\languages.toml со state = "shipped";
                               # значение множества без своих строк в сборке показывается
                               # по-английски, слово в файле остаётся.
@@ -605,6 +608,9 @@ language  = "ru"              # ru | en | uk | de | fr | es | pt | it | pl | cs 
                               # есть; если ни одного — "en". Сербский и узбекский — по два письма
                               # (200б.1): решает письмо полного тега — sr-Latn-RS → sr-Latn,
                               # sr-Cyrl-RS и sr → sr; uz-Cyrl-UZ → uz-Cyrl, uz-Latn-UZ и uz → uz.
+                              # Норвежский — два языка (Э109): nb-NO → nb, nn-NO → nn, старое
+                              # no и no-NO → nb; боснийский один, латиницей: bs-Latn-BA и
+                              # bs-Cyrl-BA → bs.
                               # Существующий файл не трогается: в нём отсутствующий language
                               # по-прежнему даёт "ru".
 theme     = "system"          # system | light | dark
