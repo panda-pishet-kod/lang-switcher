@@ -71,6 +71,19 @@ function Fail([string]$why) {
     exit 1
 }
 
+# STAGE E108 (decision 202.13): the longest first line of a text, in code points -- see the check in
+# the parse below for why and where the number was measured.
+$EXCERPT_CAP = 150
+
+function Test-FirstLine($entry, [string]$tag, [string]$line) {
+    $points = @($line.Trim().EnumerateRunes()).Count
+    if ($points -gt $EXCERPT_CAP) {
+        $why = "entry {0} [{1}]: the first line of the text is {2} characters, the limit is {3} -- " +
+            "'Recent letters' shows it as the excerpt; break the text into lines"
+        Fail ($why -f $entry.Id, $tag, $points, $EXCERPT_CAP)
+    }
+}
+
 Write-Host '======================================================================'
 Write-Host ' Lang_Switcher -- check and sign the author feed (FR-102)'
 Write-Host '======================================================================'
@@ -175,6 +188,28 @@ foreach ($line in $lines) {
             $table[$Matches[1]] = $Matches[2]
         }
         continue
+    }
+
+    # STAGE E108 (decision 202.13): the first line of a text is the excerpt the window "Recent
+    # letters" shows under the title, wrapped to the width of the row; a first line long enough
+    # makes that window the tallest of the program, and the font step of every screen is counted
+    # from the tallest window. The limit is measured, not chosen (scratchpad-E108,
+    # exp-threshold.out): a Russian first line of 150 characters leaves the tallest window as it
+    # is and one of 160 makes it grow; an Urdu one of 150 does not. Published entries of 1.2.0 are
+    # 116 at most.
+    if ($section -eq 'language') {
+        if ($awaitFirst) {
+            $awaitFirst = $false
+            if ($trimmed -ne '"""') { Test-FirstLine $current $language $trimmed }
+            continue
+        }
+        if ($trimmed -match '^text\s*=\s*"""(.*)$') {
+            $rest = $Matches[1].Trim()
+            if ($rest -eq '') { $awaitFirst = $true }
+            elseif ($rest -ne '"""') { Test-FirstLine $current $language ($rest -replace '"""$', '') }
+            continue
+        }
+        if ($trimmed -match '^text\s*=\s*"(.*)"$') { Test-FirstLine $current $language $Matches[1]; continue }
     }
 
     if ($section -eq 'language' -or $section -eq 'other') { continue }
