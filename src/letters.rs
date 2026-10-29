@@ -2297,6 +2297,18 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "Sveiki",
             badge: ["RU", "LV"],
         },
+        // KBDSW (Swedish: `å` on the key of `[`) and KBDDA (Danish: `ø` on the key of `'`) against
+        // KBDUS.
+        Language::Sv => DemoPair {
+            typed: "hall[",
+            fixed: "hallå",
+            badge: ["EN", "SV"],
+        },
+        Language::Da => DemoPair {
+            typed: "hall'",
+            fixed: "hallø",
+            badge: ["EN", "DA"],
+        },
         //
         // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
         // from the translator, the keys off the file of the layout).
@@ -2304,9 +2316,7 @@ pub fn demo_pair(language: Language) -> DemoPair {
         | Language::Nl
         | Language::Ro
         | Language::Hu
-        | Language::Sv
         | Language::Sq
-        | Language::Da
         | Language::Fi
         | Language::Nb
         | Language::Et

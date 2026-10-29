@@ -2025,6 +2025,8 @@ END
 #include "res/lang/tt.rc"
 #include "res/lang/ka.rc"
 #include "res/lang/mk.rc"
+#include "res/lang/sv.rc"
+#include "res/lang/da.rc"
 #include "res/lang/hr.rc"
 #include "res/lang/sk.rc"
 #include "res/lang/lt.rc"

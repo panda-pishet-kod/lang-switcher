@@ -8277,6 +8277,34 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "Iznākusi versija 0.97.0",
         "Sīkāka informācija — lejupielādes lapā.\n",
     ),
+    (
+        Language::Sv,
+        "Programmet uppdaterar nu sig självt",
+        concat!(
+            "Från och med 0.104.0 uppdaterar Lang Switcher sig självt.\n",
+            "Programmet hämtar nya versioner från utvecklarens webbplats och installerar\n",
+            "dem efter att ha kontrollerat signaturen. Installera den nya versionen\n",
+            "en gång, så kommer uppdateringarna av sig själva. Den här versionen\n",
+            "åtgärdar också starten i Windows utan Visual C++-paketet: versionerna\n",
+            "0.90.0–0.103.0 startade inte där.\n",
+        ),
+        "Version 0.97.0 har släppts",
+        "Detaljer finns på nedladdningssidan.\n",
+    ),
+    (
+        Language::Da,
+        "Programmet opdaterer nu sig selv",
+        concat!(
+            "Fra og med 0.104.0 opdaterer Lang Switcher sig selv.\n",
+            "Programmet henter nye versioner fra udviklerens websted og installerer\n",
+            "dem, efter at have kontrolleret signaturen. Installer den nye version én\n",
+            "gang, så kommer opdateringerne af sig selv. Denne version retter også\n",
+            "opstart på Windows uden Visual C++-pakken: Versionerne 0.90.0–0.103.0\n",
+            "startede ikke dér.\n",
+        ),
+        "Version 0.97.0 er udgivet",
+        "Detaljer findes på downloadsiden.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and
@@ -19586,7 +19614,8 @@ fn quotes_the_button(text: &str, label: &str) -> bool {
     text.match_indices(label).any(|(at, _)| {
         text[..at]
             .trim_end_matches([' ', '\u{a0}', '\u{202f}'])
-            .ends_with(['«', '»', '“', '„', '"', '‹', '「', '‘'])
+            // ” opens a quotation too in Swedish and Finnish (stage E109).
+            .ends_with(['«', '»', '“', '„', '"', '‹', '「', '‘', '”'])
     })
 }
 
@@ -28369,8 +28398,10 @@ fn a_system_tag_maps_onto_a_locale_by_its_primary_subtag() {
         "zh-CN",
         "ja-JP",
         "ko-KR",
-        "nl-NL",
-        "sv-SE",
+        // Stage E109: `nl-NL` and `sv-SE` stood here until Dutch and Swedish joined group B;
+        // Catalan and Basque are in no group.
+        "ca-ES",
+        "eu-ES",
         // ⚠ Т-30-1, recorded as a **fact and not a defect**: `iw` is the retired ISO 639-1 code
         // for Hebrew, which some systems still hand out. This build does not have it, so a
         // machine that answers `iw` gets English by the rule of вопрос 95 — the same road as a

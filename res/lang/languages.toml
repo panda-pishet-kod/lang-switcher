@@ -679,7 +679,7 @@ rtl = false
 inno = "Swedish"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "sq"
@@ -705,7 +705,7 @@ rtl = false
 inno = "Danish"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "fi"
