@@ -1995,3 +1995,5 @@ END
 #include "res/lang/el.rc"
 #include "res/lang/he.rc"
 #include "res/lang/ar.rc"
+#include "res/lang/hi.rc"
+#include "res/lang/ur.rc"

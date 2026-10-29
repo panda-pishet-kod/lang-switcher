@@ -226,7 +226,7 @@ rtl = false
 inno = "Hindi"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "bn"
@@ -253,7 +253,7 @@ rtl = true
 inno = "Urdu"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "pa"

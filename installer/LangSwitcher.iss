@@ -284,6 +284,10 @@ WizardSmallImageFileDynamicDark=
 ; official translations for the languages of the program, and Brazilian Portuguese with the
 ; same messages as Portuguese (155.12). Greek: no official file -- English (155.11).
 ; tests\installer_languages.rs holds every entry to its file and every file to English.isl.
+; Stage E108 (decision 202.2): the languages of group A follow, in the order of the registry
+; res\lang\languages.toml. Where Inno has no translation of its own (inno_official = false) the
+; first file is Default.isl and lang\<Language>.isl carries all of Inno's messages too, translated
+; by the same window as the program; where it has one (ta, th, bg, hy) it is the official file.
 Name: "english"; MessagesFile: "compiler:Default.isl,lang\English.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl,lang\Russian.isl"
 Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl,lang\Ukrainian.isl"
@@ -298,6 +302,8 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl,lang\Turkish.isl"
 Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl,lang\Hebrew.isl"
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl,lang\Arabic.isl"
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl,lang\BrazilianPortuguese.isl"
+Name: "hindi"; MessagesFile: "compiler:Default.isl,lang\Hindi.isl"
+Name: "urdu"; MessagesFile: "compiler:Default.isl,lang\Urdu.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
