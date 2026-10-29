@@ -2160,6 +2160,13 @@ const PAIRS_OF_DECISION_178_6: &[(Language, &str, &str, [&str; 2])] = &[
     (Language::Km, "CMrabsYr", "ជំរាបសួរ", ["EN", "KM"]),
     (Language::Ka, "gamarjoba", "გამარჯობა", ["EN", "KA"]),
     (Language::Hy, "ba87", "բարև", ["EN", "HY"]),
+    // Stage E109, group B (pairs-wave.ps1, with the way back).
+    (Language::Hr, "ydravo", "zdravo", ["EN", "HR"]),
+    (Language::Sk, "4au", "čau", ["EN", "SK"]),
+    (Language::Sl, "\\ivjo", "živjo", ["EN", "SL"]),
+    (Language::Bs, "'ao", "ćao", ["EN", "BS"]),
+    (Language::Lt, "a2i8", "ačiū", ["EN", "LT"]),
+    (Language::Lv, "Ымушлш", "Sveiki", ["RU", "LV"]),
 ];
 
 /// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение

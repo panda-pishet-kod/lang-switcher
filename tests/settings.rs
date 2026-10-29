@@ -8197,6 +8197,86 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "Թողարկվեց 0.97.0 տարբերակը",
         "Մանրամասները՝ ներբեռնման էջում։\n",
     ),
+    (
+        Language::Hr,
+        "Program se sada ažurira sam",
+        concat!(
+            "Lang Switcher se od verzije 0.104.0 ažurira sam.\n",
+            "Nove verzije preuzima s autorova web-mjesta i instalira ih nakon provjere\n",
+            "potpisa. Instalirajte novu verziju jednom, a dalje će ažuriranja stizati\n",
+            "sama. U ovoj je verziji popravljeno i pokretanje na sustavu Windows bez\n",
+            "paketa Visual C++: verzije 0.90.0–0.103.0 ondje se nisu pokretale.\n",
+        ),
+        "Izašla je verzija 0.97.0",
+        "Pojedinosti su na stranici za preuzimanje.\n",
+    ),
+    (
+        Language::Sk,
+        "Program sa teraz aktualizuje sám",
+        concat!(
+            "Od verzie 0.104.0 sa Lang Switcher aktualizuje sám.\n",
+            "Nové verzie sťahuje zo stránky autora a po overení podpisu ich\n",
+            "nainštaluje. Novú verziu nainštalujte raz — ďalšie aktualizácie prídu\n",
+            "samy. Táto verzia opravuje aj spúšťanie v systéme Windows bez balíka\n",
+            "Visual C++: verzie 0.90.0–0.103.0 sa tam nespúšťali.\n",
+        ),
+        "Vyšla verzia 0.97.0",
+        "Podrobnosti nájdete na stránke na stiahnutie.\n",
+    ),
+    (
+        Language::Sl,
+        "Program se zdaj posodablja sam",
+        concat!(
+            "Od različice 0.104.0 se Lang Switcher posodablja sam.\n",
+            "Nove različice prenese s spletnega mesta avtorja in jih po preverjanju\n",
+            "podpisa namesti. Novo različico namestite enkrat — nato bodo posodobitve\n",
+            "prišle same. Ta različica popravlja tudi zagon v sistemu Windows brez\n",
+            "paketa Visual C++: različice 0.90.0–0.103.0 se tam niso zagnale.\n",
+        ),
+        "Izšla je različica 0.97.0",
+        "Podrobnosti so na strani za prenos.\n",
+    ),
+    (
+        Language::Bs,
+        "Program se sada ažurira sam",
+        concat!(
+            "Lang Switcher se od verzije 0.104.0 ažurira sam.\n",
+            "Nove verzije preuzima sa sajta autora i instalira ih nakon provjere potpisa.\n",
+            "Instalirajte novu verziju jednom, a dalje će ažuriranja stizati sama.\n",
+            "U ovoj verziji popravljeno je i pokretanje na sistemu Windows bez paketa\n",
+            "Visual C++: verzije 0.90.0–0.103.0 tamo se nisu pokretale.\n",
+        ),
+        "Izašla je verzija 0.97.0",
+        "Detalji su na stranici za preuzimanje.\n",
+    ),
+    (
+        Language::Lt,
+        "Programa dabar atsinaujina pati",
+        concat!(
+            "Lang Switcher dabar pats atsisiunčia ir įdiegia naujas versijas.\n",
+            "Nuo versijos 0.104.0 programa jas ima iš autoriaus svetainės ir diegia\n",
+            "pati, patikrinusi skaitmeninį parašą. Įdiekite naują versiją vieną\n",
+            "kartą — toliau atnaujinimai ateis patys. Šioje versijoje taip pat\n",
+            "ištaisytas paleidimas sistemoje Windows be Visual C++ paketo: versijos\n",
+            "0.90.0–0.103.0 ten nepasileisdavo.\n",
+        ),
+        "Išleista versija 0.97.0",
+        "Išsamiau — atsisiuntimo puslapyje.\n",
+    ),
+    (
+        Language::Lv,
+        "Programma tagad atjaunināsies pati",
+        concat!(
+            "Lang Switcher tagad pats lejupielādē un instalē jaunās versijas.\n",
+            "Sākot ar versiju 0.104.0, programma ņem tās no autora vietnes un instalē\n",
+            "pati, pārbaudījusi digitālo parakstu. Instalējiet jauno versiju vienu\n",
+            "reizi — turpmāk atjauninājumi parādīsies paši. Šajā versijā labota arī\n",
+            "palaišana sistēmā Windows bez Visual C++ pakotnes: versijas\n",
+            "0.90.0–0.103.0 tur nepalaidās.\n",
+        ),
+        "Iznākusi versija 0.97.0",
+        "Sīkāka informācija — lejupielādes lapā.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and
@@ -19160,11 +19240,23 @@ fn the_caption_of_hello_names_the_pair_of_its_own_language() {
     let _guard = with_product_strings();
 
     // The quotation marks of the language (RULES п. 3): « » of the fourteen (French with its
-    // spaces), and since stage E108 “ ” of Hindi and „ “ of the languages that write them.
+    // spaces), and since stage E108 “ ” of Hindi and „ “ of the languages that write them. Stage
+    // E109, group B: „ ” (Croatian, Bosnian, Romanian, Hungarian), » « (Slovenian, Danish), ” ” and
+    // » » (Finnish, Swedish), ‘ ’ (Welsh, Dutch).
     let quoted = |caption: &str, word: &str| {
-        [("«", "»"), ("« ", " »"), ("“", "”"), ("„", "“")]
-            .iter()
-            .any(|(open, close)| caption.contains(&format!("{open}{word}{close}")))
+        [
+            ("«", "»"),
+            ("« ", " »"),
+            ("“", "”"),
+            ("„", "“"),
+            ("„", "”"),
+            ("»", "«"),
+            ("”", "”"),
+            ("»", "»"),
+            ("‘", "’"),
+        ]
+        .iter()
+        .any(|(open, close)| caption.contains(&format!("{open}{word}{close}")))
     };
     let russian = letters::demo_pair(Language::Ru);
     let mut captions = Vec::new();

@@ -2260,6 +2260,44 @@ pub fn demo_pair(language: Language) -> DemoPair {
         // never draws (`Language::is_shipped`), and `tests\letters.rs` refuses a shipped language
         // that is still there.
         //
+        // Stage E109, group B: the word of the translator, the keys off KBDCR (hr, bs, sl) and KBDSL
+        // (sk) against KBDUS, with the way back (`scratchpad-E109\pairs-*.out.txt`).
+        Language::Hr => DemoPair {
+            typed: "ydravo",
+            fixed: "zdravo",
+            badge: ["EN", "HR"],
+        },
+        Language::Sk => DemoPair {
+            typed: "4au",
+            fixed: "čau",
+            badge: ["EN", "SK"],
+        },
+        Language::Sl => DemoPair {
+            typed: "\\ivjo",
+            fixed: "živjo",
+            badge: ["EN", "SL"],
+        },
+        Language::Bs => DemoPair {
+            typed: "'ao",
+            fixed: "ćao",
+            badge: ["EN", "BS"],
+        },
+        // KBDLT1 (Lithuanian, the layout of lt-LT: the letters on the row of digits) against KBDUS.
+        // Latvian: on the layout of lv-LV, KBDLV1 (QWERTY), the `č` of «čau» and the `ī` of «labrīt»
+        // stand on no key and on no modifier — only behind a dead key (`pairs-w2.out.txt`); so the pair
+        // is the other way of 178.5, as Uzbek's — «Sveiki» typed while the Russian layout was on
+        // (KBDRU, `pairs-lv-reverse.out.txt`).
+        Language::Lt => DemoPair {
+            typed: "a2i8",
+            fixed: "ačiū",
+            badge: ["EN", "LT"],
+        },
+        Language::Lv => DemoPair {
+            typed: "Ымушлш",
+            fixed: "Sveiki",
+            badge: ["RU", "LV"],
+        },
+        //
         // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
         // from the translator, the keys off the file of the layout).
         Language::Vi
@@ -2270,13 +2308,7 @@ pub fn demo_pair(language: Language) -> DemoPair {
         | Language::Sq
         | Language::Da
         | Language::Fi
-        | Language::Hr
-        | Language::Sk
         | Language::Nb
-        | Language::Lt
-        | Language::Sl
-        | Language::Bs
-        | Language::Lv
         | Language::Et
         | Language::Cy
         | Language::Mt

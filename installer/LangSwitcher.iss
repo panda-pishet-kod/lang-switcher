@@ -332,6 +332,12 @@ Name: "belarusian"; MessagesFile: "compiler:Default.isl,lang\Belarusian.isl"
 Name: "tatar"; MessagesFile: "compiler:Default.isl,lang\Tatar.isl"
 Name: "georgian"; MessagesFile: "compiler:Default.isl,lang\Georgian.isl"
 Name: "macedonian"; MessagesFile: "compiler:Default.isl,lang\Macedonian.isl"
+Name: "croatian"; MessagesFile: "compiler:Default.isl,lang\Croatian.isl"
+Name: "slovak"; MessagesFile: "compiler:Languages\Slovak.isl,lang\Slovak.isl"
+Name: "lithuanian"; MessagesFile: "compiler:Default.isl,lang\Lithuanian.isl"
+Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl,lang\Slovenian.isl"
+Name: "bosnian"; MessagesFile: "compiler:Default.isl,lang\Bosnian.isl"
+Name: "latvian"; MessagesFile: "compiler:Default.isl,lang\Latvian.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a
