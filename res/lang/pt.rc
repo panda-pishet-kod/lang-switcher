@@ -153,7 +153,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Avisar sobre atualizações e novidades do autor"
     IDS_NEWS_SWITCH_SUB     "Uma vez por dia o programa lê um arquivo do site do autor. Este interruptor desliga as cartas e as notícias desse arquivo."
     IDS_FEEDBACK_PANEL      "Retorno"
-    IDS_FEEDBACK_TEXT       "Achou um erro ou tem uma ideia? O assistente monta a mensagem em cinco passos. Nada sai sozinho: o texto vai para a área de transferência, e quem cola é você."
+    IDS_FEEDBACK_TEXT       "Achou um erro ou tem uma ideia? O assistente monta a mensagem e só a envia ao autor quando você clicar em «Enviar»."
     IDS_WRITE_TO_AUTHOR     "Escrever para o autor…"
     IDS_LETTERS_CAPTION     "Últimas cartas"
     IDS_LETTERS_FOOT        "As três últimas notícias ficam guardadas. Quando chega uma quarta, a mais antiga sai, mesmo não lida."

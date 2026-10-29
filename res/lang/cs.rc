@@ -154,7 +154,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Informovat o aktualizacích a novinkách autora"
     IDS_NEWS_SWITCH_SUB     "Jednou denně program přečte jeden soubor ze stránek autora. Tento přepínač vypíná dopisy a novinky z tohoto souboru."
     IDS_FEEDBACK_PANEL      "Zpětná vazba"
-    IDS_FEEDBACK_TEXT       "Našli jste chybu nebo máte nápad? Průvodce sestaví zprávu v pěti krocích. Nic neodejde samo: text se dostane do schránky a vložíte ho vy."
+    IDS_FEEDBACK_TEXT       "Našli jste chybu nebo máte nápad? Průvodce sestaví hlášení a odešle ho autorovi, až když stisknete «Odeslat»."
     IDS_WRITE_TO_AUTHOR     "Napsat autorovi…"
     IDS_LETTERS_CAPTION     "Poslední dopisy"
     IDS_LETTERS_FOOT        "Uchovávají se tři poslední novinky. Když přijde čtvrtá, nejstarší odejde, i nepřečtená."

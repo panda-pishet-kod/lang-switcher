@@ -157,7 +157,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Yazarın güncelleme ve haberlerini bildir"
     IDS_NEWS_SWITCH_SUB     "Program günde bir kez yazarın sitesinden tek bir dosya okur. Bu anahtar, o dosyadaki mektupları ve haberleri kapatır."
     IDS_FEEDBACK_PANEL      "Geri bildirim"
-    IDS_FEEDBACK_TEXT       "Bir hata mı buldunuz, bir fikriniz mi var? Sihirbaz iletiyi beş adımda hazırlar. Hiçbir şey kendiliğinden gitmez: metin panoya gider, yapıştıran siz olursunuz."
+    IDS_FEEDBACK_TEXT       "Bir hata mı buldunuz, bir fikriniz mi var? Sihirbaz bildirimi hazırlar ve yazara yalnızca «Gönder» düğmesine bastığınızda gönderir."
     IDS_WRITE_TO_AUTHOR     "Yazara yaz…"
     IDS_LETTERS_CAPTION     "Son mektuplar"
     IDS_LETTERS_FOOT        "Son üç haber saklanır. Dördüncüsü geldiğinde en eskisi okunmamış olsa bile gider."

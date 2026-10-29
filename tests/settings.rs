@@ -17913,10 +17913,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (settings::IDS_FEEDBACK_PANEL, "Обратная связь", "Feedback"),
     (
         settings::IDS_FEEDBACK_TEXT,
-        "Нашли ошибку или есть идея? Мастер соберёт обращение за пять шагов. Ничего не \
-         отправится само: текст попадёт в буфер обмена, а вставите его вы.",
-        "Found a bug or have an idea? The wizard puts a message together in five steps. Nothing \
-         is sent by itself: the text goes to the clipboard, and you paste it.",
+        // Stage E108, task T-108-0 (решение 202.5): until 1.3.0 the panel promised five steps and
+        // the clipboard — the path the wizard of 1.2.0 left (решение 199.3).
+        "Нашли ошибку или есть идея? Мастер соберёт обращение и отправит его автору, только когда \
+         вы нажмёте «Отправить».",
+        "Found a bug or have an idea? The wizard puts an appeal together and sends it to the \
+         author only when you press «Send».",
     ),
     (
         settings::IDS_WRITE_TO_AUTHOR,
@@ -18839,6 +18841,109 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
     assert!(
         wrong.is_empty(),
         "181.1: {} strings do not name the place of their language:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// The words of the path the wizard walked until 1.2.0 — the clipboard and the five steps — in the
+/// fourteen languages that said them in `IDS_FEEDBACK_TEXT` (stage E108, task T-108-0). A table and
+/// not a `match`: a language that came after 1.2.0 never said them.
+const THE_OLD_PATH_OF_THE_FEEDBACK: [(Language, &[&str]); 14] = [
+    (Language::Ru, &["буфер", "пять"]),
+    (Language::En, &["clipboard", "five"]),
+    (Language::De, &["Zwischenablage", "fünf"]),
+    (Language::Fr, &["presse-papiers", "cinq"]),
+    (Language::Es, &["portapapeles", "cinco"]),
+    (Language::It, &["appunti", "cinque"]),
+    (Language::Pt, &["área de transferência", "cinco"]),
+    (Language::Pl, &["schowk", "pięciu"]),
+    (Language::Uk, &["буфер", "п'ять"]),
+    (Language::Tr, &["pano", "beş"]),
+    (Language::Cs, &["schránk", "pěti"]),
+    (Language::El, &["πρόχειρο", "πέντε"]),
+    (Language::He, &["לוח", "חמישה"]),
+    (Language::Ar, &["الحافظة", "خمس"]),
+];
+
+/// Whether `text` names the button `label` in quotation marks — the mark right before it (a space
+/// between is allowed, as French writes « Envoyer ») opens a quotation in one of the conventions
+/// the languages of the program use.
+fn quotes_the_button(text: &str, label: &str) -> bool {
+    text.match_indices(label).any(|(at, _)| {
+        text[..at]
+            .trim_end_matches([' ', '\u{a0}', '\u{202f}'])
+            .ends_with(['«', '»', '“', '„', '"', '‹', '「', '‘'])
+    })
+}
+
+/// **Stage E108, task T-108-0, решение 202.5 — the panel «Обратная связь» of «От автора» says how
+/// the wizard of 1.2.0 sends, in every language.** The wizard sends the appeal itself when the person
+/// presses «Отправить» (решение 199.3); until 1.3.0 the panel said «за пять шагов … текст попадёт в
+/// буфер обмена, а вставите его вы» in all fourteen. Now each language names its own button
+/// `IDS_WIZARD_SEND` in quotation marks, says not a word of the clipboard or of the five steps, and
+/// sends nobody to the group or the issues. Under the gate of [`LOCALE`].
+///
+/// ⚠ Control: the panel as it stood in `e107`, written down here in Russian and English, is caught
+/// by both checks — they can fail.
+#[test]
+fn the_feedback_panel_names_the_button_that_sends_in_every_language() {
+    const E107_RU: &str = "Нашли ошибку или есть идея? Мастер соберёт обращение за пять шагов. \
+                           Ничего не отправится само: текст попадёт в буфер обмена, а вставите \
+                           его вы.";
+    const E107_EN: &str = "Found a bug or have an idea? The wizard puts a message together in \
+                           five steps. Nothing is sent by itself: the text goes to the clipboard, \
+                           and you paste it.";
+
+    fn says_the_old_path(language: Language, text: &str) -> bool {
+        let lower = text.to_lowercase();
+
+        THE_OLD_PATH_OF_THE_FEEDBACK
+            .iter()
+            .filter(|(of, _)| *of == language)
+            .flat_map(|(_, words)| words.iter())
+            .any(|word| lower.contains(&word.to_lowercase()))
+    }
+
+    let _guard = with_product_strings();
+    let mut wrong = Vec::new();
+    let mut control = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let text = settings::text(settings::IDS_FEEDBACK_TEXT);
+        let send = settings::text(settings::IDS_WIZARD_SEND);
+
+        if !quotes_the_button(&text, &send) {
+            wrong.push(format!("{language:?}: «{send}» is not named — «{text}»"));
+        }
+        if says_the_old_path(language, &text) {
+            wrong.push(format!("{language:?}: the clipboard or five steps — «{text}»"));
+        }
+        if names_the_group_or_the_issues(&text) {
+            wrong.push(format!("{language:?}: sends to a place — «{text}»"));
+        }
+
+        match language {
+            Language::Ru => control.push((language, E107_RU, send)),
+            Language::En => control.push((language, E107_EN, send)),
+            _ => {}
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert_eq!(control.len(), 2, "the control reads Russian and English");
+    for (language, old, send) in control {
+        assert!(
+            !quotes_the_button(old, &send) && says_the_old_path(language, old),
+            "the control: the panel of e107 in {language:?} must be caught by both checks"
+        );
+    }
+    assert!(
+        wrong.is_empty(),
+        "202.5: {} languages describe a path the wizard does not walk:\n{}",
         wrong.len(),
         wrong.join("\n")
     );

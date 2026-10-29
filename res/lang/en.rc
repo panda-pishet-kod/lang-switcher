@@ -152,7 +152,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Tell me about the author's updates and news"
     IDS_NEWS_SWITCH_SUB     "Once a day, the program reads one file from the author's site. This switch turns off the letters and news from that file."
     IDS_FEEDBACK_PANEL      "Feedback"
-    IDS_FEEDBACK_TEXT       "Found a bug or have an idea? The wizard puts a message together in five steps. Nothing is sent by itself: the text goes to the clipboard, and you paste it."
+    IDS_FEEDBACK_TEXT       "Found a bug or have an idea? The wizard puts an appeal together and sends it to the author only when you press «Send»."
     IDS_WRITE_TO_AUTHOR     "Write to the author…"
     IDS_LETTERS_CAPTION     "Recent letters"
     IDS_LETTERS_FOOT        "The three latest news items are kept. When a fourth arrives, the oldest goes, read or not."

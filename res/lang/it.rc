@@ -158,7 +158,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Avvisami degli aggiornamenti e delle notizie dell'autore"
     IDS_NEWS_SWITCH_SUB     "Una volta al giorno il programma legge un file dal sito dell'autore. Questo interruttore disattiva le lettere e le notizie di quel file."
     IDS_FEEDBACK_PANEL      "Riscontro"
-    IDS_FEEDBACK_TEXT       "Hai trovato un errore o hai un'idea? La procedura guidata compone il messaggio in cinque passi. Niente parte da solo: il testo finisce negli appunti, e a incollarlo sei tu."
+    IDS_FEEDBACK_TEXT       "Hai trovato un errore o hai un'idea? La procedura guidata compone il messaggio e lo invia all'autore solo quando premi «Invia»."
     IDS_WRITE_TO_AUTHOR     "Scrivi all'autore…"
     IDS_LETTERS_CAPTION     "Ultime lettere"
     IDS_LETTERS_FOOT        "Vengono conservate le tre notizie più recenti. Quando ne arriva una quarta, la più vecchia se ne va, anche se non letta."

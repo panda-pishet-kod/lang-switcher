@@ -156,7 +156,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Über Updates und Neuigkeiten des Autors informieren"
     IDS_NEWS_SWITCH_SUB     "Einmal am Tag liest das Programm eine Datei von der Seite des Autors. Der Schalter schaltet die Briefe und Nachrichten aus dieser Datei ab."
     IDS_FEEDBACK_PANEL      "Rückmeldung"
-    IDS_FEEDBACK_TEXT       "Einen Fehler gefunden oder eine Idee? Der Assistent stellt die Nachricht in fünf Schritten zusammen. Nichts geht von selbst weg: Der Text landet in der Zwischenablage, und einfügen tun Sie ihn."
+    IDS_FEEDBACK_TEXT       "Einen Fehler gefunden oder eine Idee? Der Assistent stellt die Meldung zusammen und schickt sie erst an den Autor, wenn Sie auf «Senden» klicken."
     IDS_WRITE_TO_AUTHOR     "An den Autor schreiben…"
     IDS_LETTERS_CAPTION     "Letzte Briefe"
     IDS_LETTERS_FOOT        "Die drei letzten Nachrichten werden aufbewahrt. Kommt eine vierte, geht die älteste — auch ungelesen."

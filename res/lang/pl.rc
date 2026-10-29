@@ -158,7 +158,7 @@ BEGIN
     IDS_NEWS_SWITCH         "Powiadamiaj o aktualizacjach i wiadomościach autora"
     IDS_NEWS_SWITCH_SUB     "Raz dziennie program czyta jeden plik ze strony autora. Ten przełącznik wyłącza listy i wiadomości z tego pliku."
     IDS_FEEDBACK_PANEL      "Kontakt"
-    IDS_FEEDBACK_TEXT       "Znalazłeś błąd albo masz pomysł? Kreator złoży zgłoszenie w pięciu krokach. Nic nie wyjdzie samo: tekst trafi do schowka, a wkleisz go ty."
+    IDS_FEEDBACK_TEXT       "Coś nie działa albo masz pomysł? Kreator złoży zgłoszenie i wyśle je do autora dopiero wtedy, gdy klikniesz «Wyślij»."
     IDS_WRITE_TO_AUTHOR     "Napisz do autora…"
     IDS_LETTERS_CAPTION     "Ostatnie listy"
     IDS_LETTERS_FOOT        "Przechowywane są trzy ostatnie wiadomości. Gdy przyjdzie czwarta, najstarsza odchodzi, nawet nieprzeczytana."
