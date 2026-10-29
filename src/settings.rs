@@ -127,7 +127,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
     SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
     SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE,
-    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
     SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
     SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
@@ -6414,7 +6415,8 @@ pub enum LanguageSwitch {
     /// Язык другой, направление письма то же — окно **перезаполняется на месте**, тем же телом,
     /// которым заполняется при создании ([`relabel_dialog`]).
     Relabel,
-    /// Направление письма сменилось — окно **пересоздаётся** в том же экранном прямоугольнике.
+    /// Направление письма или шаг шрифта сменились — окно **пересоздаётся** на том же месте, в своём
+    /// размере ([`reopened_window`]).
     Reopen,
 }
 
@@ -6844,7 +6846,8 @@ pub enum Opening {
     Fresh,
     /// «Применить» changed the direction of writing, so the window is being built again.
     ///
-    /// It sits down in the rectangle the previous one occupied — `Some`, the ordinary case —
+    /// It sits down where the previous one stood, in its own size ([`reopened_window`]) — `Some`,
+    /// the rectangle of the previous one and the ordinary case —
     /// and the focus goes on the language combo, where the hand that caused this left it. A
     /// `None` rectangle is the degraded path of [`DialogState::reopen_at`]: the window is
     /// still rebuilt, and `DS_CENTER` decides where.
@@ -7679,23 +7682,24 @@ unsafe extern "system" fn dialog_proc(
                 // it before this message — and the window is not on the screen yet: it is shown
                 // when this procedure returns. So the move lands before the first paint, and
                 // there is no blink. Measured both ways in посылка П3.
+                //
+                // Stage E108, the stand (7.4): the place is the previous window's and the size is
+                // this window's own — [`reopened_window`]. Moved first, so that the work area is
+                // asked of the monitor it now stands on; lifted second, only if it grew past it.
                 if let Some(rect) = at {
-                    // SAFETY: `hwnd` is the live dialog being initialised; the call is given
-                    // plain numbers and keeps no pointer.
-                    if let Err(error) = unsafe {
-                        SetWindowPos(
-                            hwnd,
-                            None,
-                            rect.left,
-                            rect.top,
-                            rect.right - rect.left,
-                            rect.bottom - rect.top,
-                            SWP_NOZORDER | SWP_NOACTIVATE,
-                        )
-                    } {
-                        // NFR-13: the window opens where `DS_CENTER` left it, which is a worse
-                        // place and not a lost window.
-                        crate::app::report_non_critical("SetWindowPos", &error);
+                    let mut own = RECT::default();
+
+                    // SAFETY: `hwnd` is the live dialog being initialised and `own` a live local.
+                    if unsafe { move_window_to(hwnd, rect.left, rect.top) }
+                        && unsafe { GetWindowRect(hwnd, &raw mut own) }.is_ok()
+                        && let Some(work_area) = monitor_work_rect(hwnd)
+                    {
+                        let place = reopened_window(rect, own, work_area);
+
+                        if place.top != own.top {
+                            // SAFETY: as above.
+                            unsafe { move_window_to(hwnd, place.left, place.top) };
+                        }
                     }
                 }
 
@@ -15004,6 +15008,63 @@ fn reopen_in_place(hwnd: HWND) {
     unsafe { with_state(hwnd, |state| state.reopen_at = at) };
 
     end_dialog(hwnd, DIALOG_REOPEN);
+}
+
+/// Where a window rebuilt by [`LanguageSwitch::Reopen`] stands — stage E108, the stand (7.4).
+///
+/// The **place** is the previous window's top left corner, where the eye left it. The **size** is
+/// the new window's own: a change between two tables of the tallest window (решение 202.40) opens
+/// at another step of the font, and a window kept in the old rectangle showed ≈ 95 px of empty
+/// ground under its buttons on the stand (ru → ta, `reports\shots-E108\s7-live-ru-to-ta.png`). A
+/// change of the direction of writing alone keeps the step and so the size: nothing moves, as in
+/// 1.2.0. A window that grew past the bottom of the work area is lifted, never above its top.
+///
+/// Pure, so that `tests\settings.rs` reads the rule the dialog uses.
+pub fn reopened_window(previous: RECT, own: RECT, work_area: RECT) -> RECT {
+    let width = own.right - own.left;
+    let height = own.bottom - own.top;
+
+    let top = if previous.top + height > work_area.bottom {
+        (work_area.bottom - height).max(work_area.top)
+    } else {
+        previous.top
+    };
+
+    RECT {
+        left: previous.left,
+        top,
+        right: previous.left + width,
+        bottom: top + height,
+    }
+}
+
+/// Moves the window to a screen point and leaves its size alone — the size of a dialog being
+/// initialised is the one `fit_window_to_work_area` decided. `false` when the move failed.
+///
+/// # Safety
+///
+/// `hwnd` must be a live window of this thread.
+unsafe fn move_window_to(hwnd: HWND, left: i32, top: i32) -> bool {
+    // SAFETY: the caller's; the call is given plain numbers and keeps no pointer.
+    match unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            left,
+            top,
+            0,
+            0,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+        )
+    } {
+        Ok(()) => true,
+        Err(error) => {
+            // NFR-13: the window opens where `DS_CENTER` left it, which is a worse place and not
+            // a lost window.
+            crate::app::report_non_critical("SetWindowPos", &error);
+            false
+        }
+    }
 }
 
 /// Adds the name in the edit field to the exclusion list — FR-84.

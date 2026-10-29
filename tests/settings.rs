@@ -2731,6 +2731,46 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     );
 }
 
+/// **Стенд Э108, 7.4: a window rebuilt in another step of the font keeps its place, not the size
+/// of the old one.**
+///
+/// The stand switched an open settings window from Russian to Tamil: the new window came up at
+/// the step of Tamil but in the rectangle of the Russian one, 769 × 847 against 769 × 752 of a
+/// fresh Tamil window, ≈ 95 px of empty ground under the buttons (`s7-live-ru-to-ta`). The sizes
+/// below are the stand's.
+#[test]
+fn a_reopened_window_stands_where_the_old_one_stood_in_its_own_size() {
+    // 1920 × 1080 at 100 %, the work area of the stand.
+    let work_area = rect(0, 0, 1920, 1032);
+    let russian = rect(250, 40, 250 + 769, 40 + 847);
+
+    // Russian → Tamil: the place stays, the size is Tamil's.
+    let tamil = rect(255, 0, 255 + 769, 752);
+    assert_eq!(
+        settings::reopened_window(russian, tamil, work_area),
+        rect(250, 40, 250 + 769, 40 + 752)
+    );
+
+    // A change of direction alone keeps the step and the size: the old rectangle, as in 1.2.0.
+    let same_size = rect(255, 0, 255 + 769, 847);
+    assert_eq!(
+        settings::reopened_window(russian, same_size, work_area),
+        russian
+    );
+
+    // Tamil → Russian low on the screen: the taller window is lifted so that its bottom is on
+    // the work area, and never above the top of it.
+    let tamil_low = rect(250, 260, 250 + 769, 260 + 752);
+    assert_eq!(
+        settings::reopened_window(tamil_low, rect(0, 0, 769, 847), work_area),
+        rect(250, 185, 250 + 769, 1032)
+    );
+    assert_eq!(
+        settings::reopened_window(tamil_low, rect(0, 0, 769, 1100), work_area),
+        rect(250, 0, 250 + 769, 1100)
+    );
+}
+
 /// **Criterion 2 of task Т-31-2, and the guard over a line a measurement paid for.**
 ///
 /// Three claims about the shape, swept over the source, because none of them can be driven from
