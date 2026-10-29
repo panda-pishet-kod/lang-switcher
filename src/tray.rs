@@ -4405,7 +4405,9 @@ pub fn adopt_ui_language() {
         return;
     };
 
-    settings::set_ui_language(language);
+    // Stage E108: a value of the closed set the build does not carry speaks English
+    // (`Language::in_force`); the file keeps its word.
+    settings::set_ui_language(language.in_force());
 
     // FR-90, решение 99.2: the tooltip is «Lang Switcher — {состояние}», and the state word is
     // a string of the locale. `NIM_MODIFY` in a second borrow, after the first has ended —

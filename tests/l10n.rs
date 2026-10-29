@@ -159,6 +159,11 @@ fn registry() -> Vec<Entry> {
 /// 52 planned languages have a translation of their own in Inno Setup 6.7.3 (premise П5); every
 /// shipped language with an official Inno translation has the installer's own file
 /// `installer/lang/<inno>.isl`, Greek — the one without — has none (155.11).
+///
+/// ⭐ **Stage E108, task T-108-2:** the values of `Language::ALL` are the fourteen and group A, all
+/// forty-four, each held to its entry — tag, LANGID, direction, name; the languages the build
+/// offers (`Language::shipped`, read by `build.rs` out of this very file) are the entries with
+/// `state = "shipped"`, the fourteen and whichever of group A have come; group B is planned (E109).
 #[test]
 fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs() {
     let registry = registry();
@@ -168,13 +173,13 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
         "the registry: 14 shipped, then A and B, in this order"
     );
 
-    let shipped: Vec<&Entry> = registry.iter().filter(|e| e.group == "shipped").collect();
+    let values: Vec<&Entry> = registry.iter().filter(|e| e.group != "B").collect();
     assert_eq!(
-        shipped.len(),
+        values.len(),
         Language::ALL.len(),
-        "one shipped entry per language of the program"
+        "one entry per value of the closed set: the fourteen and group A"
     );
-    for (entry, language) in shipped.iter().zip(Language::ALL) {
+    for (entry, language) in values.iter().zip(Language::ALL) {
         assert_eq!(entry.tag, language.tag(), "the order of Language::ALL");
         assert_eq!(entry.langid, language.langid(), "{}: LANGID", entry.tag);
         assert_eq!(entry.rtl, language.is_rtl(), "{}: direction", entry.tag);
@@ -186,18 +191,29 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
         );
     }
 
+    let shipped: Vec<&str> = registry
+        .iter()
+        .filter(|e| e.state == "shipped")
+        .map(|e| e.tag.as_str())
+        .collect();
+    let offered: Vec<&str> = Language::shipped().map(Language::tag).collect();
+    assert_eq!(
+        shipped, offered,
+        "the build offers exactly the shipped entries of the registry, in its order (build.rs)"
+    );
+
     let mut groups = BTreeMap::new();
     for entry in &registry {
         *groups.entry(entry.group.as_str()).or_insert(0) += 1;
-        let expected_state = if entry.group == "shipped" {
-            "shipped"
-        } else {
-            "planned"
+        let state_is_admissible = match entry.group.as_str() {
+            "shipped" => entry.state == "shipped",
+            "A" => entry.state == "shipped" || entry.state == "planned",
+            _ => entry.state == "planned",
         };
-        assert_eq!(
-            entry.state, expected_state,
-            "{}: state follows the group",
-            entry.tag
+        assert!(
+            state_is_admissible,
+            "{}: the state {} is not one its group {} may have",
+            entry.tag, entry.state, entry.group
         );
         assert!(
             entry.script.len() == 4
@@ -252,14 +268,14 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
 
     let official_planned = registry
         .iter()
-        .filter(|e| e.state == "planned" && e.inno_official)
+        .filter(|e| e.group != "shipped" && e.inno_official)
         .count();
     assert_eq!(
         official_planned, 12,
         "premise П5: 12 of the 52 have an Inno translation"
     );
 
-    for entry in &shipped {
+    for entry in registry.iter().filter(|e| e.group == "shipped") {
         let own = resource_script::root().join(format!("installer/lang/{}.isl", entry.inno));
         assert_eq!(
             own.is_file(),
@@ -610,7 +626,7 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     // registry — `the_files_of_res_lang_are_the_files_app_rc_includes`.
     let files = resource_script::language_files();
     assert!(
-        files.len() >= Language::ALL.len(),
+        files.len() >= Language::shipped().count(),
         "at least one included file per shipped language"
     );
     assert_eq!(
@@ -752,7 +768,7 @@ fn the_files_of_res_lang_are_the_files_app_rc_includes() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 
     let langids = registry_langids();
-    for language in Language::ALL {
+    for language in Language::shipped() {
         let path = format!("res/lang/{}.rc", language.tag());
         assert!(
             included.contains(&path),

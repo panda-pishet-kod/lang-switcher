@@ -923,9 +923,18 @@ pub mod links {
     /// all ask here, so a person is never sent to write on one side and to read on the other. A
     /// `match` without a wildcard on purpose: a language added to [`Language`] does not compile
     /// until somebody has said which side its readers are on.
+    ///
+    /// ⭐ **Stage E108, решение 202.6** — дословно: «Делаем так, пока нет адаптированных страниц
+    /// сайта под каждый из языков»: Kazakh, Belarusian, Tatar and Uzbek in Cyrillic read the
+    /// Russian side too; the other twenty-six of group A — the English one.
     fn reads_the_russian_side(language: Language) -> bool {
         match language {
-            Language::Ru | Language::Uk => true,
+            Language::Ru
+            | Language::Uk
+            | Language::Kk
+            | Language::Be
+            | Language::Tt
+            | Language::UzCyrl => true,
             Language::En
             | Language::De
             | Language::Fr
@@ -937,7 +946,33 @@ pub mod links {
             | Language::Tr
             | Language::El
             | Language::He
-            | Language::Ar => false,
+            | Language::Ar
+            | Language::Hi
+            | Language::Bn
+            | Language::Ur
+            | Language::Pa
+            | Language::Mr
+            | Language::Te
+            | Language::Ta
+            | Language::Fa
+            | Language::Gu
+            | Language::Th
+            | Language::Kn
+            | Language::Or
+            | Language::Ml
+            | Language::Uz
+            | Language::Ne
+            | Language::As
+            | Language::Az
+            | Language::Km
+            | Language::Sr
+            | Language::SrLatn
+            | Language::Ug
+            | Language::Bg
+            | Language::Hy
+            | Language::Lo
+            | Language::Ka
+            | Language::Mk => false,
         }
     }
 
@@ -2018,8 +2053,52 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "مرحبا",
             badge: ["EN", "AR"],
         },
+        // Stage E108: a language of group A gets its pair when its translation comes — the
+        // translator names the word, the keys are taken off the layouts by the instrument of
+        // 178.4 (§0 п. 6 of TZ-E108). Until then the build does not offer the language
+        // (`Language::is_shipped`) and the pair is never drawn; `tests\letters.rs` refuses a
+        // shipped language that is still in this arm.
+        Language::Hi
+        | Language::Bn
+        | Language::Ur
+        | Language::Pa
+        | Language::Mr
+        | Language::Te
+        | Language::Ta
+        | Language::Fa
+        | Language::Gu
+        | Language::Th
+        | Language::Kn
+        | Language::Or
+        | Language::Ml
+        | Language::Uz
+        | Language::UzCyrl
+        | Language::Ne
+        | Language::As
+        | Language::Az
+        | Language::Km
+        | Language::Kk
+        | Language::Sr
+        | Language::SrLatn
+        | Language::Ug
+        | Language::Bg
+        | Language::Hy
+        | Language::Lo
+        | Language::Be
+        | Language::Tt
+        | Language::Ka
+        | Language::Mk => PAIR_TO_COME,
     }
 }
+
+/// The pair of a language of group A whose translation has not come yet — the English pair, so a
+/// stray drawing shows a real example and not an empty field. Never the pair of a shipped language
+/// but English and Polish (which show it by решение 178.5): `tests\letters.rs` holds that.
+pub const PAIR_TO_COME: DemoPair = DemoPair {
+    typed: "руддщ",
+    fixed: "hello",
+    badge: ["RU", "EN"],
+};
 
 /// One frame of the demonstration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

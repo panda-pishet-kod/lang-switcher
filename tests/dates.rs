@@ -25,6 +25,7 @@ use std::sync::{Mutex, MutexGuard};
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::Globalization::{
     ENUM_DATE_FORMATS_FLAGS, GetDateFormatEx, GetLocaleInfoEx, LOCALE_ICALENDARTYPE,
+    LOCALE_IDIGITSUBSTITUTION, LOCALE_SNATIVEDIGITS,
 };
 use windows::core::{PCWSTR, w};
 
@@ -113,6 +114,22 @@ fn default_calendar(tag: &str) -> u32 {
         .expect("LOCALE_ICALENDARTYPE is a number")
 }
 
+/// One string of the locale `tag` — `GetLocaleInfoEx` of `kind`.
+fn locale_info(tag: &str, kind: u32) -> String {
+    let locale = wide(tag);
+    let mut buffer = [0u16; 32];
+
+    // SAFETY: both buffers are live locals of this frame and the call is told the length of
+    // the one it writes into.
+    let written = unsafe { GetLocaleInfoEx(PCWSTR(locale.as_ptr()), kind, Some(&mut buffer)) };
+
+    assert!(written > 0, "GetLocaleInfoEx refused the locale «{tag}»");
+
+    let units = usize::try_from(written).unwrap_or(1).saturating_sub(1);
+
+    String::from_utf16(&buffer[..units]).expect("Windows answers in UTF-16")
+}
+
 /// Whether a locale's own calendar is a Gregorian one — the thirteen whose strings must not
 /// move a byte.
 fn is_gregorian(calendar: u32) -> bool {
@@ -131,7 +148,7 @@ fn every_locale_with_a_gregorian_calendar_prints_exactly_what_it_printed_before(
     let _gate = locale_gate();
 
     for date in [day(2026, 9, 4), day(2026, 3, 22), day(2026, 12, 31)] {
-        for language in Language::ALL {
+        for language in Language::shipped() {
             let tag = language.tag();
             let calendar = default_calendar(tag);
 
@@ -204,6 +221,64 @@ fn the_arabic_locale_prints_a_gregorian_month_and_not_a_hijri_one() {
     settings::set_ui_language(Language::Ru);
 }
 
+/// **Stage E108, task T-108-2, §0 п. 5 of TZ-E108 — Persian prints the Gregorian month and not the
+/// month of the solar hijri year.**
+///
+/// The calendar of `fa` is the solar hijri (`LOCALE_ICALENDARTYPE` 22): `GetDateFormatEx` dates
+/// the fourth of September 2026 «13 شهریور», the thirteenth of Shahrivar. The program asks the
+/// Gregorian calendar for the name of the month (Т-33-1), so the letter says «4 سپتامبر». The
+/// language need not be offered by the build for this: the month comes out of Windows by the tag.
+///
+/// The digits: measured on the host (stage E108), `LOCALE_IDIGITSUBSTITUTION` of `fa` is 0 — «by
+/// context», as for the fourteen — and the old road printed European digits too («13 شهریور»), so
+/// `to_string` of `format_date` changes nothing about them. The test prints the measurement.
+///
+/// The positive control: the baseline for the same day **must** be the solar hijri month, or this
+/// file compares a locale that never had the calendar.
+#[test]
+fn the_persian_locale_prints_a_gregorian_month_and_not_a_solar_hijri_one() {
+    let _gate = locale_gate();
+
+    settings::set_ui_language(Language::Fa);
+
+    println!(
+        "fa: calendar {}, digit substitution {}, native digits «{}»",
+        default_calendar("fa"),
+        locale_info("fa", LOCALE_IDIGITSUBSTITUTION),
+        locale_info("fa", LOCALE_SNATIVEDIGITS)
+    );
+
+    for (date, gregorian, solar) in [
+        (day(2026, 9, 4), "سپتامبر", "شهریور"),
+        (day(2026, 3, 22), "مارس", "فروردین"),
+    ] {
+        let now = letters::format_date(date);
+        let before = baseline("fa", date);
+
+        println!("fa {date}: «{now}» (старая дорога «{before}»)");
+
+        assert!(
+            before.contains(solar),
+            "the baseline for {date} is «{before}» and carries no «{solar}» — this test would \
+             pass on a machine whose Persian calendar is not the solar hijri"
+        );
+        assert!(
+            now.contains(gregorian),
+            "fa on {date} must name the Gregorian month «{gregorian}»: «{now}»"
+        );
+        assert!(
+            !now.contains(solar),
+            "fa on {date} still carries the solar hijri month «{solar}»: «{now}»"
+        );
+        assert!(
+            now.starts_with(&date.day().to_string()),
+            "fa on {date} must start with the day of the Gregorian month: «{now}»"
+        );
+    }
+
+    settings::set_ui_language(Language::Ru);
+}
+
 /// **Т-33-1** — Hebrew names the Gregorian month too.
 ///
 /// ⚠ **`he` never had the defect, and saying so is the point of this test.** The mandate
@@ -246,7 +321,7 @@ fn no_locale_falls_back_to_the_iso_form() {
     let date = day(2026, 9, 4);
     let iso = date.to_string();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let now = letters::format_date(date);

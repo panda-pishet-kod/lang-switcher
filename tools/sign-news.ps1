@@ -139,7 +139,11 @@ foreach ($line in $lines) {
         continue
     }
 
-    if ($trimmed -match '^\[item\.([A-Za-z]+)\]$') {
+    # STAGE E108 (T-108-2): a tag is two or three letters and, for the second Serbian and the second
+    # Uzbek of decision 200b.1, a script after a hyphen -- [item.sr-Latn], [item.uz-Cyrl]. Until
+    # E108 such a header fell through to "another table" below and its language was left out of
+    # the count without a word.
+    if ($trimmed -match '^\[item\.([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\]$') {
         if (-not $current) { Fail 'a language table before the first [[item]]' }
         $language = $Matches[1]
         $current.Languages += $language

@@ -100,6 +100,8 @@ fn main() {
         .manifest_required()
         .unwrap();
 
+    shipped_languages();
+
     let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets the package version");
     let mut numbers = version.split('.').map(|part| {
         part.parse::<u16>()
@@ -114,4 +116,69 @@ fn main() {
     embed_resource::compile_for("updater.rc", ["LangSwitcherUpdate"], &version_macros)
         .manifest_required()
         .unwrap();
+}
+
+// Stage E108, task T-108-2: the languages this build offers are the entries of the registry
+// res/lang/languages.toml that say `state = "shipped"` -- so a language joins the program with its
+// file res/lang/<tag>.rc and one line of the registry, and src/settings.rs holds every value of the
+// closed set without a second list to keep in step. Written to OUT_DIR/shipped_languages.rs as
+// one array of tags, in the order of the registry; tests/l10n.rs reads the registry with the toml
+// crate and holds this list to it.
+//
+// The registry is read line by line and not with the toml crate: a build dependency would be a
+// crate added to the closed list of SPEC section 3.2 (criterion 4 of section 13 counts
+// `cargo tree`). The shape it reads is the one the file has: `[[language]]` starts an entry,
+// `tag = "..."` and `state = "..."` are two of its lines. Anything else it does not understand
+// about those two keys stops the build rather than leaving a language out in silence.
+fn shipped_languages() {
+    let path = "res/lang/languages.toml";
+    let text = std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{path}: {error}"));
+
+    let quoted = |line: &str, key: &str| -> Option<String> {
+        let rest = line
+            .strip_prefix(key)?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim();
+        let value = rest.strip_prefix('"')?.strip_suffix('"')?;
+        Some(value.to_owned())
+    };
+
+    let mut entries: Vec<(Option<String>, Option<String>)> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line == "[[language]]" {
+            entries.push((None, None));
+        } else if let Some(entry) = entries.last_mut() {
+            if line.starts_with("tag ") || line.starts_with("tag=") {
+                entry.0 = Some(quoted(line, "tag").unwrap_or_else(|| panic!("{path}: {line}")));
+            } else if line.starts_with("state ") || line.starts_with("state=") {
+                entry.1 = Some(quoted(line, "state").unwrap_or_else(|| panic!("{path}: {line}")));
+            }
+        }
+    }
+
+    let mut shipped = Vec::new();
+    for (tag, state) in entries {
+        let tag = tag.unwrap_or_else(|| panic!("{path}: an entry without a tag"));
+        match state.as_deref() {
+            Some("shipped") => shipped.push(tag),
+            Some("planned") => {}
+            other => panic!("{path}: «{tag}» has the state {other:?}, not shipped or planned"),
+        }
+    }
+
+    let list: Vec<String> = shipped.iter().map(|tag| format!("{tag:?}")).collect();
+    let code = format!(
+        "/// The tags of `res/lang/languages.toml` with `state = \"shipped\"`, in its order — build.rs.\n\
+         pub(crate) const SHIPPED: [&str; {}] = [{}];\n",
+        shipped.len(),
+        list.join(", ")
+    );
+
+    let out = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
+    std::fs::write(
+        std::path::Path::new(&out).join("shipped_languages.rs"),
+        code,
+    )
+    .expect("OUT_DIR/shipped_languages.rs must be writable");
 }

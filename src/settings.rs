@@ -214,7 +214,12 @@ pub const CONFIG_FILE_NAME: &str = "config.toml";
 /// schema 7 hotkey was — and the number is spent on `0.93.0` and the builds before it: they meet a
 /// stamp they do not know and leave the file alone instead of dropping the trigger (measured on the
 /// base — посылка П4 of stage Э95: `FromNewerSchema`, the hotkey `Pause`, the bytes untouched).
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+///
+/// Version 9 arrived with **stage E108**, task T-108-2: the thirty languages of group A in the
+/// closed set of `general.language`. [`step_8_to_9`] is a bare stamp, and the number is spent on
+/// 1.2.0 and the builds before it — they meet a stamp they do not know and leave a file that says
+/// `language = "hi"` alone instead of quarantining it.
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 /// The version this build assigns to a file that carries no `schema_version` field.
 ///
@@ -231,10 +236,18 @@ fn pre_version_schema() -> u32 {
     PRE_VERSION_SCHEMA
 }
 
-/// Interface language, `general.language` of section 7. Fourteen values — the twelve of решение
-/// 93, tier one, and the two right-to-left locales of вопрос 97.
+/// Interface language, `general.language` of section 7. Forty-four values — the twelve of решение
+/// 93, tier one, the two right-to-left locales of вопрос 97, and since stage E108 the thirty of
+/// group A (решения 198.13, 198.14, 200б.1; Serbian and Uzbek in both of their scripts).
 ///
 /// A closed set rather than a free string: a value outside it must not pass silently.
+///
+/// ⭐ **The closed set and the languages a build offers are two things since stage E108** (task
+/// T-108-2). Every value is here, with its tag, LANGID, name and direction, and a file that names
+/// one of them parses; the languages the build **offers** — the combo, the first run, the strings —
+/// are [`Self::shipped`]: the entries of `res\lang\languages.toml` that say `state = "shipped"`,
+/// read by `build.rs`. A language joins the program with its file `res\lang\<tag>.rc` and that one
+/// line of the registry; until then [`Self::in_force`] puts English in its place.
 ///
 /// # ⚠ What a closed set cost on a downgrade, and how вопрос 94.1 stopped paying it
 ///
@@ -265,7 +278,8 @@ fn pre_version_schema() -> u32 {
 /// therefore `5`, [`step_4_to_5`] is a bare stamp, and
 /// `a_twelve_locale_build_meeting_a_right_to_left_file_refuses_to_write` pins the same three
 /// claims on the new numbers. The lesson this enum keeps writing down is one line long: **a new
-/// value of a closed set costs a schema**.
+/// value of a closed set costs a schema**. Stage E108 pays it a third time: the thirty values of
+/// group A are schema `9`, [`step_8_to_9`] is a bare stamp.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -303,21 +317,90 @@ pub enum Language {
     /// `ar-SA`, and not one table per country: section 7 spells a locale in two letters, and
     /// this build ships one translation per language exactly as it does for `pt`.
     Ar,
+    /// Hindi — group A, stage E108 (решение 202.1: the trial language with Urdu).
+    Hi,
+    /// Bengali — one language, `bn-IN` (решение 200б.2).
+    Bn,
+    /// Urdu — **read right to left**, stage E108 (решение 202.1: the trial language with Hindi).
+    Ur,
+    /// Punjabi — Gurmukhi, `pa-IN` (решение 200б.2).
+    Pa,
+    /// Marathi.
+    Mr,
+    /// Telugu.
+    Te,
+    /// Tamil.
+    Ta,
+    /// Persian — **read right to left**. Its calendar is the solar hijri; the program prints the
+    /// Gregorian month (`CAL_GREGORIAN`) whatever the locale's own calendar is.
+    Fa,
+    /// Gujarati.
+    Gu,
+    /// Thai. Its calendar is the Buddhist one; the program prints the Gregorian month.
+    Th,
+    /// Kannada.
+    Kn,
+    /// Odia.
+    Or,
+    /// Malayalam.
+    Ml,
+    /// Uzbek in the Latin script — the official one and the main Uzbek of this program
+    /// (решение 200б.1); `uz-Latn-UZ`.
+    Uz,
+    /// Uzbek in the Cyrillic script, alive in everyday use — the second Uzbek (решение 200б.1);
+    /// `uz-Cyrl-UZ`. The tag of section 7 is `uz-Cyrl`.
+    #[serde(rename = "uz-Cyrl")]
+    UzCyrl,
+    /// Nepali.
+    Ne,
+    /// Assamese.
+    As,
+    /// Azerbaijani — Latin, the official script (решение 200б.1).
+    Az,
+    /// Khmer.
+    Km,
+    /// Kazakh.
+    Kk,
+    /// Serbian in the Cyrillic script — the constitutional one and the main Serbian of this
+    /// program (решение 200б.1); `sr-Cyrl-RS`.
+    Sr,
+    /// Serbian in the Latin script — the second Serbian (решение 200б.1); `sr-Latn-RS`. The tag of
+    /// section 7 is `sr-Latn`.
+    #[serde(rename = "sr-Latn")]
+    SrLatn,
+    /// Uyghur — **read right to left**, in the Arabic script.
+    Ug,
+    /// Bulgarian.
+    Bg,
+    /// Armenian.
+    Hy,
+    /// Lao.
+    Lo,
+    /// Belarusian.
+    Be,
+    /// Tatar.
+    Tt,
+    /// Georgian.
+    Ka,
+    /// Macedonian.
+    Mk,
+}
+
+/// The tags of the languages this build offers — `build.rs` out of `res\lang\languages.toml`
+/// (stage E108, task T-108-2); [`Language::shipped`] is the one reader.
+mod shipped_registry {
+    include!(concat!(env!("OUT_DIR"), "/shipped_languages.rs"));
 }
 
 impl Language {
-    /// Every locale, in the order the language combo box shows them — Russian, English, the
-    /// ten of решение 93, and then the two right-to-left locales of вопрос 97.
+    /// Every value of the closed set, in the order of the registry `res\lang\languages.toml` —
+    /// Russian, English, the ten of решение 93, the two right-to-left locales of вопрос 97, and
+    /// the thirty of group A (stage E108).
     ///
-    /// The one place that order is written down. [`Self::index`] is a position in this array,
-    /// the atomic of [`set_ui_language`] stores that position, and the dialog fills the combo
-    /// by walking this array — so the three cannot drift apart the way three hand-written
-    /// `match` arms could.
-    ///
-    /// ⚠ Hebrew and Arabic go on the **end** and not into alphabetical place (вопрос 97): the
-    /// position of a locale is a stored number, and moving `el` from eleven to nine would hand
-    /// every configuration that names it the wrong language on the next start.
-    pub const ALL: [Self; 14] = [
+    /// [`Self::index`] is a position in this array and the atomic of [`set_ui_language`] stores
+    /// that position — in the process only: the file holds the tag (замер L10N). The combo of the
+    /// dialog no longer walks this array: since решение 202.7 its order is [`language_order`].
+    pub const ALL: [Self; 44] = [
         Self::Ru,
         Self::En,
         Self::Uk,
@@ -332,7 +415,120 @@ impl Language {
         Self::El,
         Self::He,
         Self::Ar,
+        Self::Hi,
+        Self::Bn,
+        Self::Ur,
+        Self::Pa,
+        Self::Mr,
+        Self::Te,
+        Self::Ta,
+        Self::Fa,
+        Self::Gu,
+        Self::Th,
+        Self::Kn,
+        Self::Or,
+        Self::Ml,
+        Self::Uz,
+        Self::UzCyrl,
+        Self::Ne,
+        Self::As,
+        Self::Az,
+        Self::Km,
+        Self::Kk,
+        Self::Sr,
+        Self::SrLatn,
+        Self::Ug,
+        Self::Bg,
+        Self::Hy,
+        Self::Lo,
+        Self::Be,
+        Self::Tt,
+        Self::Ka,
+        Self::Mk,
     ];
+
+    /// **Every value in the order of its name — the part of the combo under the line**, решение
+    /// 202.7, вариант 1 of the mock-up `https://claude.ai/artifact/Phkza4d6dMJ5wGfLNHeBTM`.
+    ///
+    /// Written down and not sorted at run time, for the reason [`Self::native_name`] is written
+    /// down: the list must read the same on every machine, and a comparison asked of Windows
+    /// depends on the version of its sorting tables. The order is the one the owner chose on the
+    /// mock-up, and it was measured, not reasoned: the root collation of ICU (`InvariantCulture`
+    /// of PowerShell 7) over the forty-four names, with Georgian moved to the end as the mock-up
+    /// has it — 40 of 40 of the mock-up's rows (stage E108, `scratchpad-E108`). NLS
+    /// (`CompareStringEx`, the invariant locale) puts Georgian after Armenian and Uyghur after
+    /// Persian — 22 of 40 — and was not taken. Latin, Greek, Cyrillic, Armenian, Hebrew, Arabic, the
+    /// Indic scripts, Thai, Lao, Khmer, Georgian.
+    pub const BY_NAME: [Self; 44] = [
+        Self::Az,
+        Self::Cs,
+        Self::De,
+        Self::En,
+        Self::Es,
+        Self::Fr,
+        Self::It,
+        Self::Uz,
+        Self::Pl,
+        Self::Pt,
+        Self::SrLatn,
+        Self::Tr,
+        Self::El,
+        Self::Be,
+        Self::Bg,
+        Self::Kk,
+        Self::Mk,
+        Self::Ru,
+        Self::Sr,
+        Self::Tt,
+        Self::UzCyrl,
+        Self::Uk,
+        Self::Hy,
+        Self::He,
+        Self::Ug,
+        Self::Ur,
+        Self::Ar,
+        Self::Fa,
+        Self::Ne,
+        Self::Mr,
+        Self::Hi,
+        Self::As,
+        Self::Bn,
+        Self::Pa,
+        Self::Gu,
+        Self::Or,
+        Self::Ta,
+        Self::Te,
+        Self::Kn,
+        Self::Ml,
+        Self::Th,
+        Self::Lo,
+        Self::Km,
+        Self::Ka,
+    ];
+
+    /// Whether this build carries the strings of this language — its tag is an entry of
+    /// `res\lang\languages.toml` with `state = "shipped"` (stage E108, task T-108-2).
+    pub fn is_shipped(self) -> bool {
+        shipped_registry::SHIPPED.contains(&self.tag())
+    }
+
+    /// The languages this build offers, in the order of [`Self::ALL`] — the values of the closed
+    /// set whose strings are in the build ([`Self::is_shipped`]).
+    pub fn shipped() -> impl Iterator<Item = Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|language| language.is_shipped())
+    }
+
+    /// The language the interface is shown in when the file names this one — itself when the
+    /// build carries it, English when it does not.
+    ///
+    /// Only a build of a stage of translations meets the second case: a file written by a build
+    /// that already had a language a later intermediate build does not. Its strings would be
+    /// empty, so the program speaks English and leaves the file as it is.
+    pub fn in_force(self) -> Self {
+        if self.is_shipped() { self } else { Self::En }
+    }
 
     /// The Windows language identifier of this locale — the number `app.rc` tags its string
     /// table with and the number [`text`] asks `FindResourceExW` for.
@@ -365,6 +561,38 @@ impl Language {
             Self::El => 0x0408,
             Self::He => 0x040D,
             Self::Ar => 0x0401,
+            // Group A, stage E108 — the `langid` of `res\lang\languages.toml`, measured there by
+            // `LocaleNameToLCID` and back (69 of 69 round trips, stage L10N).
+            Self::Hi => 0x0439,
+            Self::Bn => 0x0445,
+            Self::Ur => 0x0420,
+            Self::Pa => 0x0446,
+            Self::Mr => 0x044E,
+            Self::Te => 0x044A,
+            Self::Ta => 0x0449,
+            Self::Fa => 0x0429,
+            Self::Gu => 0x0447,
+            Self::Th => 0x041E,
+            Self::Kn => 0x044B,
+            Self::Or => 0x0448,
+            Self::Ml => 0x044C,
+            Self::Uz => 0x0443,
+            Self::UzCyrl => 0x0843,
+            Self::Ne => 0x0461,
+            Self::As => 0x044D,
+            Self::Az => 0x042C,
+            Self::Km => 0x0453,
+            Self::Kk => 0x043F,
+            Self::Sr => 0x281A,
+            Self::SrLatn => 0x241A,
+            Self::Ug => 0x0480,
+            Self::Bg => 0x0402,
+            Self::Hy => 0x042B,
+            Self::Lo => 0x0454,
+            Self::Be => 0x0423,
+            Self::Tt => 0x0444,
+            Self::Ka => 0x0437,
+            Self::Mk => 0x042F,
         }
     }
 
@@ -379,13 +607,15 @@ impl Language {
     /// `LOCALE_IREADINGLAYOUT`: the direction of an interface this program ships is a property
     /// of the translation in `app.rc`, which is written once and does not vary by machine.
     pub const fn is_rtl(self) -> bool {
-        matches!(self, Self::He | Self::Ar)
+        // Stage E108: Urdu, Persian and Uyghur — the `rtl` of the registry.
+        matches!(self, Self::He | Self::Ar | Self::Ur | Self::Fa | Self::Ug)
     }
 
-    /// The two-letter name of section 7, for a message and for a test.
+    /// The name of section 7, for a message and for a test — two letters, and since stage E108
+    /// two letters and a script for the second Serbian and the second Uzbek (`sr-Latn`, `uz-Cyrl`).
     ///
-    /// The same fourteen words `#[serde(rename_all = "lowercase")]` produces from the variants
-    /// above, written out rather than derived: this is the vocabulary of the configuration
+    /// The same words serde produces from the variants above — `rename_all = "lowercase"` and the
+    /// two `rename`s — written out rather than derived: this is the vocabulary of the configuration
     /// file, and a reader of section 7 should find it spelled here and not inferred.
     pub const fn tag(self) -> &'static str {
         match self {
@@ -403,6 +633,36 @@ impl Language {
             Self::El => "el",
             Self::He => "he",
             Self::Ar => "ar",
+            Self::Hi => "hi",
+            Self::Bn => "bn",
+            Self::Ur => "ur",
+            Self::Pa => "pa",
+            Self::Mr => "mr",
+            Self::Te => "te",
+            Self::Ta => "ta",
+            Self::Fa => "fa",
+            Self::Gu => "gu",
+            Self::Th => "th",
+            Self::Kn => "kn",
+            Self::Or => "or",
+            Self::Ml => "ml",
+            Self::Uz => "uz",
+            Self::UzCyrl => "uz-Cyrl",
+            Self::Ne => "ne",
+            Self::As => "as",
+            Self::Az => "az",
+            Self::Km => "km",
+            Self::Kk => "kk",
+            Self::Sr => "sr",
+            Self::SrLatn => "sr-Latn",
+            Self::Ug => "ug",
+            Self::Bg => "bg",
+            Self::Hy => "hy",
+            Self::Lo => "lo",
+            Self::Be => "be",
+            Self::Tt => "tt",
+            Self::Ka => "ka",
+            Self::Mk => "mk",
         }
     }
 
@@ -437,6 +697,40 @@ impl Language {
             Self::El => "Ελληνικά",
             Self::He => "עברית",
             Self::Ar => "العربية",
+            // Group A, stage E108 — the `endonym` of the registry: what Windows calls the language
+            // in itself, first letter capital where the script has case; the translator of each
+            // language confirms it. Scripts without case — all but the Latin and the Cyrillic
+            // ones here — carry none, as Hebrew and Arabic above.
+            Self::Hi => "हिन्दी",
+            Self::Bn => "বাংলা",
+            Self::Ur => "اردو",
+            Self::Pa => "ਪੰਜਾਬੀ",
+            Self::Mr => "मराठी",
+            Self::Te => "తెలుగు",
+            Self::Ta => "தமிழ்",
+            Self::Fa => "فارسی",
+            Self::Gu => "ગુજરાતી",
+            Self::Th => "ไทย",
+            Self::Kn => "ಕನ್ನಡ",
+            Self::Or => "ଓଡ଼ିଆ",
+            Self::Ml => "മലയാളം",
+            Self::Uz => "O‘zbek",
+            Self::UzCyrl => "Ўзбекча",
+            Self::Ne => "नेपाली",
+            Self::As => "অসমীয়া",
+            Self::Az => "Azərbaycan",
+            Self::Km => "ខ្មែរ",
+            Self::Kk => "Қазақ тілі",
+            Self::Sr => "Српски",
+            Self::SrLatn => "Srpski",
+            Self::Ug => "ئۇيغۇرچە",
+            Self::Bg => "Български",
+            Self::Hy => "Հայերեն",
+            Self::Lo => "ລາວ",
+            Self::Be => "Беларуская",
+            Self::Tt => "Татар",
+            Self::Ka => "ქართული",
+            Self::Mk => "Македонски",
         }
     }
 
@@ -549,19 +843,66 @@ fn primary_subtag(tag: &str) -> &str {
 ///
 /// Case-insensitive, because case carries no meaning in a language tag: `DE-de` is the tag
 /// `de-DE` written by somebody who did not know the convention.
+///
+/// ⭐ **Stage E108, task T-108-2, решение 200б.1 — Serbian and Uzbek are two languages each, and
+/// the primary subtag cannot tell them apart.** `sr` is Serbian in either script, `uz` Uzbek in
+/// either. For these the **script subtag** of the full tag decides: Windows answers
+/// `sr-Cyrl-RS` / `sr-Latn-RS` and `uz-Latn-UZ` / `uz-Cyrl-UZ`
+/// (`GetUserPreferredUILanguages`, and `LCIDToLocaleName` of a layout). A tag whose script is the
+/// one of a language's own tag (`sr-Latn`, `uz-Cyrl`) is that language; any other script, or
+/// none — `sr`, `sr-RS`, `uz-UZ` — is the main one, whose tag is the bare subtag (Serbian
+/// Cyrillic, Uzbek Latin). Only languages the build offers ([`Language::shipped`]) are answered;
+/// if the main one is not among them, the other one of the same language is better than English.
 pub fn language_of_ui_tag(tag: &str) -> Option<Language> {
+    language_of_tag_among(tag, Language::shipped())
+}
+
+/// [`language_of_ui_tag`] over a given set of languages instead of the ones the build offers —
+/// public so that a test drives the rule of the scripts over the whole closed set, Serbian and
+/// Uzbek in both scripts, whatever the registry ships today.
+pub fn language_of_tag_among(
+    tag: &str,
+    offered: impl IntoIterator<Item = Language>,
+) -> Option<Language> {
     let primary = primary_subtag(tag);
 
     // An empty primary subtag is not «no preference», it is a tag that was never a tag —
-    // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for all fourteen anyway;
-    // the early return says so on purpose rather than by luck.
+    // `""`, `"-"`, `"---"`. `eq_ignore_ascii_case` would answer `false` for every language
+    // anyway; the early return says so on purpose rather than by luck.
     if primary.is_empty() {
         return None;
     }
 
-    Language::ALL
-        .into_iter()
-        .find(|language| primary.eq_ignore_ascii_case(language.tag()))
+    let script = script_subtag(tag);
+    let mut main = None;
+    let mut other = None;
+
+    for language in offered {
+        let own = language.tag();
+
+        if !primary.eq_ignore_ascii_case(primary_subtag(own)) {
+            continue;
+        }
+
+        match script_subtag(own) {
+            None => main = Some(language),
+            Some(own_script) if script.is_some_and(|s| s.eq_ignore_ascii_case(own_script)) => {
+                return Some(language);
+            }
+            Some(_) => other = other.or(Some(language)),
+        }
+    }
+
+    main.or(other)
+}
+
+/// The script subtag of a BCP-47 tag, if it has one — `Latn` of `sr-Latn-RS`, `Cyrl` of
+/// `uz-Cyrl`: the second subtag when it is four letters (RFC 5646 §2.2.3). `None` for `sr`,
+/// `sr-RS`, `de-DE`.
+fn script_subtag(tag: &str) -> Option<&str> {
+    tag.split(['-', '_'])
+        .nth(1)
+        .filter(|subtag| subtag.len() == 4 && subtag.bytes().all(|b| b.is_ascii_alphabetic()))
 }
 
 /// The locale a **first run** starts in, given the preferred UI languages of Windows in order —
@@ -674,6 +1015,94 @@ pub fn preferred_ui_languages() -> Vec<String> {
 /// the other half.
 pub fn system_language_for_a_first_run() -> Language {
     first_run_language(preferred_ui_languages().iter().map(String::as_str))
+}
+
+// =========================================================================================
+// Решение 202.7, stage E108, task T-108-2 — the order of the combo «Язык интерфейса»
+// =========================================================================================
+
+/// The rows of the combo «Язык интерфейса» in the order they are shown — решение 202.7.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LanguageOrder {
+    /// Every language the build offers, once each: the group on top, then the rest.
+    pub languages: Vec<Language>,
+    /// How many of them the group on top holds — the line lies along the bottom edge of the last
+    /// of them, and there is no line when nothing is below.
+    pub top: usize,
+}
+
+/// **The order of the combo «Язык интерфейса», вариант 1 of решение 202.7** — дословно владельца:
+/// «вначале системный, потом английски, языки раскладок пользователя, русский и по далее по
+/// самоназванию».
+///
+/// On top: the language of Windows, English, the languages of the person's layouts in the order of
+/// the session, Russian — each once, and only languages the build offers. Below the line: every
+/// other language the build offers, in the order of [`Language::BY_NAME`]. The combo stores the
+/// language and not the row (`read_dialog`), so the order may change from one opening to the next
+/// — a layout added, Windows switched to another language — and nothing stored moves.
+///
+/// Pure, for the test of the order with a given language of Windows and given layouts;
+/// [`language_order_on_this_machine`] asks the machine.
+pub fn language_order(windows: Option<Language>, layouts: &[Language]) -> LanguageOrder {
+    let mut languages = Vec::new();
+
+    let on_top = windows
+        .into_iter()
+        .chain([Language::En])
+        .chain(layouts.iter().copied())
+        .chain([Language::Ru]);
+
+    for language in on_top {
+        if language.is_shipped() && !languages.contains(&language) {
+            languages.push(language);
+        }
+    }
+
+    let top = languages.len();
+
+    for language in Language::BY_NAME {
+        if language.is_shipped() && !languages.contains(&language) {
+            languages.push(language);
+        }
+    }
+
+    LanguageOrder { languages, top }
+}
+
+/// [`language_order`] with the language of Windows and the layouts of `session` — asked once per
+/// opening of the settings (решение 202.7: «вычисляется при каждом открытии»).
+///
+/// The language of Windows is the one the first run would pick ([`first_run_language`] without
+/// its English at the end): the first preferred interface language the build offers. A layout
+/// speaks the language of its locale (`LCIDToLocaleName` of its language identifier), matched by
+/// the same rule as Windows' own tags — so `uz-Cyrl-UZ` is Uzbek in Cyrillic.
+fn language_order_on_this_machine(session: &[LayoutId]) -> LanguageOrder {
+    let windows = preferred_ui_languages()
+        .iter()
+        .find_map(|tag| language_of_ui_tag(tag));
+    let layouts: Vec<Language> = session
+        .iter()
+        .filter_map(|layout| language_of_langid(layout.language_id()))
+        .collect();
+
+    language_order(windows, &layouts)
+}
+
+/// The language of the build a Windows language identifier names, if any — the locale name of
+/// `langid` (`LCIDToLocaleName`) read by [`language_of_ui_tag`].
+fn language_of_langid(langid: u16) -> Option<Language> {
+    let mut locale = [0u16; 85];
+
+    // SAFETY: `locale` is a live buffer of this frame and the call is told its length by the
+    // slice, so it cannot write past the end. The identifier is a plain integer. The answer is the
+    // number of units written including the terminator, zero on failure, checked below (NFR-13).
+    let written = unsafe {
+        windows::Win32::Globalization::LCIDToLocaleName(u32::from(langid), Some(&mut locale), 0)
+    };
+
+    let units = usize::try_from(written).ok()?.checked_sub(1)?;
+
+    language_of_ui_tag(&String::from_utf16_lossy(locale.get(..units)?))
 }
 
 /// Layout switching mode, `layouts.mode` of section 7. Values `pair` and `cycle`.
@@ -1967,6 +2396,9 @@ impl Config {
         if self.schema_version < 8 {
             step_7_to_8(self);
         }
+        if self.schema_version < 9 {
+            step_8_to_9(self);
+        }
         ReadOutcome::Migrated { from }
     }
 }
@@ -2145,6 +2577,19 @@ fn step_6_to_7(config: &mut Config) {
 /// ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]).
 fn step_7_to_8(config: &mut Config) {
     config.schema_version = 8;
+}
+
+/// Raises a file from schema 8 to schema 9 — **stage E108**, task T-108-2: the thirty languages
+/// of group A in the closed set of `general.language`.
+///
+/// **A bare stamp**, as [`step_3_to_4`] and [`step_4_to_5`] were for the same reason: nothing in a
+/// schema 8 file changes meaning — it names one of the fourteen, and they are all still here. The
+/// number buys the other direction (память `closed-enum-downgrade-cost`): 1.2.0 and the builds
+/// before it meet `language = "hi"` under a stamp they have never written, read the file and leave
+/// it alone ([`ReadOutcome::FromNewerSchema`], [`SavePolicy::Forbidden`]) instead of refusing the
+/// word and moving the whole configuration to `.bad`.
+fn step_8_to_9(config: &mut Config) {
+    config.schema_version = 9;
 }
 
 /// Builds the configuration path inside an arbitrary application data directory.
@@ -6329,6 +6774,9 @@ pub fn show_dialog(
     // tell an untouched cycle from an edited one.
     let rows = layout_rows(&config.layouts, &session);
 
+    // Решение 202.7: the order of the language combo, asked of the machine at every opening.
+    let languages = language_order_on_this_machine(&session);
+
     // FR-92а, task T-11-4: the palette of this dialog, resolved once at initialisation —
     // the setting comes from the configuration the dialog was opened with, and the system
     // switch is read exactly once, so the first paint is one consistent palette. Who
@@ -6346,6 +6794,7 @@ pub fn show_dialog(
             rows,
             cycle_at_open: config.layouts.cycle.clone(),
             session,
+            languages,
             apply,
             capture: None,
             combination_taken: false,
@@ -6878,6 +7327,11 @@ struct DialogState<'a> {
     /// The layouts of this session, as `layouts::enumerate` gave them — FR-35 has already
     /// removed the IMEs.
     session: Vec<LayoutId>,
+    /// The rows of the combo «Язык интерфейса» — решение 202.7, worked out once per opening
+    /// ([`language_order_on_this_machine`]); `fill_dialog` fills the combo from it, `read_dialog`
+    /// reads the language back out of it, and the line under the group on top is drawn after
+    /// its `top`.
+    languages: LanguageOrder,
     /// What to do with a configuration the user asked to apply.
     apply: &'a mut dyn FnMut(&Config),
     /// The capture of FR-94, while one is armed. `Some` is the whole of "armed": the value
@@ -9756,15 +10210,23 @@ unsafe fn draw_combo_item(
 
             let colors = combo_item_color_roles(closed_part, highlighted);
 
+            // Решение 202.7: the line under the group on top of the language combo — in the
+            // dropped list only, under the last row of the group, and only when rows follow it.
+            let line_under = control == IDC_LANGUAGE
+                && !closed_part
+                && state.languages.top < state.languages.languages.len()
+                && usize::try_from(item_id).is_ok_and(|row| row + 1 == state.languages.top);
+
             Some((
                 combo_fill_brush(colors.fill, brushes),
                 combo_text_ink(colors.text, palette),
                 state.fonts.as_ref().map(DialogFonts::text),
+                line_under.then_some(palette.field_border),
             ))
         })
     };
 
-    let Some(Some((fill, ink, face))) = choice else {
+    let Some(Some((fill, ink, face, line_under))) = choice else {
         return 0;
     };
 
@@ -9831,6 +10293,24 @@ unsafe fn draw_combo_item(
                 widgets::combo::draw_row(dc, rect, &mut buffer[..copied], ink, face, inset);
             }
         }
+    }
+
+    // Решение 202.7, вариант 1 of the mock-up: one pixel of `field_border` along the bottom edge
+    // of the last row of the group on top, inset by the air of the text on both sides. The rows
+    // of a `CBS_OWNERDRAWFIXED` list are all one height, so the line is a part of a row and not a
+    // row of its own.
+    if let Some(colour) = line_under {
+        let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
+            .map(|(horizontal, _)| horizontal)
+            .unwrap_or(FIELD_TEXT_INSET_DLU);
+        let area = RECT {
+            left: rect.left + inset,
+            top: rect.bottom - 1,
+            right: rect.right - inset,
+            bottom: rect.bottom,
+        };
+
+        theme::paint_caption_underline(dc, &area, colour);
     }
 
     if closed_part && focused {
@@ -13638,20 +14118,25 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
     // timings that stood beside it are in `config.toml` and on no control (решение 81).
     set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
-    // FR-94, task Т-28-2, решение 93 and вопрос 97: fourteen locales, each named in its own
-    // language. The
-    // list is `Language::ALL` walked in order and nothing else — the array is the one place
-    // the order of this combo is written down, and `Language::index` below reads the same
-    // array, so the selected item and the stored value cannot come apart.
+    // FR-94, task Т-28-2, решение 93 and вопрос 97: each language named in its own language.
+    // ⭐ Stage E108, решение 202.7: the rows are `state.languages` — the group on top, the line,
+    // the rest by name — worked out once per opening; `read_dialog` reads the language back out of
+    // the same vector, so the selected row and the stored value cannot come apart.
     send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
-    for language in Language::ALL {
+    for language in &state.languages.languages {
         combo_add(hwnd, IDC_LANGUAGE, language.native_name());
     }
+    let in_force = state.working.general.language.in_force();
     send_to(
         hwnd,
         IDC_LANGUAGE,
         CB_SETCURSEL,
-        usize::try_from(state.working.general.language.index()).unwrap_or(0),
+        state
+            .languages
+            .languages
+            .iter()
+            .position(|language| *language == in_force)
+            .unwrap_or(0),
         0,
     );
 
@@ -13947,13 +14432,20 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2.
     state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
-    // Task Т-28-2: the item index is a position in `Language::ALL`, the same array `fill_dialog`
-    // filled the combo from. `CB_ERR` is −1 and every other stray answer is out of range, and
-    // both read as the default of section 7 — the same way the appearance combo beside it
-    // treats a state the dialog cannot reach.
-    state.working.general.language = Language::from_index(
-        u32::try_from(send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0)).unwrap_or(u32::MAX),
-    );
+    // Stage E108, решение 202.7: the item index is a position in `state.languages`, the vector
+    // `fill_dialog` filled the combo from. `CB_ERR` is −1 and every other stray answer is out of
+    // range, and both leave the language as it was — the same way the appearance combo beside
+    // it treats a state the dialog cannot reach. The row of the language in force keeps the
+    // file's own word, so a language the build does not carry is not overwritten by the English
+    // that stands in for it (`Language::in_force`).
+    let picked = usize::try_from(send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0))
+        .ok()
+        .and_then(|index| state.languages.languages.get(index).copied());
+    if let Some(picked) = picked
+        && picked != state.working.general.language.in_force()
+    {
+        state.working.general.language = picked;
+    }
     state.working.general.theme =
         theme_from_combo_index(send_to(hwnd, IDC_THEME, CB_GETCURSEL, 0, 0));
 

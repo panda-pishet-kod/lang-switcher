@@ -1469,61 +1469,38 @@ fn only_https_at_a_host_of_this_program_reaches_the_shell() {
 // Where a person writes to the author — решение 181.1, задача T-103-2
 // =========================================================================================
 
-/// The address of решение 181.1 for every language of the interface, written down **apart from
-/// the code**: the topic of the group for Russian and Ukrainian, the issues on GitHub for the other
-/// twelve.
-const FEEDBACK_OF_DECISION_181_1: [(Language, &str); 14] = [
-    (Language::Ru, "https://t.me/panda_koding/45"),
-    (
-        Language::En,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (Language::Uk, "https://t.me/panda_koding/45"),
-    (
-        Language::De,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Fr,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Es,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Pt,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::It,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Pl,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Cs,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Tr,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::El,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::He,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
-    (
-        Language::Ar,
-        "https://github.com/panda-pishet-kod/lang-switcher/issues",
-    ),
+/// The two addresses of решение 181.1, written down **apart from the code**: the topic of the
+/// group and the issues on GitHub.
+const THE_GROUP: &str = "https://t.me/panda_koding/45";
+const THE_ISSUES: &str = "https://github.com/panda-pishet-kod/lang-switcher/issues";
+
+/// The languages that read the Russian side — решение 181.1 (Russian, Ukrainian) and, since stage
+/// E108, решение 202.6 (Kazakh, Belarusian, Tatar, Uzbek in Cyrillic: «Делаем так, пока нет
+/// адаптированных страниц сайта под каждый из языков»).
+const THE_RUSSIAN_SIDE: [Language; 6] = [
+    Language::Ru,
+    Language::Uk,
+    Language::Kk,
+    Language::Be,
+    Language::Tt,
+    Language::UzCyrl,
 ];
+
+/// The address of решения 181.1 и 202.6 for every value of `general.language`, in the order of
+/// `Language::ALL`: the topic of the group on the Russian side, the issues on GitHub on the other.
+/// Until stage E108 fourteen rows written out; the side table above is the same fact for forty-four.
+fn feedback_of_decision_181_1() -> Vec<(Language, &'static str)> {
+    Language::ALL
+        .into_iter()
+        .map(|language| {
+            if THE_RUSSIAN_SIDE.contains(&language) {
+                (language, THE_GROUP)
+            } else {
+                (language, THE_ISSUES)
+            }
+        })
+        .collect()
+}
 
 /// The languages whose address in `canon` is not the one [`links::feedback_url`] answers.
 fn feedback_mismatches(canon: &[(Language, &str)]) -> Vec<Language> {
@@ -1539,24 +1516,24 @@ fn feedback_mismatches(canon: &[(Language, &str)]) -> Vec<Language> {
 /// issues on GitHub in the other twelve. Until `e102` both the wizard and «Спасибо» sent everybody
 /// to the channel, where there is nowhere to write (вопрос 181).
 ///
+/// ⭐ **Stage E108, решение 202.6:** the forty-four values, the four of group A that read the
+/// Russian side among them.
+///
 /// ⚠ Control: the canon with Ukrainian sent to GitHub Issues is caught, and only on Ukrainian.
 #[test]
 fn every_language_writes_to_the_author_where_decision_181_1_says() {
-    let languages: Vec<Language> = FEEDBACK_OF_DECISION_181_1
-        .iter()
-        .map(|(language, _)| *language)
-        .collect();
+    let canon = feedback_of_decision_181_1();
 
     assert_eq!(
-        languages,
-        Language::ALL,
-        "the canon names every language once, in the order of the combo box"
+        (THE_GROUP, THE_ISSUES),
+        (links::GROUP_URL, links::ISSUES_URL),
+        "the two addresses are the ones of 181.1"
     );
 
     assert_eq!(
-        feedback_mismatches(&FEEDBACK_OF_DECISION_181_1),
+        feedback_mismatches(&canon),
         Vec::<Language>::new(),
-        "181.1: the address of these languages is not the one the decision gives them"
+        "181.1, 202.6: the address of these languages is not the one the decisions give them"
     );
 
     let to_the_group: Vec<Language> = Language::ALL
@@ -1564,13 +1541,13 @@ fn every_language_writes_to_the_author_where_decision_181_1_says() {
         .filter(|language| links::feedback_url(*language) == links::GROUP_URL)
         .collect();
 
-    assert_eq!(
-        to_the_group,
-        [Language::Ru, Language::Uk],
-        "the group is for the two languages that read it and for no other"
+    assert!(
+        to_the_group.len() == THE_RUSSIAN_SIDE.len()
+            && to_the_group.iter().all(|l| THE_RUSSIAN_SIDE.contains(l)),
+        "the group is for the six languages that read it and for no other: {to_the_group:?}"
     );
 
-    let mut spoilt = FEEDBACK_OF_DECISION_181_1;
+    let mut spoilt = canon;
     spoilt[2].1 = links::ISSUES_URL;
 
     assert_eq!(
@@ -1599,12 +1576,13 @@ fn page_of(url: &str) -> &str {
     url.split_once('?').map_or(url, |(page, _)| page)
 }
 
-/// The pages решение 181.33 gives `language`: the Russian ones in Russian and Ukrainian, the
-/// English ones in the other twelve.
+/// The pages решение 181.33 gives `language`: the Russian ones on the Russian side (Russian,
+/// Ukrainian and, since stage E108, the four of решение 202.6), the English ones on the other.
 fn pages_of_decision_181_33(language: Language) -> (&'static str, &'static str) {
-    match language {
-        Language::Ru | Language::Uk => RUSSIAN_PAGES,
-        _ => ENGLISH_PAGES,
+    if THE_RUSSIAN_SIDE.contains(&language) {
+        RUSSIAN_PAGES
+    } else {
+        ENGLISH_PAGES
     }
 }
 
@@ -1679,15 +1657,15 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         assert!(links::is_allowed(english), "{english} must reach the shell");
     }
 
-    let twelve: Vec<Language> = Language::ALL
+    let english_side: Vec<Language> = Language::ALL
         .into_iter()
-        .filter(|language| !matches!(language, Language::Ru | Language::Uk))
+        .filter(|language| !THE_RUSSIAN_SIDE.contains(language))
         .collect();
 
     assert_eq!(
         pages_mismatches(|_| RUSSIAN_PAGES),
-        twelve,
-        "the control: the Russian pages for every language must be caught on the twelve"
+        english_side,
+        "the control: the Russian pages for every language must be caught on the English side"
     );
     assert_eq!(
         pages_mismatches(|language| {
@@ -2074,7 +2052,7 @@ fn the_address_of_the_letter_is_the_sites_and_no_table_carries_it() {
 /// takes as many frames as its word has letters; the rest of the turn is what it was.
 #[test]
 fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
-    for language in Language::ALL {
+    for language in Language::shipped() {
         let pair = letters::demo_pair(language);
         let letters_typed = pair.typed.chars().count() as u32;
 
@@ -2159,7 +2137,7 @@ const PAIRS_OF_DECISION_178_6: [(Language, &str, &str, [&str; 2]); 14] = [
 /// language by language, not as a set of pairs.
 #[test]
 fn every_language_shows_the_pair_of_decision_178_6() {
-    for language in Language::ALL {
+    for language in Language::shipped() {
         assert_eq!(
             PAIRS_OF_DECISION_178_6
                 .iter()
@@ -2168,6 +2146,25 @@ fn every_language_shows_the_pair_of_decision_178_6() {
             1,
             "{language:?}: the canon names every language of the interface exactly once"
         );
+    }
+
+    // Stage E108: a value of group A without its pair yet stands in the arm of the pairs to come,
+    // and the build does not offer it.
+    for language in Language::ALL {
+        if PAIRS_OF_DECISION_178_6
+            .iter()
+            .all(|(of, ..)| *of != language)
+        {
+            assert_eq!(
+                letters::demo_pair(language),
+                letters::PAIR_TO_COME,
+                "{language:?}: a language with no pair in the canon is one whose pair is to come"
+            );
+            assert!(
+                !language.is_shipped(),
+                "{language:?}: offered without its pair of решение 178.6"
+            );
+        }
     }
 
     let pair_of =

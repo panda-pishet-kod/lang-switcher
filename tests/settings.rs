@@ -14,6 +14,10 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 #[path = "support/resource_script.rs"]
 mod resource_script;
 
+/// The registry of the languages — the tables of the tests read it (stage E108, T-108-2).
+#[path = "support/registry.rs"]
+mod registry;
+
 use lang_switcher::settings::{
     self, CONFIG_FILE_NAME, CURRENT_SCHEMA_VERSION, Config, ConfigError, Language, LayoutMode,
     QUARANTINE_SUFFIX, Quarantined, ReadOutcome, ReplacementMethod, SavePolicy,
@@ -135,8 +139,9 @@ fn defaults_match_section_7_field_by_field() {
     // purpose: everywhere else in this file a file "of today" is stamped
     // `{CURRENT_SCHEMA_VERSION}`, so that raising the schema costs one edit here and none there.
     // Schema 8 — task T-95-1, вопрос 159: `[hotkey] trigger`, the double press of `Shift`.
-    assert_eq!(config.schema_version, 8);
-    assert_eq!(CURRENT_SCHEMA_VERSION, 8);
+    // Schema 9 — stage E108, task T-108-2: the thirty languages of group A in `general.language`.
+    assert_eq!(config.schema_version, 9);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 9);
 
     assert!(config.general.enabled);
     assert!(config.general.autostart);
@@ -1094,9 +1099,10 @@ fn a_file_of_schema_three_is_raised_to_the_current_schema_and_nothing_else_moves
     // not one step is the thing worth pinning, and the number the file lands on is asserted by
     // the rung that owns it — `a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves`.
     // Task T-93-1 put a fifth rung on top (6 → 7), and the file climbs that one too — and task
-    // T-95-1 a sixth (7 → 8, the stamp of `[hotkey] trigger`).
+    // T-95-1 a sixth (7 → 8, the stamp of `[hotkey] trigger`), and stage E108 a seventh (8 → 9, the
+    // stamp of the thirty languages of group A).
     assert_eq!(
-        config.schema_version, 8,
+        config.schema_version, 9,
         "and it climbed the whole ladder, not one rung of it"
     );
 
@@ -1162,7 +1168,7 @@ fn a_file_of_schema_four_is_raised_to_five_and_nothing_else_moves() {
     // asserted by `a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new`.
     // ⚠ Task T-93-1: three rungs now, 4 → 5 → 6 → 7 — the stamp of `[hotkey] modifiers` on top;
     // task T-95-1: four, the stamp of `[hotkey] trigger` (7 → 8) above it.
-    assert_eq!(config.schema_version, 8, "and that version is eight");
+    assert_eq!(config.schema_version, 9, "and that version is nine");
 
     assert!(
         !config.general.enabled,
@@ -1229,7 +1235,7 @@ fn a_file_of_schema_five_is_raised_to_six_and_the_letters_know_it_is_not_new() {
     // ⚠ Task T-93-1: the file climbs on past six to the stamp of `[hotkey] modifiers`, which
     // carries nothing of the letters — what this rung decided arrives at seven untouched; and on
     // past seven to the stamp of `[hotkey] trigger` (task T-95-1), which carries nothing either.
-    assert_eq!(config.schema_version, 8, "and that version is eight");
+    assert_eq!(config.schema_version, 9, "and that version is nine");
 
     // What the rung carries — the three decisions of the rung, in order.
     assert!(
@@ -2635,7 +2641,7 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
 
     // And the language that did not change asks for nothing at all: «Применить» pressed twice
     // must not blink the window the second time.
-    for language in Language::ALL {
+    for language in Language::shipped() {
         assert_eq!(
             settings::language_switch(language, language),
             Unchanged,
@@ -2670,13 +2676,14 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
         }
     }
 
-    println!("--- 14 × 14 pairs: relabel {relabel}, reopen {reopen} ---");
+    println!("--- 44 × 44 pairs: relabel {relabel}, reopen {reopen} ---");
 
-    // Twelve left-to-right locales and two right-to-left ones: 12 × 11 + 2 × 1 = 134 pairs
-    // keep the direction, and 12 × 2 + 2 × 12 = 48 cross it. A number, so that a mechanism
-    // quietly claiming every pair could not pass this test.
-    assert_eq!(relabel, 134, "pairs that keep the direction of writing");
-    assert_eq!(reopen, 48, "pairs that cross it");
+    // Since stage E108 the whole closed set: thirty-nine left-to-right values and five
+    // right-to-left ones (Hebrew, Arabic, Urdu, Persian, Uyghur): 39 × 38 + 5 × 4 = 1502 pairs keep
+    // the direction, and 39 × 5 + 5 × 39 = 390 cross it. A number, so that a mechanism quietly
+    // claiming every pair could not pass this test.
+    assert_eq!(relabel, 1502, "pairs that keep the direction of writing");
+    assert_eq!(reopen, 390, "pairs that cross it");
 }
 
 /// **Criterion 2 of task Т-31-2, and the guard over a line a measurement paid for.**
@@ -6162,7 +6169,7 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
         let slot = (SLOT_UNITS * base + 2) / 4;
         let mut widest = (0, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             for id in [settings::IDS_LOG_SAVE, settings::IDS_LOG_SAVED] {
@@ -8353,7 +8360,7 @@ fn the_model_of_the_author_window_is_the_live_window() {
     let _guard = with_product_strings();
     let mut differences = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let words = AuthorWords::now("0.83.0");
@@ -8410,7 +8417,7 @@ fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
     let mut differences = Vec::new();
     let mut measured = 0;
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let feed = PublishedFeed::now();
@@ -8483,7 +8490,7 @@ fn the_model_of_the_full_list_is_the_live_window_at_every_reachable_face() {
     let mut differences = Vec::new();
     let mut measured = 0;
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let entries = full_list(&PublishedFeed::now());
@@ -8573,8 +8580,7 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
 
     // The words of every language, made once: `(language, «От автора» in its three states, the
     // full «Последние письма»)`.
-    let words: Vec<_> = Language::ALL
-        .into_iter()
+    let words: Vec<_> = Language::shipped()
         .map(|language| {
             settings::set_ui_language(language);
             let feed = PublishedFeed::now();
@@ -9618,7 +9624,7 @@ fn the_paragraphs_of_the_author_window_are_drawn_inside_their_rectangles() {
     let mut measured = 0_usize;
 
     for step in [10_u16, 9, 8, 7, 6] {
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             settings::testing::with_font_step(step, || {
@@ -10154,7 +10160,7 @@ fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
         let slot = (SLOT_UNITS * base + 2) / 4;
         let mut widest = (0, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             let caption = settings::text(settings::IDS_ABOUT_AUTHOR);
@@ -10261,7 +10267,7 @@ fn every_reason_a_capture_refuses_fits_the_note_in_all_fourteen_languages() {
         let ceiling = line * SLOT_LINES;
         let mut tallest = (0, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             let mut lines: Vec<(String, String)> = [
@@ -10386,7 +10392,7 @@ fn the_invitation_of_a_capture_fits_its_field_in_all_fourteen_languages() {
         let slot = ((FIELD_UNITS - 2 * settings::FIELD_TEXT_INSET_DLU) * base + 2) / 4;
         let mut widest = (0, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             let invitation = settings::text(settings::IDS_CAPTURE_PROMPT);
@@ -10516,7 +10522,7 @@ fn the_health_line_of_the_state_panel_fits_in_all_fourteen_languages() {
         let slot = (SLOT_UNITS * base + 2) / 4;
         let mut widest = (0, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             let health = settings::format_text(settings::IDS_STATE_HEALTH, &["144", "144", "144"]);
@@ -10645,7 +10651,7 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
 
         let mut tightest = (i32::MAX, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             for (row, string) in [
@@ -10825,7 +10831,7 @@ fn the_help_rows_never_overlap_at_any_scale_or_locale() {
             .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
             .expect("the program must name at least one key");
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             for key in [widest_key.as_str(), "Pause"] {
@@ -11076,7 +11082,7 @@ fn the_language_row_fits_its_labels_and_its_longest_language_name() {
             language_combo.2
         );
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             for id in [settings::IDS_LANGUAGE_LABEL, settings::IDS_THEME_LABEL] {
@@ -11107,7 +11113,7 @@ fn the_language_row_fits_its_labels_and_its_longest_language_name() {
         }
 
         // The names in the list are the languages' own — the longest is «Português (Brasil)».
-        for language in Language::ALL {
+        for language in Language::shipped() {
             let name = language.native_name();
             let width = extent_of(&sheet, &face, name).cx;
 
@@ -11499,7 +11505,7 @@ fn the_layout_note_is_shown_whole_and_the_list_still_holds_three_rows() {
             list.3
         );
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             // The worst case of the placeholder: both halves of the pair unresolved at once.
@@ -14747,15 +14753,14 @@ fn every_russian_literal_of_the_about_template_is_replaced_in_all_fourteen_langu
         russian.iter().any(|(id, _)| *id == 1136),
         "the instrument does not see the literal «От автора…» on 1136"
     );
-    assert_eq!(
-        Language::ALL.len(),
-        14,
-        "the sweep names fourteen languages"
+    assert!(
+        Language::shipped().count() >= 14,
+        "the sweep names at least the fourteen languages of 1.0.0"
     );
 
     let mut wrong = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let texts = settings::about_texts(None);
@@ -15219,7 +15224,7 @@ fn a_file_of_schema_six_is_raised_to_seven_and_its_hotkey_is_the_bare_key() {
     // ⚠ Task T-95-1: the file climbs on past seven to the stamp of `[hotkey] trigger`, which
     // carries nothing of the hotkey but its default `press` — what this rung decided arrives at
     // eight untouched.
-    assert_eq!(config.schema_version, 8, "and that version is eight");
+    assert_eq!(config.schema_version, 9, "and that version is nine");
 
     assert_eq!(
         config.hotkey,
@@ -15482,7 +15487,7 @@ fn a_file_of_schema_seven_is_raised_to_eight_and_its_hotkey_is_pressed() {
 
     assert_eq!(outcome, ReadOutcome::Migrated { from: 7 });
     assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-    assert_eq!(config.schema_version, 8, "and that version is eight");
+    assert_eq!(config.schema_version, 9, "and that version is nine");
 
     assert_eq!(config.hotkey, combination(&["Ctrl"], "F12"));
     assert_eq!(config.hotkey.trigger, settings::TRIGGER_PRESS);
@@ -15515,7 +15520,7 @@ fn every_balloon_string_fits_the_shell_in_all_fourteen_languages() {
     let mut worst_title = 0;
     let mut worst_body = 0;
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         for letter in [
@@ -18524,7 +18529,7 @@ fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
         item: None,
     };
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
         let plan = letters::plan_for(letters::Letter::Welcome, &context);
 
@@ -18584,7 +18589,7 @@ fn the_caption_of_hello_names_the_pair_of_its_own_language() {
     let russian = letters::demo_pair(Language::Ru);
     let mut captions = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
         let caption = settings::text(settings::IDS_HELLO_DEMO_CAP);
         let pair = letters::demo_pair(language);
@@ -18668,7 +18673,7 @@ fn the_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
     let _guard = with_product_strings();
     let mut wrong = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         for id in WITH_SLOT {
@@ -18749,29 +18754,56 @@ fn names_the_group_or_the_issues(text: &str) -> bool {
 }
 
 /// The word each language called the channel by until `e102` — what none of the six may say now.
+/// A table of the fourteen that said it and not a `match` (stage E108): a language that came after
+/// `e102` never named the channel there.
+const THE_CHANNEL: [(Language, &[&str]); 14] = [
+    (Language::Ru, &["канал"]),
+    (Language::Uk, &["канал"]),
+    (Language::En, &["channel"]),
+    (Language::De, &["kanal"]),
+    (Language::Fr, &["chaîne"]),
+    (Language::Es, &["canal"]),
+    (Language::Pt, &["canal"]),
+    (Language::It, &["canal"]),
+    (Language::Pl, &["kanał", "kanal"]),
+    (Language::Cs, &["kanál"]),
+    (Language::Tr, &["kanal"]),
+    (Language::El, &["κανάλ", "καναλ"]),
+    (Language::He, &["ערוץ"]),
+    (Language::Ar, &["قناة"]),
+];
+
+/// The word `language` called the channel by until `e102`, if it existed then.
 fn the_channel_in(language: Language) -> &'static [&'static str] {
-    match language {
-        Language::Ru | Language::Uk => &["канал"],
-        Language::En => &["channel"],
-        Language::De => &["kanal"],
-        Language::Fr => &["chaîne"],
-        Language::Es | Language::Pt | Language::It => &["canal"],
-        Language::Pl => &["kanał", "kanal"],
-        Language::Cs => &["kanál"],
-        Language::Tr => &["kanal"],
-        Language::El => &["κανάλ", "καναλ"],
-        Language::He => &["ערוץ"],
-        Language::Ar => &["قناة"],
-    }
+    THE_CHANNEL
+        .iter()
+        .find(|(of, _)| *of == language)
+        .map_or(&[], |(_, words)| *words)
 }
 
-/// Whether `text` in `language` names the place of решение 181.1 and not the channel: the group in
-/// Russian («групп…») and Ukrainian («груп…»), «GitHub Issues» — untranslated — in the other twelve.
+/// The languages that read the Russian side of the author's places — решение 181.1 (Russian,
+/// Ukrainian) and решение 202.6 (Kazakh, Belarusian, Tatar, Uzbek in Cyrillic) — written here apart
+/// from `letters::links`, whose answer this is.
+const THE_RUSSIAN_SIDE: [Language; 6] = [
+    Language::Ru,
+    Language::Uk,
+    Language::Kk,
+    Language::Be,
+    Language::Tt,
+    Language::UzCyrl,
+];
+
+/// Whether `text` in `language` names the place of решение 181.1 and not the channel: on the
+/// Russian side the group and not GitHub — «групп…» in Russian, «груп…» in Ukrainian, and in the
+/// four of 202.6 whatever their word for it is, so no GitHub —, on the English side «GitHub Issues»,
+/// untranslated.
 fn names_its_place(language: Language, text: &str) -> bool {
     let lower = text.to_lowercase();
-    let place = match language {
-        Language::Ru | Language::Uk => lower.contains("груп") && !text.contains("GitHub"),
-        _ => text.contains("GitHub Issues"),
+    let place = if THE_RUSSIAN_SIDE.contains(&language) {
+        !text.contains("GitHub")
+            && (!matches!(language, Language::Ru | Language::Uk) || lower.contains("груп"))
+    } else {
+        text.contains("GitHub Issues")
     };
 
     place
@@ -18798,7 +18830,7 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
     let mut control_caught = 0;
     let mut place_caught = 0;
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         for (id, name) in STRINGS_OF_THE_PLACE {
@@ -18819,6 +18851,12 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
             }
         }
 
+        // The controls are read in the fourteen whose words for the channel and the group this
+        // test knows (stage E108: a language of group A brings neither).
+        if the_channel_in(language).is_empty() {
+            continue;
+        }
+
         if !names_its_place(language, &settings::text(settings::IDS_CHANNEL_OPEN)) {
             control_caught += 1;
         }
@@ -18831,12 +18869,15 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
     settings::set_ui_language(Language::Ru);
 
     assert_eq!(
-        control_caught, 14,
-        "the control: «Открыть канал» must be caught in every language"
+        control_caught,
+        THE_CHANNEL.len(),
+        "the control: «Открыть канал» must be caught in every language of 1.0.0"
     );
     assert_eq!(
-        place_caught, 14,
-        "the control: «Открыть группу» / «Open GitHub Issues» must be caught in every language"
+        place_caught,
+        THE_CHANNEL.len(),
+        "the control: «Открыть группу» / «Open GitHub Issues» must be caught in every language of \
+         1.0.0"
     );
     assert!(
         wrong.is_empty(),
@@ -18909,7 +18950,7 @@ fn the_feedback_panel_names_the_button_that_sends_in_every_language() {
     let mut wrong = Vec::new();
     let mut control = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         let text = settings::text(settings::IDS_FEEDBACK_TEXT);
@@ -18919,7 +18960,9 @@ fn the_feedback_panel_names_the_button_that_sends_in_every_language() {
             wrong.push(format!("{language:?}: «{send}» is not named — «{text}»"));
         }
         if says_the_old_path(language, &text) {
-            wrong.push(format!("{language:?}: the clipboard or five steps — «{text}»"));
+            wrong.push(format!(
+                "{language:?}: the clipboard or five steps — «{text}»"
+            ));
         }
         if names_the_group_or_the_issues(&text) {
             wrong.push(format!("{language:?}: sends to a place — «{text}»"));
@@ -18970,7 +19013,7 @@ fn the_thanks_of_the_wizard_carries_no_number_of_the_appeal() {
     let _guard = with_product_strings();
     let mut wrong = Vec::new();
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         settings::set_ui_language(language);
 
         for id in [
@@ -19276,7 +19319,8 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
 
     let mut missing: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let stem = subject
             .iter()
             .find(|(t, _)| *t == tag)
@@ -25598,38 +25642,25 @@ fn gdi_objects() -> u32 {
 // the two right-to-left locales of вопрос 97.
 // =========================================================================================
 
-/// Every locale: the value section 7 stores, the `LANGID` `app.rc` tags the string table with,
-/// and the name the language combo box shows.
+/// Every value of the closed set: the word section 7 stores, the `LANGID` `app.rc` tags the
+/// string table with, and the name the language combo box shows — the fourteen of 1.0.0 and the
+/// thirty of group A.
 ///
-/// Written out here rather than imported from the crate on purpose, exactly as the interface
-/// strings are: what a test must not borrow from the code under test is the **answer**. The
-/// order is the order of the combo box — Russian, English, the ten of решение 93, then Hebrew
-/// and Arabic — and it is a contract, not a preference: `Language::index` encodes it and the
-/// atomic of `set_ui_language` stores it.
-///
-/// ⚠ The **length** is taken from `Language::ALL` on purpose, and the number itself is asserted
-/// in exactly one place — `the_language_combo_offers_native_names_in_the_order_of_the_array`.
-/// A count repeated in seven tests is a count that gets fixed in six of them.
-///
-/// ⚠ Every `LANGID` here was taken from `LCIDToLocaleName` and not from memory
-/// (`scratchpad-Э28\прибор-langid.log` for the twelve, `scratchpad-Э30\прибор-langid.log` for
-/// `he` and `ar`, both with a positive control on `0x0FFF`).
-const ALL_LOCALES: [(&str, u16, &str); Language::ALL.len()] = [
-    ("ru", 0x0419, "Русский"),
-    ("en", 0x0409, "English"),
-    ("uk", 0x0422, "Українська"),
-    ("de", 0x0407, "Deutsch"),
-    ("fr", 0x040C, "Français"),
-    ("es", 0x040A, "Español"),
-    ("pt", 0x0416, "Português (Brasil)"),
-    ("it", 0x0410, "Italiano"),
-    ("pl", 0x0415, "Polski"),
-    ("cs", 0x0405, "Čeština"),
-    ("tr", 0x041F, "Türkçe"),
-    ("el", 0x0408, "Ελληνικά"),
-    ("he", 0x040D, "עברית"),
-    ("ar", 0x0401, "العربية"),
-];
+/// ⭐ **Read out of the registry `res\lang\languages.toml` since stage E108** (task T-108-2, «таблицы
+/// тестов — на реестр»): until then the fourteen rows were written out here. What a test must not
+/// borrow from the code under test is still the **answer**, and the registry is data apart from
+/// the code — `tests\l10n.rs` holds `Language` to it value by value, and its `LANGID`s were
+/// measured there (`LocaleNameToLCID` and back, 69 of 69). The order is the order of the registry
+/// and of `Language::ALL`.
+fn all_locales() -> Vec<(String, u16, String)> {
+    registry::locales(&registry::closed_set())
+}
+
+/// The locales the build offers — the entries of the registry with `state = "shipped"`: the ones
+/// whose string tables are in the built binary. A sweep of the strings walks these.
+fn shipped_locales() -> Vec<(String, u16, String)> {
+    registry::locales(&registry::shipped())
+}
 
 /// The `Language` a configuration naming `tag` reads back as — through the file, deliberately.
 ///
@@ -25659,13 +25690,22 @@ fn language_of_tag(tag: &str) -> Language {
     config.general.language
 }
 
-/// **Т-28-2, Т-30-1: all fourteen values of `general.language` survive the file, both ways.**
+/// **Т-28-2, Т-30-1: all values of `general.language` survive the file, both ways** — the
+/// forty-four since stage E108, `sr-Latn` and `uz-Cyrl` with their script.
 ///
 /// Round trip and not just a read: the value has to come back out of `to_toml_string` spelled
 /// the same way it went in, or a build that merely *reads* fourteen values would write two.
 #[test]
 fn every_one_of_the_language_values_survives_a_round_trip() {
-    for (tag, _, _) in ALL_LOCALES {
+    let locales = all_locales();
+    assert_eq!(
+        locales.len(),
+        Language::ALL.len(),
+        "the registry names every value of the closed set"
+    );
+
+    for (tag, _, _) in locales {
+        let tag = tag.as_str();
         let language = language_of_tag(tag);
 
         assert_eq!(
@@ -25701,9 +25741,9 @@ fn every_one_of_the_language_values_survives_a_round_trip() {
 /// two files share no header — so the test states them itself.
 #[test]
 fn every_locale_carries_the_langid_its_string_table_is_tagged_with() {
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in all_locales() {
         assert_eq!(
-            language_of_tag(tag).langid(),
+            language_of_tag(&tag).langid(),
             langid,
             "locale `{tag}` must ask the resource loader for 0x{langid:04X}"
         );
@@ -25722,7 +25762,8 @@ fn every_locale_carries_every_interface_string() {
     let product = ProductImage::shared();
     let mut empty: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         for id in settings::INTERFACE_STRINGS {
             let string = product.string_of_langid(langid, id);
 
@@ -25755,7 +25796,8 @@ fn the_balloon_after_an_update_fits_in_every_language() {
     let mut too_long: Vec<String> = Vec::new();
     let mut short_ceiling = 0;
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let title = product
             .string_of_langid(langid, settings::IDS_TOAST_UPDATED_TITLE)
             .replace("{0}", version);
@@ -25882,7 +25924,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     let mut empty_neighbours: Vec<String> = Vec::new();
     let mut read = 0;
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         // ⚠ **Both holes, since task T-81-3.** 3111 is checked on exactly the terms 3004 is: it
         // has to be gone from the resource and not only from the crate's list, and its block has
         // to read across it. 3111 sits in the block 3104..3119, so 3110 and 3112 are its
@@ -25923,7 +25966,7 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        ALL_LOCALES.len() * 9,
+        shipped_locales().len() * 9,
         "nine rows in each of the fourteen locales — three round each of the three holes (the \
          third, 3041, since task T-93-2); «no holes» out of no readings is the cheapest lie such \
          a sweep tells"
@@ -26054,6 +26097,52 @@ fn a_twelve_locale_build_meeting_a_right_to_left_file_refuses_to_write() {
     );
 }
 
+/// The last schema a build that knew **fourteen** locales stamped a file with — 1.2.0 and every
+/// build since 0.95.0 (`[hotkey] trigger`, вопрос 159).
+const LAST_FOURTEEN_LOCALE_SCHEMA: u32 = 8;
+
+/// **Stage E108, task T-108-2 — the coin of вопрос 94.1 spent a third time: a file naming a
+/// language of group A carries a stamp no fourteen-locale build wrote.**
+///
+/// The mechanism is the one the two tests above hold (a stamp too new → read, never written, no
+/// `.bad`); what this stage adds is the number, and this test pins it on the real values: every
+/// one of the thirty, written by this build, carries `schema_version = 9` — above the 8 of 1.2.0 —
+/// and reads back as current. ⚠ The `const` block makes lowering the schema a build that does not
+/// compile.
+#[test]
+fn a_file_of_group_a_carries_a_stamp_no_fourteen_locale_build_wrote() {
+    const {
+        assert!(
+            CURRENT_SCHEMA_VERSION > LAST_FOURTEEN_LOCALE_SCHEMA,
+            "a file naming a language of group A must be stamped with a schema no build of \
+             fourteen had — without it 1.2.0 quarantines the file"
+        );
+    }
+
+    let dir = TestDir::new("group_a_stamp");
+    let group_a: Vec<Language> = Language::ALL.into_iter().skip(14).collect();
+    assert_eq!(group_a.len(), 30, "the thirty of group A");
+
+    for language in group_a {
+        let mut ours = Config::default();
+        ours.general.language = language;
+
+        let text = ours.to_toml_string().expect("the file must serialise");
+
+        assert!(
+            text.contains(&format!("language = \"{}\"", language.tag()))
+                && text.contains(&format!("schema_version = {CURRENT_SCHEMA_VERSION}")),
+            "{language:?}: the word and the stamp are in the file: {text}"
+        );
+
+        let path = write_file(&dir, &text);
+        let (back, outcome) = settings::read_or_default(&path);
+
+        assert_eq!(outcome.as_ref().ok(), Some(&ReadOutcome::Current));
+        assert_eq!(back.general.language, language, "{language:?} reads back");
+    }
+}
+
 /// **Т-29-1, вопрос 94.1 — the flip of the Т-28-2 measurement: a downgrade now refuses to write
 /// instead of quarantining.**
 ///
@@ -26169,30 +26258,34 @@ fn a_downgrade_meets_the_new_stamp_and_refuses_to_write_rather_than_quarantining
     );
 }
 
-/// **Т-28-2, Т-30-1: the combo offers the native names, in the order of the array.**
+/// **Т-28-2, Т-30-1: every value of the closed set has its native name and its position.**
 ///
 /// Three things at once, and they are one contract: the name shown, the position it stands at,
 /// and the value that position reads back as. A build that showed «Deutsch» at position three
-/// and stored Ukrainian for it would pass any two of the three checks separately.
+/// and stored Ukrainian for it would pass any two of the three checks separately. Since stage
+/// E108 (решение 202.7) the combo no longer shows the array in its order — that is
+/// `the_language_combo_puts_the_group_of_the_person_on_top_and_the_rest_by_name` — and the
+/// position is the number of the atomic of `set_ui_language` alone; the file holds the tag.
 ///
 /// ⚠ **The one place the count itself is a literal.** Everything else takes its length from
 /// `Language::ALL`; here the number is the thing under test, so it is typed out — twelve of
-/// решение 93 plus the two of вопрос 97.
+/// решение 93, the two of вопрос 97 and the thirty of group A (stage E108).
 #[test]
-fn the_language_combo_offers_native_names_in_the_order_of_the_array() {
+fn every_value_of_the_closed_set_has_its_name_and_its_position() {
     assert_eq!(
         Language::ALL.len(),
-        14,
-        "решение 93 names twelve locales for tier one, вопрос 97 adds Hebrew and Arabic"
+        44,
+        "решение 93 names twelve locales for tier one, вопрос 97 adds Hebrew and Arabic, stage \
+         E108 the thirty of group A"
     );
 
-    for (position, (tag, _, native)) in ALL_LOCALES.iter().enumerate() {
+    for (position, (tag, _, native)) in all_locales().iter().enumerate() {
         let language = language_of_tag(tag);
         let index = u32::try_from(position).expect("a locale count fits a u32");
 
         assert_eq!(
             language.native_name(),
-            *native,
+            native.as_str(),
             "the combo shows `{tag}` under its own name"
         );
         assert_eq!(
@@ -26213,9 +26306,101 @@ fn the_language_combo_offers_native_names_in_the_order_of_the_array() {
     }
 
     // Out of range in both directions is the default of section 7, not a panic and not a
-    // neighbouring language: this is what a `CB_ERR` of −1 arrives as.
-    assert_eq!(Language::from_index(14), Language::Ru);
+    // neighbouring language.
+    assert_eq!(Language::from_index(44), Language::Ru);
     assert_eq!(Language::from_index(u32::MAX), Language::Ru);
+}
+
+/// **Stage E108, task T-108-2, решение 202.7 — the combo «Язык интерфейса» puts the language of
+/// Windows, English, the languages of the layouts and Russian on top, and the rest by name.**
+///
+/// The owner's words: «вначале системный, потом английски, языки раскладок пользователя, русский и
+/// по далее по самоназванию»; вариант 1 of the mock-up. Driven with a given language of Windows
+/// and given layouts — the machine of the mock-up (Windows in Russian; Russian, English, Ukrainian
+/// and Kazakh layouts) and two others — and only over the languages the build offers: a language
+/// the registry does not ship yet is not a row.
+///
+/// The order under the line is held to the mock-up itself — its forty rows, written out here from
+/// the page (`LANGS` of the artifact) — and not to `Language::BY_NAME`, the answer under test.
+///
+/// ⚠ Controls: a top group in the wrong order (Russian before English) and a rest in the order of
+/// `Language::ALL` are both told apart from the answer.
+#[test]
+fn the_language_combo_puts_the_group_of_the_person_on_top_and_the_rest_by_name() {
+    // The mock-up of решение 202.7, below its line: «Письма идут в порядке владельца, внутри
+    // письма — по алфавиту самоназвания»; the four on top of it are ru, en, uk, kk.
+    const MOCK_UP: [&str; 40] = [
+        "az", "cs", "de", "es", "fr", "it", "uz", "pl", "pt", "sr-Latn", "tr", "el", "be", "bg",
+        "mk", "sr", "tt", "uz-Cyrl", "hy", "he", "ug", "ur", "ar", "fa", "ne", "mr", "hi", "as",
+        "bn", "pa", "gu", "or", "ta", "te", "kn", "ml", "th", "lo", "km", "ka",
+    ];
+
+    let shipped = |tags: &[&str]| -> Vec<String> {
+        tags.iter()
+            .filter(|tag| language_of_tag(tag).is_shipped())
+            .map(|tag| (*tag).to_owned())
+            .collect()
+    };
+    let tags = |languages: &[Language]| -> Vec<String> {
+        languages.iter().map(|l| l.tag().to_owned()).collect()
+    };
+
+    // The machine of the mock-up.
+    let order = settings::language_order(
+        Some(Language::Ru),
+        &[Language::Ru, Language::En, Language::Uk, Language::Kk],
+    );
+    assert_eq!(
+        tags(&order.languages[..order.top]),
+        shipped(&["ru", "en", "uk", "kk"]),
+        "the group on top"
+    );
+    assert_eq!(
+        tags(&order.languages[order.top..]),
+        shipped(&MOCK_UP),
+        "under the line: the rest in the order of the mock-up"
+    );
+
+    // Every language the build offers is a row, once.
+    let mut every = tags(&order.languages);
+    every.sort();
+    let mut offered: Vec<String> = Language::shipped().map(|l| l.tag().to_owned()).collect();
+    offered.sort();
+    assert_eq!(every, offered, "every offered language once");
+
+    // Windows in German, an English and a Ukrainian layout: German, English, Ukrainian, Russian —
+    // each once, though English is both the second rule and a layout.
+    let german = settings::language_order(Some(Language::De), &[Language::En, Language::Uk]);
+    assert_eq!(
+        tags(&german.languages[..german.top]),
+        shipped(&["de", "en", "uk", "ru"]),
+        "Windows first, then English, the layouts, Russian"
+    );
+
+    // Windows in a language the build does not have, no layouts of ours: English and Russian.
+    let none = settings::language_order(None, &[]);
+    assert_eq!(tags(&none.languages[..none.top]), ["en", "ru"]);
+    assert_eq!(
+        none.languages.len(),
+        Language::shipped().count(),
+        "nothing is lost under the line"
+    );
+
+    // The controls.
+    assert_ne!(
+        tags(&none.languages[..none.top]),
+        ["ru", "en"],
+        "the control: Russian before English is not the order"
+    );
+    let in_the_array: Vec<String> = Language::shipped()
+        .filter(|l| !order.languages[..order.top].contains(l))
+        .map(|l| l.tag().to_owned())
+        .collect();
+    assert_ne!(
+        in_the_array,
+        tags(&order.languages[order.top..]),
+        "the control: the order of Language::ALL is not the order by name"
+    );
 }
 
 /// **Т-28-2, Т-30-1: the names are distinct, and each starts the way its own script can.**
@@ -26232,28 +26417,61 @@ fn the_language_combo_offers_native_names_in_the_order_of_the_array() {
 /// is real: a script that *has* case must use it, and a script that has none must still start
 /// with a letter **of its own block** — which is the half that catches a name gone to Latin or
 /// to question marks, and that is what the capital check was really buying.
+///
+/// ⭐ **Stage E108: all forty-four values, and the block is the one of the registry's script.**
+/// Group A brings fourteen scripts without case (the Indic ones, Thai, Lao, Khmer, Georgian,
+/// Armenian has case); each name must begin with a letter of the block of the `script` its entry
+/// of `res\lang\languages.toml` names, and a script with case must use it.
 #[test]
 fn the_native_names_are_distinct_and_start_in_their_own_script() {
-    let mut seen: Vec<&str> = Vec::new();
+    // The Unicode block of each script of the closed set (ISO 15924 → the first letter's range).
+    fn block_of(script: &str) -> std::ops::RangeInclusive<char> {
+        match script {
+            "Latn" => 'A'..='\u{024F}',
+            "Grek" => '\u{0370}'..='\u{03FF}',
+            "Cyrl" => '\u{0400}'..='\u{04FF}',
+            "Armn" => '\u{0530}'..='\u{058F}',
+            "Hebr" => '\u{0590}'..='\u{05FF}',
+            "Arab" => '\u{0600}'..='\u{06FF}',
+            "Deva" => '\u{0900}'..='\u{097F}',
+            "Beng" => '\u{0980}'..='\u{09FF}',
+            "Guru" => '\u{0A00}'..='\u{0A7F}',
+            "Gujr" => '\u{0A80}'..='\u{0AFF}',
+            "Orya" => '\u{0B00}'..='\u{0B7F}',
+            "Taml" => '\u{0B80}'..='\u{0BFF}',
+            "Telu" => '\u{0C00}'..='\u{0C7F}',
+            "Knda" => '\u{0C80}'..='\u{0CFF}',
+            "Mlym" => '\u{0D00}'..='\u{0D7F}',
+            "Thai" => '\u{0E00}'..='\u{0E7F}',
+            "Laoo" => '\u{0E80}'..='\u{0EFF}',
+            "Geor" => '\u{10A0}'..='\u{10FF}',
+            "Khmr" => '\u{1780}'..='\u{17FF}',
+            other => panic!("the script {other} has no block in this test"),
+        }
+    }
 
-    for language in Language::ALL {
+    let mut seen: Vec<&str> = Vec::new();
+    let entries = registry::closed_set();
+
+    assert_eq!(entries.len(), Language::ALL.len(), "one entry per value");
+
+    for (entry, language) in entries.iter().zip(Language::ALL) {
+        assert_eq!(entry.tag, language.tag(), "the order of the registry");
+
         let name = language.native_name();
         let first = name.chars().next().expect("a name is not empty");
 
-        if language.is_rtl() {
-            // The two blocks of вопрос 97: Hebrew U+0590…U+05FF, Arabic U+0600…U+06FF.
-            let own_block = matches!(first, '\u{0590}'..='\u{05FF}' | '\u{0600}'..='\u{06FF}');
+        assert!(
+            block_of(&entry.script).contains(&first) && first.is_alphabetic(),
+            "«{name}» must begin with a letter of its own script {}, not `{first}`",
+            entry.script
+        );
 
-            assert!(
-                own_block,
-                "«{name}» must begin with a letter of its own script, not `{first}`"
-            );
-            assert!(
-                !first.is_uppercase() && !first.is_lowercase(),
-                "`{first}` is expected to be caseless — if this fails, the name is not the \
-                 script it claims to be"
-            );
-        } else {
+        // ⚠ Georgian has capitals in Unicode since 11.0 (Mtavruli, U+1C90…), but the language does
+        // not capitalise the first letter of a word with them — «ქართული», as Windows writes it.
+        let has_case = first.to_uppercase().ne(first.to_lowercase()) && entry.script != "Geor";
+
+        if has_case {
             assert!(
                 first.is_uppercase(),
                 "«{name}» must start with a capital: решение 92, kept by решение 93"
@@ -26276,6 +26494,9 @@ fn the_native_names_are_distinct_and_start_in_their_own_script() {
 /// A source sweep, like the sweeps this file already keeps over `read_dialog`: the two literals
 /// that used to stand here — `"Русский"` and `"English"` — must be gone from the module, or a
 /// thirteenth locale would be added to the enum and quietly not appear in the window.
+///
+/// Since stage E108 (решение 202.7) the combo walks `state.languages` — the order
+/// `settings::language_order` works out over the languages the build offers — and not the array.
 #[test]
 fn the_dialog_names_no_language_of_its_own() {
     let source = settings_module_source();
@@ -26287,13 +26508,14 @@ fn the_dialog_names_no_language_of_its_own() {
 
         assert!(
             !line.contains("combo_add(hwnd, IDC_LANGUAGE, \""),
-            "the language combo must be filled from `Language::ALL`, not from a literal: {line}"
+            "the language combo must be filled from the order of the languages, not from a \
+             literal: {line}"
         );
     }
 
     assert!(
-        source.contains("for language in Language::ALL {"),
-        "and it is filled by walking the array"
+        source.contains("for language in &state.languages.languages {"),
+        "and it is filled by walking the order of решение 202.7"
     );
 }
 
@@ -26306,7 +26528,8 @@ fn the_dialog_names_no_language_of_its_own() {
 fn the_autostart_row_reads_the_same_in_the_dialog_and_in_the_menu() {
     let product = ProductImage::shared();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         assert_eq!(
             product.string_of_langid(langid, settings::IDS_AUTOSTART),
             product.string_of_langid(langid, settings::IDS_MENU_AUTOSTART),
@@ -26330,7 +26553,8 @@ fn every_locale_keeps_the_placeholders_of_the_row_it_translates() {
         let russian = product.string_of_langid(0x0419, id);
         let wanted = placeholders_of(&russian);
 
-        for (tag, langid, _) in ALL_LOCALES {
+        for (tag, langid, _) in shipped_locales() {
+            let tag = tag.as_str();
             let mine = placeholders_of(&product.string_of_langid(langid, id));
 
             if mine != wanted {
@@ -26366,7 +26590,8 @@ fn placeholders_of(text: &str) -> Vec<&'static str> {
 fn the_product_name_is_untranslated_in_every_locale() {
     let product = ProductImage::shared();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let caption = product.string_of_langid(langid, settings::IDS_DIALOG_CAPTION);
 
         assert!(
@@ -26394,7 +26619,8 @@ fn no_translation_carries_a_direction_mark() {
     let product = ProductImage::shared();
     let mut marked: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         for id in settings::INTERFACE_STRINGS {
             let string = product.string_of_langid(langid, id);
 
@@ -26515,14 +26741,16 @@ fn the_mirror_goes_into_the_template_and_only_into_an_extended_one() {
     assert_eq!(settings::mirror_template(&mut empty), None);
 }
 
-/// **Т-30-2: exactly the two right-to-left locales ask for a mirror, and no others.**
+/// **Т-30-2: exactly the right-to-left languages ask for a mirror, and no others** — Hebrew and
+/// Arabic of вопрос 97, and since stage E108 Urdu, Persian and Uyghur of group A.
 ///
 /// `Language::is_rtl` is the one place that knows it — the dialog template, the tray menu and
 /// the reading order of an island all read this and nothing else. A sweep over the whole array
-/// rather than two `assert!`s, so that a fifteenth locale added without a thought about
-/// direction shows up here rather than in a window.
+/// rather than five `assert!`s, so that a language added without a thought about direction shows
+/// up here rather than in a window; and the registry's `rtl` (measured there:
+/// `LOCALE_IREADINGLAYOUT`) says the same, value by value.
 #[test]
-fn only_hebrew_and_arabic_are_read_right_to_left() {
+fn only_the_five_right_to_left_languages_are_read_right_to_left() {
     let mirrored: Vec<&str> = Language::ALL
         .into_iter()
         .filter(|language| language.is_rtl())
@@ -26531,18 +26759,27 @@ fn only_hebrew_and_arabic_are_read_right_to_left() {
 
     assert_eq!(
         mirrored,
-        vec!["he", "ar"],
-        "вопрос 97 names two right-to-left locales and this build has exactly those"
+        vec!["he", "ar", "ur", "fa", "ug"],
+        "вопрос 97 names two right-to-left locales, group A three more"
     );
 
-    // And the other twelve are not mirrored — stated from the other side so that a predicate
-    // that answered `true` for everything could not pass the check above by accident.
+    for (entry, language) in registry::closed_set().iter().zip(Language::ALL) {
+        assert_eq!(
+            entry.rtl,
+            language.is_rtl(),
+            "{}: the direction of the registry",
+            entry.tag
+        );
+    }
+
+    // And the other thirty-nine are not mirrored — stated from the other side so that a
+    // predicate that answered `true` for everything could not pass the check above by accident.
     assert_eq!(
         Language::ALL
             .into_iter()
             .filter(|language| !language.is_rtl())
             .count(),
-        12
+        39
     );
 }
 
@@ -26704,7 +26941,8 @@ fn no_layout_name_carries_a_direction_mark_into_the_configuration() {
 fn the_help_arrow_follows_the_direction_of_the_script() {
     let product = ProductImage::shared();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let line = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_5);
         let language = language_of_tag(tag);
 
@@ -26783,7 +27021,8 @@ fn the_fourth_help_line_opens_with_the_word_of_the_menu_entry() {
     let product = ProductImage::shared();
     let mut defects: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let line = product.string_of_langid(langid, settings::IDS_ABOUT_HELP_4);
         let menu = product.string_of_langid(langid, settings::IDS_MENU_SUSPEND);
 
@@ -26926,7 +27165,8 @@ fn the_selection_help_line_carries_its_caveat_in_every_locale() {
     let product = ProductImage::shared();
     let mut defects: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let before = BEFORE
             .iter()
             .find(|(locale, _)| *locale == tag)
@@ -27024,7 +27264,8 @@ fn the_second_copy_says_it_is_already_running_in_the_language_of_windows() {
     let product = ProductImage::shared();
     let mut defects: Vec<String> = Vec::new();
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         let sentence = product.string_of_langid(langid, settings::IDS_ALREADY_RUNNING);
         let rest = sentence.replace("Lang Switcher", "");
         let own = rest
@@ -27063,7 +27304,7 @@ fn the_second_copy_says_it_is_already_running_in_the_language_of_windows() {
 
     let ordinary = MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND;
 
-    for language in Language::ALL {
+    for language in Language::shipped() {
         let style = lang_switcher::app::already_running_style(language);
         let reads_right_to_left = style.0 & MB_RTLREADING.0 != 0 && style.0 & MB_RIGHT.0 != 0;
 
@@ -27152,23 +27393,35 @@ fn the_second_copy_says_it_is_already_running_in_the_language_of_windows() {
 fn the_locale_picked_in_the_combo_is_the_locale_the_file_ends_up_carrying() {
     let dir = TestDir::new("combo_to_file");
 
-    for from in Language::ALL {
-        for to in Language::ALL {
-            // 1. The dialog opens on a configuration carrying `from` and selects its position.
+    // Stage E108, решение 202.7: the rows are the order of the languages, worked out per opening —
+    // here as a machine whose Windows speaks the language the dialog shows and whose layouts are
+    // Russian and English; the position of a row is a position in that order, not in the array.
+    for from in Language::shipped() {
+        let order = settings::language_order(Some(from), &[Language::Ru, Language::En]);
+        let row_of = |language: Language| {
+            order
+                .languages
+                .iter()
+                .position(|row| *row == language)
+                .expect("every offered language is a row")
+        };
+
+        for to in Language::shipped() {
+            // 1. The dialog opens on a configuration carrying `from` and selects its row.
             let mut config = Config::default();
             config.general.language = from;
 
-            let selected = config.general.language.index();
+            let selected = row_of(config.general.language.in_force());
             assert_eq!(
-                selected,
-                from.index(),
+                order.languages[selected],
+                from,
                 "the combo opens on `{}`",
                 from.tag()
             );
 
-            // 2. «ОК»: the item at the position the user left selected becomes the value.
-            let picked = to.index();
-            config.general.language = Language::from_index(picked);
+            // 2. «ОК»: the language of the row the user left selected becomes the value.
+            let picked = row_of(to);
+            config.general.language = order.languages[picked];
 
             assert_eq!(
                 config.general.language,
@@ -27201,7 +27454,7 @@ fn the_locale_picked_in_the_combo_is_the_locale_the_file_ends_up_carrying() {
                 to.tag()
             );
             assert_eq!(
-                back.general.language.index(),
+                row_of(back.general.language.in_force()),
                 picked,
                 "and the next opening of the dialog selects the same item again"
             );
@@ -27312,6 +27565,77 @@ fn a_system_tag_maps_onto_a_locale_by_its_primary_subtag() {
     assert_eq!(settings::first_run_language(["iw-IL"]), Language::En);
     assert_eq!(settings::first_run_language(["he-IL"]), Language::He);
     assert_eq!(settings::first_run_language(["ar-EG"]), Language::Ar);
+}
+
+/// **Stage E108, task T-108-2, решение 200б.1 — Serbian and Uzbek are chosen by the script of the
+/// full tag of Windows, both pairs.**
+///
+/// The primary subtag `sr` / `uz` does not tell the scripts apart; Windows does, in the full tag
+/// `GetUserPreferredUILanguages` answers: `sr-Cyrl-RS` / `sr-Latn-RS`, `uz-Latn-UZ` /
+/// `uz-Cyrl-UZ`. The main language of each — Serbian in Cyrillic, Uzbek in Latin — takes the bare
+/// tag and any tag without the other script. Driven over the whole closed set
+/// (`language_of_tag_among`), so the rule is held whatever the registry ships today; and over the
+/// languages the build offers, the answer is always one of them.
+///
+/// ⚠ Control: the rule of the primary subtag alone — the first language whose tag begins with
+/// `sr` — answers Cyrillic Serbian for `sr-Latn-RS` and is caught.
+#[test]
+fn serbian_and_uzbek_are_chosen_by_the_script_of_the_full_tag() {
+    let among_all = |tag: &str| settings::language_of_tag_among(tag, Language::ALL);
+
+    for (tag, wanted) in [
+        ("sr-Cyrl-RS", Language::Sr),
+        ("sr-Latn-RS", Language::SrLatn),
+        ("sr-Latn-ME", Language::SrLatn),
+        ("sr-Cyrl-BA", Language::Sr),
+        ("sr", Language::Sr),
+        ("sr-RS", Language::Sr),
+        ("SR-latn-rs", Language::SrLatn),
+        ("uz-Latn-UZ", Language::Uz),
+        ("uz-Cyrl-UZ", Language::UzCyrl),
+        ("uz", Language::Uz),
+        ("uz-UZ", Language::Uz),
+        ("uz_Cyrl", Language::UzCyrl),
+        // The other languages of group A by their primary subtag, as the fourteen.
+        ("az-Latn-AZ", Language::Az),
+        ("pa-IN", Language::Pa),
+        ("bn-BD", Language::Bn),
+        ("kk-KZ", Language::Kk),
+        ("ug-CN", Language::Ug),
+    ] {
+        assert_eq!(
+            among_all(tag),
+            Some(wanted),
+            "`{tag}` must be `{}`",
+            wanted.tag()
+        );
+    }
+
+    // The rule of the primary subtag alone, as it stood until stage E108 — the control.
+    let primary_only = |tag: &str| {
+        Language::ALL
+            .into_iter()
+            .find(|language| language.tag().starts_with(&tag[..2]))
+    };
+    assert_ne!(
+        primary_only("sr-Latn-RS"),
+        Some(Language::SrLatn),
+        "the control: the primary subtag alone does not see the script"
+    );
+
+    // Over the languages the build offers: always one of them, or none.
+    for tag in [
+        "sr-Cyrl-RS",
+        "sr-Latn-RS",
+        "uz-Latn-UZ",
+        "uz-Cyrl-UZ",
+        "hi-IN",
+        "ur-PK",
+    ] {
+        if let Some(language) = settings::language_of_ui_tag(tag) {
+            assert!(language.is_shipped(), "`{tag}` → {language:?}, not offered");
+        }
+    }
 }
 
 /// **The fall-through, and the English at the end of it — вопрос 95.**
@@ -27636,8 +27960,8 @@ fn the_machine_answers_a_real_list_of_tags_and_one_of_the_locales() {
     );
 
     assert!(
-        Language::ALL.contains(&chosen),
-        "the answer is always one of the twelve"
+        chosen.is_shipped(),
+        "the answer is always a language the build offers"
     );
 }
 
@@ -27775,10 +28099,11 @@ fn a_schema_6_file_without_the_idle_timeout_is_current_and_not_migrated() {
     // T-93-1 moved it, for a reason of its own: the one rung above the 6 FR-15 shipped on is the
     // stamp of `[hotkey] modifiers` (вопрос 157), and the number here says so rather than six.
     // ⚠ Task T-95-1 moved it once more: the stamp of `[hotkey] trigger` (вопрос 159) is the second.
+    // ⚠ Stage E108 a third time: the stamp of the thirty languages of group A.
     assert_eq!(
-        CURRENT_SCHEMA_VERSION, 8,
+        CURRENT_SCHEMA_VERSION, 9,
         "FR-15 не поднимал схему (была 6); 7 — штамп `[hotkey] modifiers` Э93, 8 — штамп \
-         `[hotkey] trigger` Э95, и только они"
+         `[hotkey] trigger` Э95, 9 — штамп группы А Э108, и только они"
     );
 
     // And the far side of that promise: a file stamped above the current schema *would* be read
@@ -28564,7 +28889,7 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
         let px = |units: i32| (units * unit_x + 2) / 4;
         let mut tightest = (i32::MAX, String::new());
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             for (what, template, control, string) in frozen {
@@ -29658,7 +29983,8 @@ fn every_locale_carries_the_strings_of_the_two_ways() {
         );
     }
 
-    for (tag, langid, _) in ALL_LOCALES {
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
         for id in ids {
             let string = product.string_of_langid(langid, id);
 
@@ -29735,7 +30061,7 @@ fn every_string_of_the_two_ways_fits_its_place_in_all_fourteen_languages() {
             control_seen = true;
         }
 
-        for language in Language::ALL {
+        for language in Language::shipped() {
             settings::set_ui_language(language);
 
             let one_line = [
