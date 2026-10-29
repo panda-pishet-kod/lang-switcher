@@ -2736,6 +2736,46 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     );
 }
 
+/// **Стенд Э108, 7.4: a window rebuilt in another step of the font keeps its place, not the size
+/// of the old one.**
+///
+/// The stand switched an open settings window from Russian to Tamil: the new window came up at
+/// the step of Tamil but in the rectangle of the Russian one, 769 × 847 against 769 × 752 of a
+/// fresh Tamil window, ≈ 95 px of empty ground under the buttons (`s7-live-ru-to-ta`). The sizes
+/// below are the stand's.
+#[test]
+fn a_reopened_window_stands_where_the_old_one_stood_in_its_own_size() {
+    // 1920 × 1080 at 100 %, the work area of the stand.
+    let work_area = rect(0, 0, 1920, 1032);
+    let russian = rect(250, 40, 250 + 769, 40 + 847);
+
+    // Russian → Tamil: the place stays, the size is Tamil's.
+    let tamil = rect(255, 0, 255 + 769, 752);
+    assert_eq!(
+        settings::reopened_window(russian, tamil, work_area),
+        rect(250, 40, 250 + 769, 40 + 752)
+    );
+
+    // A change of direction alone keeps the step and the size: the old rectangle, as in 1.2.0.
+    let same_size = rect(255, 0, 255 + 769, 847);
+    assert_eq!(
+        settings::reopened_window(russian, same_size, work_area),
+        russian
+    );
+
+    // Tamil → Russian low on the screen: the taller window is lifted so that its bottom is on
+    // the work area, and never above the top of it.
+    let tamil_low = rect(250, 260, 250 + 769, 260 + 752);
+    assert_eq!(
+        settings::reopened_window(tamil_low, rect(0, 0, 769, 847), work_area),
+        rect(250, 185, 250 + 769, 1032)
+    );
+    assert_eq!(
+        settings::reopened_window(tamil_low, rect(0, 0, 769, 1100), work_area),
+        rect(250, 0, 250 + 769, 1100)
+    );
+}
+
 /// **Criterion 2 of task Т-31-2, and the guard over a line a measurement paid for.**
 ///
 /// Three claims about the shape, swept over the source, because none of them can be driven from
@@ -20120,6 +20160,127 @@ fn the_acting_line_is_built_from_the_pair_and_the_four_counters_and_says_zero_in
     }
 }
 
+/// **Стенд Э108, FAIL 2, решение 202.19о: in a right-to-left window every name of the acting line
+/// is an embedding of its own; in a left-to-right one the line is what it was.**
+///
+/// The stand read «Действующий цикл» backwards in all five right-to-left languages, each for one
+/// kind of names: Urdu with «←» and Latin names, the four others with «→» and names in Arabic
+/// script (`reports\shots-E108\README.md`). Held for all 44 languages with a Latin name, a name in
+/// Arabic script and both: right to left, each name stands between two right-to-left marks in an
+/// embedding of its own direction; left to right, no direction control at all — the forty-four
+/// minus five, the twelve left-to-right ones of 1.2.0 among them, get the plain substitution.
+#[test]
+fn the_names_of_the_acting_line_are_embedded_in_a_right_to_left_window_only() {
+    use settings::{Acting, acting_line};
+
+    const RLM: char = '\u{200F}';
+    const LRE: char = '\u{202A}';
+    const RLE: char = '\u{202B}';
+    const PDF: char = '\u{202C}';
+    const CONTROLS: [char; 13] = [
+        '\u{200E}', '\u{200F}', '\u{061C}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+        '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{FEFF}',
+    ];
+
+    let latin = "English (United States)";
+    let arabic = "اردو (پاکستان)";
+    let pair = Acting::Pair(latin.to_owned(), arabic.to_owned());
+    let cycle = Acting::Cycle(vec![
+        latin.to_owned(),
+        arabic.to_owned(),
+        "Deutsch".to_owned(),
+    ]);
+
+    let product = ProductImage::shared();
+    let _gate = with_product_strings();
+    let mut wrong = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let (latin_in, arabic_in, german_in) = if language.is_rtl() {
+            (
+                format!("{RLM}{LRE}{latin}{PDF}{RLM}"),
+                format!("{RLM}{RLE}{arabic}{PDF}{RLM}"),
+                format!("{RLM}{LRE}Deutsch{PDF}{RLM}"),
+            )
+        } else {
+            (latin.to_owned(), arabic.to_owned(), "Deutsch".to_owned())
+        };
+
+        let pair_wanted = product
+            .string(language, settings::IDS_STATE_PAIR)
+            .replace("{0}", &latin_in)
+            .replace("{1}", &arabic_in);
+        let arrow = product.string(language, settings::IDS_CYCLE_ARROW);
+        let cycle_wanted = product
+            .string(language, settings::IDS_STATE_CYCLE)
+            .replace("{0}", &[latin_in, arabic_in, german_in].join(&arrow));
+
+        for (line, wanted) in [
+            (acting_line(&pair, 0), pair_wanted),
+            (acting_line(&cycle, 0), cycle_wanted),
+        ] {
+            // The line goes on with the refusals through `IDS_STATE_JOINED` of the language.
+            if !line.contains(&wanted) {
+                wrong.push(format!("{}: «{line:?}» lacks «{wanted:?}»", language.tag()));
+            }
+
+            if !language.is_rtl() && line.chars().any(|c| CONTROLS.contains(&c)) {
+                wrong.push(format!(
+                    "{}: a direction control in «{line:?}»",
+                    language.tag()
+                ));
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **Стенд Э108, FAIL 2, решение 202.19о: the arrows of the acting line point the way the script
+/// reads, and the comma of a list in Arabic script is the Arabic one.**
+///
+/// The rule of [`the_help_arrow_follows_the_direction_of_the_script`] for the two strings of
+/// «Состояние» that carry an arrow: with the names embedded, the first of them stands on the
+/// right in a right-to-left line, and the arrow that leads to the next is «←». Arabic had «, »
+/// since 1.2.0 where Urdu, Persian and Uyghur have «، ».
+#[test]
+fn the_arrows_of_the_acting_line_follow_the_direction_of_the_script() {
+    let product = ProductImage::shared();
+    let mut wrong = Vec::new();
+
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
+        let language = language_of_tag(tag);
+        let (wanted, unwanted) = if language.is_rtl() {
+            ('←', '→')
+        } else {
+            ('→', '←')
+        };
+
+        for id in [settings::IDS_CYCLE_ARROW, settings::IDS_STATE_PAIR] {
+            let line = product.string_of_langid(langid, id);
+
+            if !line.contains(wanted) || line.contains(unwanted) {
+                wrong.push(format!("{tag} {id}: «{line}» wants «{wanted}»"));
+            }
+        }
+
+        if registry::script_of(tag).as_deref() == Some("Arab") {
+            let separator = product.string_of_langid(langid, settings::IDS_LIST_SEPARATOR);
+
+            if separator != "، " {
+                wrong.push(format!("{tag}: list separator «{separator}», wanted «، »"));
+            }
+        }
+    }
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// **Task T-34-5 — the pure half, all sixteen combinations.** `program_state` is a function of
 /// the four flags the modules publish and of nothing else, and every combination has exactly one
 /// answer, in the order the doc comment of the function gives: fail-safe first, then the hook
@@ -27888,6 +28049,61 @@ fn a_caption_in_a_cursive_script_is_drawn_as_one_run() {
             "«{caption}» keeps the letter spacing of the mock-ups"
         );
     }
+}
+
+/// **Стенд Э108, FAIL 1: a panel caption in a script of joining or stacking marks is not cut
+/// into characters either.**
+///
+/// The spacing places every character with a `TextOutW` of its own, and a Devanagari vowel sign,
+/// a virama or a Thai tone mark is a character of its own: drawn alone it loses the consonant it
+/// belongs to. The stand saw «स◌ाम◌ान◌्य» for «सामान्य» and «ท◌ั◌่วไป» for «ทั่วไป» — the dotted
+/// circle is the font's sign of a mark with nothing to sit on (`reports\shots-E108\README.md`,
+/// `s2-hi-settings`). The rule of Т-30-4 refused the spacing to Hebrew and Arabic only.
+///
+/// Held on the six group headings of the **built** binary in every shipped language, by the
+/// script the registry gives the language — not by the code's own list of blocks, which is what
+/// is under test. A language written in a script of joining or stacking marks is drawn as one
+/// run; every other language is spaced exactly as before, the fourteen of 1.2.0 included.
+#[test]
+fn a_caption_in_a_script_of_joining_or_stacking_marks_is_drawn_as_one_run() {
+    const ONE_RUN: [&str; 14] = [
+        "Arab", "Hebr", "Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym",
+        "Thai", "Laoo", "Khmr",
+    ];
+
+    const GROUPS: [u16; 6] = [
+        settings::IDS_GROUP_GENERAL,
+        settings::IDS_GROUP_HOTKEY,
+        settings::IDS_GROUP_LAYOUTS,
+        settings::IDS_GROUP_EXCLUSIONS,
+        settings::IDS_GROUP_DIAGNOSTICS,
+        settings::IDS_GROUP_STATE,
+    ];
+
+    let product = ProductImage::shared();
+    let mut wrong = Vec::new();
+
+    for (tag, langid, _) in shipped_locales() {
+        let script = registry::script_of(&tag).expect("every shipped language names its script");
+        let one_run = ONE_RUN.contains(&script.as_str());
+
+        for id in GROUPS {
+            let caption = product.string_of_langid(langid, id);
+
+            if settings::caption_takes_tracking(&caption) == one_run {
+                wrong.push(format!(
+                    "{tag} ({script}) «{caption}»: spaced {}, wanted {}",
+                    one_run, !one_run
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "a caption is cut into characters where its script cannot bear it, or the reverse:\n{}",
+        wrong.join("\n")
+    );
 }
 
 /// **Т-30-4, замер: no direction mark reaches the configuration file, and none is needed.**

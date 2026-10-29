@@ -225,7 +225,7 @@ IDS_TOAST_UPDATED	toast	text	balloon text: 255 characters	-	-
 IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_FAILED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_LIST_SEPARATOR	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	the separator of the list in {0} of IDS_LAYOUT_NOTE, «, » with its space; right to left: the separator of the language («،») is the translator's choice, the stand checks it
-IDS_CYCLE_ARROW	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	between the layouts of the cycle in {0} of IDS_STATE_CYCLE, « → » with its spaces; right to left: the direction of the arrow is the translator's choice, the stand checks it
+IDS_CYCLE_ARROW	IDD_SETTINGS	IDC_STATE_PAIR	704x19	-	between the layouts of the cycle in {0} of IDS_STATE_CYCLE, « → » with its spaces; right to left « ← »: the code embeds every name, the first stands on the right (решение 202.19о)
 IDS_TIP_FORMAT	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	{0} = «Lang Switcher», not translated; {1} = IDS_TIP_ACTIVE or IDS_TIP_PAUSED (code: APP_NAME, &state)	the tooltip of the tray icon; the order and the joiner are the language's
 IDS_WIZARD_SEND	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the main button of the last step: the appeal goes to the site only when it is pressed (decision 199.5)
 IDS_WIZARD_SENDING	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the same button, grey, while the appeal is on its way (up to 15 seconds)

@@ -127,9 +127,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
     SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
     SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE,
-    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
-    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW,
+    SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
     SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
     WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
     WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
@@ -6646,7 +6646,8 @@ pub enum LanguageSwitch {
     /// Язык другой, направление письма то же — окно **перезаполняется на месте**, тем же телом,
     /// которым заполняется при создании ([`relabel_dialog`]).
     Relabel,
-    /// Направление письма сменилось — окно **пересоздаётся** в том же экранном прямоугольнике.
+    /// Направление письма или шаг шрифта сменились — окно **пересоздаётся** на том же месте, в своём
+    /// размере ([`reopened_window`]).
     Reopen,
 }
 
@@ -7076,7 +7077,8 @@ pub enum Opening {
     Fresh,
     /// «Применить» changed the direction of writing, so the window is being built again.
     ///
-    /// It sits down in the rectangle the previous one occupied — `Some`, the ordinary case —
+    /// It sits down where the previous one stood, in its own size ([`reopened_window`]) — `Some`,
+    /// the rectangle of the previous one and the ordinary case —
     /// and the focus goes on the language combo, where the hand that caused this left it. A
     /// `None` rectangle is the degraded path of [`DialogState::reopen_at`]: the window is
     /// still rebuilt, and `DS_CENTER` decides where.
@@ -7911,23 +7913,24 @@ unsafe extern "system" fn dialog_proc(
                 // it before this message — and the window is not on the screen yet: it is shown
                 // when this procedure returns. So the move lands before the first paint, and
                 // there is no blink. Measured both ways in посылка П3.
+                //
+                // Stage E108, the stand (7.4): the place is the previous window's and the size is
+                // this window's own — [`reopened_window`]. Moved first, so that the work area is
+                // asked of the monitor it now stands on; lifted second, only if it grew past it.
                 if let Some(rect) = at {
-                    // SAFETY: `hwnd` is the live dialog being initialised; the call is given
-                    // plain numbers and keeps no pointer.
-                    if let Err(error) = unsafe {
-                        SetWindowPos(
-                            hwnd,
-                            None,
-                            rect.left,
-                            rect.top,
-                            rect.right - rect.left,
-                            rect.bottom - rect.top,
-                            SWP_NOZORDER | SWP_NOACTIVATE,
-                        )
-                    } {
-                        // NFR-13: the window opens where `DS_CENTER` left it, which is a worse
-                        // place and not a lost window.
-                        crate::app::report_non_critical("SetWindowPos", &error);
+                    let mut own = RECT::default();
+
+                    // SAFETY: `hwnd` is the live dialog being initialised and `own` a live local.
+                    if unsafe { move_window_to(hwnd, rect.left, rect.top) }
+                        && unsafe { GetWindowRect(hwnd, &raw mut own) }.is_ok()
+                        && let Some(work_area) = monitor_work_rect(hwnd)
+                    {
+                        let place = reopened_window(rect, own, work_area);
+
+                        if place.top != own.top {
+                            // SAFETY: as above.
+                            unsafe { move_window_to(hwnd, place.left, place.top) };
+                        }
                     }
                 }
 
@@ -10465,8 +10468,36 @@ const fn label_reading(control: i32) -> theme::Reading {
 /// letter-spacing either of them is a typographic error and not a style. One rule for both, and
 /// it reads off the text rather than off the locale — a caption is what it is whoever is looking
 /// at it.
+///
+/// ⛔ **Stage E108, the stand (FAIL 1): no, for a caption carrying a mark that joins or stacks**
+/// either. A Devanagari vowel sign, a virama, a Thai tone mark, a Khmer subscript is a character
+/// of its own, and drawn by a `TextOutW` of its own it loses the letter it belongs to: the stand
+/// saw «स◌ाम◌ान◌्य» for «सामान्य» (`reports\shots-E108\README.md`). None of those scripts has
+/// capitals either. See [`is_joining_or_stacking`].
 pub fn caption_takes_tracking(caption: &str) -> bool {
-    !caption.chars().any(is_strong_rtl)
+    !caption
+        .chars()
+        .any(|character| is_strong_rtl(character) || is_joining_or_stacking(character))
+}
+
+/// A character of a script whose marks join or stack onto a letter — the scripts of India from
+/// Devanagari to Sinhala, Thai, Lao, Tibetan, Myanmar and Khmer — or a combining mark of any
+/// script: drawn alone, it has nothing to sit on.
+///
+/// By blocks and not by language, as [`is_strong_rtl`] is: the rule reads the text.
+const fn is_joining_or_stacking(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0300}'..='\u{036F}'
+            | '\u{0900}'..='\u{0FFF}'
+            | '\u{1000}'..='\u{109F}'
+            | '\u{1780}'..='\u{17FF}'
+            | '\u{19E0}'..='\u{19FF}'
+            | '\u{1AB0}'..='\u{1AFF}'
+            | '\u{1DC0}'..='\u{1DFF}'
+            | '\u{20D0}'..='\u{20FF}'
+            | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 /// A character of one of the two right-to-left scripts вопрос 97 admits — the Hebrew and Arabic
@@ -14646,11 +14677,27 @@ pub enum Acting {
 /// refused and by how much, without switching the journal on. Zero is said in words — «отказов
 /// выбора не было» — because «отказов: 0 · пара: —» is a table row, not a sentence.
 pub fn acting_line(acting: &Acting, refusals: u32) -> String {
+    // Stage E108, the stand (FAIL 2), решение 202.19о: in a right-to-left window every name goes
+    // into the line as an embedding of its own, so that the arrows read the way the window does
+    // whatever script the names are in — [`theme::embedded_name`]. A left-to-right window gets
+    // the names as they are, byte for byte as in 1.2.0.
+    let right_to_left = ui_language().in_force().is_rtl();
+    let in_line = |name: &str| {
+        if right_to_left {
+            theme::embedded_name(name, reading_of_name(name) == theme::Reading::Native)
+        } else {
+            name.to_owned()
+        }
+    };
+
     let what = match acting {
-        Acting::Pair(source, target) => format_text(IDS_STATE_PAIR, &[source, target]),
-        // The arrow is a string since T-L10N-10: « → » in every table; right to left, the
-        // translation chooses its direction.
+        Acting::Pair(source, target) => {
+            format_text(IDS_STATE_PAIR, &[&in_line(source), &in_line(target)])
+        }
+        // The arrow is a string since T-L10N-10: « → » left to right, « ← » in the five
+        // right-to-left tables, whose first name stands on the right.
         Acting::Cycle(names) => {
+            let names: Vec<String> = names.iter().map(|name| in_line(name)).collect();
             format_text(IDS_STATE_CYCLE, &[&names.join(&text(IDS_CYCLE_ARROW))])
         }
         Acting::None => text(IDS_STATE_PAIR_NONE),
@@ -15208,6 +15255,63 @@ fn reopen_in_place(hwnd: HWND) {
     unsafe { with_state(hwnd, |state| state.reopen_at = at) };
 
     end_dialog(hwnd, DIALOG_REOPEN);
+}
+
+/// Where a window rebuilt by [`LanguageSwitch::Reopen`] stands — stage E108, the stand (7.4).
+///
+/// The **place** is the previous window's top left corner, where the eye left it. The **size** is
+/// the new window's own: a change between two tables of the tallest window (решение 202.40) opens
+/// at another step of the font, and a window kept in the old rectangle showed ≈ 95 px of empty
+/// ground under its buttons on the stand (ru → ta, `reports\shots-E108\s7-live-ru-to-ta.png`). A
+/// change of the direction of writing alone keeps the step and so the size: nothing moves, as in
+/// 1.2.0. A window that grew past the bottom of the work area is lifted, never above its top.
+///
+/// Pure, so that `tests\settings.rs` reads the rule the dialog uses.
+pub fn reopened_window(previous: RECT, own: RECT, work_area: RECT) -> RECT {
+    let width = own.right - own.left;
+    let height = own.bottom - own.top;
+
+    let top = if previous.top + height > work_area.bottom {
+        (work_area.bottom - height).max(work_area.top)
+    } else {
+        previous.top
+    };
+
+    RECT {
+        left: previous.left,
+        top,
+        right: previous.left + width,
+        bottom: top + height,
+    }
+}
+
+/// Moves the window to a screen point and leaves its size alone — the size of a dialog being
+/// initialised is the one `fit_window_to_work_area` decided. `false` when the move failed.
+///
+/// # Safety
+///
+/// `hwnd` must be a live window of this thread.
+unsafe fn move_window_to(hwnd: HWND, left: i32, top: i32) -> bool {
+    // SAFETY: the caller's; the call is given plain numbers and keeps no pointer.
+    match unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            left,
+            top,
+            0,
+            0,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
+        )
+    } {
+        Ok(()) => true,
+        Err(error) => {
+            // NFR-13: the window opens where `DS_CENTER` left it, which is a worse place and not
+            // a lost window.
+            crate::app::report_non_critical("SetWindowPos", &error);
+            false
+        }
+    }
 }
 
 /// Adds the name in the edit field to the exclusion list — FR-84.
