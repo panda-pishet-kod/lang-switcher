@@ -18,6 +18,14 @@ use std::path::Path;
 #[path = "support/registry.rs"]
 mod registry;
 
+/// The script of a sign — the one judge of `tests\l10n.rs` too (stage E108, решение 202.8).
+#[path = "support/scripts.rs"]
+mod scripts;
+
+/// The messages of Inno's own `Default.isl` 6.7.3 in `[Messages]` — counted in the file; a language
+/// without an official translation carries every one of them in its own file (decision 202.2).
+const INNO_MESSAGES: usize = 281;
+
 /// The internal names of [Languages] of 1.2.0, in order: English first — it is the fallback.
 const LANGUAGES: [&str; 14] = [
     "english",
@@ -711,5 +719,172 @@ fn the_wizard_wears_the_look_of_the_site_and_its_signature_opens_the_site_as_the
         )),
         Ok(1),
         "the control: the address opened as the person must be found"
+    );
+}
+
+/// **Stage E108, decision 202.2 — every language of group A speaks its own language in the
+/// installer, and the installer knows which language it is.**
+///
+/// For a language without an official translation of Inno, our file is the whole translation:
+/// `[LangOptions]` names the language by the LANGID of the registry (Inno picks the language of
+/// the wizard by it), reads right to left exactly when the registry says so, and `[Messages]`
+/// carries every one of the 281 messages of `Default.isl` — the same names in every such file.
+/// For a language Inno translates (ta, th, bg, hy), our file is only our messages, like the
+/// fourteen. In both, every message of `[CustomMessages]` carries letters of the language's own
+/// script (the registry's `script`), and none of another non-Latin script — the lesson of the
+/// trial of Hindi (решение 202.8).
+///
+/// ⚠ Control: a file whose LANGID is another language's, one without `RightToLeft` for a language
+/// read right to left, and a message in Latin letters for a non-Latin language are each caught.
+#[test]
+fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
+    fn options_of(text: &str) -> Vec<(String, String)> {
+        section(text, "LangOptions")
+            .into_iter()
+            .filter_map(|line| line.split_once('='))
+            .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
+            .collect()
+    }
+
+    fn message_names(text: &str) -> Vec<String> {
+        let mut names: Vec<String> = section(text, "Messages")
+            .into_iter()
+            .filter_map(|line| line.split_once('='))
+            .map(|(key, _)| key.trim().to_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// What is wrong with one file of group A, as lines.
+    fn problems_of(entry: &registry::Entry, text: &str, own: &[(String, String)]) -> Vec<String> {
+        let file = format!("{}.isl", entry.inno);
+        let mut out = Vec::new();
+        let options = options_of(text);
+        let option = |key: &str| {
+            options
+                .iter()
+                .find(|(of, _)| of.eq_ignore_ascii_case(key))
+                .map(|(_, value)| value.as_str())
+        };
+
+        if entry.inno_official {
+            if !options.is_empty() || !section(text, "Messages").is_empty() {
+                out.push(format!(
+                    "{file}: Inno translates {} itself — our file carries only our messages",
+                    entry.tag
+                ));
+            }
+        } else {
+            let langid = format!("${:04X}", entry.langid);
+            if option("LanguageID").map(str::to_uppercase) != Some(langid.clone()) {
+                out.push(format!(
+                    "{file}: LanguageID {:?}, the registry says {langid}",
+                    option("LanguageID")
+                ));
+            }
+            if option("LanguageName").is_none_or(str::is_empty) {
+                out.push(format!("{file}: no LanguageName"));
+            }
+            let rtl = option("RightToLeft").is_some_and(|value| value.eq_ignore_ascii_case("yes"));
+            if rtl != entry.rtl {
+                out.push(format!(
+                    "{file}: RightToLeft is {rtl}, the registry reads {} right to left: {}",
+                    entry.tag, entry.rtl
+                ));
+            }
+            let count = message_names(text).len();
+            if count != INNO_MESSAGES {
+                out.push(format!(
+                    "{file}: {count} messages of Inno, Default.isl has {INNO_MESSAGES}"
+                ));
+            }
+        }
+
+        if entry.script != "Latn" {
+            for (message, value) in own {
+                let scripts: Vec<&str> =
+                    value.chars().filter_map(scripts::script_of_char).collect();
+                if !scripts.contains(&entry.script.as_str()) {
+                    out.push(format!(
+                        "{file}: {message} carries no letter of {} — «{value}»",
+                        entry.script
+                    ));
+                }
+                if let Some(other) = scripts.iter().find(|script| **script != entry.script) {
+                    out.push(format!(
+                        "{file}: {message} carries a sign of {other} — «{value}»"
+                    ));
+                }
+            }
+        }
+
+        out
+    }
+
+    let group_a: Vec<registry::Entry> = registry::shipped()
+        .into_iter()
+        .filter(|entry| entry.group == "A")
+        .collect();
+
+    let mut problems = Vec::new();
+    let mut names_of_unofficial: Option<(String, Vec<String>)> = None;
+
+    for entry in &group_a {
+        let file = format!("{}.isl", entry.inno);
+        let text = fs::read_to_string(installer().join("lang").join(&file))
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        problems.extend(problems_of(entry, &text, &messages(&file)));
+
+        if !entry.inno_official {
+            let names = message_names(&text);
+            match &names_of_unofficial {
+                None => names_of_unofficial = Some((file.clone(), names)),
+                Some((first, theirs)) if *theirs != names => problems.push(format!(
+                    "{file}: the names of [Messages] are not those of {first}"
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+
+    // The controls, on the first language of group A read right to left and not in Latin.
+    if let Some(entry) = group_a
+        .iter()
+        .find(|entry| entry.rtl && !entry.inno_official && entry.script != "Latn")
+    {
+        let file = format!("{}.isl", entry.inno);
+        let text = fs::read_to_string(installer().join("lang").join(&file)).expect("read above");
+        let own = messages(&file);
+        let langid = format!("${:04X}", entry.langid);
+
+        // The keys as lines of the file: the header of a file may name them in a comment.
+        let other_langid =
+            text.replacen(&format!("\nLanguageID={langid}"), "\nLanguageID=$0409", 1);
+        let no_rtl = text.replacen("\nRightToLeft=yes", "\nRightToLeft=no", 1);
+        let mut latin = own.clone();
+        latin[0].1 = "Latin letters only".to_owned();
+
+        for (what, mutant, own) in [
+            ("another LANGID", &other_langid, &own),
+            ("no RightToLeft", &no_rtl, &own),
+            ("a message in Latin letters", &text, &latin),
+        ] {
+            assert!(
+                *mutant != text || own != &messages(&file),
+                "{what}: the control must change what it is made of"
+            );
+            assert!(
+                !problems_of(entry, mutant, own).is_empty(),
+                "the control: {what} in {file} must be caught"
+            );
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "{} problem(s) with the languages of group A in the installer:\n  {}",
+        problems.len(),
+        problems.join("\n  ")
     );
 }
