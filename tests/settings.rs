@@ -8305,6 +8305,62 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "Version 0.97.0 er udgivet",
         "Detaljer findes på downloadsiden.\n",
     ),
+    (
+        Language::Fi,
+        "Ohjelma päivittyy nyt itsestään",
+        concat!(
+            "Lang Switcher lataa ja asentaa nyt uudet versiot itse.\n",
+            "Versiosta 0.104.0 alkaen se hakee ne tekijän sivustolta ja asentaa\n",
+            "ne tarkistettuaan digitaalisen allekirjoituksen. Asenna uusi versio\n",
+            "kerran, niin päivitykset tulevat jatkossa itsestään. Tämä versio\n",
+            "korjaa myös käynnistymisen Windowsissa, jossa ei ole Visual C++ -pakettia:\n",
+            "versiot 0.90.0–0.103.0 eivät käynnistyneet siellä.\n",
+        ),
+        "Versio 0.97.0 on julkaistu",
+        "Lisätietoja on lataussivulla.\n",
+    ),
+    (
+        Language::Nb,
+        "Programmet oppdaterer seg nå selv",
+        concat!(
+            "Fra og med 0.104.0 oppdaterer Lang Switcher seg selv.\n",
+            "Programmet laster ned nye versjoner fra utviklerens nettsted og\n",
+            "installerer dem etter å ha kontrollert signaturen. Installer den nye\n",
+            "versjonen én gang, så kommer oppdateringene av seg selv. Denne\n",
+            "versjonen retter også oppstart på Windows uten Visual C++-pakken:\n",
+            "versjonene 0.90.0–0.103.0 startet ikke der.\n",
+        ),
+        "Versjon 0.97.0 er ute",
+        "Detaljer finnes på nedlastingssiden.\n",
+    ),
+    (
+        Language::Et,
+        "Programm värskendab nüüd ennast ise",
+        concat!(
+            "Lang Switcher laadib ja paigaldab nüüd uued versioonid ise.\n",
+            "Alates versioonist 0.104.0 võtab programm need autori saidilt ja\n",
+            "paigaldab pärast digiallkirja kontrollimist. Paigaldage uus versioon\n",
+            "ühe korra, edaspidi tulevad värskendused ise. See versioon parandab ka\n",
+            "käivitumise Windowsis, kus puudub Visual C++ pakett: versioonid\n",
+            "0.90.0–0.103.0 seal ei käivitunud.\n",
+        ),
+        "Versioon 0.97.0 on välja antud",
+        "Üksikasjad on allalaadimislehel.\n",
+    ),
+    (
+        Language::Nn,
+        "Programmet oppdaterer seg no sjølv",
+        concat!(
+            "Frå og med 0.104.0 oppdaterer Lang Switcher seg sjølv.\n",
+            "Programmet lastar ned nye versjonar frå nettstaden til utviklaren og\n",
+            "installerer dei etter at signaturen er kontrollert. Installer den nye\n",
+            "versjonen éin gong, så kjem oppdateringane av seg sjølv. Denne\n",
+            "versjonen rettar òg oppstart på Windows utan Visual C++-pakken:\n",
+            "versjonane 0.90.0–0.103.0 starta ikkje der.\n",
+        ),
+        "Versjon 0.97.0 er ute",
+        "Detaljar finst på nedlastingssida.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and

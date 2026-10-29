@@ -334,12 +334,16 @@ Name: "georgian"; MessagesFile: "compiler:Default.isl,lang\Georgian.isl"
 Name: "macedonian"; MessagesFile: "compiler:Default.isl,lang\Macedonian.isl"
 Name: "swedish"; MessagesFile: "compiler:Languages\Swedish.isl,lang\Swedish.isl"
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl,lang\Danish.isl"
+Name: "finnish"; MessagesFile: "compiler:Languages\Finnish.isl,lang\Finnish.isl"
 Name: "croatian"; MessagesFile: "compiler:Default.isl,lang\Croatian.isl"
 Name: "slovak"; MessagesFile: "compiler:Languages\Slovak.isl,lang\Slovak.isl"
+Name: "norwegian"; MessagesFile: "compiler:Languages\Norwegian.isl,lang\Norwegian.isl"
 Name: "lithuanian"; MessagesFile: "compiler:Default.isl,lang\Lithuanian.isl"
 Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl,lang\Slovenian.isl"
 Name: "bosnian"; MessagesFile: "compiler:Default.isl,lang\Bosnian.isl"
 Name: "latvian"; MessagesFile: "compiler:Default.isl,lang\Latvian.isl"
+Name: "estonian"; MessagesFile: "compiler:Default.isl,lang\Estonian.isl"
+Name: "norwegiannynorsk"; MessagesFile: "compiler:Default.isl,lang\NorwegianNynorsk.isl"
 
 [Files]
 ; ignoreversion: the product is replaced whenever this installer runs, including a

@@ -718,7 +718,7 @@ rtl = false
 inno = "Finnish"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "hr"
@@ -757,7 +757,7 @@ rtl = false
 inno = "Norwegian"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 note = "two languages (198.13, 200б.1): Bokmål (this entry, Inno Norwegian.isl is $0414) and Nynorsk (nn)"
 
 [[language]]
@@ -823,7 +823,7 @@ rtl = false
 inno = "Estonian"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "cy"
@@ -901,5 +901,5 @@ rtl = false
 inno = "NorwegianNynorsk"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 note = "two languages (198.13, 200б.1): Nynorsk (this entry; no Inno translation) and Bokmål (nb)"

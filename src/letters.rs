@@ -2309,6 +2309,28 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "hallø",
             badge: ["EN", "DA"],
         },
+        // KBDFI and KBDEST (`ä` on the key of `'`), KBDNO for both forms of Norwegian (`å` on the key
+        // of `[`) against KBDUS. Nynorsk takes «hallå» of the reviewer, not «skål» — a toast (C7-5).
+        Language::Fi => DemoPair {
+            typed: "p'iv''",
+            fixed: "päivää",
+            badge: ["EN", "FI"],
+        },
+        Language::Nb => DemoPair {
+            typed: "hall[",
+            fixed: "hallå",
+            badge: ["EN", "NB"],
+        },
+        Language::Et => DemoPair {
+            typed: "t'nan",
+            fixed: "tänan",
+            badge: ["EN", "ET"],
+        },
+        Language::Nn => DemoPair {
+            typed: "hall[",
+            fixed: "hallå",
+            badge: ["EN", "NN"],
+        },
         //
         // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
         // from the translator, the keys off the file of the layout).
@@ -2317,15 +2339,11 @@ pub fn demo_pair(language: Language) -> DemoPair {
         | Language::Ro
         | Language::Hu
         | Language::Sq
-        | Language::Fi
-        | Language::Nb
-        | Language::Et
         | Language::Cy
         | Language::Mt
         | Language::Is
         | Language::Lb
-        | Language::Mi
-        | Language::Nn => PAIR_TO_COME,
+        | Language::Mi => PAIR_TO_COME,
     }
 }
 
