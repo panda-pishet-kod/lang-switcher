@@ -10233,8 +10233,36 @@ const fn label_reading(control: i32) -> theme::Reading {
 /// letter-spacing either of them is a typographic error and not a style. One rule for both, and
 /// it reads off the text rather than off the locale — a caption is what it is whoever is looking
 /// at it.
+///
+/// ⛔ **Stage E108, the stand (FAIL 1): no, for a caption carrying a mark that joins or stacks**
+/// either. A Devanagari vowel sign, a virama, a Thai tone mark, a Khmer subscript is a character
+/// of its own, and drawn by a `TextOutW` of its own it loses the letter it belongs to: the stand
+/// saw «स◌ाम◌ान◌्य» for «सामान्य» (`reports\shots-E108\README.md`). None of those scripts has
+/// capitals either. See [`is_joining_or_stacking`].
 pub fn caption_takes_tracking(caption: &str) -> bool {
-    !caption.chars().any(is_strong_rtl)
+    !caption
+        .chars()
+        .any(|character| is_strong_rtl(character) || is_joining_or_stacking(character))
+}
+
+/// A character of a script whose marks join or stack onto a letter — the scripts of India from
+/// Devanagari to Sinhala, Thai, Lao, Tibetan, Myanmar and Khmer — or a combining mark of any
+/// script: drawn alone, it has nothing to sit on.
+///
+/// By blocks and not by language, as [`is_strong_rtl`] is: the rule reads the text.
+const fn is_joining_or_stacking(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0300}'..='\u{036F}'
+            | '\u{0900}'..='\u{0FFF}'
+            | '\u{1000}'..='\u{109F}'
+            | '\u{1780}'..='\u{17FF}'
+            | '\u{19E0}'..='\u{19FF}'
+            | '\u{1AB0}'..='\u{1AFF}'
+            | '\u{1DC0}'..='\u{1DFF}'
+            | '\u{20D0}'..='\u{20FF}'
+            | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 /// A character of one of the two right-to-left scripts вопрос 97 admits — the Hebrew and Arabic

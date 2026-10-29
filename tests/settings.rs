@@ -27506,6 +27506,61 @@ fn a_caption_in_a_cursive_script_is_drawn_as_one_run() {
     }
 }
 
+/// **Стенд Э108, FAIL 1: a panel caption in a script of joining or stacking marks is not cut
+/// into characters either.**
+///
+/// The spacing places every character with a `TextOutW` of its own, and a Devanagari vowel sign,
+/// a virama or a Thai tone mark is a character of its own: drawn alone it loses the consonant it
+/// belongs to. The stand saw «स◌ाम◌ान◌्य» for «सामान्य» and «ท◌ั◌่วไป» for «ทั่วไป» — the dotted
+/// circle is the font's sign of a mark with nothing to sit on (`reports\shots-E108\README.md`,
+/// `s2-hi-settings`). The rule of Т-30-4 refused the spacing to Hebrew and Arabic only.
+///
+/// Held on the six group headings of the **built** binary in every shipped language, by the
+/// script the registry gives the language — not by the code's own list of blocks, which is what
+/// is under test. A language written in a script of joining or stacking marks is drawn as one
+/// run; every other language is spaced exactly as before, the fourteen of 1.2.0 included.
+#[test]
+fn a_caption_in_a_script_of_joining_or_stacking_marks_is_drawn_as_one_run() {
+    const ONE_RUN: [&str; 14] = [
+        "Arab", "Hebr", "Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym",
+        "Thai", "Laoo", "Khmr",
+    ];
+
+    const GROUPS: [u16; 6] = [
+        settings::IDS_GROUP_GENERAL,
+        settings::IDS_GROUP_HOTKEY,
+        settings::IDS_GROUP_LAYOUTS,
+        settings::IDS_GROUP_EXCLUSIONS,
+        settings::IDS_GROUP_DIAGNOSTICS,
+        settings::IDS_GROUP_STATE,
+    ];
+
+    let product = ProductImage::shared();
+    let mut wrong = Vec::new();
+
+    for (tag, langid, _) in shipped_locales() {
+        let script = registry::script_of(&tag).expect("every shipped language names its script");
+        let one_run = ONE_RUN.contains(&script.as_str());
+
+        for id in GROUPS {
+            let caption = product.string_of_langid(langid, id);
+
+            if settings::caption_takes_tracking(&caption) == one_run {
+                wrong.push(format!(
+                    "{tag} ({script}) «{caption}»: spaced {}, wanted {}",
+                    one_run, !one_run
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "a caption is cut into characters where its script cannot bear it, or the reverse:\n{}",
+        wrong.join("\n")
+    );
+}
+
 /// **Т-30-4, замер: no direction mark reaches the configuration file, and none is needed.**
 ///
 /// The mandate offered a trailing direction mark in the text of a list item as a way of keeping
