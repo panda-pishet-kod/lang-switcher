@@ -64,12 +64,14 @@ Windows 10 or Windows 11, 64-bit. No runtime to install, no account, no internet
 
 ## Languages
 
-**The interface** speaks 44 languages — 42 languages, Serbian and Uzbek in both of their scripts:
+**The interface** speaks 66 languages — 64 languages, Serbian and Uzbek in both of their scripts:
 English, Russian, Ukrainian, German, French, Spanish, Portuguese, Italian, Polish, Czech, Turkish,
 Greek, Hebrew, Arabic, Hindi, Bengali, Urdu, Punjabi, Marathi, Telugu, Tamil, Persian, Gujarati,
 Thai, Kannada, Odia, Malayalam, Uzbek (Latin and Cyrillic), Nepali, Assamese, Azerbaijani, Khmer,
-Kazakh, Serbian (Cyrillic and Latin), Uyghur, Bulgarian, Armenian, Lao, Belarusian, Tatar, Georgian
-and Macedonian; Hebrew, Arabic, Urdu, Persian and Uyghur read right to left. The language list of
+Kazakh, Serbian (Cyrillic and Latin), Uyghur, Bulgarian, Armenian, Lao, Belarusian, Tatar, Georgian,
+Macedonian, Vietnamese, Dutch, Romanian, Hungarian, Swedish, Albanian, Danish, Finnish, Croatian,
+Slovak, Norwegian Bokmål, Lithuanian, Slovenian, Bosnian, Latvian, Estonian, Welsh, Maltese,
+Icelandic, Luxembourgish, Māori and Norwegian Nynorsk; Hebrew, Arabic, Urdu, Persian and Uyghur read right to left. The language list of
 the settings puts the language of Windows, English, the languages of your keyboard layouts and
 Russian on top, and the rest by name.
 

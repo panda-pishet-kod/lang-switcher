@@ -6404,14 +6404,15 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     // `1.0.0.0`, `e106` (stage Э106: new abilities — the statistics of three more languages,
     // the list of languages) is `1.1.0.0`, `e107` (stage Э107: the appeal sent from the wizard,
     // the statistics of six more languages) is `1.2.0.0`, `e108` (stage Э108: the interface in the
-    // thirty languages of group A) is `1.3.0.0`. `Cargo.toml` is the one source and
+    // thirty languages of group A) is `1.3.0.0`, `e109` (stage Э109: the twenty-two of
+    // group B) is `1.4.0.0`. `Cargo.toml` is the one source and
     // `tools\verify-version.ps1` holds the ten places to it — this assertion is the reader of the
     // bytes `rc.exe` really produced, and the one the instrument cannot see: it is raised **by
     // hand**, and that is what makes it the honest red before a version bump.
     assert_eq!(
         version,
-        Some((1, 3, 0, 0)),
-        "app.rc must declare FILEVERSION 1,3,0,0 — version 1.3.0, the fourth field always 0 (решение 192.3)"
+        Some((1, 4, 0, 0)),
+        "app.rc must declare FILEVERSION 1,4,0,0 — version 1.4.0, the fourth field always 0 (решение 192.3)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process

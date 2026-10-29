@@ -77,7 +77,7 @@
 ; The name of the Start menu folder of e90...e100, with the platform: kept only for the cleanup in
 ; [InstallDelete].  tests\installer_name.rs allows the old name on this line and on no other.
 #define GroupNameUntilE100 "Lang Switcher for Windows"
-#define AppVersion     "1.3.0"
+#define AppVersion     "1.4.0"
 #define AppPublisher   "Panda Koder"
 #define AppExeName     "LangSwitcher.exe"
 #define AppCopyright   "Copyright (C) 2026 Panda Koder"
@@ -175,10 +175,10 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppCopyright={#AppCopyright}
-VersionInfoVersion=1.3.0.0
+VersionInfoVersion=1.4.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion=1.3.0.0
+VersionInfoProductVersion=1.4.0.0
 VersionInfoDescription={#AppName} Setup
 VersionInfoCopyright={#AppCopyright}
 
