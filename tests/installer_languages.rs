@@ -136,6 +136,26 @@ fn messages(file: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Whether a line of an Inno file names something in straight apostrophes — `'Telepítés'` — and
+/// not in the quotation marks of its language (RULES п. 16; the stand of 1.4.0, stage E109).
+///
+/// An opening apostrophe stands after a sign that is not a letter and before a letter; its closing one
+/// after a letter and before a sign that is not one — so the elision of «d'Layout» or «a'r» is no name.
+fn names_in_straight_apostrophes(line: &str) -> bool {
+    let value = line.split_once('=').map_or(line, |(_, value)| value);
+    let signs: Vec<char> = value.chars().collect();
+    let letter = |at: usize| signs.get(at).is_some_and(|sign| sign.is_alphanumeric());
+
+    (0..signs.len()).any(|open| {
+        signs[open] == '\''
+            && (open == 0 || !letter(open - 1))
+            && letter(open + 1)
+            && (open + 1..signs.len())
+                .find(|&close| signs[close] == '\'')
+                .is_some_and(|close| letter(close - 1) && !letter(close + 1))
+    })
+}
+
 /// Every entry of `[Languages]`: its internal name and its files, in order.
 fn language_entries(script: &str) -> Vec<(String, Vec<String>)> {
     section(script, "Languages")
@@ -774,11 +794,22 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
         };
 
         if entry.inno_official {
-            if !options.is_empty() || !section(text, "Messages").is_empty() {
+            if !options.is_empty() {
                 out.push(format!(
                     "{file}: Inno translates {} itself — our file carries only our messages",
                     entry.tag
                 ));
+            }
+            // Stage E109 (the stand of 1.4.0): a message of Inno's own translation may be given again
+            // here only to put the quotation marks of the language round a name the official file
+            // writes in straight apostrophes (RULES п. 16) — so no message here may keep them.
+            for line in section(text, "Messages") {
+                if names_in_straight_apostrophes(line) {
+                    out.push(format!(
+                        "{file}: [Messages] gives a message of Inno again and keeps the straight \
+                         apostrophes — «{line}»"
+                    ));
+                }
             }
         } else {
             let langid = format!("${:04X}", entry.langid);
@@ -891,5 +922,70 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
         "{} problem(s) with the languages of groups A and B in the installer:\n  {}",
         problems.len(),
         problems.join("\n  ")
+    );
+}
+
+/// **Stage E109, the stand of 1.4.0 — the installer in Hungarian names its buttons in Hungarian
+/// quotation marks.** Inno's own Hungarian translation (`compiler:Languages\Hungarian.isl`, Inno Setup
+/// 6.7.3) writes nineteen of its messages with a button or a file in straight apostrophes — «Kattintson
+/// a 'Telepítés'-re» on the page «ready to install» (FAIL of the stand, `reports\shots-E109\README.md`).
+/// Our `Hungarian.isl` gives exactly those nineteen again, with „…” instead of the apostrophes and not a
+/// word otherwise changed (the lines were made out of the official file by replacing the marks alone).
+///
+/// ⚠ Control: the official line itself is caught by the rule; an elision of another language is not.
+#[test]
+fn the_official_hungarian_messages_name_their_buttons_in_hungarian_quotation_marks() {
+    /// The messages of the official Hungarian translation of Inno Setup 6.7.3 that name something in
+    /// straight apostrophes — measured on the file, stage E109.
+    const STRAIGHT_IN_THE_OFFICIAL_FILE: [&str; 19] = [
+        "SetupAppRunningError",
+        "UninstallAppRunningError",
+        "ClickNext",
+        "BrowseDialogLabel",
+        "PasswordLabel3",
+        "InfoBeforeClickLabel",
+        "InfoAfterClickLabel",
+        "SelectDirBrowseLabel",
+        "SelectComponentsLabel2",
+        "SelectTasksLabel2",
+        "SelectStartMenuFolderBrowseLabel",
+        "ReadyLabel2a",
+        "ReadyLabel2b",
+        "CannotContinue",
+        "ClickFinish",
+        "ShowReadmeCheck",
+        "SelectDiskLabel2",
+        "ErrorOpeningReadme",
+        "ConfirmDeleteSharedFile2",
+    ];
+
+    let text = fs::read_to_string(installer().join("lang").join("Hungarian.isl"))
+        .expect("Hungarian.isl is read");
+    let given: Vec<(String, String)> = section(&text, "Messages")
+        .into_iter()
+        .filter_map(|line| line.split_once('='))
+        .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
+        .collect();
+    let names: Vec<&str> = given.iter().map(|(name, _)| name.as_str()).collect();
+
+    assert_eq!(
+        names, STRAIGHT_IN_THE_OFFICIAL_FILE,
+        "Hungarian.isl gives again exactly the messages the official file writes with straight \
+         apostrophes"
+    );
+    for (name, value) in &given {
+        assert!(
+            value.contains('„') && value.contains('”') && !names_in_straight_apostrophes(value),
+            "{name}: the name stands in „…”, not in straight apostrophes — «{value}»"
+        );
+    }
+
+    assert!(
+        names_in_straight_apostrophes("ReadyLabel2b=Kattintson a 'Telepítés'-re a folytatáshoz."),
+        "the control: the line of the official file must be caught"
+    );
+    assert!(
+        !names_in_straight_apostrophes("d'Layout gouf op Lëtzebuergesch ëmgeschalt, a'r cynllun"),
+        "the control: an elision is not a name in apostrophes"
     );
 }
