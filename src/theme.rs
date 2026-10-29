@@ -2955,6 +2955,42 @@ pub enum Reading {
     LatinIsland,
 }
 
+/// A name set into a sentence of a **right-to-left** window as an embedding of its own — stage
+/// E108, the stand (FAIL 2), решение 202.19о.
+///
+/// A line that strings names together — «Действующий цикл: A ← B ← C» — has its order decided by
+/// the bidi algorithm and not by the string: Latin names and the arrows between them merge into
+/// one left-to-right island, and a name in Arabic script turns its neighbours round, so one arrow
+/// could not read right for both (`reports\shots-E108\README.md`). Each name is wrapped in an
+/// embedding of its own direction (LRE or RLE … PDF), and a right-to-left mark stands on either
+/// side of it, so that the arrows and spaces between the names are flanked by strong
+/// right-to-left characters and take the direction of the window: the first name stands on the
+/// right and every arrow is «←».
+///
+/// ⛔ Not the isolates of Unicode 6.3 (FSI … PDI), which решение 202.19о asked for first:
+/// measured by `ScriptItemize` + `ScriptLayout`, the engine `DrawText` uses, they change nothing —
+/// «A ← B ← C» with isolated names came out in the same order as without them, the reverse one
+/// (`scratchpad-E108\logs\bidi-order.log`). Embeddings came out right with Latin names, with
+/// names in Arabic script and with both.
+///
+/// `reads_right_to_left` is the name's own direction — [`crate::settings::reading_of_name`].
+/// Never applied to a name that goes into the configuration file: only to the line of
+/// «Состояние» that is put on the screen.
+pub fn embedded_name(name: &str, reads_right_to_left: bool) -> String {
+    const RIGHT_TO_LEFT_MARK: char = '\u{200F}';
+    const LEFT_TO_RIGHT_EMBEDDING: char = '\u{202A}';
+    const RIGHT_TO_LEFT_EMBEDDING: char = '\u{202B}';
+    const POP_DIRECTIONAL_FORMATTING: char = '\u{202C}';
+
+    let opening = if reads_right_to_left {
+        RIGHT_TO_LEFT_EMBEDDING
+    } else {
+        LEFT_TO_RIGHT_EMBEDDING
+    };
+
+    format!("{RIGHT_TO_LEFT_MARK}{opening}{name}{POP_DIRECTIONAL_FORMATTING}{RIGHT_TO_LEFT_MARK}")
+}
+
 /// [`LABEL_TEXT_FORMAT`] with the reading order this `dc` and this kind of run call for.
 ///
 /// The one call the drawing sites make, so that the decision above is taken once rather than

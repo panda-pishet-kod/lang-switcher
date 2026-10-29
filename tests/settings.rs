@@ -19840,6 +19840,127 @@ fn the_acting_line_is_built_from_the_pair_and_the_four_counters_and_says_zero_in
     }
 }
 
+/// **Стенд Э108, FAIL 2, решение 202.19о: in a right-to-left window every name of the acting line
+/// is an embedding of its own; in a left-to-right one the line is what it was.**
+///
+/// The stand read «Действующий цикл» backwards in all five right-to-left languages, each for one
+/// kind of names: Urdu with «←» and Latin names, the four others with «→» and names in Arabic
+/// script (`reports\shots-E108\README.md`). Held for all 44 languages with a Latin name, a name in
+/// Arabic script and both: right to left, each name stands between two right-to-left marks in an
+/// embedding of its own direction; left to right, no direction control at all — the forty-four
+/// minus five, the twelve left-to-right ones of 1.2.0 among them, get the plain substitution.
+#[test]
+fn the_names_of_the_acting_line_are_embedded_in_a_right_to_left_window_only() {
+    use settings::{Acting, acting_line};
+
+    const RLM: char = '\u{200F}';
+    const LRE: char = '\u{202A}';
+    const RLE: char = '\u{202B}';
+    const PDF: char = '\u{202C}';
+    const CONTROLS: [char; 13] = [
+        '\u{200E}', '\u{200F}', '\u{061C}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+        '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{FEFF}',
+    ];
+
+    let latin = "English (United States)";
+    let arabic = "اردو (پاکستان)";
+    let pair = Acting::Pair(latin.to_owned(), arabic.to_owned());
+    let cycle = Acting::Cycle(vec![
+        latin.to_owned(),
+        arabic.to_owned(),
+        "Deutsch".to_owned(),
+    ]);
+
+    let product = ProductImage::shared();
+    let _gate = with_product_strings();
+    let mut wrong = Vec::new();
+
+    for language in Language::ALL {
+        settings::set_ui_language(language);
+
+        let (latin_in, arabic_in, german_in) = if language.is_rtl() {
+            (
+                format!("{RLM}{LRE}{latin}{PDF}{RLM}"),
+                format!("{RLM}{RLE}{arabic}{PDF}{RLM}"),
+                format!("{RLM}{LRE}Deutsch{PDF}{RLM}"),
+            )
+        } else {
+            (latin.to_owned(), arabic.to_owned(), "Deutsch".to_owned())
+        };
+
+        let pair_wanted = product
+            .string(language, settings::IDS_STATE_PAIR)
+            .replace("{0}", &latin_in)
+            .replace("{1}", &arabic_in);
+        let arrow = product.string(language, settings::IDS_CYCLE_ARROW);
+        let cycle_wanted = product
+            .string(language, settings::IDS_STATE_CYCLE)
+            .replace("{0}", &[latin_in, arabic_in, german_in].join(&arrow));
+
+        for (line, wanted) in [
+            (acting_line(&pair, 0), pair_wanted),
+            (acting_line(&cycle, 0), cycle_wanted),
+        ] {
+            // The line goes on with the refusals through `IDS_STATE_JOINED` of the language.
+            if !line.contains(&wanted) {
+                wrong.push(format!("{}: «{line:?}» lacks «{wanted:?}»", language.tag()));
+            }
+
+            if !language.is_rtl() && line.chars().any(|c| CONTROLS.contains(&c)) {
+                wrong.push(format!(
+                    "{}: a direction control in «{line:?}»",
+                    language.tag()
+                ));
+            }
+        }
+    }
+
+    settings::set_ui_language(Language::Ru);
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **Стенд Э108, FAIL 2, решение 202.19о: the arrows of the acting line point the way the script
+/// reads, and the comma of a list in Arabic script is the Arabic one.**
+///
+/// The rule of [`the_help_arrow_follows_the_direction_of_the_script`] for the two strings of
+/// «Состояние» that carry an arrow: with the names embedded, the first of them stands on the
+/// right in a right-to-left line, and the arrow that leads to the next is «←». Arabic had «, »
+/// since 1.2.0 where Urdu, Persian and Uyghur have «، ».
+#[test]
+fn the_arrows_of_the_acting_line_follow_the_direction_of_the_script() {
+    let product = ProductImage::shared();
+    let mut wrong = Vec::new();
+
+    for (tag, langid, _) in shipped_locales() {
+        let tag = tag.as_str();
+        let language = language_of_tag(tag);
+        let (wanted, unwanted) = if language.is_rtl() {
+            ('←', '→')
+        } else {
+            ('→', '←')
+        };
+
+        for id in [settings::IDS_CYCLE_ARROW, settings::IDS_STATE_PAIR] {
+            let line = product.string_of_langid(langid, id);
+
+            if !line.contains(wanted) || line.contains(unwanted) {
+                wrong.push(format!("{tag} {id}: «{line}» wants «{wanted}»"));
+            }
+        }
+
+        if registry::script_of(tag).as_deref() == Some("Arab") {
+            let separator = product.string_of_langid(langid, settings::IDS_LIST_SEPARATOR);
+
+            if separator != "، " {
+                wrong.push(format!("{tag}: list separator «{separator}», wanted «، »"));
+            }
+        }
+    }
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// **Task T-34-5 — the pure half, all sixteen combinations.** `program_state` is a function of
 /// the four flags the modules publish and of nothing else, and every combination has exactly one
 /// answer, in the order the doc comment of the function gives: fail-safe first, then the hook

@@ -128,9 +128,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
     SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE,
     SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
-    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW,
+    SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
     SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
     WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
     WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
@@ -14446,11 +14445,27 @@ pub enum Acting {
 /// refused and by how much, without switching the journal on. Zero is said in words — «отказов
 /// выбора не было» — because «отказов: 0 · пара: —» is a table row, not a sentence.
 pub fn acting_line(acting: &Acting, refusals: u32) -> String {
+    // Stage E108, the stand (FAIL 2), решение 202.19о: in a right-to-left window every name goes
+    // into the line as an embedding of its own, so that the arrows read the way the window does
+    // whatever script the names are in — [`theme::embedded_name`]. A left-to-right window gets
+    // the names as they are, byte for byte as in 1.2.0.
+    let right_to_left = ui_language().in_force().is_rtl();
+    let in_line = |name: &str| {
+        if right_to_left {
+            theme::embedded_name(name, reading_of_name(name) == theme::Reading::Native)
+        } else {
+            name.to_owned()
+        }
+    };
+
     let what = match acting {
-        Acting::Pair(source, target) => format_text(IDS_STATE_PAIR, &[source, target]),
-        // The arrow is a string since T-L10N-10: « → » in every table; right to left, the
-        // translation chooses its direction.
+        Acting::Pair(source, target) => {
+            format_text(IDS_STATE_PAIR, &[&in_line(source), &in_line(target)])
+        }
+        // The arrow is a string since T-L10N-10: « → » left to right, « ← » in the five
+        // right-to-left tables, whose first name stands on the right.
         Acting::Cycle(names) => {
+            let names: Vec<String> = names.iter().map(|name| in_line(name)).collect();
             format_text(IDS_STATE_CYCLE, &[&names.join(&text(IDS_CYCLE_ARROW))])
         }
         Acting::None => text(IDS_STATE_PAIR_NONE),
