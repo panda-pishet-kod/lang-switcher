@@ -266,7 +266,7 @@ rtl = false
 inno = "Punjabi"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "Gurmukhi, the LIP pa-IN (200б.1, as recommended); Shahmukhi pa-Arab-PK (0x0846, right to left, no LIP) not taken"
 
 [[language]]
@@ -293,7 +293,7 @@ rtl = false
 inno = "Telugu"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "ta"
@@ -306,7 +306,7 @@ rtl = false
 inno = "Tamil"
 inno_official = true
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "fa"
@@ -332,7 +332,7 @@ rtl = false
 inno = "Gujarati"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "th"
@@ -358,7 +358,7 @@ rtl = false
 inno = "Kannada"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "or"
@@ -371,7 +371,7 @@ rtl = false
 inno = "Odia"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "ml"
@@ -384,7 +384,7 @@ rtl = false
 inno = "Malayalam"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "uz"
@@ -397,7 +397,7 @@ rtl = false
 inno = "Uzbek"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "two languages (200б.1): Latin the main one (this entry, the LIP uz-Latn-UZ) and Cyrillic (uz-Cyrl); the primary tag uz does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers uz-Latn-UZ or uz-Cyrl-UZ) belongs to the stage of translations A"
 
 [[language]]
@@ -411,7 +411,7 @@ rtl = false
 inno = "UzbekCyrillic"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "two languages (200б.1): Cyrillic the second (this entry, Windows has no LIP of it) and Latin (uz); the primary tag uz does not tell the scripts apart: the choice at the first run by the script of Windows (GetUserPreferredUILanguages answers uz-Latn-UZ or uz-Cyrl-UZ) belongs to the stage of translations A"
 
 [[language]]
@@ -451,7 +451,7 @@ rtl = false
 inno = "Azerbaijani"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 note = "Latin, the LIP az-Latn-AZ (200б.1); Cyrillic az-Cyrl-AZ (0x082C) not taken"
 
 [[language]]
@@ -465,7 +465,7 @@ rtl = false
 inno = "Khmer"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "kk"
@@ -478,7 +478,7 @@ rtl = false
 inno = "Kazakh"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "sr"
@@ -532,7 +532,7 @@ rtl = false
 inno = "Bulgarian"
 inno_official = true
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "hy"
@@ -545,7 +545,7 @@ rtl = false
 inno = "Armenian"
 inno_official = true
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "lo"
@@ -571,7 +571,7 @@ rtl = false
 inno = "Belarusian"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "tt"
@@ -584,7 +584,7 @@ rtl = false
 inno = "Tatar"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "ka"
@@ -597,7 +597,7 @@ rtl = false
 inno = "Georgian"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "mk"
@@ -610,7 +610,7 @@ rtl = false
 inno = "Macedonian"
 inno_official = false
 group = "A"
-state = "planned"
+state = "shipped"
 
 # ---------------------------------------------------------------------------------------------
 # Group B -- 22 languages: Latin with letters of its own; Windows has the UI.

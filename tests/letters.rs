@@ -2141,6 +2141,25 @@ const PAIRS_OF_DECISION_178_6: &[(Language, &str, &str, [&str; 2])] = &[
     (Language::SrLatn, "ydravo", "zdravo", ["EN", "SR"]),
     (Language::Fa, "sghl", "سلام", ["EN", "FA"]),
     (Language::Ug, "sflfm", "سالام", ["EN", "UG"]),
+    (Language::Ta, "bCidicd", "வணக்கம்", ["EN", "TA"]),
+    (Language::Ml, "vcmdkejx", "നമസ്കാരം", ["EN", "ML"]),
+    (Language::UzCyrl, "Cj-vbcbp", "Соғмисиз", ["EN", "UZ"]),
+    // Uzbek in Latin — the other way round, as Polish (решение 178.5): typed with Russian on.
+    (Language::Uz, "Ыфдщь", "Salom", ["RU", "UZ"]),
+    (Language::Te, "vcmdkejx", "నమస్కారం", ["EN", "TE"]),
+    (Language::Kn, "vcmdkej", "ನಮಸ್ಕಾರ", ["EN", "KN"]),
+    (Language::Pa, "vcmls", "ਨਮਸਤੇ", ["EN", "PA"]),
+    (Language::Gu, "vcmdls", "નમસ્તે", ["EN", "GU"]),
+    (Language::Az, "Nec's'n", "Necəsən", ["EN", "AZ"]),
+    (Language::Be, "ghsdbnfyyt", "прывітанне", ["EN", "BE"]),
+    (Language::Kk, "c2ktv", "сәлем", ["EN", "KK"]),
+    (Language::Tt, "cokfv", "сәлам", ["EN", "TT"]),
+    (Language::Bg, "po,dlex", "здравей", ["EN", "BG"]),
+    (Language::Mk, "zdravo", "здраво", ["EN", "MK"]),
+    (Language::Or, "vcmdkej", "ନମସ୍କାର", ["EN", "OR"]),
+    (Language::Km, "CMrabsYr", "ជំរាបសួរ", ["EN", "KM"]),
+    (Language::Ka, "gamarjoba", "გამარჯობა", ["EN", "KA"]),
+    (Language::Hy, "ba87", "բարև", ["EN", "HY"]),
 ];
 
 /// **Задача T-102-2, сторож (1) — every language of the interface shows the pair of решение

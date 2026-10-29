@@ -5653,24 +5653,143 @@ const TALLEST_FIRST_FACE: i32 = FONT_STEP_FLOOR;
 /// tells of five steps and the clipboard, and the shorter words took a row off the window that was
 /// the tallest at this one face. Measured by the test above; no face went up.
 ///
-/// ⭐ **11 px: 407 → 412 with stage E108, wave 1** (task T-108-4): Serbian in Cyrillic — «От автора»
-/// with the quiet line — is five units taller than the Greek one at the floor of the rule, and at
-/// no other face. Measured by the test above with the twenty-four languages of the wave; the face
-/// of 11 px is the last step, so the rule only meets it on the smallest screens.
+/// ⭐⭐ **Stage E108, решение 202.40 (C6): this is the table of the fourteen languages of 1.0.0**, the
+/// same numbers as after T-108-0, byte for byte — the look of the fourteen does not move. Tamil and
+/// Malayalam made «От автора» a fifth taller than any window of the fourteen, and one table for all
+/// would have taken a step of the font off every screen of every language; so the rule counts with
+/// the table **of the language of the interface** ([`tallest_window_units_in`]): the fourteen and
+/// every language whose windows fit here use this table, a language whose windows are taller
+/// somewhere has its own, measured face by face ([`TALLER_LANGUAGES`]). Within a language the step
+/// is one for every window (решение 143.1 stands).
 const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
-    412, 389, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
+    407, 389, 399, 390, 397, 387, 395, 400, 402, 396, // 11 … 20 px
     386, 399, 403, 404, 386, 396, 401, 412, 404, 392, // 21 … 30 px
     401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
 ];
 
-/// The height, in dialog units, of the tallest window of the program at a dialog face of `face`
-/// pixels — [`TALLEST_WINDOW_BY_FACE`], and its own maximum beyond it: a face the table does not
-/// know is counted as the tallest the table knows, never shorter.
-pub fn tallest_window_units(face: i32) -> i32 {
+/// **The languages whose own tallest window is taller than [`TALLEST_WINDOW_BY_FACE`] at some face**
+/// — stage E108, решение 202.40 — each with its own table, measured by
+/// `the_tallest_window_by_face_is_the_table_the_rule_counts_with` as the fourteen's is: the least
+/// number of units that holds the tallest window of that language at each face, 11 … 40 px.
+///
+/// Measured with the thirty-two languages of 2026-10-29 (`scratchpad-E108\tallest-per-lang.log`):
+/// Tamil and Malayalam a fifth taller («От автора» with the quiet line), Telugu and Kannada a few
+/// units, Serbian and Uzbek in Cyrillic at some faces only — each table is that language's own
+/// tallest, so at a face where it is shorter than the fourteen's the language may keep a larger step.
+const TALLER_LANGUAGES: [(Language, [i32; 30]); 10] = [
+    (
+        Language::Te,
+        [
+            417, 399, 408, 381, 406, 380, 404, 409, 412, 405, // 11 … 20 px
+            395, 408, 403, 413, 395, 405, 411, 412, 413, 401, // 21 … 30 px
+            410, 395, 407, 401, 410, 418, 404, 414, 407, 413, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Ta,
+        [
+            507, 444, 494, 442, 492, 438, 489, 479, 467, 472, // 11 … 20 px
+            446, 493, 456, 500, 454, 490, 481, 499, 483, 463, // 21 … 30 px
+            479, 472, 476, 470, 497, 489, 475, 484, 487, 483, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Kn,
+        [
+            407, 408, 399, 399, 397, 396, 395, 400, 412, 396, // 11 … 20 px
+            395, 399, 403, 404, 395, 396, 401, 403, 404, 401, // 21 … 30 px
+            401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Ml,
+        [
+            472, 473, 460, 460, 458, 456, 456, 462, 476, 456, // 11 … 20 px
+            454, 460, 465, 466, 454, 457, 464, 474, 466, 463, // 21 … 30 px
+            462, 456, 459, 462, 463, 472, 466, 467, 470, 466, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::UzCyrl,
+        [
+            406, 399, 398, 390, 397, 387, 395, 391, 402, 387, // 11 … 20 px
+            386, 398, 394, 403, 386, 396, 392, 402, 395, 392, // 21 … 30 px
+            392, 387, 397, 392, 400, 399, 394, 395, 398, 394, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Sr,
+        [
+            412, 380, 380, 380, 396, 380, 394, 382, 383, 380, // 11 … 20 px
+            380, 389, 380, 394, 380, 387, 383, 402, 386, 380, // 21 … 30 px
+            391, 380, 388, 380, 391, 390, 380, 386, 380, 393, // 31 … 40 px
+        ],
+    ),
+    // Wave 2, with forty languages (`scratchpad-E108\tallest-40.log`).
+    (
+        Language::Mk,
+        [
+            413, 399, 407, 390, 405, 387, 403, 391, 402, 404, // 11 … 20 px
+            386, 407, 394, 412, 403, 405, 392, 410, 412, 392, // 21 … 30 px
+            409, 387, 406, 392, 409, 416, 394, 412, 398, 411, // 31 … 40 px
+        ],
+    ),
+    // Wave 2, with all forty-four languages (`scratchpad-E108\tallest-44.log`).
+    (
+        Language::Km,
+        [
+            397, 399, 390, 390, 389, 387, 387, 391, 402, 387, // 11 … 20 px
+            386, 390, 394, 395, 386, 388, 392, 394, 395, 392, // 21 … 30 px
+            392, 387, 389, 392, 392, 399, 394, 395, 398, 394, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Hy,
+        [
+            417, 418, 416, 408, 414, 404, 412, 409, 421, 405, // 11 … 20 px
+            403, 408, 412, 421, 403, 405, 411, 429, 413, 410, // 21 … 30 px
+            410, 404, 407, 410, 410, 418, 413, 414, 416, 413, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Ka,
+        [
+            417, 408, 408, 399, 406, 404, 404, 409, 421, 405, // 11 … 20 px
+            403, 408, 412, 413, 403, 405, 411, 421, 413, 410, // 21 … 30 px
+            410, 404, 407, 410, 410, 418, 413, 414, 416, 413, // 31 … 40 px
+        ],
+    ),
+];
+
+/// The table of the tallest window `language` counts with — its own, or the fourteen's.
+fn tallest_table_of(language: Language) -> &'static [i32; 30] {
+    TALLER_LANGUAGES
+        .iter()
+        .find(|(of, _)| *of == language)
+        .map_or(&TALLEST_WINDOW_BY_FACE, |(_, table)| table)
+}
+
+/// Whether `language` counts with a table of its own and not the fourteen's — stage E108.
+pub fn has_own_tallest_table(language: Language) -> bool {
+    TALLER_LANGUAGES.iter().any(|(of, _)| *of == language)
+}
+
+/// The height, in dialog units, of the tallest window of the program **in `language`** at a dialog
+/// face of `face` pixels — its table ([`tallest_table_of`]), and the table's own maximum beyond
+/// it: a face the table does not know is counted as the tallest the table knows, never shorter.
+pub fn tallest_window_units_in(language: Language, face: i32) -> i32 {
+    let table = tallest_table_of(language);
+
     usize::try_from(face - TALLEST_FIRST_FACE)
         .ok()
-        .and_then(|index| TALLEST_WINDOW_BY_FACE.get(index).copied())
-        .unwrap_or_else(|| TALLEST_WINDOW_BY_FACE.iter().copied().max().unwrap_or(0))
+        .and_then(|index| table.get(index).copied())
+        .unwrap_or_else(|| table.iter().copied().max().unwrap_or(0))
+}
+
+/// [`tallest_window_units_in`] the language of the interface in force — what the rule of the
+/// step counts with when a window opens ([`font_step_for`]).
+pub fn tallest_window_units(face: i32) -> i32 {
+    tallest_window_units_in(ui_language().in_force(), face)
 }
 
 /// **The rule of the step — решение 143.1**, the pure half of задача T-83-2: the step the six
@@ -6304,12 +6423,23 @@ pub enum LanguageSwitch {
 /// Публичная, как пара [`theme_combo_index`] / [`theme_from_combo_index`] рядом, и по той же
 /// причине: тест обязан звать **ту самую** функцию, которую зовёт диалог, а не её копию.
 /// Единственное место в программе, где написано, отчего зависит выбор механизма.
+///
+/// ⭐ **Stage E108, решение 202.40 (в): the step of the font goes by the language too** — a language
+/// with a table of the tallest window of its own opens at the step that table gives
+/// ([`tallest_window_units_in`]), and the step is set when a window is created, as the mirror is.
+/// So a change between two tables is a change that reopens, whatever the direction: a window left
+/// relabelled would stay at the step of the old language.
 pub fn language_switch(old: Language, new: Language) -> LanguageSwitch {
     if old == new {
         return LanguageSwitch::Unchanged;
     }
 
-    if old.is_rtl() == new.is_rtl() {
+    let same_table = std::ptr::eq(
+        tallest_table_of(old.in_force()),
+        tallest_table_of(new.in_force()),
+    );
+
+    if old.is_rtl() == new.is_rtl() && same_table {
         LanguageSwitch::Relabel
     } else {
         LanguageSwitch::Reopen

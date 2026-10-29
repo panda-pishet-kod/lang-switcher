@@ -64,8 +64,14 @@ Windows 10 or Windows 11, 64-bit. No runtime to install, no account, no internet
 
 ## Languages
 
-**The interface** speaks 14 languages: English, Russian, Ukrainian, German, French, Spanish,
-Portuguese, Italian, Polish, Czech, Turkish, Greek, Hebrew and Arabic (the last two right to left).
+**The interface** speaks 44 languages — 42 languages, Serbian and Uzbek in both of their scripts:
+English, Russian, Ukrainian, German, French, Spanish, Portuguese, Italian, Polish, Czech, Turkish,
+Greek, Hebrew, Arabic, Hindi, Bengali, Urdu, Punjabi, Marathi, Telugu, Tamil, Persian, Gujarati,
+Thai, Kannada, Odia, Malayalam, Uzbek (Latin and Cyrillic), Nepali, Assamese, Azerbaijani, Khmer,
+Kazakh, Serbian (Cyrillic and Latin), Uyghur, Bulgarian, Armenian, Lao, Belarusian, Tatar, Georgian
+and Macedonian; Hebrew, Arabic, Urdu, Persian and Uyghur read right to left. The language list of
+the settings puts the language of Windows, English, the languages of your keyboard layouts and
+Russian on top, and the rest by name.
 
 **Typing.** The program converts between any two Windows keyboard layouts installed on your
 computer, except layouts with an IME (Chinese, Japanese, Korean), where a character is built from

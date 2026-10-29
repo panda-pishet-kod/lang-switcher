@@ -2125,29 +2125,117 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "سالام",
             badge: ["EN", "UG"],
         },
-        // Stage E108: a language of group A gets its pair when its translation comes — the
-        // translator names the word, the keys are taken off the layouts by the instrument of
-        // 178.4 (§0 п. 6 of TZ-E108). Until then the build does not offer the language
-        // (`Language::is_shipped`) and the pair is never drawn; `tests\letters.rs` refuses a
-        // shipped language that is still in this arm.
-        Language::Pa
-        | Language::Te
-        | Language::Ta
-        | Language::Gu
-        | Language::Kn
-        | Language::Or
-        | Language::Ml
-        | Language::Uz
-        | Language::UzCyrl
-        | Language::Az
-        | Language::Km
-        | Language::Kk
-        | Language::Bg
-        | Language::Hy
-        | Language::Be
-        | Language::Tt
-        | Language::Ka
-        | Language::Mk => PAIR_TO_COME,
+        // KBDINTAM (Tamil, INSCRIPT — as the other Indic languages of the program; Tamil 99 would
+        // be «vphfhkf»: the stand looks), KBDINMAL, KBDUZB (`scratchpad-E108\pairs-uz-ta-ml.out.txt`).
+        // The translators' keys were from memory and two were wrong (ta «bCkdkcd», uz-Cyrl «Cj]…»).
+        Language::Ta => DemoPair {
+            typed: "bCidicd",
+            fixed: "வணக்கம்",
+            badge: ["EN", "TA"],
+        },
+        Language::Ml => DemoPair {
+            typed: "vcmdkejx",
+            fixed: "നമസ്കാരം",
+            badge: ["EN", "ML"],
+        },
+        Language::UzCyrl => DemoPair {
+            typed: "Cj-vbcbp",
+            fixed: "Соғмисиз",
+            badge: ["EN", "UZ"],
+        },
+        // Uzbek in Latin has no layout of its own in Windows — its readers type with the English
+        // one, as the Polish programmers do (решение 178.5) — so its pair is the other way round:
+        // «Salom» typed while the Russian layout was on (KBDRU, `pairs-uz-reverse.out.txt`).
+        Language::Uz => DemoPair {
+            typed: "Ыфдщь",
+            fixed: "Salom",
+            badge: ["RU", "UZ"],
+        },
+        // Wave 2 — KBDINTEL and KBDINKAN against KBDUS (`scratchpad-E108\pairs-te-kn.out.txt`); the
+        // translators' captions held a stub «ghbdtn», and KBDKAN.DLL, which the report named, is
+        // not a file of Windows.
+        Language::Te => DemoPair {
+            typed: "vcmdkejx",
+            fixed: "నమస్కారం",
+            badge: ["EN", "TE"],
+        },
+        Language::Kn => DemoPair {
+            typed: "vcmdkej",
+            fixed: "ನಮಸ್ಕಾರ",
+            badge: ["EN", "KN"],
+        },
+        // Wave 2 — KBDINPUN, KBDINGUJ, KBDAZEL, KBDBLR, KBDKAZ, KBDTAT, KBDBULG (and KBDBU — the same
+        // keys), KBDMAC (and KBDMACST) against KBDUS (`scratchpad-E108\pairs-pa-gu.out.txt`,
+        // `pairs-wave2a.out.txt`); the captions of the translators held stubs.
+        Language::Pa => DemoPair {
+            typed: "vcmls",
+            fixed: "ਨਮਸਤੇ",
+            badge: ["EN", "PA"],
+        },
+        Language::Gu => DemoPair {
+            typed: "vcmdls",
+            fixed: "નમસ્તે",
+            badge: ["EN", "GU"],
+        },
+        Language::Az => DemoPair {
+            typed: "Nec's'n",
+            fixed: "Necəsən",
+            badge: ["EN", "AZ"],
+        },
+        Language::Be => DemoPair {
+            typed: "ghsdbnfyyt",
+            fixed: "прывітанне",
+            badge: ["EN", "BE"],
+        },
+        Language::Kk => DemoPair {
+            typed: "c2ktv",
+            fixed: "сәлем",
+            badge: ["EN", "KK"],
+        },
+        Language::Tt => DemoPair {
+            typed: "cokfv",
+            fixed: "сәлам",
+            badge: ["EN", "TT"],
+        },
+        Language::Bg => DemoPair {
+            typed: "po,dlex",
+            fixed: "здравей",
+            badge: ["EN", "BG"],
+        },
+        Language::Mk => DemoPair {
+            typed: "zdravo",
+            fixed: "здраво",
+            badge: ["EN", "MK"],
+        },
+        // KBDINORI, KBDKHMR (Khmer: «សួស្តី» takes a space for its coeng on this layout, and the
+        // program converts the last word — so «ជំរាបសួរ», no coeng), KBDGEOQW (Georgian QWERTY;
+        // the traditional KBDGEO gives «ugbgjwk.g»), KBDARMPH (Armenian Phonetic, the layout of
+        // hy-AM; the Eastern one gives «bar&») against KBDUS (`pairs-wave2b.out.txt`).
+        Language::Or => DemoPair {
+            typed: "vcmdkej",
+            fixed: "ନମସ୍କାର",
+            badge: ["EN", "OR"],
+        },
+        Language::Km => DemoPair {
+            typed: "CMrabsYr",
+            fixed: "ជំរាបសួរ",
+            badge: ["EN", "KM"],
+        },
+        Language::Ka => DemoPair {
+            typed: "gamarjoba",
+            fixed: "გამარჯობა",
+            badge: ["EN", "KA"],
+        },
+        Language::Hy => DemoPair {
+            typed: "ba87",
+            fixed: "բարև",
+            badge: ["EN", "HY"],
+        },
+        // Stage E108: every value of the closed set has its pair since wave 2. A language of a later
+        // group joins with its own arm — the word of its translator, the keys off its layout by the
+        // instrument of 178.4; until then it may stand in an arm of `PAIR_TO_COME`, which the build
+        // never draws (`Language::is_shipped`), and `tests\letters.rs` refuses a shipped language
+        // that is still there.
     }
 }
 

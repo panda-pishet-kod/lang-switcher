@@ -610,6 +610,28 @@ fn refusals(
                      «{foreign}»"
                 ));
             }
+
+            // Stage E108, wave 2: a Latin letter inside a word of another script — the Macedonian
+            // «сѐ» typed with a Latin «è» passed the scan above, Latin being allowed everywhere.
+            // A word is a run of letters; one that holds Latin and Cyrillic or Greek letters — the
+            // scripts whose letters look alike — is refused, both ways. ⚠ Not the Arabic script:
+            // its conjunction «و» is written onto the next word, Latin too («وAlt» of Arabic).
+            let is_latin = |c: char| {
+                c.is_ascii_alphabetic()
+                    || matches!(c, '\u{00C0}'..='\u{024F}' | '\u{02BB}' | '\u{02BC}')
+            };
+            let looks_alike = |c: char| matches!(script_of_char(c), Some("Cyrl" | "Grek"));
+            let mixed: Vec<String> = string
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| word.chars().any(is_latin) && word.chars().any(looks_alike))
+                .map(str::to_owned)
+                .collect();
+            if !mixed.is_empty() {
+                out.push(format!(
+                    "{file}: {id} — смешение письма в слове (латиница и кириллица или греческое, \
+                     файл письма {own}): {mixed:?}"
+                ));
+            }
         }
     }
     out
@@ -848,13 +870,20 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
         "the mutant of an escape needs a \\\\"
     );
 
-    let mutants: [(&str, String, &[&str]); 10] = [
+    let mutants: [(&str, String, &[&str]); 11] = [
         (
             // Stage E108, решение 202.8: the mistake of the trial of Hindi, in Cyrillic — a Greek
             // «ρ» in place of the Cyrillic «р» of «Три» looks the same and is another script.
             "a letter of another script",
             uk.replacen(&panel, &panel.replacen('р', "ρ", 1), 1),
             &["uk.rc: IDS_WHATSNEW_PANEL — знаки чужого письма"],
+        ),
+        (
+            // Stage E108, wave 2: the Macedonian «сѐ» was typed with a Latin «è» — Latin is
+            // allowed in every table, so only the word gives it away. Here a Latin «i» in «зміни».
+            "a Latin letter inside a word of another script",
+            uk.replacen(&panel, &panel.replacen('і', "i", 1), 1),
+            &["uk.rc: IDS_WHATSNEW_PANEL — смешение письма в слове"],
         ),
         (
             "an identifier taken out",

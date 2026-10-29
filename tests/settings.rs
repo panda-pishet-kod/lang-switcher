@@ -2654,9 +2654,32 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     let mut relabel = 0;
     let mut reopen = 0;
 
+    // Stage E108, решение 202.40 (в): a language with a table of the tallest window of its own
+    // opens at its own step, so a change to or from it reopens even in one direction of writing.
+    let own = |language: Language| settings::has_own_tallest_table(language.in_force());
+
+    if settings::has_own_tallest_table(Language::Ta) && Language::Ta.is_shipped() {
+        assert_eq!(
+            settings::language_switch(Language::Ru, Language::Ta),
+            Reopen,
+            "Russian → Tamil: one direction, two tables — the window takes the step of Tamil"
+        );
+        assert_eq!(
+            settings::language_switch(Language::Ta, Language::Ml),
+            Reopen,
+            "Tamil → Malayalam: two tables of their own"
+        );
+    }
+    assert_eq!(
+        settings::language_switch(Language::Ru, Language::De),
+        Relabel,
+        "Russian → German: one direction, the table of the fourteen"
+    );
+
     for old in Language::ALL {
         for new in Language::ALL {
-            let wanted = match (old == new, old.is_rtl() == new.is_rtl()) {
+            let same_table = !own(old) && !own(new);
+            let wanted = match (old == new, old.is_rtl() == new.is_rtl() && same_table) {
                 (true, _) => Unchanged,
                 (false, true) => Relabel,
                 (false, false) => Reopen,
@@ -2679,11 +2702,33 @@ fn the_mechanism_of_a_language_change_follows_the_direction_of_writing() {
     println!("--- 44 × 44 pairs: relabel {relabel}, reopen {reopen} ---");
 
     // Since stage E108 the whole closed set: thirty-nine left-to-right values and five
-    // right-to-left ones (Hebrew, Arabic, Urdu, Persian, Uyghur): 39 × 38 + 5 × 4 = 1502 pairs keep
-    // the direction, and 39 × 5 + 5 × 39 = 390 cross it. A number, so that a mechanism quietly
-    // claiming every pair could not pass this test.
-    assert_eq!(relabel, 1502, "pairs that keep the direction of writing");
-    assert_eq!(reopen, 390, "pairs that cross it");
+    // right-to-left ones (Hebrew, Arabic, Urdu, Persian, Uyghur). Only the languages that share the
+    // table of the fourteen relabel among themselves (решение 202.40): l of them left to right and
+    // r right to left give l × (l − 1) + r × (r − 1) pairs, every other pair of different languages
+    // reopens. The two counts, so that a mechanism quietly claiming every pair could not pass.
+    let shared_ltr = Language::ALL
+        .iter()
+        .filter(|l| !l.is_rtl() && !own(**l))
+        .count();
+    let shared_rtl = Language::ALL
+        .iter()
+        .filter(|l| l.is_rtl() && !own(**l))
+        .count();
+    let expected_relabel = shared_ltr * (shared_ltr - 1) + shared_rtl * (shared_rtl - 1);
+    println!("--- shared table: {shared_ltr} left to right, {shared_rtl} right to left ---");
+    assert!(
+        shared_rtl == 5 && shared_ltr < 39,
+        "the five right-to-left languages share the table, and some left-to-right ones have their own"
+    );
+    assert_eq!(
+        relabel, expected_relabel,
+        "pairs that keep the direction and the table"
+    );
+    assert_eq!(
+        reopen,
+        44 * 43 - expected_relabel,
+        "pairs that cross one or the other"
+    );
 }
 
 /// **Criterion 2 of task Т-31-2, and the guard over a line a measurement paid for.**
@@ -7902,6 +7947,251 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "يېڭى نەشرى چىقتى: 0.97.0",
         "تەپسىلاتى چۈشۈرۈش بېتىدە.\n",
     ),
+    (
+        Language::Ta,
+        "நிரல் இப்போது தானே புதுப்பித்துக்கொள்ளும்",
+        concat!(
+            "0.104.0 முதல் Lang Switcher புதிய பதிப்புகளைத் தானே நிறுவுகிறது.\n",
+            "கோப்புகள் உருவாக்குநரின் தளத்திலிருந்து வருகின்றன, நிறுவும் முன் கையொப்பம்\n",
+            "சரிபார்க்கப்படும். புதிய பதிப்பை ஒருமுறை நிறுவுங்கள் — இனி புதுப்பிப்புகள்\n",
+            "தாமாகவே வரும். இந்தப் பதிப்பில் Visual C++ தொகுப்பு இல்லாத Windows\n",
+            "கணினியிலும் நிரல் தொடங்கும்படி சரிசெய்யப்பட்டுள்ளது: 0.90.0–0.103.0\n",
+            "பதிப்புகள் அங்கு தொடங்கவில்லை.\n",
+        ),
+        "பதிப்பு 0.97.0 வெளியானது",
+        "விவரங்கள் பதிவிறக்கப் பக்கத்தில் உள்ளன.\n",
+    ),
+    (
+        Language::Ml,
+        "പ്രോഗ്രാം ഇനി സ്വയം അപ്ഡേറ്റ് ചെയ്യും",
+        concat!(
+            "0.104.0 മുതൽ Lang Switcher പുതിയ പതിപ്പുകൾ സ്വയം ഇൻസ്റ്റാൾ ചെയ്യുന്നു.\n",
+            "ഫയലുകൾ നിർമ്മാതാവിന്റെ സൈറ്റിൽ നിന്ന് വരുന്നു, ഇൻസ്റ്റാൾ ചെയ്യുന്നതിന്\n",
+            "മുമ്പ് ഒപ്പ് പരിശോധിക്കും. പുതിയ പതിപ്പ് ഒരിക്കൽ ഇൻസ്റ്റാൾ ചെയ്യുക —\n",
+            "പിന്നീടുള്ള അപ്ഡേറ്റുകൾ സ്വയം വരും. ഈ പതിപ്പിൽ Visual C++ പാക്കേജ്\n",
+            "ഇല്ലാത്ത Windows കമ്പ്യൂട്ടറിലും പ്രോഗ്രാം ആരംഭിക്കുന്ന വിധം ശരിയാക്കി:\n",
+            "0.90.0–0.103.0 പതിപ്പുകൾ അവിടെ ആരംഭിച്ചിരുന്നില്ല.\n",
+        ),
+        "പതിപ്പ് 0.97.0 പുറത്തിറങ്ങി",
+        "വിശദാംശങ്ങൾ ഡൗൺലോഡ് പേജിലുണ്ട്.\n",
+    ),
+    (
+        Language::Uz,
+        "Dastur endi oʻzi yangilanadi",
+        concat!(
+            "0.104.0 versiyasidan boshlab Lang Switcher yangilanishlarni oʻzi oʻrnatadi.\n",
+            "Yangi versiyalar muallif saytidan yuklab olinadi, oʻrnatishdan oldin esa\n",
+            "imzo tekshiriladi. Yangi versiyani bir marta oʻrnating — keyingi\n",
+            "yangilanishlar oʻzi keladi. Bu versiyada Visual C++ paketi yoʻq Windows\n",
+            "tizimida ishga tushish ham tuzatildi: 0.90.0–0.103.0 versiyalari u yerda\n",
+            "ishga tushmasdi.\n",
+        ),
+        "0.97.0 versiyasi chiqdi",
+        "Tafsilotlar yuklab olish sahifasida.\n",
+    ),
+    (
+        Language::UzCyrl,
+        "Дастур энди ўзи янгиланади",
+        concat!(
+            "0.104.0 версиясидан бошлаб Lang Switcher янгиланишларни ўзи ўрнатади.\n",
+            "Янги версиялар муаллиф сайтидан юклаб олинади, ўрнатишдан олдин эса\n",
+            "имзо текширилади. Янги версияни бир марта ўрнатинг — кейинги\n",
+            "янгиланишлар ўзи келади. Бу версияда Visual C++ пакети йўқ Windows\n",
+            "тизимида ишга тушиш ҳам тузатилди: 0.90.0–0.103.0 версиялари у ерда\n",
+            "ишга тушмасди.\n",
+        ),
+        "0.97.0 версияси чиқди",
+        "Тафсилотлар юклаб олиш саҳифасида.\n",
+    ),
+    (
+        Language::Te,
+        "ప్రోగ్రామ్ ఇప్పుడు తనంతట తానే నవీకరించుకుంటుంది",
+        concat!(
+            "0.104.0 నుండి Lang Switcher కొత్త సంస్కరణలను తానే ఇన్‌స్టాల్ చేసుకుంటుంది.\n",
+            "ఫైళ్లు రచయిత సైట్ నుండి వస్తాయి; ఇన్‌స్టాల్‌కు ముందు సంతకం తనిఖీ అవుతుంది.\n",
+            "కొత్త సంస్కరణను ఒక్కసారి ఇన్‌స్టాల్ చేయండి — తర్వాతి నవీకరణలు\n",
+            "వాటంతట అవే వస్తాయి. ఈ సంస్కరణలో Visual C++ ప్యాకేజీ లేని Windows లో\n",
+            "ప్రారంభం కావడం కూడా సరిచేయబడింది: సంస్కరణలు 0.90.0–0.103.0 అక్కడ\n",
+            "ప్రారంభం కాలేదు.\n",
+        ),
+        "సంస్కరణ 0.97.0 విడుదలైంది",
+        "వివరాలు డౌన్‌లోడ్ పేజీలో ఉన్నాయి.\n",
+    ),
+    (
+        Language::Kn,
+        "ಪ್ರೋಗ್ರಾಂ ಈಗ ತಾನೇ ನವೀಕರಿಸಿಕೊಳ್ಳುತ್ತದೆ",
+        concat!(
+            "0.104.0 ರಿಂದ Lang Switcher ಹೊಸ ಆವೃತ್ತಿಗಳನ್ನು ತಾನೇ ಸ್ಥಾಪಿಸಿಕೊಳ್ಳುತ್ತದೆ.\n",
+            "ಫೈಲ್‌ಗಳು ಲೇಖಕರ ಸೈಟ್‌ನಿಂದ ಬರುತ್ತವೆ; ಸ್ಥಾಪನೆಗೆ ಮುನ್ನ ಸಹಿ ಪರಿಶೀಲನೆಯಾಗುತ್ತದೆ.\n",
+            "ಹೊಸ ಆವೃತ್ತಿಯನ್ನು ಒಮ್ಮೆ ಸ್ಥಾಪಿಸಿ — ಮುಂದಿನ ನವೀಕರಣಗಳು ತಾನಾಗಿಯೇ\n",
+            "ಬರುತ್ತವೆ. ಈ ಆವೃತ್ತಿಯಲ್ಲಿ Visual C++ ಪ್ಯಾಕೇಜ್ ಇಲ್ಲದ Windows ನಲ್ಲಿ\n",
+            "ಪ್ರಾರಂಭವಾಗದಿರುವುದೂ ಸರಿಪಡಿಸಲಾಗಿದೆ: ಆವೃತ್ತಿಗಳು 0.90.0–0.103.0 ಅಲ್ಲಿ\n",
+            "ಪ್ರಾರಂಭವಾಗುತ್ತಿರಲಿಲ್ಲ.\n",
+        ),
+        "ಆವೃತ್ತಿ 0.97.0 ಬಿಡುಗಡೆಯಾಗಿದೆ",
+        "ವಿವರಗಳು ಡೌನ್‌ಲೋಡ್ ಪುಟದಲ್ಲಿವೆ.\n",
+    ),
+    (
+        Language::Pa,
+        "ਪ੍ਰੋਗਰਾਮ ਹੁਣ ਆਪਣੇ-ਆਪ ਅੱਪਡੇਟ ਹੁੰਦਾ ਹੈ",
+        concat!(
+            "ਵਰਜਨ 0.104.0 ਤੋਂ Lang Switcher ਨਵੇਂ ਵਰਜਨ ਆਪ ਡਾਊਨਲੋਡ ਅਤੇ ਇੰਸਟਾਲ ਕਰਦਾ ਹੈ।\n",
+            "ਫ਼ਾਈਲਾਂ ਲੇਖਕ ਦੀ ਸਾਈਟ ਤੋਂ ਆਉਂਦੀਆਂ ਹਨ, ਇੰਸਟਾਲ ਤੋਂ ਪਹਿਲਾਂ ਦਸਤਖ਼ਤ ਜਾਂਚੇ ਜਾਂਦੇ ਹਨ।\n",
+            "ਨਵਾਂ ਵਰਜਨ ਇੱਕ ਵਾਰ ਇੰਸਟਾਲ ਕਰ ਲਓ — ਅੱਗੋਂ ਅੱਪਡੇਟ ਆਪਣੇ-ਆਪ ਆ ਜਾਣਗੇ।\n",
+            "ਇਸ ਵਰਜਨ ਵਿੱਚ Visual C++ ਪੈਕੇਜ ਤੋਂ ਬਿਨਾਂ Windows ਉੱਤੇ ਸ਼ੁਰੂ ਹੋਣਾ ਵੀ ਠੀਕ\n",
+            "ਕੀਤਾ ਗਿਆ ਹੈ: ਵਰਜਨ 0.90.0–0.103.0 ਉੱਥੇ ਸ਼ੁਰੂ ਨਹੀਂ ਹੁੰਦੇ ਸਨ।\n",
+        ),
+        "ਵਰਜਨ 0.97.0 ਆ ਗਿਆ ਹੈ",
+        "ਵੇਰਵੇ ਡਾਊਨਲੋਡ ਪੰਨੇ ਤੇ ਹਨ।\n",
+    ),
+    (
+        Language::Gu,
+        "પ્રોગ્રામ હવે જાતે અપડેટ થાય છે",
+        concat!(
+            "વર્ઝન 0.104.0 થી Lang Switcher નવાં વર્ઝન જાતે ડાઉનલોડ અને ઇન્સ્ટોલ કરે છે.\n",
+            "ફાઇલો લેખકની સાઇટ પરથી આવે છે, અને ઇન્સ્ટોલ પહેલાં હસ્તાક્ષર ચકાસાય છે.\n",
+            "નવું વર્ઝન એક વાર ઇન્સ્ટોલ કરી લો — આગળના અપડેટ જાતે આવી જશે.\n",
+            "આ વર્ઝનમાં Visual C++ પૅકેજ વગરના Windows પર શરૂ થવાનું પણ ઠીક કર્યું છે:\n",
+            "વર્ઝન 0.90.0–0.103.0 ત્યાં શરૂ થતાં નહોતાં.\n",
+        ),
+        "વર્ઝન 0.97.0 આવી ગયું છે",
+        "વિગતો ડાઉનલોડ પૃષ્ઠ પર છે.\n",
+    ),
+    (
+        Language::Az,
+        "Proqram artıq özünü yeniləyir",
+        concat!(
+            "Lang Switcher 0.104.0 versiyasından yeni versiyaları özü yükləyir\n",
+            "və quraşdırır: faylları müəllifin saytından götürür, imzanı yoxlayır.\n",
+            "Yeni versiyanı bir dəfə quraşdırın — sonra yeniləmələr özü gələcək.\n",
+            "Bu versiyada Visual C++ paketi olmayan Windows sistemində proqramın\n",
+            "işə düşməməsi də düzəldilib: 0.90.0–0.103.0 versiyaları orada işə\n",
+            "düşmürdü.\n",
+        ),
+        "0.97.0 versiyası çıxdı",
+        "Ətraflı məlumat yükləmə səhifəsindədir.\n",
+    ),
+    (
+        Language::Be,
+        "Праграма цяпер абнаўляецца сама",
+        concat!(
+            "Пачынаючы з версіі 0.104.0, Lang Switcher сам спампоўвае новыя версіі\n",
+            "з сайта аўтара і ўсталёўвае іх, праверыўшы подпіс. Усталюйце новую\n",
+            "версію адзін раз — далей абнаўленні прыйдуць самі. У гэтай версіі\n",
+            "выпраўлены і запуск на Windows без пакета Visual C++: версіі\n",
+            "0.90.0–0.103.0 там не запускаліся.\n",
+        ),
+        "Выйшла версія 0.97.0",
+        "Падрабязнасці — на старонцы загрузкі.\n",
+    ),
+    (
+        Language::Kk,
+        "Бағдарлама енді өзі жаңарады",
+        concat!(
+            "0.104.0 нұсқасынан бастап Lang Switcher өзі жаңарады.\n",
+            "Жаңа нұсқаларды автордың сайтынан жүктеп алып, қолтаңбаны тексергеннен\n",
+            "кейін өзі орнатады. Жаңа нұсқаны бір рет орнатыңыз — одан әрі жаңартулар\n",
+            "өздігінен келіп тұрады. Бұл нұсқада Visual C++ пакеті жоқ Windows\n",
+            "жүйесінде іске қосылу да түзетілді: 0.90.0–0.103.0 нұсқалары онда іске\n",
+            "қосылмайтын еді.\n",
+        ),
+        "0.97.0 нұсқасы шықты",
+        "Толығырақ — жүктеп алу бетінде.\n",
+    ),
+    (
+        Language::Tt,
+        "Программа хәзер үз-үзен яңарта",
+        concat!(
+            "0.104.0 версиясеннән башлап Lang Switcher үз-үзен яңарта.\n",
+            "Яңа версияләрне ул автор сайтыннан йөкләп ала һәм имзаны тикшергәч\n",
+            "урнаштыра. Яңа версияне бер тапкыр урнаштырыгыз — алга таба яңартулар\n",
+            "үзеннән-үзе киләчәк. Бу версиядә Visual C++ пакеты булмаган Windows\n",
+            "системасында эшләтеп җибәрү дә төзәтелде: 0.90.0–0.103.0 версияләре\n",
+            "анда эшләми иде.\n",
+        ),
+        "0.97.0 версиясе чыкты",
+        "Тулырак мәгълүмат — йөкләп алу битендә.\n",
+    ),
+    (
+        Language::Bg,
+        "Програмата вече се актуализира сама",
+        concat!(
+            "Lang Switcher вече сам изтегля и инсталира новите си версии.\n",
+            "Считано от 0.104.0, програмата взема версиите от сайта на автора и ги\n",
+            "инсталира, след като провери подписа. Инсталирайте новата версия\n",
+            "веднъж — оттук нататък актуализациите идват сами. В тази версия е\n",
+            "поправено и стартирането на Windows без пакета Visual C++: версии\n",
+            "0.90.0–0.103.0 там не се стартираха.\n",
+        ),
+        "Излезе версия 0.97.0",
+        "Подробности — на страницата за изтегляне.\n",
+    ),
+    (
+        Language::Mk,
+        "Програмата сега се ажурира сама",
+        concat!(
+            "Lang Switcher сега сам ги презема и инсталира новите верзии.\n",
+            "Од верзија 0.104.0 програмата ги зема верзиите од сајтот на авторот и\n",
+            "ги инсталира откако ќе го провери потписот. Инсталирајте ја новата\n",
+            "верзија еднаш — натаму ажурирањата доаѓаат сами. Во оваа верзија е\n",
+            "поправено и стартувањето на Windows без пакетот Visual C++: верзиите\n",
+            "0.90.0–0.103.0 таму не се стартуваа.\n",
+        ),
+        "Излезе верзија 0.97.0",
+        "Подробностите се на страницата за преземање.\n",
+    ),
+    (
+        Language::Or,
+        "ପ୍ରୋଗ୍ରାମ ଏବେ ନିଜେ ଅପଡେଟ୍ ହୁଏ",
+        concat!(
+            "ସଂସ୍କରଣ 0.104.0 ଠାରୁ Lang Switcher ନିଜେ ଅପଡେଟ୍ ହୁଏ: ଲେଖକଙ୍କ ସାଇଟରୁ\n",
+            "ନୂଆ ସଂସ୍କରଣ ଡାଉନଲୋଡ୍ କରେ ଏବଂ ସ୍ୱାକ୍ଷର ଯାଞ୍ଚ କରି ଇନଷ୍ଟଲ୍ କରେ। ନୂଆ ସଂସ୍କରଣ\n",
+            "ଥରେ ଇନଷ୍ଟଲ୍ କରନ୍ତୁ — ତା ପରେ ଅପଡେଟ୍ ନିଜେ ଆସିବ। ଏହି ସଂସ୍କରଣରେ Visual C++\n",
+            "ପ୍ୟାକେଜ୍ ନଥିବା Windows ରେ ଆରମ୍ଭ ହେବାର ସମସ୍ୟା ମଧ୍ୟ ଠିକ୍ ହୋଇଛି:\n",
+            "0.90.0–0.103.0 ସଂସ୍କରଣ ସେଠାରେ ଚାଲୁନଥିଲା।\n",
+        ),
+        "ସଂସ୍କରଣ 0.97.0 ଆସିଗଲା",
+        "ବିବରଣୀ ଡାଉନଲୋଡ୍ ପୃଷ୍ଠାରେ ଅଛି।\n",
+    ),
+    (
+        Language::Km,
+        "កម្មវិធីអាចធ្វើបច្ចុប្បន្នភាពខ្លួនឯងបានហើយ",
+        concat!(
+            "ចាប់ពីកំណែ 0.104.0 Lang Switcher ទាញយកកំណែថ្មីពីគេហទំព័រអ្នកបង្កើត\n",
+            "ដោយខ្លួនឯង ហើយដំឡើងវា បន្ទាប់ពីពិនិត្យហត្ថលេខា។ គ្រាន់តែដំឡើងកំណែថ្មី\n",
+            "ម្ដង បន្ទាប់ពីនោះបច្ចុប្បន្នភាពនឹងមកដោយខ្លួនឯង។ កំណែនេះក៏បានដោះស្រាយ\n",
+            "ការចាប់ផ្ដើមលើ Windows ដែលគ្មានកញ្ចប់ Visual C++ ផងដែរ: កំណែ\n",
+            "0.90.0–0.103.0 មិនអាចចាប់ផ្ដើមនៅទីនោះបានទេ។\n",
+        ),
+        "កំណែ 0.97.0 បានចេញហើយ",
+        "សូមមើលព័ត៌មានលម្អិតនៅទំព័រទាញយក។\n",
+    ),
+    (
+        Language::Ka,
+        "პროგრამა ახლა თავად განახლდება",
+        concat!(
+            "ვერსია 0.104.0-დან Lang Switcher ახალ ვერსიებს თავად ჩამოტვირთავს\n",
+            "ავტორის საიტიდან და ხელმოწერის შემოწმების შემდეგ თავადვე დააინსტალირებს.\n",
+            "დააინსტალირეთ ახალი ვერსია ერთხელ — შემდეგ განახლებები თავისით მოვა.\n",
+            "ამ ვერსიაში გასწორებულია გაშვებაც Windows-ზე Visual C++ პაკეტის გარეშე:\n",
+            "ვერსიები 0.90.0–0.103.0 იქ არ ეშვებოდა.\n",
+        ),
+        "გამოვიდა ვერსია 0.97.0",
+        "დეტალები ჩამოტვირთვის გვერდზეა.\n",
+    ),
+    (
+        Language::Hy,
+        "Ծրագիրը հիմա ինքն է թարմացվում",
+        concat!(
+            "0.104.0 տարբերակից Lang Switcher-ը նոր տարբերակներն ինքն է ներբեռնում\n",
+            "հեղինակի կայքից և տեղադրում՝ նախապես ստուգելով ստորագրությունը։\n",
+            "Նոր տարբերակը տեղադրեք մեկ անգամ, հետո թարմացումները կգան ինքնուրույն։\n",
+            "Այս տարբերակում ուղղված է նաև Visual C++ փաթեթ չունեցող Windows-ում\n",
+            "գործարկումը. 0.90.0–0.103.0 տարբերակներն այնտեղ չէին գործարկվում։\n",
+        ),
+        "Թողարկվեց 0.97.0 տարբերակը",
+        "Մանրամասները՝ ներբեռնման էջում։\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and
@@ -8530,8 +8820,12 @@ fn the_model_of_the_author_window_is_the_live_window() {
     for language in Language::shipped() {
         settings::set_ui_language(language);
 
+        // ⚠ Stage E108, решение 202.40: the step of a window goes by its language now, and on the
+        // screen of this machine Tamil and Malayalam open below ten points — the model counts at
+        // the template's face, so the live window is held at ten points too.
         let words = AuthorWords::now("0.83.0");
-        let live = HiddenWindow::open("0.83.0").client_height();
+        let live =
+            settings::testing::with_font_step(10, || HiddenWindow::open("0.83.0").client_height());
         let model = author_client_by_model(13, 96, &words);
 
         println!("{language:?}: live {live} px, model {model} px");
@@ -8545,7 +8839,9 @@ fn the_model_of_the_author_window_is_the_live_window() {
         for (switch, version) in [(false, BEHIND_THE_FEED), (true, PAST_THE_FEED)] {
             let view = fed_view(switch, 9, version, &feed);
             let model = author_client_by_model(13, 96, &AuthorWords::of(view.clone()));
-            let live = HiddenWindow::author(view).client_height();
+            let live = settings::testing::with_font_step(10, || {
+                HiddenWindow::author(view).client_height()
+            });
 
             println!("{language:?}, feed live, switch {switch}: live {live} px, model {model} px");
 
@@ -8768,7 +9064,19 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         })
         .collect();
 
+    // ⭐ Stage E108, решение 202.40: the tallest window **of each language**, face by face — the
+    // table of the fourteen of 1.0.0 is their tallest, and a language taller than it somewhere has a
+    // table of its own (`settings::TALLER_LANGUAGES`).
+    let fourteen: Vec<Language> = registry::registry()
+        .iter()
+        .filter(|entry| entry.group == "shipped")
+        .map(|entry| language_of_tag(&entry.tag))
+        .collect();
     let mut measured = Vec::new();
+    let mut by_language: Vec<(Language, Vec<i32>)> = words
+        .iter()
+        .map(|(language, ..)| (*language, Vec::new()))
+        .collect();
 
     for face in RULE_FACES {
         let cell = cell_of(face);
@@ -8776,6 +9084,7 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         // whatever the pair, it is 7,2 faces.
         let drawing = mul_div(face, 72, 10);
         let mut tallest = (0, String::new());
+        let fixed = FIXED.iter().map(|(_, units)| *units).max().unwrap_or(0);
 
         for (window, units) in FIXED {
             if units > tallest.0 {
@@ -8783,43 +9092,90 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
             }
         }
 
-        for (language, states, list) in &words {
+        for ((language, states, list), (_, own)) in words.iter().zip(by_language.iter_mut()) {
             settings::set_ui_language(*language);
+            let mut own_tallest = fixed;
+            let mut note = |units: i32, what: String, tallest: &mut (i32, String)| {
+                own_tallest = own_tallest.max(units);
+                if fourteen.contains(language) && units > tallest.0 {
+                    *tallest = (units, what);
+                }
+            };
 
             for (state, words) in states {
                 let author = units_of_client(author_client_by_model(face, drawing, words), cell);
-
-                if author > tallest.0 {
-                    tallest = (author, format!("«От автора» {language:?}, {state}"));
-                }
+                note(
+                    author,
+                    format!("«От автора» {language:?}, {state}"),
+                    &mut tallest,
+                );
             }
 
             let list = units_of_client(list_client_by_model(face, drawing, list), cell);
-
-            if list > tallest.0 {
-                tallest = (list, format!("«Последние письма» {language:?}"));
-            }
+            note(
+                list,
+                format!("«Последние письма» {language:?}"),
+                &mut tallest,
+            );
 
             for key in [widest_key.as_str(), "Pause"] {
                 let about = units_of_client(about_client_by_model(face, drawing, key), cell);
-
-                if about > tallest.0 {
-                    tallest = (about, format!("«О программе» {language:?} «{key}»"));
-                }
+                note(
+                    about,
+                    format!("«О программе» {language:?} «{key}»"),
+                    &mut tallest,
+                );
             }
+
+            own.push(own_tallest);
         }
 
         println!(
-            "face {face} px (cell {cell}): tallest {} units — {}; the table says {}",
+            "face {face} px (cell {cell}): tallest of the fourteen {} units — {}; the table says {}",
             tallest.0,
             tallest.1,
-            settings::tallest_window_units(face)
+            settings::tallest_window_units_in(Language::Ru, face)
         );
 
         measured.push((face, tallest.0, cell));
     }
 
     settings::set_ui_language(Language::Ru);
+
+    // The languages of group A: a language with its own table must have exactly its measurement,
+    // one without must fit the table of the fourteen at every face.
+    let mut group_a_wrong = Vec::new();
+    for (language, own) in &by_language {
+        let faces = RULE_FACES.zip(own.iter().copied());
+
+        if fourteen.contains(language) {
+            assert!(
+                !settings::has_own_tallest_table(*language),
+                "{language:?}: a language of 1.0.0 counts with the table of the fourteen"
+            );
+        } else if settings::has_own_tallest_table(*language) {
+            for (face, units) in faces {
+                let table = settings::tallest_window_units_in(*language, face);
+                if table != units {
+                    group_a_wrong.push(format!(
+                        "{language:?} face {face}: measured {units}, its table {table}"
+                    ));
+                }
+            }
+        } else if faces
+            .clone()
+            .any(|(face, units)| units > settings::tallest_window_units_in(Language::Ru, face))
+        {
+            group_a_wrong.push(format!(
+                "{language:?} is taller than the table of the fourteen and needs its own: {own:?}"
+            ));
+        }
+    }
+    assert!(
+        group_a_wrong.is_empty(),
+        "⛔⛔ the tables of the languages of group A — перемерить:\n{}",
+        group_a_wrong.join("\n")
+    );
 
     // Where a table and the measurement part: a face at which the table is not the least number
     // of units that holds the tallest window.
@@ -8833,7 +9189,7 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
             .collect()
     };
 
-    let wrong = disagreements(&settings::tallest_window_units);
+    let wrong = disagreements(&|face: i32| settings::tallest_window_units_in(Language::Ru, face));
 
     assert!(
         wrong.is_empty(),
@@ -8847,7 +9203,7 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         .expect("faces");
 
     assert_eq!(
-        settings::tallest_window_units(RULE_FACES.end() + 1),
+        settings::tallest_window_units_in(Language::Ru, RULE_FACES.end() + 1),
         most,
         "beyond the table the rule must count with the table's own maximum"
     );
@@ -8855,8 +9211,9 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
     // ⚠ Отрицательный контроль: the table one unit short — at every face at once, and at the one
     // face the 150 % of a 1080p screen turns on — must be caught, and one unit short must really
     // be a smaller window there.
-    let short = |face: i32| settings::tallest_window_units(face) - 1;
-    let short_at_14 = |face: i32| settings::tallest_window_units(face) - i32::from(face == 14);
+    let short = |face: i32| settings::tallest_window_units_in(Language::Ru, face) - 1;
+    let short_at_14 =
+        |face: i32| settings::tallest_window_units_in(Language::Ru, face) - i32::from(face == 14);
 
     assert_eq!(
         disagreements(&short).len(),
@@ -8912,9 +9269,19 @@ fn the_rule_answers_what_the_owner_took_on_the_six_screens() {
     let mut wrong = Vec::new();
 
     for (screen, work, dpi, frame, owner) in SCREENS {
-        let step = settings::font_step(work, dpi, frame, settings::tallest_window_units, cell_of);
+        let step = settings::font_step(
+            work,
+            dpi,
+            frame,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of,
+        );
         let face = theme::face_at(step, dpi);
-        let window = mul_div(settings::tallest_window_units(face), cell_of(face), 8) + frame;
+        let window = mul_div(
+            settings::tallest_window_units_in(Language::Ru, face),
+            cell_of(face),
+            8,
+        ) + frame;
 
         println!(
             "{screen}: {step} pt, face {face} px, the tallest window {window} px in {work} — {} px \
@@ -8942,27 +9309,57 @@ fn the_rule_answers_what_the_owner_took_on_the_six_screens() {
 fn the_rule_keeps_its_floor_and_its_ceiling() {
     // A work area nothing fits in: the floor — the smallest step whose face is not under 11 px.
     assert_eq!(
-        settings::font_step(100, 96, 39, settings::tallest_window_units, cell_of),
+        settings::font_step(
+            100,
+            96,
+            39,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of
+        ),
         8
     );
     assert_eq!(
-        settings::font_step(100, 120, 47, settings::tallest_window_units, cell_of),
+        settings::font_step(
+            100,
+            120,
+            47,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of
+        ),
         7
     );
     assert_eq!(
-        settings::font_step(100, 144, 56, settings::tallest_window_units, cell_of),
+        settings::font_step(
+            100,
+            144,
+            56,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of
+        ),
         6
     );
 
     // A work area everything fits in: ten, and never more.
     assert_eq!(
-        settings::font_step(100_000, 144, 56, settings::tallest_window_units, cell_of),
+        settings::font_step(
+            100_000,
+            144,
+            56,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of
+        ),
         10
     );
 
     // A monitor on which ten points come out under the floor — none that Windows makes: ten.
     assert_eq!(
-        settings::font_step(100, 72, 39, settings::tallest_window_units, cell_of),
+        settings::font_step(
+            100,
+            72,
+            39,
+            |face| settings::tallest_window_units_in(Language::Ru, face),
+            cell_of
+        ),
         10
     );
 
@@ -10149,7 +10546,7 @@ fn the_monitor_is_measured_before_the_window_exists() {
                 screen.work_area,
                 screen.dpi,
                 screen.frame,
-                settings::tallest_window_units,
+                |face| settings::tallest_window_units_in(Language::Ru, face),
                 cell_of
             )
         );
@@ -14963,7 +15360,10 @@ fn every_russian_literal_of_the_about_template_is_replaced_in_all_fourteen_langu
             ));
         }
 
-        if language != Language::Ru && row == "От автора…" {
+        // ⚠ Stage E108: Bulgarian writes the same three words — «От автора…» is its own row, not the
+        // Russian literal of the template; the check above (1136 shows the row) holds it as it
+        // holds every language.
+        if !matches!(language, Language::Ru | Language::Bg) && row == "От автора…" {
             wrong.push(format!(
                 "{language:?}: the row itself is the Russian literal"
             ));
@@ -27332,7 +27732,12 @@ fn letter_of_the_script_of(tag: &str, letter: char) -> bool {
                 | '\u{FB50}'..='\u{FDFF}'
                 | '\u{FE70}'..='\u{FEFF}'
         ),
-        "Latn" => letter.is_ascii_alphabetic() || matches!(letter, '\u{00C0}'..='\u{02AF}'),
+        // ʻ (U+02BB) and ʼ (U+02BC) are letters of Uzbek in Latin — oʻ, gʻ — and stand in the block
+        // of the spacing modifiers (stage E108).
+        "Latn" => {
+            letter.is_ascii_alphabetic()
+                || matches!(letter, '\u{00C0}'..='\u{02AF}' | '\u{02BB}' | '\u{02BC}')
+        }
         "Armn" => matches!(letter, '\u{0530}'..='\u{058F}'),
         "Deva" => matches!(letter, '\u{0900}'..='\u{097F}' | '\u{A8E0}'..='\u{A8FF}'),
         "Beng" => matches!(letter, '\u{0980}'..='\u{09FF}'),
