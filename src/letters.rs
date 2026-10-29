@@ -2331,19 +2331,39 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "hallå",
             badge: ["EN", "NN"],
         },
+        // Dutch: the layout of nl-NL is US-International (KBDUSX), which types «hallo» with the keys of
+        // KBDUS — so the other way of 178.5, as Uzbek and Latvian: «hallo» typed while the Russian
+        // layout was on (`pairs-nl-reverse.out.txt`). Luxembourgish: KBDSF, the layout of lb-LU
+        // (`0000046E`), `ä` with `Shift` on the key of `'`.
+        Language::Nl => DemoPair {
+            typed: "рфддщ",
+            fixed: "hallo",
+            badge: ["RU", "NL"],
+        },
+        Language::Lb => DemoPair {
+            typed: "\"ddi",
+            fixed: "äddi",
+            badge: ["EN", "LB"],
+        },
+        // Welsh: the layout of cy-GB is United Kingdom Extended (KBDUKX), «helo» in the keys of KBDUS —
+        // the other way of 178.5, as Dutch (`pairs-cy-mi-reverse.out.txt`). Icelandic: KBDIC, `æ` on
+        // the key of `;` («halló» of the translator: `ó` is behind a dead key).
+        Language::Cy => DemoPair {
+            typed: "рудщ",
+            fixed: "helo",
+            badge: ["RU", "CY"],
+        },
+        Language::Is => DemoPair {
+            typed: "h;",
+            fixed: "hæ",
+            badge: ["EN", "IS"],
+        },
         //
         // Stage E109, group B: the words of the translators are to come (решение 202.19д — the word
         // from the translator, the keys off the file of the layout).
-        Language::Vi
-        | Language::Nl
-        | Language::Ro
-        | Language::Hu
-        | Language::Sq
-        | Language::Cy
-        | Language::Mt
-        | Language::Is
-        | Language::Lb
-        | Language::Mi => PAIR_TO_COME,
+        Language::Vi | Language::Ro | Language::Hu | Language::Sq | Language::Mt | Language::Mi => {
+            PAIR_TO_COME
+        }
     }
 }
 

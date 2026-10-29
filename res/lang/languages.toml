@@ -640,7 +640,7 @@ rtl = false
 inno = "Dutch"
 inno_official = true
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "ro"
@@ -836,7 +836,7 @@ rtl = false
 inno = "Welsh"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "mt"
@@ -862,7 +862,7 @@ rtl = false
 inno = "Icelandic"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "lb"
@@ -875,7 +875,7 @@ rtl = false
 inno = "Luxembourgish"
 inno_official = false
 group = "B"
-state = "planned"
+state = "shipped"
 
 [[language]]
 tag = "mi"

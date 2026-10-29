@@ -332,6 +332,7 @@ Name: "belarusian"; MessagesFile: "compiler:Default.isl,lang\Belarusian.isl"
 Name: "tatar"; MessagesFile: "compiler:Default.isl,lang\Tatar.isl"
 Name: "georgian"; MessagesFile: "compiler:Default.isl,lang\Georgian.isl"
 Name: "macedonian"; MessagesFile: "compiler:Default.isl,lang\Macedonian.isl"
+Name: "dutch"; MessagesFile: "compiler:Languages\Dutch.isl,lang\Dutch.isl"
 Name: "swedish"; MessagesFile: "compiler:Languages\Swedish.isl,lang\Swedish.isl"
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl,lang\Danish.isl"
 Name: "finnish"; MessagesFile: "compiler:Languages\Finnish.isl,lang\Finnish.isl"
@@ -343,6 +344,9 @@ Name: "slovenian"; MessagesFile: "compiler:Languages\Slovenian.isl,lang\Slovenia
 Name: "bosnian"; MessagesFile: "compiler:Default.isl,lang\Bosnian.isl"
 Name: "latvian"; MessagesFile: "compiler:Default.isl,lang\Latvian.isl"
 Name: "estonian"; MessagesFile: "compiler:Default.isl,lang\Estonian.isl"
+Name: "welsh"; MessagesFile: "compiler:Default.isl,lang\Welsh.isl"
+Name: "icelandic"; MessagesFile: "compiler:Default.isl,lang\Icelandic.isl"
+Name: "luxembourgish"; MessagesFile: "compiler:Default.isl,lang\Luxembourgish.isl"
 Name: "norwegiannynorsk"; MessagesFile: "compiler:Default.isl,lang\NorwegianNynorsk.isl"
 
 [Files]

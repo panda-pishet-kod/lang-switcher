@@ -8361,6 +8361,61 @@ const PUBLISHED_FEED: &[(Language, &str, &str, &str, &str)] = &[
         "Versjon 0.97.0 er ute",
         "Detaljar finst på nedlastingssida.\n",
     ),
+    (
+        Language::Nl,
+        "Het programma werkt zichzelf nu bij",
+        concat!(
+            "Sinds 0.104.0 werkt Lang Switcher zichzelf bij.\n",
+            "Nieuwe versies downloadt het van de site van de auteur en installeert het\n",
+            "zelf, na controle van de handtekening. Installeer de nieuwe versie één\n",
+            "keer, daarna komen de updates vanzelf. Deze versie lost ook het starten op\n",
+            "Windows zonder het Visual C++-pakket op: de versies 0.90.0 tot en met\n",
+            "0.103.0 startten daar niet.\n",
+        ),
+        "Versie 0.97.0 is verschenen",
+        "Details staan op de downloadpagina.\n",
+    ),
+    (
+        Language::Lb,
+        "De Programm aktualiséiert sech elo selwer",
+        concat!(
+            "Zënter 0.104.0 aktualiséiert Lang Switcher sech selwer.\n",
+            "Nei Versioune luet hie vum Site vum Auteur erof an installéiert se selwer,\n",
+            "nodeems d'Ënnerschrëft kontrolléiert ass. Installéiert déi nei Versioun\n",
+            "eemol, duerno kommen d'Updates vun eleng. An dëser Versioun ass och de\n",
+            "Start op Windows ouni de Visual-C++-Package korrigéiert: d'Versioune\n",
+            "0.90.0 bis 0.103.0 sinn do net gestart.\n",
+        ),
+        "D'Versioun 0.97.0 ass do",
+        "Détailer stinn op der Downloadsäit.\n",
+    ),
+    (
+        Language::Cy,
+        "Mae'r rhaglen bellach yn diweddaru ei hun",
+        concat!(
+            "Ers 0.104.0, mae Lang Switcher yn diweddaru ei hun.\n",
+            "Mae'n lawrlwytho fersiynau newydd o wefan yr awdur ac yn eu gosod,\n",
+            "ar ôl gwirio'r llofnod. Gosodwch y fersiwn newydd unwaith, a daw'r\n",
+            "diweddariadau ohonynt eu hunain. Mae'r fersiwn hon hefyd yn trwsio\n",
+            "cychwyn ar Windows heb y pecyn Visual C++: ni chychwynnodd fersiynau\n",
+            "0.90.0 i 0.103.0 yno.\n",
+        ),
+        "Rhyddhawyd fersiwn 0.97.0",
+        "Mae'r manylion ar y dudalen lawrlwytho.\n",
+    ),
+    (
+        Language::Is,
+        "Forritið uppfærir sig nú sjálft",
+        concat!(
+            "Frá og með 0.104.0 uppfærir Lang Switcher sig sjálft.\n",
+            "Forritið sækir nýjar útgáfur af vef höfundar og setur þær upp sjálft,\n",
+            "eftir að hafa athugað undirskriftina. Settu nýju útgáfuna upp einu sinni\n",
+            "og uppfærslurnar koma af sjálfu sér. Þessi útgáfa lagar líka ræsingu á\n",
+            "Windows án Visual C++ pakkans: útgáfur 0.90.0 til 0.103.0 ræstust ekki þar.\n",
+        ),
+        "Útgáfa 0.97.0 er komin út",
+        "Nánari upplýsingar eru á niðurhalssíðunni.\n",
+    ),
 ];
 
 /// The published feed in the locale in force, **at full capacity** — the update and

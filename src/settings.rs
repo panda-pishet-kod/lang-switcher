@@ -5871,7 +5871,7 @@ const TALLEST_WINDOW_BY_FACE: [i32; 30] = [
 /// Tamil and Malayalam a fifth taller («От автора» with the quiet line), Telugu and Kannada a few
 /// units, Serbian and Uzbek in Cyrillic at some faces only — each table is that language's own
 /// tallest, so at a face where it is shorter than the fourteen's the language may keep a larger step.
-const TALLER_LANGUAGES: [(Language, [i32; 30]); 10] = [
+const TALLER_LANGUAGES: [(Language, [i32; 30]); 13] = [
     (
         Language::Te,
         [
@@ -5952,6 +5952,34 @@ const TALLER_LANGUAGES: [(Language, [i32; 30]); 10] = [
             417, 408, 408, 399, 406, 404, 404, 409, 421, 405, // 11 … 20 px
             403, 408, 412, 413, 403, 405, 411, 421, 413, 410, // 21 … 30 px
             410, 404, 407, 410, 410, 418, 413, 414, 416, 413, // 31 … 40 px
+        ],
+    ),
+    // Stage E109, group B, with fifty-eight languages (`scratchpad-E109\t109-3-w5-testing.log`):
+    // Dutch at 12 px only, Luxembourgish at most faces — «От автора», the quiet line.
+    (
+        Language::Nl,
+        [
+            406, 399, 390, 390, 389, 387, 387, 391, 402, 387, // 11 … 20 px
+            386, 390, 394, 395, 386, 388, 392, 394, 395, 392, // 21 … 30 px
+            392, 387, 389, 392, 392, 399, 394, 395, 398, 394, // 31 … 40 px
+        ],
+    ),
+    (
+        Language::Lb,
+        [
+            416, 408, 407, 390, 405, 396, 403, 400, 412, 396, // 11 … 20 px
+            395, 399, 403, 412, 395, 404, 401, 411, 404, 401, // 21 … 30 px
+            401, 395, 398, 401, 409, 408, 404, 404, 407, 404, // 31 … 40 px
+        ],
+    ),
+    // With sixty languages (`scratchpad-E109\t109-3-w6-testing.log`): Welsh at 12 px and at a few
+    // faces above.
+    (
+        Language::Cy,
+        [
+            407, 408, 399, 399, 397, 396, 395, 400, 412, 396, // 11 … 20 px
+            395, 399, 403, 404, 395, 396, 401, 403, 404, 401, // 21 … 30 px
+            401, 395, 398, 401, 401, 408, 404, 404, 407, 404, // 31 … 40 px
         ],
     ),
 ];
