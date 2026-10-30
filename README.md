@@ -12,11 +12,14 @@ It is a small tray program for Windows 10 and 11. It is free and open source, li
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.2.0**. New in it: you can send a message to the author straight from the
-program — the "Write to the author" wizard has a **Send** button now, no email app or browser
-needed; the letter statistics that pick the right reading of an ambiguous key now cover Arabic,
-Persian, Indonesian, Hindi, Tamil and Sinhala as well; and four rare cases of special layouts were
-fixed (see [Languages](#languages)). Since 1.0.0 the program updates itself.
+**Status:** version **1.4.1**. The interface speaks **66 languages** (see [Languages](#languages)).
+New in 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
+Windows builds it (French BÉPO `´`, `´`, `o` is `ő`); a word typed on the level of the right `Ctrl`
+of Canadian Multilingual Standard converts into the same level of a layout that has it; in Notepad
+with Tamil 99 the replacement no longer lands after the word with nothing erased. Version 1.4.0
+added 22 interface languages, 1.3.0 another 30; 1.2.0 brought the **Send** button of the "Write to
+the author" wizard and the letter statistics of six more languages. Since 1.0.0 the program
+updates itself.
 
 ## How it works
 
