@@ -94,9 +94,9 @@ The finer points:
   converted the way Windows itself types them.
 - Text in scripts with signs above and below the letters is erased and selected exactly: the
   program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points).
-  Notepad takes a typed Tamil consonant with its pulli (`க்`) off sometimes with one `Backspace`,
-  sometimes with two; with the `backspace` method the program sends one, so a consonant may stay
-  in front of the replacement, but the text before the word is never erased.
+  In Notepad of Windows 11 the `backspace` method goes by the selection, like `auto`: that field
+  loses or repeats characters of an insertion after `Backspace`, and it takes a typed Tamil
+  consonant with its pulli (`க்`) off sometimes with one press, sometimes with two.
 - When a key of the layout is ambiguous (Arabic 101: `لا` is one key, `B`, and also two, `G` and
   `H`) and the word was not typed just now, the program picks the reading that is more probable in
   the target language. It has letter statistics for English, French, Spanish and Russian, and since
