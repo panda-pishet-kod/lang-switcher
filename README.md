@@ -86,8 +86,9 @@ Mongolian, Central Atlas Tamazight and Inuktitut are each counted with two scrip
 
 The finer points:
 
-- Letters a layout gives only with `AltGr`, dead keys and keys that print several characters at
-  once (Arabic `لا`, Indian conjuncts) are converted the way Windows itself types them.
+- Letters a layout gives only with `AltGr`, dead keys (two in a row as well: BÉPO `´`, `´`, `o` is
+  `ő`) and keys that print several characters at once (Arabic `لا`, Indian conjuncts) are
+  converted the way Windows itself types them.
 - Text in scripts with signs above and below the letters is erased and selected exactly: the
   program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points).
 - When a key of the layout is ambiguous (Arabic 101: `لا` is one key, `B`, and also two, `G` and
@@ -97,8 +98,6 @@ The finer points:
 - The level of the right `Ctrl` of Canadian Multilingual Standard (the only layout of Windows with
   such a level, Japanese aside) converts into the same level of a layout that has it; a target
   layout without it does not take such a word, and the program sounds a refusal instead.
-- A letter the target layout builds from two dead keys in a row (BÉPO: `´`, `´`, `o` for `ő`)
-  comes out as the accents and the letter, `´´o`.
 - In selected text the program cannot see `CapsLock`, and a character the target layout does not
   have is carried over as it is.
 

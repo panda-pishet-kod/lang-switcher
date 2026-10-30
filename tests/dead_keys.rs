@@ -249,6 +249,7 @@ fn the_table_of_a_layout_file_is_read_and_believed_only_when_it_matches() {
             accent: unit('^'),
             base: unit('e'),
             composed: unit('ê'),
+            chained: false,
         }),
         "KBDFR.DLL composes ^ + e into ê"
     );
@@ -267,4 +268,142 @@ fn the_table_of_a_layout_file_is_read_and_believed_only_when_it_matches() {
         layouts::believed_against(french, &[unit('^'), unit('\u{2603}')]).is_empty(),
         "an accent the file does not have: another layout's file"
     );
+}
+
+// =========================================================================================
+// Stage E110, task T-110-2 — chains of dead keys (BACKLOG Q-201-3)
+// =========================================================================================
+
+/// The acute `´`, the dead key of [`bepo`] on the key of US `'`.
+const ACUTE: char = '\u{00B4}';
+/// The double acute `˝` — the dead key BÉPO makes of `´` and `´`.
+const DOUBLE_ACUTE: char = '\u{02DD}';
+
+/// BÉPO as far as these tests need it: the key of US `'` is the dead acute; `´` + `o` is `ó`,
+/// `´` + `´` **makes the dead double acute** `˝` (a link of a chain, `DKF_DEAD`), and `˝` + `o` is
+/// `ő` — the entries of `KBDFRNB.DLL` (`scratchpad-E110\logs\kbd-chains.txt`).
+fn bepo() -> LayoutMap {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0xF0B0_040C));
+
+    for (letter, scan) in LETTERS {
+        builder.set(scan, false, Mods::NONE, KeyMapping::from_char(letter));
+    }
+    builder.set(SCAN_QUOTE, false, Mods::NONE, KeyMapping::dead(ACUTE));
+    builder.add_dead_transition(ACUTE, 'o', 'ó');
+    builder.add_dead_chain(ACUTE, ACUTE, DOUBLE_ACUTE);
+    builder.add_dead_transition(DOUBLE_ACUTE, 'o', 'ő');
+
+    builder.finish()
+}
+
+/// **Stage E110, task T-110-2 — a letter the target makes of two dead keys in a row is that
+/// letter.** BÉPO: `´`, `´`, `o` is `ő` — until E110 the replacement put `´´o` on the screen (B2
+/// us→x, 201.3; the README named it a limit). The dead key the first two make waits for the next
+/// key, as in Windows, and the count of the next press is what really stood there: one character.
+///
+/// ⚠ Controls: one `´` and `o` is still `ó`; the chain with nothing after it goes out as its own
+/// accent, `˝`, and with a key it does not compose with — the accent and the key, `˝t`.
+#[test]
+fn a_chain_of_dead_keys_of_the_target_composes_the_letter() {
+    let us = us();
+    let bepo = bepo();
+
+    assert_eq!(
+        rendered(&typed(&us, &keys_of("''o")), &bepo),
+        "ő",
+        "201.3: ´ ´ o is ő, not ´´o"
+    );
+    assert_eq!(
+        rendered(&typed(&us, &keys_of("x''o")), &bepo),
+        "xő",
+        "in a word"
+    );
+    assert_eq!(
+        rendered(&typed(&us, &keys_of("'o")), &bepo),
+        "ó",
+        "the control: one link"
+    );
+    assert_eq!(
+        rendered(&typed(&us, &keys_of("x''")), &bepo),
+        "x\u{02DD}",
+        "the control: the chain at the end goes out as its accent"
+    );
+    assert_eq!(
+        rendered(&typed(&us, &keys_of("''t")), &bepo),
+        "\u{02DD}t",
+        "the control: nothing to compose with — the accent and the key"
+    );
+    assert_eq!(
+        OnScreen::as_injected(&typed(&us, &keys_of("x''o")), &bepo).characters(),
+        2,
+        "the next press erases the two characters that stood there"
+    );
+    assert_eq!(
+        bepo.chain(unit(ACUTE), unit(ACUTE)),
+        Some(unit(DOUBLE_ACUTE))
+    );
+    assert_eq!(
+        bepo.compose(unit(ACUTE), unit(ACUTE)),
+        None,
+        "a link of a chain is not a character on the screen"
+    );
+    assert_eq!(
+        bepo.decompose(unit(DOUBLE_ACUTE)),
+        None,
+        "and never the answer of the selection path"
+    );
+}
+
+/// **A chain as long as the table makes it** — no layout of Windows 11 has a chain of two links
+/// (`scratchpad-E110\logs\kbd-chains.txt`), and the composer is not built for one: a synthetic
+/// layout whose `˝` and `´` make a third dead key, which `o` completes.
+#[test]
+fn a_chain_of_any_length_composes() {
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0xF0B1_040C));
+    for (letter, scan) in LETTERS {
+        builder.set(scan, false, Mods::NONE, KeyMapping::from_char(letter));
+    }
+    builder.set(SCAN_QUOTE, false, Mods::NONE, KeyMapping::dead(ACUTE));
+    builder.add_dead_chain(ACUTE, ACUTE, DOUBLE_ACUTE);
+    builder.add_dead_chain(DOUBLE_ACUTE, ACUTE, '\u{02F6}');
+    builder.add_dead_transition('\u{02F6}', 'o', 'ȍ');
+    let three = builder.finish();
+
+    assert_eq!(rendered(&typed(&us(), &keys_of("'''o")), &three), "ȍ");
+}
+
+/// **The links of a chain are read off the layout's own file** — `KBDFRNB.DLL` of this machine
+/// (BÉPO): `´` + `´` makes the dead `˝`, flagged as a link, and `˝` + `o` is `ő`. Read, not loaded
+/// as a layout. Red «до» on the base `6fe60da`: the reader left the links out, and the entry was
+/// not there.
+#[test]
+fn the_links_of_a_chain_are_read_off_the_layout_file() {
+    let table = layouts::read_dead_table("KBDFRNB.DLL");
+
+    assert!(
+        table.iter().any(|entry| entry.accent == unit(ACUTE)
+            && entry.base == unit(ACUTE)
+            && entry.composed == unit(DOUBLE_ACUTE)),
+        "KBDFRNB.DLL: ´ + ´ makes ˝"
+    );
+    assert!(
+        table.contains(&DeadTransition {
+            accent: unit(ACUTE),
+            base: unit(ACUTE),
+            composed: unit(DOUBLE_ACUTE),
+            chained: true,
+        }),
+        "and it is a link of a chain"
+    );
+    assert!(table.contains(&DeadTransition {
+        accent: unit(DOUBLE_ACUTE),
+        base: unit('o'),
+        composed: unit('ő'),
+        chained: false,
+    }));
+}
+
+/// One UTF-16 unit of a character of the BMP.
+fn unit(ch: char) -> u16 {
+    u16::try_from(u32::from(ch)).expect("a BMP character")
 }

@@ -662,35 +662,63 @@ pub struct LayoutMap {
 /// **One composition of a dead key** — `DEADTRANS(base, accent, composed, flags)` of the layout's
 /// own table (`KBDTABLES::pDeadKey`): the dead key whose accent is `accent`, then a key giving
 /// `base`, puts `composed` on the screen. Решение 195.1, stage Э105.
+///
+/// ⭐ **A link of a chain — stage E110, task T-110-2 (BACKLOG Q-201-3).** With [`Self::chained`]
+/// (`DKF_DEAD` of `kbd.h`) `composed` is not put on the screen: it is a dead key of its own, waiting
+/// for the next key — BÉPO: `´` then `´` is the dead double acute `˝`, and `˝` then `o` is `ő`.
+/// Measured (`scratchpad-E110\kbd-chains.ps1`, the `pDeadKey` of the 218 layout files of Windows
+/// 11): four layouts chain — BÉPO (5 links), German Extended E1 and E2 (105 each), Cherokee Nation
+/// Phonetic (44) — none longer than one link; [`crate::convert::Composer`] walks any length.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DeadTransition {
     /// The character the dead key reports — `^` for the circumflex key of French.
     pub accent: u16,
     /// The character the next key gives — `e`.
     pub base: u16,
-    /// What Windows puts on the screen for the two — `ê`.
+    /// What Windows puts on the screen for the two — `ê`; for a link of a chain, the accent of the
+    /// dead key the two make.
     pub composed: u16,
+    /// Whether `composed` is itself a dead key — a link of a chain (`DKF_DEAD`), stage E110.
+    pub chained: bool,
 }
 
 impl LayoutMap {
     /// **What the dead key of `accent` and a key giving `base` compose into** — решение 195.1,
     /// out of the layout's own table (посылка П3: `^`+`e` = `ê` in French, `´`+`o` = `ó` in
     /// Spanish, `~`+`a` = `ã` in Portuguese). `None`: Windows composes nothing, and puts the accent
-    /// and the letter side by side (`^t`).
+    /// and the letter side by side (`^t`) — or the two make a dead key of their own
+    /// ([`LayoutMap::chain`]).
     pub fn compose(&self, accent: u16, base: u16) -> Option<u16> {
+        self.dead_entry(accent, base)
+            .filter(|entry| !entry.chained)
+            .map(|entry| entry.composed)
+    }
+
+    /// **The dead key `accent` and a key giving `base` make together** — a link of a chain, stage
+    /// E110, task T-110-2: BÉPO `´` and `´` make the dead `˝`, which the next key completes (`ő`).
+    /// `None` for a pair that composes a character ([`LayoutMap::compose`]) or nothing.
+    pub fn chain(&self, accent: u16, base: u16) -> Option<u16> {
+        self.dead_entry(accent, base)
+            .filter(|entry| entry.chained)
+            .map(|entry| entry.composed)
+    }
+
+    /// The entry of the table for `(accent, base)`, a link of a chain or not.
+    fn dead_entry(&self, accent: u16, base: u16) -> Option<DeadTransition> {
         self.dead
             .binary_search_by(|entry| (entry.accent, entry.base).cmp(&(accent, base)))
             .ok()
-            .map(|index| self.dead[index].composed)
+            .map(|index| self.dead[index])
     }
 
     /// **The dead key and the base `composed` was typed with** — the backward half of
     /// [`LayoutMap::compose`], for the selection path (решение 195.1: `ê` → `^` + `e`). The first
-    /// entry of the table, in the order of `(accent, base)`. On the UI thread, never in the hook.
+    /// entry of the table, in the order of `(accent, base)`; a link of a chain is not text on the
+    /// screen and is never the answer (stage E110). On the UI thread, never in the hook.
     pub fn decompose(&self, composed: u16) -> Option<(u16, u16)> {
         self.dead
             .iter()
-            .find(|entry| entry.composed == composed)
+            .find(|entry| !entry.chained && entry.composed == composed)
             .map(|entry| (entry.accent, entry.base))
     }
 
@@ -850,12 +878,24 @@ impl LayoutMapBuilder {
     /// Records one composition of a dead key — решение 195.1. The live sweep adds the layout's
     /// own table here ([`dead_transitions_of`]); a test adds the compositions it states.
     pub fn add_dead_transition(&mut self, accent: char, base: char, composed: char) {
+        self.push_dead(accent, base, composed, false);
+    }
+
+    /// Records one link of a chain of dead keys — stage E110, task T-110-2: the dead key `accent`
+    /// and a key giving `base` make the dead key `dead` (BÉPO: `´`, `´` → `˝`). A test states it;
+    /// the live sweep reads it out of the layout's own table ([`read_dead_table`]).
+    pub fn add_dead_chain(&mut self, accent: char, base: char, dead: char) {
+        self.push_dead(accent, base, dead, true);
+    }
+
+    fn push_dead(&mut self, accent: char, base: char, composed: char, chained: bool) {
         let unit = |ch: char| u16::try_from(u32::from(ch)).unwrap_or(0);
 
         self.dead.push(DeadTransition {
             accent: unit(accent),
             base: unit(base),
             composed: unit(composed),
+            chained,
         });
     }
 
@@ -1396,7 +1436,8 @@ fn klid_of(layout: LayoutId) -> Option<String> {
 /// of the table. A file of another layout — the convention of [`klid_of`] misread — answers
 /// nothing, and the dead keys of the layout then compose with nothing (the accent and the letter
 /// side by side), which is what this program did before Э105, not something new and wrong.
-/// Entries that make a dead key of their own (`DKF_DEAD`, a chained accent) are left out.
+/// Entries that make a dead key of their own (`DKF_DEAD`, a chained accent) were left out until
+/// stage E110; since task T-110-2 they are kept as links of a chain ([`DeadTransition::chained`]).
 ///
 /// Runs where the cache is built — the message path of FR-20 and FR-21, never the hook callback.
 fn dead_transitions_of(layout: LayoutId, swept: &[u16]) -> Vec<DeadTransition> {
@@ -1487,13 +1528,14 @@ pub fn read_dead_table(file: &str) -> Vec<DeadTransition> {
                 break;
             }
 
-            if dead.uFlags & CHAINED == 0 {
-                table.push(DeadTransition {
-                    accent: (dead.dwBoth >> 16) as u16,
-                    base: (dead.dwBoth & 0xFFFF) as u16,
-                    composed: dead.wchComposed,
-                });
-            }
+            // Stage E110, task T-110-2: a link of a chain is kept, marked — its `composed` is the
+            // accent of the dead key the two make, not a character on the screen.
+            table.push(DeadTransition {
+                accent: (dead.dwBoth >> 16) as u16,
+                base: (dead.dwBoth & 0xFFFF) as u16,
+                composed: dead.wchComposed,
+                chained: dead.uFlags & CHAINED != 0,
+            });
 
             // SAFETY: the next entry of the same array; the zero entry ends it.
             entry = unsafe { entry.add(1) };
@@ -1753,9 +1795,10 @@ impl LayoutCache {
             // own short slice — still no allocation, no lock, no Win32 call (NFR-02…NFR-05).
             if mapping.is_dead() {
                 return first.is_some_and(|accent| {
-                    map.dead_transitions()
-                        .iter()
-                        .any(|step| step.accent == accent && is_letter(step.composed))
+                    // A link of a chain (stage E110) gives a dead key, not a letter on the screen.
+                    map.dead_transitions().iter().any(|step| {
+                        step.accent == accent && !step.chained && is_letter(step.composed)
+                    })
                 });
             }
 

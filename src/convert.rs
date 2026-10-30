@@ -264,6 +264,12 @@ pub fn level_missing_in(strokes: &[Keystroke], target: &LayoutMap) -> bool {
 /// Fed one converted mapping at a time ([`Composer::push`]) and closed by [`Composer::finish`]:
 /// a dead key at the very end goes out as its accent, the visible way. Holds at most the one
 /// accent, on the stack — no copy of the text (SEC-01).
+///
+/// ⭐ **Chains of dead keys — stage E110, task T-110-2 (BACKLOG Q-201-3).** A dead key that meets
+/// a key with which the table of the target makes **another dead key** ([`LayoutMap::chain`],
+/// `DKF_DEAD`) does not go out: the new dead key waits in its place, as it does in Windows. BÉPO:
+/// `´`, `´`, `o` is `ő` — until E110 the program put `´´o` on the screen (B2 us→x, 201.3). The
+/// chain is as long as the table makes it; the one accent waiting is still all there is to hold.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Composer {
     pending: Option<u16>,
@@ -276,11 +282,17 @@ impl Composer {
         let units = mapping.units();
 
         if let Some(accent) = self.pending.take() {
-            if let [base] = units
-                && let Some(composed) = target.compose(accent, *base)
-            {
-                emit(&[composed]);
-                return;
+            if let [base] = units {
+                if let Some(composed) = target.compose(accent, *base) {
+                    emit(&[composed]);
+                    return;
+                }
+
+                // Stage E110: a link of a chain — the two make a dead key, which waits.
+                if let Some(dead) = target.chain(accent, *base) {
+                    self.pending = Some(dead);
+                    return;
+                }
             }
 
             // No composition: as Windows does, the accent and what came after it, side by side —
