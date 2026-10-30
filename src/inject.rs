@@ -2027,6 +2027,14 @@ pub trait Environment {
         false
     }
 
+    /// ⭐ **Stage E110, task T-110-4 — whether the selection packet goes out after the layout
+    /// switch** ([`switches_ahead_in`], [`run_steps_ahead`]). Asked once, for the selection packet
+    /// only. The default answers no — FR-43; [`System`] reads the class of the focused field and
+    /// the layout of the text on the screen.
+    fn switches_ahead(&mut self) -> bool {
+        false
+    }
+
     /// **FR-40 step 5 — the layout switch. The connection point of task T-05-1.**
     ///
     /// Called after the replacement has been sent — and only when it was taken whole, task
@@ -2076,6 +2084,12 @@ pub struct System {
     /// ([`switch_classic_in`]) and [`Environment::switch_back`] returns to this layout. `None` for
     /// every other path, which switches through the chain of §4.6 and never back.
     back: Option<LayoutId>,
+
+    /// ⭐ **The layout the text on the screen is in — stage E110, task T-110-4.** `Some` for the
+    /// paths other than the classic console ([`System::for_target_from`]): the question of
+    /// [`Environment::switches_ahead`] is asked of it, and the selection that switched ahead
+    /// returns to it when its packet did not reach the screen.
+    screen: Option<LayoutId>,
 }
 
 impl System {
@@ -2084,6 +2098,18 @@ impl System {
         Self {
             target: Some(target),
             back: None,
+            screen: None,
+        }
+    }
+
+    /// The real machine for a replacement over text in the layout `screen`, ending in the switch
+    /// to `target` — stage E110, task T-110-4: [`System::for_target`] that also knows what is on
+    /// the screen.
+    pub const fn for_target_from(target: LayoutId, screen: LayoutId) -> Self {
+        Self {
+            target: Some(target),
+            back: None,
+            screen: Some(screen),
         }
     }
 
@@ -2094,8 +2120,25 @@ impl System {
         Self {
             target: Some(target),
             back: Some(back),
+            screen: None,
         }
     }
+}
+
+/// The language of the Tamil layouts (Tamil 99, `00020449`) — stage E110, task T-110-4.
+const TAMIL: u16 = 0x0449;
+
+/// ⭐ **The pure half of task T-110-4 (BACKLOG Q-201-1)** — whether the selection packet goes out
+/// **after** the layout switch: in a field of [`SETTLING_FIELD_CLASSES`] (Блокнот of Windows 11)
+/// over text in a Tamil layout. Блокнот under Tamil 99 took the injected selection after its
+/// characters and erased nothing (case 10, B1 on Test_VM: 5 of 30 on 1.4.0; 1 of 30 with a `WM_NULL`
+/// round trip to the field before the switch, not kept; 0 of 30 with this rule; 201.15 without the
+/// program — 2 of 8 with no switch at all, so the switch is not the cause alone). The switch the
+/// program posts is taken by the window before the injected input
+/// ([`run_steps_ahead`], as in the classic console), so the packet meets the field in the target
+/// layout. Every other field and language keeps FR-43. Case-insensitively, as [`resolve_auto`].
+pub fn switches_ahead_in(class: Option<&str>, screen: Option<LayoutId>) -> bool {
+    screen.is_some_and(|layout| layout.language_id() == TAMIL) && erase_settle_for(class) > 0
 }
 
 impl Environment for System {
@@ -2139,6 +2182,24 @@ impl Environment for System {
         let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
 
         parts_typed_ksha_in(class.as_deref())
+    }
+
+    /// **Stage E110, task T-110-4** — the class of the focused field and the layout on the screen.
+    fn switches_ahead(&mut self) -> bool {
+        if self.screen.is_none() {
+            return false;
+        }
+
+        // SAFETY: as in `erase_settle_ms` above.
+        let foreground = unsafe { GetForegroundWindow() };
+
+        if foreground.is_invalid() {
+            return false;
+        }
+
+        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
+
+        switches_ahead_in(class.as_deref(), self.screen)
     }
 
     /// **Stage E110, task T-110-3** — the class of the focused field, the same way as above.
@@ -2233,6 +2294,10 @@ impl Environment for System {
     fn switch_back(&mut self) {
         if let Some(back) = self.back {
             switch_classic_in(&mut crate::switch::System, back);
+        } else if let Some(screen) = self.screen {
+            // Stage E110, task T-110-4: the selection that switched ahead goes back through the
+            // chain of §4.6, the way it switched.
+            switch_layout_in(&mut crate::switch::System, screen);
         }
     }
 }
@@ -2682,7 +2747,8 @@ pub fn replace_with(
     let mut system = if matches!(delivery, Delivery::Keystrokes) {
         System::for_classic_console(target.layout(), back)
     } else {
-        System::for_target(target.layout())
+        // Stage E110, task T-110-4: the other paths know what is on the screen too.
+        System::for_target_from(target.layout(), back)
     };
 
     replace_in_with(&mut system, strokes, target, on_screen, delay_ms, delivery)
@@ -2831,7 +2897,15 @@ pub fn replace_in_with(
                 0
             };
 
-            run_steps(env, &events[..len], erased, typed, delay_ms, settle_ms)
+            // ⭐ Stage E110, task T-110-4 (BACKLOG Q-201-1): in Блокнот over Tamil text the selection
+            // packet goes out after the switch ([`switches_ahead_in`]).
+            let selection = matches!(delivery, Delivery::Selection);
+
+            if selection && env.switches_ahead() {
+                run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+            } else {
+                run_steps(env, &events[..len], erased, typed, delay_ms, settle_ms)
+            }
         }
     });
 

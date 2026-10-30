@@ -200,6 +200,9 @@ struct Bench {
     /// ⭐ **Stage E110, task T-110-3.** What `joins_typed_pulli` answers — `true` is the field of
     /// Notepad of Windows 11, which takes a Tamil consonant typed with its pulli off at once.
     pulli: bool,
+    /// ⭐ **Stage E110, task T-110-4.** What `switches_ahead` answers — `true` is the field of
+    /// Notepad of Windows 11 over Tamil text, where the selection goes out after the switch.
+    ahead: bool,
 }
 
 impl Bench {
@@ -214,6 +217,7 @@ impl Bench {
             settle: 0,
             ksha: false,
             pulli: false,
+            ahead: false,
         }
     }
 
@@ -336,6 +340,10 @@ impl Environment for Bench {
 
     fn joins_typed_pulli(&mut self) -> bool {
         self.pulli
+    }
+
+    fn switches_ahead(&mut self) -> bool {
+        self.ahead
     }
 
     fn switch_layout(&mut self) {
@@ -5247,6 +5255,90 @@ fn only_the_field_of_notepad_takes_a_tamil_consonant_with_its_pulli_at_once() {
     }
 
     assert!(!inject::joins_typed_pulli_in(None));
+}
+
+/// ⭐ **Stage E110, task T-110-4 — in Блокнот over Tamil text the selection goes out after the
+/// switch**, as the keys of the classic console do (`run_steps_ahead`): the switch first, then the
+/// packet, and the way back when the packet did not reach the screen (Н12). Every other field keeps
+/// FR-43 — the packet, then the switch.
+#[test]
+fn the_selection_over_tamil_in_notepad_goes_out_after_the_switch() {
+    let target = russian();
+    let strokes = ghbdtn();
+    let steps = |bench: &Bench| {
+        bench
+            .log
+            .iter()
+            .filter_map(|step| match step {
+                Step::Send(_) => Some("send"),
+                Step::Switch => Some("switch"),
+                Step::SwitchBack => Some("back"),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let run = |bench: &mut Bench, method: ReplacementMethod| {
+        let _ = inject::replace_in_with(
+            bench,
+            &strokes,
+            &target,
+            inject::OnScreen::as_typed(&strokes),
+            0,
+            method,
+        );
+    };
+
+    let mut bench = Bench {
+        ahead: true,
+        ..Bench::new()
+    };
+    run(&mut bench, ReplacementMethod::Selection);
+    let order = steps(&bench);
+    assert_eq!(order.first(), Some(&"switch"), "{order:?}");
+    assert!(
+        order.contains(&"send") && !order.contains(&"back"),
+        "{order:?}"
+    );
+    assert_eq!(
+        order.iter().filter(|step| **step == "switch").count(),
+        1,
+        "one switch, ahead: {order:?}"
+    );
+
+    let mut bench = Bench {
+        ahead: true,
+        ..Bench::refusing(usize::MAX / 2)
+    };
+    run(&mut bench, ReplacementMethod::Selection);
+    assert_eq!(
+        steps(&bench).last(),
+        Some(&"back"),
+        "the way back when the packet did not reach the screen"
+    );
+
+    let mut bench = Bench {
+        ahead: true,
+        ..Bench::new()
+    };
+    run(&mut bench, ReplacementMethod::Backspace);
+    let order = steps(&bench);
+    assert_eq!(
+        order.last(),
+        Some(&"switch"),
+        "the control: Backspace keeps FR-43: {order:?}"
+    );
+
+    // The pure rule: Блокнот, and the text on the screen in a Tamil layout.
+    let tamil = Some(LayoutId::from_raw(0xF0C8_0449));
+    assert!(inject::switches_ahead_in(Some("RichEditD2DPT"), tamil));
+    assert!(inject::switches_ahead_in(Some("richeditd2dpt"), tamil));
+    assert!(!inject::switches_ahead_in(
+        Some("RichEditD2DPT"),
+        Some(LayoutId::from_raw(0x0409_0409))
+    ));
+    assert!(!inject::switches_ahead_in(Some("Edit"), tamil));
+    assert!(!inject::switches_ahead_in(None, tamil));
+    assert!(!inject::switches_ahead_in(Some("RichEditD2DPT"), None));
 }
 
 /// ⭐ **Task T-107-6 (в), решение 201.10а — in Блокнот the conjunct `க்ஷ` typed by one key is two
