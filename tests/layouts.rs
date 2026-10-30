@@ -17,9 +17,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use lang_switcher::layouts::{
     Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
-    LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MappingKind, Mods, REBUILD_MESSAGES, SelectionError,
-    Session, cycle_for, enumerate, enumerate_all, layout_list_changed, needs_rebuild, published,
-    selection_failures,
+    LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MAX_SESSION, MappingKind, Mods, PAIR_VARIANT_REFUSED,
+    REBUILD_MESSAGES, SelectionError, Session, cycle_for, enumerate, enumerate_all,
+    layout_list_changed, needs_rebuild, published, selection_failures,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -1250,6 +1250,188 @@ fn a_pair_beyond_the_truncated_session_is_refused_and_not_quietly_replaced() {
 
     assert_eq!(cycle.layouts(), [US, RUSSIAN]);
     assert_eq!(selection_failures().too_many_layouts, before + 1);
+}
+
+/// ⭐ **Stage E111, task T-111-5 (BACKLOG Q-198-8) — a pair names a variant of a language by its
+/// `KLID`.** `0x00020422` used to be read as a handle and found nothing: the session calls that layout
+/// `F0A80422`, and a hand-edited file broke the pair in silence (198.26). Read-only: one value of the
+/// registry of the machine the test runs on. Red «до» on `0b0d081`: the spec matches nothing.
+#[test]
+fn a_pair_names_a_variant_of_a_language_by_its_klid() {
+    // The handle as a 64-bit process holds it: `GetKeyboardLayoutList` sign-extends.
+    const UKRAINIAN_ENHANCED: LayoutId = LayoutId::from_raw(0xFFFF_FFFF_F0A8_0422);
+
+    let spec = LayoutSpec::parse("0x00020422");
+
+    assert!(
+        spec.matches(UKRAINIAN_ENHANCED),
+        "the variant found by its Layout Id: {spec:?}"
+    );
+    assert!(
+        !spec.matches(LayoutId::from_raw(0x0422_0422)),
+        "the first layout of the language is another layout"
+    );
+
+    let pair = settings(LayoutMode::Pair, ["0x00000409", "0x00020422"], &[]);
+    let cycle = cycle_for(pair, &[US, RUSSIAN, UKRAINIAN_ENHANCED], Session::Whole)
+        .expect("both fields of the pair are in the session");
+
+    assert_eq!(cycle.layouts(), [US, UKRAINIAN_ENHANCED]);
+}
+
+/// **The pure half of task T-111-5:** only the identifier of a variant asks the registry; the
+/// `Layout Id` gives the device word of the handle, whichever language the session loaded the layout
+/// under; a `KLID` Windows does not know stays what the file wrote and matches nothing.
+#[test]
+fn only_the_identifier_of_a_variant_asks_the_registry() {
+    for not_a_variant in [
+        "0x00000409",
+        "0x04090409",
+        "0xFFFFFFFFF0A80422",
+        "0x04220422",
+        "",
+        "word",
+    ] {
+        let spec = LayoutSpec::parse_with(not_a_variant, |klid| {
+            panic!("{not_a_variant} asked the registry for {klid:08X}")
+        });
+
+        assert!(!spec.names_a_variant(), "{not_a_variant}: {spec:?}");
+    }
+
+    let found = LayoutSpec::parse_with("0x00020422", |klid| {
+        assert_eq!(klid, 0x0002_0422);
+        Some(0x00A8)
+    });
+
+    assert!(found.names_a_variant());
+    assert!(found.matches(LayoutId::from_raw(0xFFFF_FFFF_F0A8_0422)));
+    assert!(found.matches(LayoutId::from_raw(0xF0A8_0422)));
+    assert!(
+        found.matches(LayoutId::from_raw(0xFFFF_FFFF_F0A8_0419)),
+        "the same file under another language"
+    );
+    assert!(!found.matches(LayoutId::from_raw(0xFFFF_FFFF_F0A9_0422)));
+    assert!(!found.matches(LayoutId::from_raw(0x0422_0422)));
+
+    let unknown = LayoutSpec::parse_with("0x00770422", |_| None);
+
+    assert!(unknown.names_a_variant());
+    assert_eq!(unknown.raw(), 0x0077_0422);
+    assert!(!unknown.matches(LayoutId::from_raw(0x0422_0422)));
+    assert!(!unknown.matches(LayoutId::from_raw(0x0077_0422 | (0xFFFF_FFFF << 32))));
+}
+
+/// ⭐ **Stage E111, task T-111-5 — a variant the session lacks is refused, not replaced by the first
+/// two layouts.** Counted, and a row of the journal's vocabulary (`diag`). The prefill of FR-30 is
+/// still the answer for a language the session lacks, and a session of exactly two layouts still
+/// reads no field at all.
+///
+/// ⚠ Moves the process-wide `pair_variant_missing` counter; nothing else in this binary raises it.
+#[test]
+fn a_pair_that_names_a_variant_the_session_lacks_is_refused_and_journalled() {
+    let before = selection_failures().pair_variant_missing;
+    let session = [US, RUSSIAN, GREEK];
+
+    // Windows has the layout, the session does not.
+    let absent = settings(LayoutMode::Pair, ["0x00000409", "0x00020422"], &[]);
+    assert_eq!(
+        cycle_for(absent, &session, Session::Whole),
+        Err(SelectionError::PairVariantMissing)
+    );
+    assert_eq!(selection_failures().pair_variant_missing, before + 1);
+
+    // Windows has no such layout: the source field this time, so that both fields are looked at.
+    let unknown = settings(LayoutMode::Pair, ["0x00770422", "0x00000419"], &[]);
+    assert_eq!(
+        cycle_for(unknown, &session, Session::Whole),
+        Err(SelectionError::PairVariantMissing)
+    );
+    assert_eq!(selection_failures().pair_variant_missing, before + 2);
+
+    assert_ne!(
+        lang_switcher::diag::Operation::from_name(PAIR_VARIANT_REFUSED),
+        lang_switcher::diag::Operation::UNLISTED,
+        "the name of the journal line is in the vocabulary of `diag`"
+    );
+    assert!(
+        lang_switcher::diag::render().contains("layouts.pair_variant_missing"),
+        "and the counter is a row of the dump"
+    );
+
+    // The controls: the language the session lacks — the prefill of FR-30, nothing counted.
+    let language = settings(LayoutMode::Pair, ["0x00000409", "0x00000405"], &[]);
+    let prefilled = cycle_for(language, &session, Session::Whole).expect("the prefill of FR-30");
+    assert_eq!(prefilled.layouts(), [US, RUSSIAN]);
+
+    // Exactly two layouts: the configuration is not consulted at all.
+    let two = cycle_for(absent, &[US, RUSSIAN], Session::Whole).expect("the first bullet of FR-30");
+    assert_eq!(two.layouts(), [US, RUSSIAN]);
+
+    // A list cut short: "not there" is not established, so the refusal is Т-22-5's.
+    assert_eq!(
+        cycle_for(absent, &session, Session::Truncated),
+        Err(SelectionError::TooManyLayouts)
+    );
+
+    assert_eq!(selection_failures().pair_variant_missing, before + 2);
+}
+
+/// ⭐ **Stage E111, task T-111-5 — a pair of the ninth layout of a session works.** Under the old
+/// bound of the array, [`MAX_CYCLE`], this was the refusal of Т-22-5: the settings window showed the
+/// pair as valid and the hotkey did nothing. Both product paths take the wider array.
+#[test]
+fn a_pair_of_the_ninth_layout_of_the_session_resolves() {
+    const NINTH: LayoutId = LayoutId::from_raw(0x0405_0405);
+
+    let session = [
+        US,
+        RUSSIAN,
+        GREEK,
+        LayoutId::from_raw(0x0407_0407),
+        LayoutId::from_raw(0x040C_040C),
+        LayoutId::from_raw(0x0410_0410),
+        LayoutId::from_raw(0x040A_040A),
+        LayoutId::from_raw(0x0415_0415),
+        NINTH,
+    ];
+    let cache = LayoutCache::from_maps(
+        session
+            .iter()
+            .map(|layout| {
+                let mut builder = LayoutMapBuilder::new(*layout);
+                builder.set(SCAN_A, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('a'));
+                builder.finish()
+            })
+            .collect(),
+    )
+    .expect("nine non-empty maps");
+
+    let mut available = [LayoutId::default(); MAX_SESSION];
+    let count = cache.layouts(&mut available);
+    assert_eq!(count, 9);
+
+    let pair = settings(LayoutMode::Pair, ["0x00000409", "0x00000405"], &[]);
+    let cycle = cycle_for(pair, &available[..count], Session::of(count, cache.len()))
+        .expect("the ninth layout is looked at");
+    assert_eq!(cycle.layouts(), [US, NINTH]);
+
+    // The array of the two press paths, read where it is declared.
+    for (file, text) in [
+        ("inject.rs", include_str!("../src/inject.rs")),
+        ("selection.rs", include_str!("../src/selection.rs")),
+    ] {
+        assert!(
+            text.contains("[LayoutId::default(); layouts::MAX_SESSION]")
+                || text.contains("[LayoutId::default(); crate::layouts::MAX_SESSION]"),
+            "{file}: the press looks at the first MAX_SESSION layouts"
+        );
+        assert!(
+            !text.contains("[LayoutId::default(); layouts::MAX_CYCLE]")
+                && !text.contains("[LayoutId::default(); crate::layouts::MAX_CYCLE]"),
+            "{file}: no array of the press is cut at MAX_CYCLE"
+        );
+    }
 }
 
 // -------------------------------------------------------------------------------------

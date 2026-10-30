@@ -1680,7 +1680,7 @@ impl LayoutCache {
     /// "первые две раскладки системного списка".
     ///
     /// Allocation-free, and that is the point (NFR-09): this is read on the hotkey path, where
-    /// [`crate::inject::on_hotkey`] hands it a fixed array of [`MAX_CYCLE`] elements. `out`
+    /// [`crate::inject::on_hotkey`] hands it a fixed array of [`MAX_SESSION`] elements. `out`
     /// shorter than the cache is not an error — the first `out.len()` layouts are copied, which
     /// is what a caller with a bounded list can use anyway.
     pub fn layouts(&self, out: &mut [LayoutId]) -> usize {
@@ -1822,6 +1822,27 @@ impl LayoutCache {
 /// two. Entries past the eighth are dropped, not an error.
 pub const MAX_CYCLE: usize = 8;
 
+/// ⭐ **Stage E111, task T-111-5 (BACKLOG Q-198-8) — how many layouts of the session one press looks
+/// at**, the fixed array of [`LayoutCache::layouts`] on the hotkey path. It used to be
+/// [`MAX_CYCLE`], so a pair that named the ninth layout was refused (task Т-22-5) while the settings
+/// window, which reads the whole session, showed it as valid; the stand of Э106 met that with 16
+/// layouts (198.26). The cache holds every layout anyway, so the wider list costs one array on the
+/// stack and no sweep. What walks the hotkey is still bounded by [`MAX_CYCLE`].
+pub const MAX_SESSION: usize = 64;
+
+/// The largest high word of the identifier of a variant of a language (`00020422`, `00140C00`). A
+/// handle's high word is a language id or `0xFnnn`, so `0x0400` and above are never a variant: the
+/// first specific language id is `0x0401`, and the neutral ids below it name no keyboard.
+const VARIANT_KLID_MAX_HIGH: usize = 0x03FF;
+
+/// **The `Layout Id` of `klid`**, out of the registry — read-only, like [`klid_of`] in the other
+/// direction. `None`: no such layout on this Windows, or a layout with no id (the first layout of a
+/// language has none and is named by its language anyway).
+fn layout_id_of(klid: u32) -> Option<u16> {
+    machine_string(&format!(r"{KEYBOARD_LAYOUTS}\{klid:08X}"), "Layout Id")
+        .and_then(|text| u16::from_str_radix(text.trim(), 16).ok())
+}
+
 /// A layout identifier **as section 7 writes it** — `"0x00000409"`, not an `HKL`.
 ///
 /// The distinction is load-bearing and it is why this is a type of its own rather than a
@@ -1837,6 +1858,12 @@ pub const MAX_CYCLE: usize = 8;
 /// high word is zero names a **language** and matches any loaded layout serving it; a spec with
 /// a high word names a **handle** and matches only that one. Both forms are accepted from the
 /// file, and section 7 is not extended by one field.
+///
+/// ⭐ **Stage E111, task T-111-5 (BACKLOG Q-198-8) — and a third form, the identifier of a variant
+/// of a language:** `0x00020422`, the name of the layout under the registry key above. Its high
+/// word is too small for the device word of a handle, and it used to be read as a handle and find
+/// nothing: `F0A80422` is how the session calls that layout. [`LayoutSpec::parse`] asks the
+/// registry for its `Layout Id` and keeps the device word it gives, `0xF0A8`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LayoutSpec(usize);
 
@@ -1854,19 +1881,47 @@ impl LayoutSpec {
     /// resident program working off the defaults, and the settings dialog of FR-92 (task
     /// T-08-1) is where a bad value is reported to the user.
     ///
-    /// Allocation-free — it is called on the UI thread while publishing, and there is nothing
-    /// here that needs a string of its own.
+    /// Called on the UI thread while publishing, never on the hotkey path: the identifier of a
+    /// variant ([`LayoutSpec::names_a_variant`]) is one read of the registry, and every other value
+    /// reads nothing and allocates nothing.
     pub fn parse(text: &str) -> Self {
+        Self::parse_with(text, layout_id_of)
+    }
+
+    /// [`LayoutSpec::parse`] with the question to the registry handed in — the pure half of task
+    /// T-111-5. `layout_id` answers the `Layout Id` of a `KLID`, or `None` when Windows has no such
+    /// layout: the spec then stays what the file wrote, which matches no layout of any session and
+    /// is refused by [`cycle_for`].
+    pub fn parse_with(text: &str, layout_id: impl FnOnce(u32) -> Option<u16>) -> Self {
         let trimmed = text.trim();
         let digits = trimmed
             .strip_prefix("0x")
             .or_else(|| trimmed.strip_prefix("0X"))
             .unwrap_or(trimmed);
 
-        match usize::from_str_radix(digits, 16) {
-            Ok(value) => Self(value),
-            Err(_) => Self::NONE,
+        let Ok(value) = usize::from_str_radix(digits, 16) else {
+            return Self::NONE;
+        };
+
+        if !matches!(value >> 16, 1..=VARIANT_KLID_MAX_HIGH) {
+            return Self(value);
         }
+
+        u32::try_from(value)
+            .ok()
+            .and_then(layout_id)
+            .map_or(Self(value), |id| {
+                Self((0xF000 | usize::from(id & 0x0FFF)) << 16)
+            })
+    }
+
+    /// Whether the file named a variant of a language — the identifier of [`LayoutSpec::parse`],
+    /// whether the registry knew it or not. Only this form is refused when the session does not
+    /// have the layout: [`cycle_for`] says why.
+    pub const fn names_a_variant(self) -> bool {
+        let high = self.0 >> 16;
+
+        high != 0 && (high <= VARIANT_KLID_MAX_HIGH || self.0 & 0xFFFF == 0)
     }
 
     /// Wraps a raw identifier — the form the published atomics carry.
@@ -1894,6 +1949,12 @@ impl LayoutSpec {
             // A keyboard layout identifier: the language alone. `0x00000409` names US whichever
             // handle the session gave it.
             return layout.language_id() as usize == self.0 & 0xFFFF;
+        }
+
+        if self.0 & 0xFFFF == 0 {
+            // The device word of a variant, out of the registry (task T-111-5): the layout file
+            // whichever language the session loaded it under.
+            return (layout.raw() >> 16) & 0xFFFF == (self.0 >> 16) & 0xFFFF;
         }
 
         // A handle, written out in full. Compared exactly, so that a session with the same
@@ -1940,7 +2001,7 @@ pub enum SelectionError {
     OriginOutside,
     /// ⭐ **Task Т-22-5.** Mode `pair`, the configured pair resolved against nothing — and the
     /// list it was resolved against was **not the whole session**: it had been cut short at
-    /// [`MAX_CYCLE`] by the caller's fixed array.
+    /// [`MAX_SESSION`] by the caller's fixed array ([`MAX_CYCLE`] until task T-111-5).
     ///
     /// The prefill of FR-30 is the answer when the session really does not have the layouts the
     /// pair names. It is **not** an answer when this program simply did not look at them: the two
@@ -1950,10 +2011,17 @@ pub enum SelectionError {
     /// dialog checks against the full list.
     ///
     /// So the answer is a refusal that is counted like every other, and the press changes nothing
-    /// at all. [`MAX_CYCLE`] is not widened by this: eight is still more layouts than a session is
-    /// ever set up with, and a bound that a hand-edited file cannot turn into an unbounded array
-    /// on the hotkey path is the reason it exists.
+    /// at all. A bound that a hand-edited file cannot turn into an unbounded array on the hotkey
+    /// path is the reason [`MAX_SESSION`] exists.
     TooManyLayouts,
+    /// ⭐ **Stage E111, task T-111-5 (BACKLOG Q-198-8).** Mode `pair`, a field that names a variant
+    /// of a language ([`LayoutSpec::names_a_variant`]), and the session does not have that layout
+    /// — or Windows has no such layout at all.
+    ///
+    /// The prefill of FR-30 is for a file nobody has opened yet; a variant in it is a value somebody
+    /// wrote by hand on purpose, and two other layouts converting in its place is the silent break
+    /// the backlog names. So the answer is a refusal, counted and written to the journal.
+    PairVariantMissing,
 }
 
 impl fmt::Display for SelectionError {
@@ -1964,7 +2032,10 @@ impl fmt::Display for SelectionError {
             Self::NoLayouts => "fewer than two layouts to switch between",
             Self::OriginOutside => "the layout in use is not one of the participants",
             Self::TooManyLayouts => {
-                "the configured pair names no layout among the first eight of this session"
+                "the configured pair names no layout among the first ones of this session"
+            }
+            Self::PairVariantMissing => {
+                "the configured pair names a variant of a language this session does not have"
             }
         };
         f.write_str(text)
@@ -1989,17 +2060,20 @@ pub struct SelectionFailures {
     pub origin_outside: u32,
     /// [`SelectionError::TooManyLayouts`] — task Т-22-5.
     pub too_many_layouts: u32,
+    /// [`SelectionError::PairVariantMissing`] — task T-111-5.
+    pub pair_variant_missing: u32,
 }
 
 static IME_LAYOUT: AtomicU32 = AtomicU32::new(0);
 static NO_LAYOUTS: AtomicU32 = AtomicU32::new(0);
 static ORIGIN_OUTSIDE: AtomicU32 = AtomicU32::new(0);
 static TOO_MANY_LAYOUTS: AtomicU32 = AtomicU32::new(0);
+static PAIR_VARIANT_MISSING: AtomicU32 = AtomicU32::new(0);
 
 /// Counts one refusal and hands it back, so that a refusal cannot be produced without being
 /// counted.
 ///
-/// The one place any of the four counters is raised, and it is reached from the three places a
+/// The one place any of the five counters is raised, and it is reached from the three places a
 /// [`SelectionError`] is *created* — [`Cycle::from_layouts`], [`Cycle::target`] and, since task
 /// Т-22-5, the pair branch of [`cycle_for`]. Everything above them propagates with `?` and counts
 /// nothing, which is what keeps one refusal from being counted twice.
@@ -2012,6 +2086,7 @@ fn refuse(error: SelectionError) -> SelectionError {
         SelectionError::NoLayouts => &NO_LAYOUTS,
         SelectionError::OriginOutside => &ORIGIN_OUTSIDE,
         SelectionError::TooManyLayouts => &TOO_MANY_LAYOUTS,
+        SelectionError::PairVariantMissing => &PAIR_VARIANT_MISSING,
     };
 
     counter.fetch_add(1, Ordering::Relaxed);
@@ -2019,22 +2094,24 @@ fn refuse(error: SelectionError) -> SelectionError {
     error
 }
 
-/// What the four counters stand at.
+/// What the five counters stand at.
 pub fn selection_failures() -> SelectionFailures {
     SelectionFailures {
         ime_layout: IME_LAYOUT.load(Ordering::Relaxed),
         no_layouts: NO_LAYOUTS.load(Ordering::Relaxed),
         origin_outside: ORIGIN_OUTSIDE.load(Ordering::Relaxed),
         too_many_layouts: TOO_MANY_LAYOUTS.load(Ordering::Relaxed),
+        pair_variant_missing: PAIR_VARIANT_MISSING.load(Ordering::Relaxed),
     }
 }
 
-/// Zeroes the four counters. For tests; the product never calls it.
+/// Zeroes the five counters. For tests; the product never calls it.
 pub fn reset_selection_failures() {
     IME_LAYOUT.store(0, Ordering::Relaxed);
     NO_LAYOUTS.store(0, Ordering::Relaxed);
     ORIGIN_OUTSIDE.store(0, Ordering::Relaxed);
     TOO_MANY_LAYOUTS.store(0, Ordering::Relaxed);
+    PAIR_VARIANT_MISSING.store(0, Ordering::Relaxed);
 }
 
 /// The ordered list of layouts one press of the hotkey steps along — **FR-30, FR-31, FR-33**.
@@ -2517,9 +2594,13 @@ mod seam {
 #[cfg(feature = "testing")]
 pub use seam::arm as interleave_next_read;
 
+/// The name the journal records a refusal of [`SelectionError::PairVariantMissing`] under — a row of
+/// the vocabulary of module `diag`, stage E111. A fact and no value (SEC-01, SEC-07).
+pub const PAIR_VARIANT_REFUSED: &str = "pair variant layout missing";
+
 /// Whether the list handed to [`cycle_for`] is the whole session — task **Т-22-5**.
 ///
-/// [`LayoutCache::layouts`] copies into the caller's fixed array of [`MAX_CYCLE`] elements and
+/// [`LayoutCache::layouts`] copies into the caller's fixed array of [`MAX_SESSION`] elements and
 /// answers how many it copied. A session with more layouts than that leaves the rest out, and the
 /// slice that comes back cannot say so: it looks exactly like a whole session of eight. This type
 /// is the caller saying which of the two it handed over, and it is a named value rather than a
@@ -2532,8 +2613,8 @@ pub enum Session {
     /// Every layout the session has is in the list.
     #[default]
     Whole,
-    /// The session has more layouts than [`MAX_CYCLE`], and the list is the first [`MAX_CYCLE`] of
-    /// them in system order.
+    /// The session has more layouts than [`MAX_SESSION`], and the list is the first [`MAX_SESSION`]
+    /// of them in system order.
     Truncated,
 }
 
@@ -2601,7 +2682,7 @@ impl Session {
 ///
 /// # ⭐ The prefill is not an answer to a question this program did not ask — task Т-22-5
 ///
-/// `session` says whether `available` is the whole session or the first [`MAX_CYCLE`] of a longer
+/// `session` says whether `available` is the whole session or the first [`MAX_SESSION`] of a longer
 /// one. It is consulted in exactly one place: the prefill above. "The pair names a layout this
 /// session does not have" and "the pair names a layout this program did not look at" produce the
 /// **same** unresolved slice and are opposite facts, and the prefill of FR-30 is an answer only to
@@ -2629,10 +2710,19 @@ pub fn cycle_for(
                 // ⭐ **Task Т-22-5.** The pair resolved against nothing, and the list it was
                 // resolved against is not the session — so "not there" is not a fact this program
                 // established. Refuse rather than substitute.
-                // ⭐ **Task Т-22-5.** The pair resolved against nothing, and the list it was
-                // resolved against is not the session — so "not there" is not a fact this program
-                // established. Refuse rather than substitute.
                 _ if session == Session::Truncated => Err(refuse(SelectionError::TooManyLayouts)),
+                // ⭐ **Task T-111-5.** A variant written by hand and not in the session: refused,
+                // with a line in the journal, and the two first layouts do not act in its place.
+                _ if [source, target]
+                    .iter()
+                    .any(|spec| spec.names_a_variant() && spec.resolve(available).is_none()) =>
+                {
+                    crate::diag::record(
+                        crate::diag::Operation::from_name(PAIR_VARIANT_REFUSED),
+                        crate::diag::OsCode::NONE,
+                    );
+                    Err(refuse(SelectionError::PairVariantMissing))
+                }
                 _ => Cycle::from_layouts(available.get(..2).unwrap_or(available)),
             }
         }

@@ -835,6 +835,8 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // `inject::on_hotkey`. Appended at the end so that no index above it moves; a fact and no
     // value (SEC-01, SEC-07), `Kind::Process`, no new `Kind`.
     ("level stroke replacement refused", Kind::Process),
+    // Stage E111, task T-111-5: `pair_target` names a variant of a language the session lacks.
+    ("pair variant layout missing", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
@@ -1690,6 +1692,11 @@ fn render_counters(out: &mut String) {
     row_u32(out, "layouts.no_layouts", selection.no_layouts);
     row_u32(out, "layouts.origin_outside", selection.origin_outside);
     row_u32(out, "layouts.too_many_layouts", selection.too_many_layouts);
+    row_u32(
+        out,
+        "layouts.pair_variant_missing",
+        selection.pair_variant_missing,
+    );
 
     let (send_mismatches, events_lost) = crate::inject::send_mismatches();
 

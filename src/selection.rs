@@ -3651,7 +3651,7 @@ pub(crate) fn plan_for_press() -> Option<Plan> {
     crate::app::with_recorder_wherever_it_is(|recorder| {
         let cache = recorder.cache()?;
 
-        let mut available = [LayoutId::default(); crate::layouts::MAX_CYCLE];
+        let mut available = [LayoutId::default(); crate::layouts::MAX_SESSION];
         let count = cache.layouts(&mut available);
 
         // **Task Т-22-5**, as in `inject::take_press`: whether the array above holds the session

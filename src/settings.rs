@@ -14789,15 +14789,15 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
 
     // Task T-34-6, finding Н102: what acts when the key is pressed — the very selection the
     // hotkey makes, `layouts::cycle_for` over the published configuration and the layouts of
-    // this session (the first `MAX_CYCLE` of them, which is what the hotkey sees too), named
-    // the way the lists above name them — and how often the choice was refused, out of the four
-    // counters the dump already prints. Nothing here decides anything: `MAX_CYCLE` and the
+    // this session (the first `MAX_SESSION` of them, which is what the hotkey sees too), named
+    // the way the lists above name them — and how often the choice was refused, out of the five
+    // counters the dump already prints. Nothing here decides anything: `MAX_SESSION` and the
     // choice of the pair belong to `layouts`, this line only reads them back.
     let available: Vec<LayoutId> = state
         .session
         .iter()
         .copied()
-        .take(layouts::MAX_CYCLE)
+        .take(layouts::MAX_SESSION)
         .collect();
     let session = layouts::Session::of(available.len(), state.session.len());
     let acting = match layouts::cycle_for(layouts::published(), &available, session) {
@@ -14820,7 +14820,8 @@ fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
         .ime_layout
         .saturating_add(failures.no_layouts)
         .saturating_add(failures.origin_outside)
-        .saturating_add(failures.too_many_layouts);
+        .saturating_add(failures.too_many_layouts)
+        .saturating_add(failures.pair_variant_missing);
 
     set_text(hwnd, IDC_STATE_PAIR, &acting_line(&acting, refusals));
 }

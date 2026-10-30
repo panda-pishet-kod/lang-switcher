@@ -3372,7 +3372,7 @@ fn take_press() -> Option<Press> {
 
         // The participating layouts of FR-35, in system order — the list section 4.4 chooses
         // from. A fixed array on the stack: no allocation on the hotkey path.
-        let mut available = [LayoutId::default(); layouts::MAX_CYCLE];
+        let mut available = [LayoutId::default(); layouts::MAX_SESSION];
         let count = cache.layouts(&mut available);
 
         // **Task Т-22-5.** Whether the array above holds the session or only the front of it. A
