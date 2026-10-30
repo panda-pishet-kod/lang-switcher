@@ -536,25 +536,17 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 /// 5 of 6). [`OnScreen::for_field`] gives the selection there one letter more per such key, and
 /// only there: one `Shift+Left` too many would take the character before the run.
 ///
-/// # ⭐ No count of `Backspace` in Блокнот — stage E111, task T-111-2 (BACKLOG Q-201-2, решение 205.1)
+/// # ⭐ No count of `Backspace` in Блокнот at all — stage E111, tasks T-111-2 and T-111-6
 ///
-/// Блокнот takes a **Tamil consonant with its pulli** (`க்`) typed by keys off sometimes with one
-/// `Backspace`, sometimes with two, about evenly (Test_VM, `reports\MEASURE-E110-notepad-backspace.md`;
-/// `k` × `Backspace` in one `SendInput`, as the packet goes): the code points ate the space before
-/// the word in about half of the trials, one less left `க` in front of the replacement in the other
-/// half (the stand of 1.4.1: `க்ஷஅ` 0 of 3 exact, `க்கஅ` 1 of 3). The Grantha `ஶ்` (`ஶ்ரீஅ`) and Hindi
-/// (`क्षअ`, `नमस्ते`) went by the code point, as FR-41 counts. So the count is not corrected: a run
-/// with such a pair goes by the selection there ([`delivery_in_field`]), which is typed text only —
-/// what the program inserted Блокнот takes off by the code point (Э107, 201.3), so
-/// [`OnScreen::as_injected`] holds no pair. The consonants other than `க` are not measured and follow
-/// the rule of the script.
+/// Блокнот takes a Tamil consonant with its pulli (`க்`) typed by keys off sometimes with one
+/// `Backspace`, sometimes with two, about evenly (`reports\MEASURE-E110-notepad-backspace.md`), and
+/// loses the first character of an insertion even after the settling of Э106 (Q-198-1). So the method
+/// `backspace` does not reach that field: [`delivery_in_field`] sends it by the selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OnScreen {
     characters: usize,
     letters: usize,
     ksha_keys: usize,
-    /// Pairs of a Tamil consonant and its pulli in the typed text — stage E110, task T-110-3.
-    pulli_pairs: usize,
 }
 
 impl OnScreen {
@@ -571,14 +563,12 @@ impl OnScreen {
             .collect();
 
         let letters = windows_letters_in(&text);
-        let pulli_pairs = pulli_pairs_in(&text);
         crate::buffer::zero_slice(&mut text);
 
         Self {
             characters: typed_chars(strokes),
             letters,
             ksha_keys: ksha_keys_in(strokes),
-            pulli_pairs,
         }
     }
 
@@ -595,8 +585,6 @@ impl OnScreen {
             characters: injected_chars(strokes, previous),
             letters,
             ksha_keys: 0,
-            // Stage E110: what the program inserted goes by the code point (Э107, 201.3).
-            pulli_pairs: 0,
         }
     }
 
@@ -624,11 +612,6 @@ impl OnScreen {
         self.ksha_keys
     }
 
-    /// Pairs of a Tamil consonant and its pulli in the typed text — stage E110, task T-110-3.
-    pub const fn pulli_pairs(self) -> usize {
-        self.pulli_pairs
-    }
-
     /// [`OnScreen::for_delivery`] in a field that does or does not part the conjunct `க்ஷ` typed
     /// by one key ([`parts_typed_ksha_in`]): there the selection takes one letter more per such
     /// key. The paths of `Backspace` are not touched.
@@ -638,23 +621,6 @@ impl OnScreen {
             other => self.for_delivery(other),
         }
     }
-}
-
-/// The Tamil pulli (virama), U+0BCD.
-const PULLI: u16 = 0x0BCD;
-
-/// **The consonants of the Tamil script itself** — the eighteen of `க` to `ன`, the Grantha letters
-/// `ஜ ஶ ஷ ஸ ஹ` left out: Блокнот took `ஶ்` off by the code point (stage E110, task T-110-3).
-const TAMIL_CONSONANTS: [u16; 18] = [
-    0x0B95, 0x0B99, 0x0B9A, 0x0B9E, 0x0B9F, 0x0BA3, 0x0BA4, 0x0BA8, 0x0BA9, 0x0BAA, 0x0BAE, 0x0BAF,
-    0x0BB0, 0x0BB1, 0x0BB2, 0x0BB3, 0x0BB4, 0x0BB5,
-];
-
-/// How many times a consonant of [`TAMIL_CONSONANTS`] stands right before a [`PULLI`] in `text`.
-fn pulli_pairs_in(text: &[u16]) -> usize {
-    text.windows(2)
-        .filter(|pair| pair[1] == PULLI && TAMIL_CONSONANTS.contains(&pair[0]))
-        .count()
 }
 
 /// The units of the Tamil conjunct `க்ஷ` — KA, PULLI, SSA.
@@ -1468,41 +1434,6 @@ pub fn resolve_auto(class: Option<&str>) -> Delivery {
     }
 }
 
-/// ⭐ **Task T-106-3, решение 198.8 — the fields whose erasure must settle before the insertion
-/// of FR-41.** `RichEditD2DPT` is the text field of Notepad of Windows 11.
-///
-/// Measured on the stand `Test_VM` without this program (`tools\vmlab\jobs\e106\j106-bs-*.ps1`,
-/// table in `reports\ITOG-E106.md`): the packet of FR-41 sent in one call — `Backspace` events,
-/// then the insertion as `KEYEVENTF_UNICODE` — came back as the last character repeated
-/// (`X uuuuuu` for `X l;ylfu`) in 13 trials of 31 (case Q-197-1 of stage Э105: 3 of 5, with the
-/// program). The insertion arriving while the field still digests the erasure is what collapses:
-/// the same insertion after a pause was exact — 20 ms 11 of 12, 35…100 ms 48 of 48, 50 ms in
-/// three passes 32 of 32 — while a pause between the events (FR-44, 1 ms) collapsed 10 of 10 and a
-/// `WM_NULL` round trip to the field (it answers in 0…2 ms) did not help (4 of 10).
-pub const SETTLING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
-
-/// The pause between the erasure and the insertion in a field of [`SETTLING_FIELD_CLASSES`] —
-/// 2.5 times the dose that still collapsed (20 ms) and the one measured in every pass.
-pub const ERASE_SETTLE_MS: u32 = 50;
-
-/// **The pure half of the settling of task T-106-3** — the pause a field of class `class` needs
-/// between the erasure and the insertion of FR-41, or zero: one call, as FR-41 has it.
-///
-/// `None` (the field cannot be read) and every other class answer zero — the packet every other
-/// window has always got. Case-insensitively, as [`resolve_auto`] compares.
-pub fn erase_settle_for(class: Option<&str>) -> u32 {
-    match class {
-        Some(class)
-            if SETTLING_FIELD_CLASSES
-                .iter()
-                .any(|settling| class.eq_ignore_ascii_case(settling)) =>
-        {
-            ERASE_SETTLE_MS
-        }
-        _ => 0,
-    }
-}
-
 /// ⭐ **Task T-107-6 (в), решение 201.10а — the fields that part the conjunct `க்ஷ` typed by one
 /// key**: Блокнот of Windows 11, see [`OnScreen`]. Edit and RichEdit are not in the list: with the
 /// text inserted they stop as `ScriptBreak` does, and typed by keys they were not measured — the
@@ -1520,48 +1451,46 @@ pub fn parts_typed_ksha_in(class: Option<&str>) -> bool {
     })
 }
 
-/// ⭐ **Stage E110, task T-110-3 (BACKLOG Q-201-2) — the fields that may take a Tamil consonant typed
-/// with its pulli off with one `Backspace`**: Блокнот of Windows 11, about every other time, see
-/// [`OnScreen`] (`reports\MEASURE-E110-notepad-backspace.md`). Edit and RichEdit typed by keys were
-/// not measured (the stand did not put Tamil 99 into a field of WinForms, Э107) and keep the count of
-/// FR-41.
-pub const PULLI_JOINING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+/// ⭐ **Stage E111, task T-111-6 (BACKLOG Q-198-1, слово владельца 206.5) — the fields where the
+/// method `backspace` goes by the selection**, as `auto` does: `RichEditD2DPT`, the text field of
+/// Notepad of Windows 11. A way round a defect of that field, not a repair of it: the cause is not
+/// known. What was measured on the stand `Test_VM`:
+///
+/// * the packet of FR-41 in one call came back as the last character repeated (`X uuuuuu` for
+///   `X l;ylfu`) in 13 trials of 31 (Q-197-1, `reports\ITOG-E106.md`), and a pause of 50 ms between
+///   the erasure and the insertion, the two calls of 1.1.0-1.4.1, did not end it: the first character
+///   was lost in 1 of 30 with the program, 1 of 50 without (Q-198-1, 198.23), and the third press of
+///   a cycle over inserted Tamil gave `X aa` for `X Ta` in 3 of 3 (1.4.1 + T-111-2);
+/// * a typed Tamil consonant with its pulli went with one `Backspace` or two, about evenly
+///   (`reports\MEASURE-E110-notepad-backspace.md`), so no count of them is right (Q-201-2).
+///
+/// Every other class keeps the packet of FR-41: Edit and RichEdit were not measured with such text.
+pub const SELECTING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
 
-/// **The pure half of task T-110-3** — whether a field of class `class` may take a Tamil consonant
-/// typed with its pulli off with one `Backspace`. `None` and every other class answer no.
-/// Case-insensitively, as [`resolve_auto`] compares.
-pub fn joins_typed_pulli_in(class: Option<&str>) -> bool {
+/// **The pure half of task T-111-6** — whether the method `backspace` goes by the selection in a
+/// field of class `class`. `None` and every other class answer no. Case-insensitively, as
+/// [`resolve_auto`] compares.
+pub fn selects_in(class: Option<&str>) -> bool {
     class.is_some_and(|class| {
-        PULLI_JOINING_FIELD_CLASSES
+        SELECTING_FIELD_CLASSES
             .iter()
-            .any(|joining| class.eq_ignore_ascii_case(joining))
+            .any(|selecting| class.eq_ignore_ascii_case(selecting))
     })
 }
 
-/// ⭐ **Stage E111, task T-111-2 (BACKLOG Q-201-2, решение 205.1) — the path a press runs in the field
-/// with the focus.** [`Delivery::Backspace`] over typed text with a Tamil consonant and its pulli, in
-/// a field that may take the pair off with one `Backspace` ([`joins_typed_pulli_in`]), is
-/// [`Delivery::Selection`]: there is no right count of `Backspace` there ([`OnScreen`]). Every other
-/// answer is `delivery` itself; the field is asked only for such a run.
+/// ⭐ **Stage E111, task T-111-6 — the path a press runs in the field with the focus.**
+/// [`Delivery::Backspace`] in a field of [`SELECTING_FIELD_CLASSES`] is [`Delivery::Selection`], the
+/// first press and the presses of the cycle alike; every other answer is `delivery` itself.
 ///
-/// ⚠ The price, measured on the same place under `auto`: the first replacement after Блокнот starts
-/// can take the space before the word (BACKLOG Q-204-1) — one too many where the path of `Backspace`
-/// was one too few or one too many about evenly.
-fn delivery_in_field(
-    delivery: Delivery,
-    on_screen: OnScreen,
-    env: &mut impl Environment,
-) -> Delivery {
-    if matches!(delivery, Delivery::Backspace)
-        && on_screen.pulli_pairs() > 0
-        && env.joins_typed_pulli()
-    {
+/// ⚠ The price, measured on the same place under `auto`: over typed Tamil the first replacement
+/// after Блокнот starts can take the space before the word (BACKLOG Q-204-1).
+fn delivery_in_field(delivery: Delivery, env: &mut impl Environment) -> Delivery {
+    if matches!(delivery, Delivery::Backspace) && env.selects_only() {
         Delivery::Selection
     } else {
         delivery
     }
 }
-
 /// The class name of `window`, or `None` when it cannot be read.
 ///
 /// The Win32 half of FR-42а, split from [`resolve_auto`] so that the resolution rule is a pure
@@ -1968,9 +1897,7 @@ pub fn inter_event_delay_ms() -> u32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Dispatched {
     /// `SendInput` calls made. **Exactly one** whenever the packet is non-empty and the pause
-    /// of FR-44 is zero, which is what FR-41 requires of the ordinary case — and two for the
-    /// `backspace` packet in the field of Notepad of Windows 11 (task T-106-3,
-    /// [`dispatch_settled`]).
+    /// of FR-44 is zero, which is what FR-41 requires.
     pub calls: usize,
     /// Events handed to `SendInput`, summed over the calls.
     pub requested: usize,
@@ -2017,18 +1944,8 @@ pub trait Environment {
     /// Hands one portion to the system and answers how many events it accepted — FR-41, FR-45.
     fn send(&mut self, events: &[INPUT]) -> u32;
 
-    /// The pause of FR-44 — reached when the configured delay is above zero — and the settling of
-    /// task T-106-3 between the erasure and the insertion of FR-41.
+    /// The pause of FR-44 — reached when the configured delay is above zero.
     fn pause(&mut self, delay_ms: u32);
-
-    /// ⭐ **Task T-106-3, решение 198.8 — how long the erasure of FR-41 must settle before the
-    /// insertion, in the field that has the keyboard focus** ([`erase_settle_for`]). Asked once
-    /// per `backspace` packet that erases and types. The default answers zero — one call, as
-    /// FR-41 has it — so a bench sees the split only when it asks for one; [`System`] reads the
-    /// class of the focused field.
-    fn erase_settle_ms(&mut self) -> u32 {
-        0
-    }
 
     /// ⭐ **Task T-107-6 (в) — whether the field with the focus parts the conjunct `க்ஷ` typed by
     /// one key** ([`parts_typed_ksha_in`], [`OnScreen::for_field`]). Asked only for a selection
@@ -2038,15 +1955,13 @@ pub trait Environment {
         false
     }
 
-    /// ⭐ **Stage E110, task T-110-3 — whether the field with the focus may take a Tamil consonant
-    /// typed with its pulli off with one `Backspace`** ([`joins_typed_pulli_in`],
-    /// [`delivery_in_field`]). Asked only for the path of `Backspace` over typed text that holds
-    /// such a pair. The default answers no — the path of FR-41; [`System`] reads the class of the
+    /// ⭐ **Stage E111, task T-111-6 — whether the method `backspace` goes by the selection in
+    /// the field with the focus** ([`selects_in`], [`delivery_in_field`]). Asked only for the path
+    /// of `Backspace`. The default answers no — the path of FR-41; [`System`] reads the class of the
     /// focused field.
-    fn joins_typed_pulli(&mut self) -> bool {
+    fn selects_only(&mut self) -> bool {
         false
     }
-
     /// ⭐ **Stage E110, task T-110-4 — whether the selection packet goes out after the layout
     /// switch** ([`switches_ahead_in`], [`run_steps_ahead`]). Asked once, for the selection packet
     /// only. The default answers no — FR-43; [`System`] reads the class of the focused field and
@@ -2149,7 +2064,7 @@ impl System {
 const TAMIL: u16 = 0x0449;
 
 /// ⭐ **The pure half of task T-110-4 (BACKLOG Q-201-1)** — whether the selection packet goes out
-/// **after** the layout switch: in a field of [`SETTLING_FIELD_CLASSES`] (Блокнот of Windows 11)
+/// **after** the layout switch: in a field of [`SELECTING_FIELD_CLASSES`] (Блокнот of Windows 11)
 /// over text in a Tamil layout. Блокнот under Tamil 99 took the injected selection after its
 /// characters and erased nothing (case 10, B1 on Test_VM: 5 of 30 on 1.4.0; 1 of 30 with a `WM_NULL`
 /// round trip to the field before the switch, not kept; 0 of 30 with this rule; 201.15 without the
@@ -2158,7 +2073,7 @@ const TAMIL: u16 = 0x0449;
 /// ([`run_steps_ahead`], as in the classic console), so the packet meets the field in the target
 /// layout. Every other field and language keeps FR-43. Case-insensitively, as [`resolve_auto`].
 pub fn switches_ahead_in(class: Option<&str>, screen: Option<LayoutId>) -> bool {
-    screen.is_some_and(|layout| layout.language_id() == TAMIL) && erase_settle_for(class) > 0
+    screen.is_some_and(|layout| layout.language_id() == TAMIL) && selects_in(class)
 }
 
 impl Environment for System {
@@ -2174,25 +2089,11 @@ impl Environment for System {
         sleep_ms(delay_ms);
     }
 
-    /// **Task T-106-3** — the class of the field with the focus in the foreground window, through
-    /// the one body `guard` asks it by ([`crate::guard::focused_control`]).
-    fn erase_settle_ms(&mut self) -> u32 {
+    /// **Task T-107-6 (в)** — the class of the field with the focus in the foreground window,
+    /// through the one body `guard` asks it by ([`crate::guard::focused_control`]).
+    fn parts_typed_ksha(&mut self) -> bool {
         // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches
         // no memory of ours; callable from any thread.
-        let foreground = unsafe { GetForegroundWindow() };
-
-        if foreground.is_invalid() {
-            return 0;
-        }
-
-        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
-
-        erase_settle_for(class.as_deref())
-    }
-
-    /// **Task T-107-6 (в)** — the class of the focused field, the same way as above.
-    fn parts_typed_ksha(&mut self) -> bool {
-        // SAFETY: as in `erase_settle_ms` above.
         let foreground = unsafe { GetForegroundWindow() };
 
         if foreground.is_invalid() {
@@ -2210,7 +2111,7 @@ impl Environment for System {
             return false;
         }
 
-        // SAFETY: as in `erase_settle_ms` above.
+        // SAFETY: as in `parts_typed_ksha` above.
         let foreground = unsafe { GetForegroundWindow() };
 
         if foreground.is_invalid() {
@@ -2222,9 +2123,9 @@ impl Environment for System {
         switches_ahead_in(class.as_deref(), self.screen)
     }
 
-    /// **Stage E110, task T-110-3** — the class of the focused field, the same way as above.
-    fn joins_typed_pulli(&mut self) -> bool {
-        // SAFETY: as in `erase_settle_ms` above.
+    /// **Stage E111, task T-111-6** — the class of the focused field, the same way as above.
+    fn selects_only(&mut self) -> bool {
+        // SAFETY: as in `parts_typed_ksha` above.
         let foreground = unsafe { GetForegroundWindow() };
 
         if foreground.is_invalid() {
@@ -2233,7 +2134,7 @@ impl Environment for System {
 
         let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
 
-        joins_typed_pulli_in(class.as_deref())
+        selects_in(class.as_deref())
     }
 
     /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
@@ -2463,50 +2364,6 @@ pub fn dispatch_in(env: &mut impl Environment, events: &[INPUT], delay_ms: u32) 
     record_discrepancy(done);
 
     done
-}
-
-/// ⭐ **Task T-106-3, решение 198.8 — FR-41 in two calls, for a field whose erasure must settle**
-/// ([`erase_settle_for`]): the first `erase_events` of `packet` (every `Backspace`, down and up),
-/// the pause `settle_ms`, then the rest — the insertion. Each half goes as [`dispatch_in`] sends
-/// a packet, so the portions of FR-44, when there are any, are kept inside each half.
-///
-/// FR-41 asks for one call, and the reason is order and atomicity; the order is kept — the
-/// erasure is whole before the insertion starts — and what is given up is the atomicity between
-/// the halves, in this one field and only for the `backspace` packet. Why: in one call the field
-/// of Notepad of Windows 11 collapsed the insertion into its last character repeated — see
-/// [`SETTLING_FIELD_CLASSES`] for the measurement.
-///
-/// FR-45 across the halves: an erasure the system did not take whole is **not** followed by the
-/// insertion. In one call `SendInput` stops at the first blocked event and sends nothing after
-/// it; the two calls keep that, and the answer counts the whole packet as asked for, so the
-/// replacement does not pass for one that reached the screen.
-fn dispatch_settled(
-    env: &mut impl Environment,
-    packet: &[INPUT],
-    erase_events: usize,
-    delay_ms: u32,
-    settle_ms: u32,
-) -> Dispatched {
-    let (erasure, insertion) = packet.split_at(erase_events.min(packet.len()));
-
-    let first = dispatch_in(env, erasure, delay_ms);
-
-    if !first.is_complete() || insertion.is_empty() {
-        return Dispatched {
-            requested: first.requested + insertion.len(),
-            ..first
-        };
-    }
-
-    env.pause(settle_ms);
-
-    let second = dispatch_in(env, insertion, delay_ms);
-
-    Dispatched {
-        calls: first.calls + second.calls,
-        requested: first.requested + second.requested,
-        accepted: first.accepted + second.accepted,
-    }
 }
 
 /// Where the portion starting at `start` ends — one event, or the whole of a character outside
@@ -2787,7 +2644,7 @@ pub fn replace_in_with(
     delivery: impl Into<Delivery>,
 ) -> Result<Replaced, InjectError> {
     let asked = delivery.into();
-    let delivery = delivery_in_field(asked, on_screen, env);
+    let delivery = delivery_in_field(asked, env);
 
     // The channel names the path the press really runs, not the one [`on_hotkey`] resolved.
     #[cfg(feature = "testing")]
@@ -2910,15 +2767,6 @@ pub fn replace_in_with(
         if matches!(delivery, Delivery::Keystrokes) {
             run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
         } else {
-            // ⭐ Task T-106-3, решение 198.8: a `backspace` packet that erases and types asks the
-            // field whether its erasure must settle first — the one question, after the packet is
-            // built and before steps 3 to 5.
-            let settle_ms = if matches!(delivery, Delivery::Backspace) && erased > 0 && typed > 0 {
-                env.erase_settle_ms()
-            } else {
-                0
-            };
-
             // ⭐ Stage E110, task T-110-4 (BACKLOG Q-201-1): in Блокнот over Tamil text the selection
             // packet goes out after the switch ([`switches_ahead_in`]).
             let selection = matches!(delivery, Delivery::Selection);
@@ -2926,7 +2774,7 @@ pub fn replace_in_with(
             if selection && env.switches_ahead() {
                 run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
             } else {
-                run_steps(env, &events[..len], erased, typed, delay_ms, settle_ms)
+                run_steps(env, &events[..len], erased, typed, delay_ms)
             }
         }
     });
@@ -2943,32 +2791,18 @@ pub fn replace_in_with(
 
 /// Steps 3 to 5 of FR-40 around a packet that is already built — step 6 is not performed (task
 /// T-40-3, see the end of the body).
-///
-/// `settle_ms` above zero — task T-106-3 — sends the `backspace` packet of FR-41 in two calls with
-/// that pause between them; see [`dispatch_settled`].
 fn run_steps(
     env: &mut impl Environment,
     packet: &[INPUT],
     erased: usize,
     typed: usize,
     delay_ms: u32,
-    settle_ms: u32,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = if settle_ms > 0 {
-        dispatch_settled(
-            env,
-            packet,
-            replacement_events(erased, 0),
-            delay_ms,
-            settle_ms,
-        )
-    } else {
-        dispatch_in(env, packet, delay_ms)
-    };
+    let replacement = dispatch_in(env, packet, delay_ms);
 
     // ---- step 5 — the connection point of task T-05-1 ----------------------------------
     //

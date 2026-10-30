@@ -191,15 +191,12 @@ struct Bench {
     /// keyboard. (Until task T-40-3 it was also a `Shift` step 6 found and pressed again; and it is
     /// the same property that made step 6 unable to see the user's own keys — finding С12.)
     keyboard: Option<Modifiers>,
-    /// ⭐ **Task T-106-3.** What `erase_settle_ms` answers — the field with the focus. Zero is
-    /// every field but the one of Notepad of Windows 11.
-    settle: u32,
     /// ⭐ **Task T-107-6 (в).** What `parts_typed_ksha` answers — `true` is the field of Notepad of
     /// Windows 11, which parts the conjunct of Tamil typed by one key.
     ksha: bool,
-    /// ⭐ **Stage E110, task T-110-3.** What `joins_typed_pulli` answers — `true` is the field of
-    /// Notepad of Windows 11, which takes a Tamil consonant typed with its pulli off at once.
-    pulli: bool,
+    /// ⭐ **Stage E111, task T-111-6.** What `selects_only` answers — `true` is the field of
+    /// Notepad of Windows 11, where the method `backspace` goes by the selection.
+    selects: bool,
     /// ⭐ **Stage E110, task T-110-4.** What `switches_ahead` answers — `true` is the field of
     /// Notepad of Windows 11 over Tamil text, where the selection goes out after the switch.
     ahead: bool,
@@ -214,18 +211,9 @@ impl Bench {
             refuse: 0,
             log: Vec::new(),
             keyboard: None,
-            settle: 0,
             ksha: false,
-            pulli: false,
+            selects: false,
             ahead: false,
-        }
-    }
-
-    /// **Task T-106-3.** A bench whose focused field asks the erasure to settle `settle` ms.
-    fn settling(settle: u32) -> Self {
-        Self {
-            settle,
-            ..Self::new()
         }
     }
 
@@ -330,16 +318,12 @@ impl Environment for Bench {
         self.log.push(Step::Pause(delay_ms));
     }
 
-    fn erase_settle_ms(&mut self) -> u32 {
-        self.settle
-    }
-
     fn parts_typed_ksha(&mut self) -> bool {
         self.ksha
     }
 
-    fn joins_typed_pulli(&mut self) -> bool {
-        self.pulli
+    fn selects_only(&mut self) -> bool {
+        self.selects
     }
 
     fn switches_ahead(&mut self) -> bool {
@@ -1333,172 +1317,6 @@ fn a_zero_delay_sends_the_whole_array_in_exactly_one_call() {
     assert_eq!(outcome.replacement.calls, 1);
     assert_eq!(outcome.release.calls, 1);
     assert_eq!(bench.sent().len(), 2);
-}
-
-// ---------------------------------------------------------------------------------------
-// Task T-106-3, решение 198.8 — the erasure settles before the insertion in Notepad
-// ---------------------------------------------------------------------------------------
-
-/// The steps of the log that send, pause or switch — what the order of step 4 is made of.
-fn sends_pauses_switches(bench: &Bench) -> Vec<Step> {
-    bench
-        .log
-        .iter()
-        .filter(|step| !matches!(step, Step::Held(_)))
-        .cloned()
-        .collect()
-}
-
-/// **Task T-106-3.** A field that asks its erasure to settle — the field of Notepad of Windows 11 —
-/// gets the packet of FR-41 in two calls: every `Backspace`, the pause, the whole insertion, and
-/// the switch of FR-43 after both. Measured on the stand: in one call the insertion came back as
-/// its last character repeated in 13 trials of 31; with 50 ms between the halves, 32 of 32 exact.
-#[test]
-fn a_settling_field_gets_the_erasure_the_pause_and_then_the_insertion() {
-    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
-    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
-
-    let steps = sends_pauses_switches(&bench);
-    println!("{steps:?}");
-
-    assert_eq!(
-        steps.len(),
-        4,
-        "решение 198.8: erasure, pause, insertion, switch — {steps:?}"
-    );
-
-    match &steps[..] {
-        [
-            Step::Send(erasure),
-            Step::Pause(pause),
-            Step::Send(insertion),
-            Step::Switch,
-        ] => {
-            assert_eq!(erasure.len(), 12, "six Backspaces, down and up");
-            assert!(
-                erasure
-                    .iter()
-                    .enumerate()
-                    .all(|(at, event)| event.is_backspace(at % 2 == 1)),
-                "the first call is the erasure and nothing else"
-            );
-            assert_eq!(*pause, inject::ERASE_SETTLE_MS);
-            assert_eq!(insertion.len(), 12, "six code units, down and up");
-            assert!(
-                insertion.iter().all(|event| event.is_unicode()),
-                "the second call is the insertion and nothing else"
-            );
-        }
-        other => {
-            panic!("решение 198.8: the order is not erasure, pause, insertion, switch: {other:?}")
-        }
-    }
-
-    assert_eq!(outcome.replacement.calls, 2);
-    assert_eq!(outcome.replacement.requested, 24);
-    assert_eq!(outcome.replacement.accepted, 24);
-    assert!(outcome.reached_the_screen());
-}
-
-/// **Task T-106-3 — and nothing else changes.** Every other field keeps the one call of FR-41; the
-/// selection of FR-42 and a press that only erases are not split even in the field of Notepad.
-#[test]
-fn the_settling_touches_the_backspace_packet_of_a_settling_field_only() {
-    // Every other field: one call, no pause.
-    let mut bench = Bench::new();
-    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
-
-    assert_eq!(
-        outcome.replacement.calls, 1,
-        "FR-41: one call in every other field"
-    );
-    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
-
-    // The selection of FR-42 in the field of Notepad: one call.
-    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
-    let outcome = inject::replace_in_with(
-        &mut bench,
-        &ghbdtn(),
-        &russian(),
-        inject::OnScreen::as_typed(&ghbdtn()),
-        0,
-        ReplacementMethod::Selection,
-    )
-    .expect("sized");
-
-    assert_eq!(outcome.replacement.calls, 1, "FR-42 is not split");
-    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
-
-    // Erasing without typing in the field of Notepad: nothing follows the erasure to wait for.
-    let origin = layout_with(LayoutId::from_raw(0x0409_0409), 0x22, KeyMapping::EMPTY);
-    let strokes = [Keystroke::recorded_in(&origin, 0x22, false, Mods::NONE)];
-    let mut bench = Bench::settling(inject::ERASE_SETTLE_MS);
-    let outcome = inject::replace_in_with(
-        &mut bench,
-        &strokes,
-        &origin,
-        inject::OnScreen::as_injected(&strokes, &russian()),
-        0,
-        ReplacementMethod::Backspace,
-    )
-    .expect("one backspace is a packet");
-
-    assert_eq!(outcome.replacement.calls, 1, "an erasure alone is one call");
-    assert!(!bench.log.iter().any(|step| matches!(step, Step::Pause(_))));
-}
-
-/// **Task T-106-3 — FR-45 across the two calls.** An erasure the system did not take whole is not
-/// followed by the insertion: in one call `SendInput` stops at the first blocked event and sends
-/// nothing after it, and the two calls keep that — no pause, no insertion, no switch.
-#[test]
-fn an_erasure_cut_short_is_not_followed_by_the_insertion() {
-    // A short call is counted by FR-45 in a process-wide counter the neighbours read.
-    let _short_sends = short_sends_are_mine();
-
-    let mut bench = Bench {
-        settle: inject::ERASE_SETTLE_MS,
-        ..Bench::refusing(1)
-    };
-    let outcome = inject::replace_in(&mut bench, &ghbdtn(), &russian(), 0).expect("sized");
-
-    let steps = sends_pauses_switches(&bench);
-    println!("{steps:?}");
-
-    assert!(
-        matches!(&steps[..], [Step::Send(erasure)] if erasure.len() == 12),
-        "only the erasure was sent: {steps:?}"
-    );
-    assert_eq!(outcome.replacement.calls, 1);
-    assert_eq!(
-        outcome.replacement.requested, 24,
-        "the whole packet was asked for"
-    );
-    assert_eq!(outcome.replacement.accepted, 11);
-    assert!(!outcome.reached_the_screen());
-}
-
-/// **Task T-106-3 — the rule of the field**, the pure half: the field of Notepad of Windows 11 and
-/// nothing else, case-insensitively, and a field that cannot be read is no reason to wait.
-#[test]
-fn only_the_field_of_notepad_asks_the_erasure_to_settle() {
-    assert_eq!(inject::ERASE_SETTLE_MS, 50);
-    assert_eq!(inject::erase_settle_for(Some("RichEditD2DPT")), 50);
-    assert_eq!(inject::erase_settle_for(Some("richeditd2dpt")), 50);
-
-    for class in [
-        "Edit",
-        "RICHEDIT50W",
-        "RichEdit20W",
-        "Chrome_RenderWidgetHostHWND",
-        "ConsoleWindowClass",
-        "CASCADIA_HOSTING_WINDOW_CLASS",
-        "Notepad",
-        "",
-    ] {
-        assert_eq!(inject::erase_settle_for(Some(class)), 0, "{class}");
-    }
-
-    assert_eq!(inject::erase_settle_for(None), 0);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -5111,8 +4929,8 @@ fn lefts_in_field(
 }
 
 /// How many `Backspace` and how many `Left` the packet of `method` sends over `strokes` in a field
-/// that does (`notepad`) or does not take a Tamil consonant typed with its pulli off at once —
-/// stage E111, task T-111-2. The bench answers both questions of Блокнот alike.
+/// that does (`notepad`) or does not take the method `backspace` by the selection — stage E111, task
+/// T-111-6. The bench answers both questions of Блокнот alike.
 fn erasure_in_field(
     strokes: &[Keystroke],
     target: &LayoutMap,
@@ -5122,7 +4940,7 @@ fn erasure_in_field(
 ) -> (usize, usize) {
     let mut bench = Bench {
         ksha: notepad,
-        pulli: notepad,
+        selects: notepad,
         ..Bench::new()
     };
     inject::replace_in_with(&mut bench, strokes, target, on_screen, 0, method)
@@ -5136,49 +4954,46 @@ fn erasure_in_field(
     )
 }
 
-/// ⭐ **Stage E111, task T-111-2 (BACKLOG Q-201-2, решение 205.1) — in Блокнот the path of
-/// `Backspace` over a Tamil consonant typed with its pulli goes by the selection.** Блокнот takes the
-/// pair off sometimes with one `Backspace`, sometimes with two, about evenly
-/// (`reports\MEASURE-E110-notepad-backspace.md`; the stand of 1.4.1: `க்ஷஅ` 0 of 3, `க்கஅ` 1 of 3): no
-/// count is right, so the word is selected, as `auto` does there. Red «до» on `0b0d081`: three
-/// `Backspace` and no `Left` for `க்கஅ` and `க்ஷஅ` in Блокнот.
+/// ⭐ **Stage E111, task T-111-6 (BACKLOG Q-198-1, слово владельца 206.5; T-111-2 is its special case)
+/// — in Блокнот the method `backspace` goes by the selection, every word and every press.** The field
+/// loses the first character of an insertion even after the settling of Э106 (1 of 30 with the
+/// program, 1 of 50 without, 198.23), gave `X aa` for `X Ta` on the third press of a cycle (3 of 3),
+/// and takes a Tamil consonant with its pulli off with one `Backspace` or two, about evenly. Red «до»
+/// on `0b0d081`: code points of `Backspace` and no `Left`, in every row.
 ///
-/// ⚠ Controls: every other field keeps the code points (FR-41); a word without such a pair keeps
-/// `Backspace` in Блокнот too (the Grantha `ஶ்`, Hindi — by the code point, measured); what the
-/// program inserted goes by the code point in Блокнот too (Э107, 201.3).
+/// ⚠ The control: every other field keeps the code points of FR-41.
 #[test]
-fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_selection() {
+fn backspace_in_notepad_goes_by_the_selection_every_word_and_every_press() {
     let target = us();
 
-    // (name, layout, keys, (Backspace, Left) in Блокнот, Backspace everywhere else)
-    type Row<'a> = (&'a str, usize, &'a [&'a str], (usize, usize), usize);
-    let rows: [Row; 5] = [
+    // (name, layout, keys, `Left` in Блокнот, `Backspace` everywhere else)
+    let rows: [(&str, usize, &[&str], usize, usize); 6] = [
         (
             "ka pulli ka a, four keys",
             0x0449_0449,
             &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"],
-            (0, 3),
+            3,
             4,
         ),
         (
             "ksha by the ligature key, a",
             0x0449_0449,
             &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
-            (0, 3),
+            3,
             4,
         ),
         (
             "shri by the ligature key, a — Grantha",
             0x0449_0449,
             &["\u{0BB6}\u{0BCD}\u{0BB0}\u{0BC0}", "\u{0B85}"],
-            (5, 0),
+            2,
             5,
         ),
         (
             "Hindi ksha by one key, a",
             0x0439_0439,
             &["\u{0915}\u{094D}\u{0937}", "\u{0905}"],
-            (4, 0),
+            2,
             4,
         ),
         (
@@ -5187,12 +5002,21 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
             &[
                 "\u{0928}", "\u{092E}", "\u{0938}", "\u{094D}", "\u{0924}", "\u{0947}",
             ],
-            (6, 0),
+            3,
+            6,
+        ),
+        (
+            "Thai sawasdee by keys, the word of Q-198-1",
+            0x041E_041E,
+            &[
+                "\u{0E2A}", "\u{0E27}", "\u{0E31}", "\u{0E2A}", "\u{0E14}", "\u{0E35}",
+            ],
+            4,
             6,
         ),
     ];
 
-    for (name, layout, keys, notepad, elsewhere) in rows {
+    for (name, layout, keys, lefts, elsewhere) in rows {
         let source = keys_from_q(LayoutId::from_raw(layout), keys);
         let strokes = typed_from_q(&source, keys.len());
         let on_screen = inject::OnScreen::as_typed(&strokes);
@@ -5205,7 +5029,7 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
                 true,
                 ReplacementMethod::Backspace
             ),
-            notepad,
+            (0, lefts),
             "{name}: (Backspace, Left) in Блокнот"
         );
         assert_eq!(
@@ -5221,17 +5045,25 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
         );
     }
 
-    // The control: the selection of Блокнот is what it was — `க்கஅ` three `Shift+Left`.
+    // A plain word as well: it is the field that decides, not the word.
+    let strokes = ghbdtn();
+    assert_eq!(
+        erasure_in_field(
+            &strokes,
+            &russian(),
+            inject::OnScreen::as_typed(&strokes),
+            true,
+            ReplacementMethod::Backspace
+        ),
+        (0, 6)
+    );
+
+    // Over Tamil text in Блокнот the packet goes the way of that selection: after the switch.
     let keys: &[&str] = &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"];
     let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
     let strokes = typed_from_q(&source, keys.len());
-    let on_screen = inject::OnScreen::as_typed(&strokes);
-    assert_eq!(on_screen.pulli_pairs(), 1);
-    assert_eq!(lefts_in_field(&strokes, &target, on_screen, true), 3);
-
-    // The packet goes the way of that selection: over Tamil text in Блокнот, after the switch.
     let mut bench = Bench {
-        pulli: true,
+        selects: true,
         ahead: true,
         ..Bench::new()
     };
@@ -5239,7 +5071,7 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
         &mut bench,
         &strokes,
         &target,
-        on_screen,
+        inject::OnScreen::as_typed(&strokes),
         0,
         ReplacementMethod::Backspace,
     )
@@ -5252,11 +5084,10 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
         .expect("the packet");
     assert!(switch < send, "the switch first: {:?}", bench.log);
 
-    // The control: inserted by the program, Блокнот goes by the code point, on the path it names.
+    // The next presses of the cycle: what the program inserted is selected by letters too.
     let previous = source;
     let strokes = typed_from_q(&target, keys.len());
     let injected = inject::OnScreen::as_injected(&strokes, &previous);
-    assert_eq!(injected.pulli_pairs(), 0);
     assert_eq!(
         erasure_in_field(
             &strokes,
@@ -5265,26 +5096,77 @@ fn backspace_in_notepad_over_a_tamil_consonant_with_its_pulli_goes_by_the_select
             true,
             ReplacementMethod::Backspace
         ),
-        (4, 0)
+        (0, 3)
+    );
+    assert_eq!(
+        erasure_in_field(
+            &strokes,
+            &target,
+            injected,
+            false,
+            ReplacementMethod::Backspace
+        ),
+        (4, 0),
+        "the control: every other field keeps FR-41 on the next presses as well"
+    );
+}
+
+/// **Every other way a press can be configured is what it was in Блокнот** — `selection` is what it
+/// says, and the keys of the classic console are never asked about the field (stage E111, T-111-6).
+#[test]
+fn only_the_method_backspace_is_sent_by_the_selection_in_notepad() {
+    let target = russian();
+    let strokes = ghbdtn();
+    let on_screen = inject::OnScreen::as_typed(&strokes);
+
+    let mut bench = Bench {
+        selects: true,
+        ..Bench::new()
+    };
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &target,
+        on_screen,
+        0,
+        inject::Delivery::Keystrokes,
+    )
+    .expect("the keys go out");
+    assert_eq!(
+        bench
+            .stream()
+            .iter()
+            .filter(|e| e.is_backspace(false))
+            .count(),
+        6,
+        "the keys of the classic console are not rerouted"
+    );
+
+    assert_eq!(
+        erasure_in_field(
+            &strokes,
+            &target,
+            on_screen,
+            true,
+            ReplacementMethod::Selection
+        ),
+        (0, 6)
     );
 }
 
 /// **The channel of the bench names the path the press really ran** — the selection, not the
-/// `backspace` the configuration said (stage E111, task T-111-2).
+/// `backspace` the configuration said (stage E111, task T-111-6).
 #[cfg(feature = "testing")]
 #[test]
-fn the_channel_names_the_selection_a_backspace_press_ran_over_the_pair_in_notepad() {
+fn the_channel_names_the_selection_a_backspace_press_ran_in_notepad() {
     use lang_switcher::control;
 
-    let target = us();
-    let keys: &[&str] = &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"];
-    let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
-    let strokes = typed_from_q(&source, keys.len());
+    let strokes = ghbdtn();
 
     control::note_replacement_method(ReplacementMethod::Backspace);
     erasure_in_field(
         &strokes,
-        &target,
+        &russian(),
         inject::OnScreen::as_typed(&strokes),
         true,
         ReplacementMethod::Backspace,
@@ -5292,18 +5174,27 @@ fn the_channel_names_the_selection_a_backspace_press_ran_over_the_pair_in_notepa
     assert_eq!(control::snapshot().last_replacement_method, "selection");
 }
 
-/// **Only the field of Блокнот takes the pair at once** — by its class, case-insensitively; an
-/// unreadable class answers no (stage E110, task T-110-3).
+/// **Only the field of Блокнот** — by its class, case-insensitively; an unreadable class answers no,
+/// so every other window keeps the method it was given (stage E111, task T-111-6).
 #[test]
-fn only_the_field_of_notepad_takes_a_tamil_consonant_with_its_pulli_at_once() {
-    assert!(inject::joins_typed_pulli_in(Some("RichEditD2DPT")));
-    assert!(inject::joins_typed_pulli_in(Some("richeditd2dpt")));
+fn only_the_field_of_notepad_takes_the_method_backspace_by_the_selection() {
+    assert!(inject::selects_in(Some("RichEditD2DPT")));
+    assert!(inject::selects_in(Some("richeditd2dpt")));
 
-    for other in ["Edit", "RichEdit20W", "RICHEDIT50W", ""] {
-        assert!(!inject::joins_typed_pulli_in(Some(other)), "{other}");
+    for other in [
+        "Edit",
+        "RichEdit20W",
+        "RICHEDIT50W",
+        "Chrome_RenderWidgetHostHWND",
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "Notepad",
+        "",
+    ] {
+        assert!(!inject::selects_in(Some(other)), "{other}");
     }
 
-    assert!(!inject::joins_typed_pulli_in(None));
+    assert!(!inject::selects_in(None));
 }
 
 /// ⭐ **Stage E110, task T-110-4 — in Блокнот over Tamil text the selection goes out after the
