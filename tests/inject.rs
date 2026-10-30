@@ -197,6 +197,9 @@ struct Bench {
     /// ⭐ **Task T-107-6 (в).** What `parts_typed_ksha` answers — `true` is the field of Notepad of
     /// Windows 11, which parts the conjunct of Tamil typed by one key.
     ksha: bool,
+    /// ⭐ **Stage E110, task T-110-3.** What `joins_typed_pulli` answers — `true` is the field of
+    /// Notepad of Windows 11, which takes a Tamil consonant typed with its pulli off at once.
+    pulli: bool,
 }
 
 impl Bench {
@@ -210,6 +213,7 @@ impl Bench {
             keyboard: None,
             settle: 0,
             ksha: false,
+            pulli: false,
         }
     }
 
@@ -328,6 +332,10 @@ impl Environment for Bench {
 
     fn parts_typed_ksha(&mut self) -> bool {
         self.ksha
+    }
+
+    fn joins_typed_pulli(&mut self) -> bool {
+        self.pulli
     }
 
     fn switch_layout(&mut self) {
@@ -5092,6 +5100,153 @@ fn lefts_in_field(
     .expect("the selection packet goes out");
 
     bench.stream().iter().filter(|e| e.is_left(false)).count()
+}
+
+/// How many `Backspace` the packet of `method` sends over `strokes` in a field that does
+/// (`notepad`) or does not take a Tamil consonant typed with its pulli off at once — stage E110,
+/// task T-110-3. The bench answers both questions of Блокнот alike.
+fn backspaces_in_field(
+    strokes: &[Keystroke],
+    target: &LayoutMap,
+    on_screen: inject::OnScreen,
+    notepad: bool,
+    method: ReplacementMethod,
+) -> usize {
+    let mut bench = Bench {
+        ksha: notepad,
+        pulli: notepad,
+        ..Bench::new()
+    };
+    inject::replace_in_with(&mut bench, strokes, target, on_screen, 0, method)
+        .expect("the packet goes out");
+
+    bench
+        .stream()
+        .iter()
+        .filter(|e| e.is_backspace(false))
+        .count()
+}
+
+/// ⭐ **Stage E110, task T-110-3 (BACKLOG Q-201-2) — in Блокнот a Tamil consonant typed with its
+/// pulli is one `Backspace`.** Test_VM, keys of Tamil 99 and Hindi Traditional from the host, `k`
+/// × `Backspace` in one `SendInput` (`reports\MEASURE-E110-notepad-backspace.md`): `க்கஅ` of four
+/// keys went with three, and four ate the space before it (2 of 2); `க்ஷஅ` of the ligature key —
+/// three, four ate the space (2 of 2); `ஶ்ரீஅ` (Grantha `ஶ்`) and Hindi went by the code point. Red
+/// «до» on the base: four `Backspace` for `க்கஅ` and `க்ஷஅ` in Блокнот.
+///
+/// ⚠ Controls: every other field keeps the code points (FR-41); the selection (`auto` in Блокнот)
+/// is untouched; what the program inserted goes by the code point in Блокнот too (Э107, 201.3).
+#[test]
+fn backspace_in_notepad_takes_a_tamil_consonant_with_its_pulli_as_one() {
+    let target = us();
+
+    // (name, layout, keys, Backspace in Блокнот, everywhere else)
+    let rows: [(&str, usize, &[&str], usize, usize); 5] = [
+        (
+            "ka pulli ka a, four keys",
+            0x0449_0449,
+            &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"],
+            3,
+            4,
+        ),
+        (
+            "ksha by the ligature key, a",
+            0x0449_0449,
+            &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
+            3,
+            4,
+        ),
+        (
+            "shri by the ligature key, a — Grantha",
+            0x0449_0449,
+            &["\u{0BB6}\u{0BCD}\u{0BB0}\u{0BC0}", "\u{0B85}"],
+            5,
+            5,
+        ),
+        (
+            "Hindi ksha by one key, a",
+            0x0439_0439,
+            &["\u{0915}\u{094D}\u{0937}", "\u{0905}"],
+            4,
+            4,
+        ),
+        (
+            "Hindi namaste by keys",
+            0x0439_0439,
+            &[
+                "\u{0928}", "\u{092E}", "\u{0938}", "\u{094D}", "\u{0924}", "\u{0947}",
+            ],
+            6,
+            6,
+        ),
+    ];
+
+    for (name, layout, keys, notepad, elsewhere) in rows {
+        let source = keys_from_q(LayoutId::from_raw(layout), keys);
+        let strokes = typed_from_q(&source, keys.len());
+        let on_screen = inject::OnScreen::as_typed(&strokes);
+
+        assert_eq!(
+            backspaces_in_field(
+                &strokes,
+                &target,
+                on_screen,
+                true,
+                ReplacementMethod::Backspace
+            ),
+            notepad,
+            "{name}: Backspace in Блокнот"
+        );
+        assert_eq!(
+            backspaces_in_field(
+                &strokes,
+                &target,
+                on_screen,
+                false,
+                ReplacementMethod::Backspace
+            ),
+            elsewhere,
+            "{name}: Backspace in every other field"
+        );
+    }
+
+    // The control: the selection of Блокнот is what it was — `க்கஅ` three `Shift+Left`.
+    let keys: &[&str] = &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"];
+    let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
+    let strokes = typed_from_q(&source, keys.len());
+    let on_screen = inject::OnScreen::as_typed(&strokes);
+    assert_eq!(on_screen.pulli_pairs(), 1);
+    assert_eq!(lefts_in_field(&strokes, &target, on_screen, true), 3);
+
+    // The control: inserted by the program, Блокнот goes by the code point.
+    let previous = source;
+    let strokes = typed_from_q(&target, keys.len());
+    let injected = inject::OnScreen::as_injected(&strokes, &previous);
+    assert_eq!(injected.pulli_pairs(), 0);
+    assert_eq!(
+        backspaces_in_field(
+            &strokes,
+            &target,
+            injected,
+            true,
+            ReplacementMethod::Backspace
+        ),
+        4
+    );
+}
+
+/// **Only the field of Блокнот takes the pair at once** — by its class, case-insensitively; an
+/// unreadable class answers no (stage E110, task T-110-3).
+#[test]
+fn only_the_field_of_notepad_takes_a_tamil_consonant_with_its_pulli_at_once() {
+    assert!(inject::joins_typed_pulli_in(Some("RichEditD2DPT")));
+    assert!(inject::joins_typed_pulli_in(Some("richeditd2dpt")));
+
+    for other in ["Edit", "RichEdit20W", "RICHEDIT50W", ""] {
+        assert!(!inject::joins_typed_pulli_in(Some(other)), "{other}");
+    }
+
+    assert!(!inject::joins_typed_pulli_in(None));
 }
 
 /// ⭐ **Task T-107-6 (в), решение 201.10а — in Блокнот the conjunct `க்ஷ` typed by one key is two

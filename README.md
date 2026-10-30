@@ -90,7 +90,8 @@ The finer points:
   `ő`) and keys that print several characters at once (Arabic `لا`, Indian conjuncts) are
   converted the way Windows itself types them.
 - Text in scripts with signs above and below the letters is erased and selected exactly: the
-  program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points).
+  program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points), and
+  the way Notepad takes a typed Tamil consonant with its pulli (`க்`) off — one `Backspace`.
 - When a key of the layout is ambiguous (Arabic 101: `لا` is one key, `B`, and also two, `G` and
   `H`) and the word was not typed just now, the program picks the reading that is more probable in
   the target language. It has letter statistics for English, French, Spanish and Russian, and since
