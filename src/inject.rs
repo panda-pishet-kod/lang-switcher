@@ -536,19 +536,18 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 /// 5 of 6). [`OnScreen::for_field`] gives the selection there one letter more per such key, and
 /// only there: one `Shift+Left` too many would take the character before the run.
 ///
-/// # ⭐ One `Backspace` less in Блокнот — stage E110, task T-110-3 (BACKLOG Q-201-2)
+/// # ⭐ No count of `Backspace` in Блокнот — stage E111, task T-111-2 (BACKLOG Q-201-2, решение 205.1)
 ///
-/// Блокнот takes a **Tamil consonant with its pulli** (`க்`) typed by keys off with **one**
-/// `Backspace`, not two (Test_VM, `reports\MEASURE-E110-notepad-backspace.md`; `k` × `Backspace` in one
-/// `SendInput`, as the packet goes): `க்கஅ` typed by four keys went with three (2 of 2) and four ate
-/// the space before it (2 of 2); `க்ஷஅ` of the ligature key — three took it all or left `க` (1 and
-/// 1), four ate the space (2 of 2). The Grantha `ஶ்` (`ஶ்ரீஅ`) and Hindi (`क्षअ`, `नमस्ते`) went by
-/// the code point, as FR-41 counts. The program sent the code points and ate the character before
-/// the word. [`OnScreen::for_field`] takes one `Backspace` less per such pair there, typed text
-/// only — what the program inserted Блокнот takes off by the code point (Э107, 201.3). The
-/// consonants other than `க` are not measured and follow the rule of the script; where Блокнот
-/// parts a pair after all, one character stays in front of the replacement — short, never one too
-/// many (decision 75).
+/// Блокнот takes a **Tamil consonant with its pulli** (`க்`) typed by keys off sometimes with one
+/// `Backspace`, sometimes with two, about evenly (Test_VM, `reports\MEASURE-E110-notepad-backspace.md`;
+/// `k` × `Backspace` in one `SendInput`, as the packet goes): the code points ate the space before
+/// the word in about half of the trials, one less left `க` in front of the replacement in the other
+/// half (the stand of 1.4.1: `க்ஷஅ` 0 of 3 exact, `க்கஅ` 1 of 3). The Grantha `ஶ்` (`ஶ்ரீஅ`) and Hindi
+/// (`क्षअ`, `नमस्ते`) went by the code point, as FR-41 counts. So the count is not corrected: a run
+/// with such a pair goes by the selection there ([`delivery_in_field`]), which is typed text only —
+/// what the program inserted Блокнот takes off by the code point (Э107, 201.3), so
+/// [`OnScreen::as_injected`] holds no pair. The consonants other than `க` are not measured and follow
+/// the rule of the script.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OnScreen {
     characters: usize,
@@ -632,14 +631,10 @@ impl OnScreen {
 
     /// [`OnScreen::for_delivery`] in a field that does or does not part the conjunct `க்ஷ` typed
     /// by one key ([`parts_typed_ksha_in`]): there the selection takes one letter more per such
-    /// key. And — stage E110, task T-110-3 — in a field that does or does not take a Tamil
-    /// consonant typed with its pulli off with one `Backspace` ([`joins_typed_pulli_in`]): there
-    /// the path of `Backspace` (FR-41) sends one less per such pair. The keys of the classic
-    /// console are not touched.
-    pub const fn for_field(self, delivery: Delivery, parts_ksha: bool, joins_pulli: bool) -> usize {
+    /// key. The paths of `Backspace` are not touched.
+    pub const fn for_field(self, delivery: Delivery, parts_ksha: bool) -> usize {
         match delivery {
             Delivery::Selection if parts_ksha => self.letters + self.ksha_keys,
-            Delivery::Backspace if joins_pulli => self.characters.saturating_sub(self.pulli_pairs),
             other => self.for_delivery(other),
         }
     }
@@ -1525,13 +1520,14 @@ pub fn parts_typed_ksha_in(class: Option<&str>) -> bool {
     })
 }
 
-/// ⭐ **Stage E110, task T-110-3 (BACKLOG Q-201-2) — the fields that take a Tamil consonant typed
-/// with its pulli off with one `Backspace`**: Блокнот of Windows 11, see [`OnScreen`]
-/// (`reports\MEASURE-E110-notepad-backspace.md`). Edit and RichEdit typed by keys were not measured
-/// (the stand did not put Tamil 99 into a field of WinForms, Э107) and keep the count of FR-41.
+/// ⭐ **Stage E110, task T-110-3 (BACKLOG Q-201-2) — the fields that may take a Tamil consonant typed
+/// with its pulli off with one `Backspace`**: Блокнот of Windows 11, about every other time, see
+/// [`OnScreen`] (`reports\MEASURE-E110-notepad-backspace.md`). Edit and RichEdit typed by keys were
+/// not measured (the stand did not put Tamil 99 into a field of WinForms, Э107) and keep the count of
+/// FR-41.
 pub const PULLI_JOINING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
 
-/// **The pure half of task T-110-3** — whether a field of class `class` takes a Tamil consonant
+/// **The pure half of task T-110-3** — whether a field of class `class` may take a Tamil consonant
 /// typed with its pulli off with one `Backspace`. `None` and every other class answer no.
 /// Case-insensitively, as [`resolve_auto`] compares.
 pub fn joins_typed_pulli_in(class: Option<&str>) -> bool {
@@ -1540,6 +1536,30 @@ pub fn joins_typed_pulli_in(class: Option<&str>) -> bool {
             .iter()
             .any(|joining| class.eq_ignore_ascii_case(joining))
     })
+}
+
+/// ⭐ **Stage E111, task T-111-2 (BACKLOG Q-201-2, решение 205.1) — the path a press runs in the field
+/// with the focus.** [`Delivery::Backspace`] over typed text with a Tamil consonant and its pulli, in
+/// a field that may take the pair off with one `Backspace` ([`joins_typed_pulli_in`]), is
+/// [`Delivery::Selection`]: there is no right count of `Backspace` there ([`OnScreen`]). Every other
+/// answer is `delivery` itself; the field is asked only for such a run.
+///
+/// ⚠ The price, measured on the same place under `auto`: the first replacement after Блокнот starts
+/// can take the space before the word (BACKLOG Q-204-1) — one too many where the path of `Backspace`
+/// was one too few or one too many about evenly.
+fn delivery_in_field(
+    delivery: Delivery,
+    on_screen: OnScreen,
+    env: &mut impl Environment,
+) -> Delivery {
+    if matches!(delivery, Delivery::Backspace)
+        && on_screen.pulli_pairs() > 0
+        && env.joins_typed_pulli()
+    {
+        Delivery::Selection
+    } else {
+        delivery
+    }
 }
 
 /// The class name of `window`, or `None` when it cannot be read.
@@ -2018,10 +2038,10 @@ pub trait Environment {
         false
     }
 
-    /// ⭐ **Stage E110, task T-110-3 — whether the field with the focus takes a Tamil consonant
+    /// ⭐ **Stage E110, task T-110-3 — whether the field with the focus may take a Tamil consonant
     /// typed with its pulli off with one `Backspace`** ([`joins_typed_pulli_in`],
-    /// [`OnScreen::for_field`]). Asked only for the path of `Backspace` over typed text that holds
-    /// such a pair. The default answers no — the count of FR-41; [`System`] reads the class of the
+    /// [`delivery_in_field`]). Asked only for the path of `Backspace` over typed text that holds
+    /// such a pair. The default answers no — the path of FR-41; [`System`] reads the class of the
     /// focused field.
     fn joins_typed_pulli(&mut self) -> bool {
         false
@@ -2698,9 +2718,9 @@ pub fn replace(
 
 /// **FR-40, steps 3 to 5**, against any [`Environment`] — see [`replace`] for the requirement.
 ///
-/// The `backspace` mode of FR-41, unconditionally — the seam task T-04-1 left, kept as it was
-/// when `backspace` was the default of section 7 (the default is `auto` since FR-42а).
-/// [`replace_in_with`] is the same steps for a mode chosen by the caller.
+/// The `backspace` mode of FR-41 — the seam task T-04-1 left, kept as it was when `backspace` was
+/// the default of section 7 (the default is `auto` since FR-42а); the one field it does not hold in
+/// is [`delivery_in_field`]'s. [`replace_in_with`] is the same steps for a mode chosen by the caller.
 pub fn replace_in(
     env: &mut impl Environment,
     strokes: &[Keystroke],
@@ -2766,7 +2786,14 @@ pub fn replace_in_with(
     delay_ms: u32,
     delivery: impl Into<Delivery>,
 ) -> Result<Replaced, InjectError> {
-    let delivery = delivery.into();
+    let asked = delivery.into();
+    let delivery = delivery_in_field(asked, on_screen, env);
+
+    // The channel names the path the press really runs, not the one [`on_hotkey`] resolved.
+    #[cfg(feature = "testing")]
+    if delivery != asked {
+        crate::control::note_replacement_method(delivery);
+    }
 
     // FR-41 and FR-42: `N` is what stands **on the screen**, not the number of keys pressed —
     // in code points for the paths that erase by `Backspace`, in letters of Windows for the
@@ -2783,12 +2810,7 @@ pub fn replace_in_with(
     let parts_ksha = matches!(delivery, Delivery::Selection)
         && on_screen.ksha_keys() > 0
         && env.parts_typed_ksha();
-    // ⭐ Stage E110, task T-110-3: the field is asked only for the path of `Backspace` over typed
-    // text with a Tamil consonant and its pulli in it.
-    let joins_pulli = matches!(delivery, Delivery::Backspace)
-        && on_screen.pulli_pairs() > 0
-        && env.joins_typed_pulli();
-    let erased = on_screen.for_field(delivery, parts_ksha, joins_pulli);
+    let erased = on_screen.for_field(delivery, parts_ksha);
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
     // FR-43. `max_units` is the length no conversion of these strokes can exceed, so the
