@@ -790,6 +790,82 @@ fn every_count_stands_as_label_colon_number() {
     );
 }
 
+/// The quotation marks of the languages where the guillemets of Russian are not the norm, as
+/// opening and closing mark (`RULES.md` п. 3, Q-203-1, task T-111-1). Portuguese is the Brazilian
+/// one: `pt-BR` in the registry. Danish and Slovenian open with what the others close with — their
+/// files always did — so a plain search for `«` would refuse them and pass a reversed one: the
+/// marks are read in order.
+const QUOTES_OF_LANGUAGE: [(&str, char, char); 8] = [
+    ("en", '“', '”'),
+    ("pt", '“', '”'),
+    ("tr", '“', '”'),
+    ("de", '„', '“'),
+    ("cs", '„', '“'),
+    ("pl", '„', '”'),
+    ("da", '»', '«'),
+    ("sl", '»', '«'),
+];
+
+/// What is wrong with the double quotation marks of a string, read in order: a mark other than
+/// the two of the language, one of the two where the other is due, a quotation left open.
+fn quote_faults(raw: &str, open: char, close: char) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut inside = false;
+    for mark in raw
+        .chars()
+        .filter(|c| matches!(c, '«' | '»' | '“' | '”' | '„' | '‟' | '"'))
+    {
+        match (inside, mark) {
+            (false, _) if mark == open => inside = true,
+            (true, _) if mark == close => inside = false,
+            _ => faults.push(format!(
+                "кавычка {mark} там, где нужна {}",
+                if inside { close } else { open }
+            )),
+        }
+    }
+    if inside {
+        faults.push(format!("кавычка не закрыта: нет {close}"));
+    }
+    faults
+}
+
+/// **The strings of these languages quote in the marks of the language** — Q-203-1: `en.rc` wrote
+/// «…» in twelve strings, and `de`, `cs` and `pl` had both kinds in one file. Only the strings are
+/// read: a comment of a file is not on any screen.
+#[test]
+fn the_languages_where_guillemets_are_not_the_norm_quote_in_their_own_marks() {
+    assert!(quote_faults("a “b” c", '“', '”').is_empty(), "the control");
+    assert_eq!(quote_faults("a «b» c", '“', '”').len(), 2, "guillemets");
+    assert_eq!(quote_faults("a ”b“ c", '“', '”').len(), 2, "reversed");
+    assert_eq!(quote_faults("a “b c", '“', '”').len(), 1, "left open");
+    assert_eq!(quote_faults("a \"\"b\"\" c", '“', '”').len(), 4, "straight");
+    assert!(quote_faults("a »b« c", '»', '«').is_empty(), "Danish");
+    assert_eq!(quote_faults("a «b» c", '»', '«').len(), 2, "not Danish");
+
+    let files = resource_script::language_files();
+    let mut refused = Vec::new();
+    for (tag, open, close) in QUOTES_OF_LANGUAGE {
+        let (_, text) = files
+            .iter()
+            .find(|(file, _)| file == tag)
+            .unwrap_or_else(|| panic!("app.rc must include res/lang/{tag}.rc"));
+        for (id, raw) in read_language_file(&format!("{tag}.rc"), text).strings {
+            for fault in quote_faults(&raw, open, close) {
+                refused.push(format!(
+                    "{tag}.rc: {id} — {fault}: кавычки языка {open}…{close} (RULES п. 3)"
+                ));
+            }
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} отказов:\n{}",
+        refused.len(),
+        refused.join("\n")
+    );
+}
+
 /// **The files on disk are the files app.rc includes, every shipped language has one, and every
 /// file is a language of the registry.** A translation written and not included would build into
 /// nothing; an include without its file would fail rc.exe with a message about a path.

@@ -6,5 +6,5 @@
 LocalCertReady=Instalator utworzy na tym komputerze certyfikat i podpisze nim Lang Switcher, aby działał także w oknach programów uruchomionych jako administrator.
 LocalCertFailed=Lang Switcher został zainstalowany, ale nie będzie działał w oknach programów uruchomionych jako administrator: Windows nie zaakceptował certyfikatu utworzonego na tym komputerze. Szczegóły znajdziesz w dzienniku instalacji.
 RemoveSettingsQuestion=Usunąć także plik ustawień Lang Switcher?
-RemoveSettingsKeep=Wybierz «Nie», aby zachować ustawienia do ponownej instalacji.
+RemoveSettingsKeep=Wybierz „Nie”, aby zachować ustawienia do ponownej instalacji.
 AuthorSlogan=programy tworzone z sercem

@@ -18625,7 +18625,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         settings::IDS_HELLO_DEMO_CAP,
         "Набрали «ghbdtn», нажали {0}: получили «привет», раскладка переключилась на русскую. \
          Ещё раз — и как было.",
-        "You typed «руддщ», pressed {0} and got «hello», with the layout switched to English. \
+        "You typed “руддщ”, pressed {0} and got “hello”, with the layout switched to English. \
          Press it again and it is back as it was.",
     ),
     (
@@ -18647,7 +18647,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (
         settings::IDS_HELLO_ROW_3,
         "Значок в трее: пауза, настройки и «О программе», где есть раздел «Как пользоваться».",
-        "The tray icon: pause, settings and «About», which has a «How to use it» section.",
+        "The tray icon: pause, settings and “About”, which has a “How to use it” section.",
     ),
     (
         settings::IDS_HELLO_SETTINGS,
@@ -18675,7 +18675,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
          в меню значка, пункт «Написать автору…».",
         "If you liked it, say so in GitHub Issues. If something is wrong, write to me: criticism \
          matters too — a problem can only be fixed once somebody knows about it. The wizard is \
-         in the tray menu, under «Write to the author…».",
+         in the tray menu, under “Write to the author…”.",
     ),
     (
         settings::IDS_SUPPORT_PANEL,
@@ -18734,17 +18734,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (
         settings::IDS_WHATSNEW_1,
         "Панель «Состояние» говорит по-человечески: работает / приостановлена / перехват не установлен / нужен перезапуск — и показывает действующую пару раскладок и отказы выбора.",
-        "The «State» panel speaks plainly: working / suspended / the hook is not installed / a restart is needed — and shows the acting pair of layouts and the refusals of selection.",
+        "The “State” panel speaks plainly: working / suspended / the hook is not installed / a restart is needed — and shows the acting pair of layouts and the refusals of selection.",
     ),
     (
         settings::IDS_WHATSNEW_2,
         "Кнопка «Сохранить журнал…» пишет журнал сейчас; в его шапке — время снятия и признак «сеанс продолжается».",
-        "The «Save the journal…» button writes the journal now; its header carries the time it was taken and says whether the session was still running.",
+        "The “Save the journal…” button writes the journal now; its header carries the time it was taken and says whether the session was still running.",
     ),
     (
         settings::IDS_WHATSNEW_3,
         "Журнал надёжнее: неудачная запись не портит прежний файл, галка «Вести журнал» действует сразу в этом сеансе, а серый пункт «Возобновить» говорит, почему он серый.",
-        "The journal is more reliable: a failed write does not damage the previous file, «Keep a journal» acts at once in this session, and the grayed «Resume» says why it is gray.",
+        "The journal is more reliable: a failed write does not damage the previous file, “Keep a journal” acts at once in this session, and the grayed “Resume” says why it is gray.",
     ),
     (
         settings::IDS_WHATSNEW_FULL,
@@ -18841,7 +18841,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         "Нашли ошибку или есть идея? Мастер соберёт обращение и отправит его автору, только когда \
          вы нажмёте «Отправить».",
         "Found a bug or have an idea? The wizard puts an appeal together and sends it to the \
-         author only when you press «Send».",
+         author only when you press “Send”.",
     ),
     (
         settings::IDS_WRITE_TO_AUTHOR,
@@ -18933,7 +18933,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (
         settings::IDS_UPDATE_STEP_1,
         "Нажмите «Открыть страницу загрузки»: там всегда последняя версия.",
-        "Press «Open the download page»: the latest version is always there.",
+        "Press “Open the download page”: the latest version is always there.",
     ),
     (
         settings::IDS_UPDATE_STEP_2,
@@ -18950,7 +18950,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
     (
         settings::IDS_UPDATE_FOOT,
         "Строка «Доступна версия {0}» останется в меню значка, пока вы не обновитесь.",
-        "The «Version {0} is available» entry stays in the tray menu until you update.",
+        "The “Version {0} is available” entry stays in the tray menu until you update.",
     ),
     (
         settings::IDS_NEWS_LETTER_TITLE,
@@ -18967,7 +18967,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         settings::IDS_NEWS_FOOT,
         "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё \
          раз через две, потом только точка на значке.",
-        "«Mark as read» closes the letter for good. «Later» or the cross: I will remind you in \
+        "“Mark as read” closes the letter for good. “Later” or the cross: I will remind you in \
          a week and once more in two, after that only the dot on the icon.",
     ),
     (
@@ -19191,7 +19191,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         "Это весь текст обращения. Правьте что угодно. Он уйдёт автору, только когда вы нажмёте \
          «Отправить».",
         "This is the whole text of the appeal. Edit anything you like. It goes to the author \
-         only when you press «Send».",
+         only when you press “Send”.",
     ),
     // ⛔ IDS_WIZARD_COPY, IDS_WIZARD_COPIED_ONLY and IDS_WIZARD_COPIED left with the group and the
     // issues (stage E107, task T-107-3, решение 199.3).
@@ -19350,7 +19350,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         settings::IDS_WIZARD_FAILED_NOTE,
         "Сайт автора не ответил. Проверьте связь и нажмите «Повторить» или отправьте письмом: \
          скопируйте текст и адрес.",
-        "The author's site did not answer. Check your connection and press «Retry», or send it \
+        "The author's site did not answer. Check your connection and press “Retry”, or send it \
          by email: copy the text and the address.",
     ),
     (
