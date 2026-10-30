@@ -250,6 +250,70 @@ fn the_reverse_index_prefers_a_press_without_altgr_over_every_key() {
     );
 }
 
+/// **Stage E110, task T-110-1, решение 204.1 — the level of a layout has a table of its own.**
+/// Canadian Multilingual Standard gives a third and a fourth column on its right `Ctrl` (`VK_OEM_8`,
+/// `KBDKANA`); the map answers the level out of the level table, and the key without the level
+/// is untouched by it. A layout without the level has no such table, answers nothing on the level
+/// and says so (`has_level`).
+///
+/// ⚠ Controls: the plain `Y` stays `y`; the level is not in the reverse index — a character of the
+/// level is not found by the selection path, which carries it over as before (FR-23); `Shift` on
+/// the level is its own combination.
+#[test]
+fn the_level_has_a_table_of_its_own_and_a_layout_without_it_answers_nothing() {
+    const SCAN_Y: u16 = 0x15;
+    let level = Mods::NONE.with_level();
+
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0001_1009));
+    builder.set(SCAN_Y, false, Mods::NONE, KeyMapping::from_char('y'));
+    assert!(
+        builder.set(SCAN_Y, false, level, KeyMapping::from_char('←')),
+        "the level is not the slot of the plain key"
+    );
+    builder.set(
+        SCAN_Y,
+        false,
+        Mods::SHIFT.with_level(),
+        KeyMapping::from_char('¥'),
+    );
+    let cms = builder.finish();
+
+    assert!(cms.has_level());
+    assert_eq!(cms.lookup(SCAN_Y, false, level).single_char(), Some('←'));
+    assert_eq!(
+        cms.lookup(SCAN_Y, false, Mods::SHIFT.with_level())
+            .single_char(),
+        Some('¥')
+    );
+    assert_eq!(
+        cms.lookup(SCAN_Y, false, Mods::NONE).single_char(),
+        Some('y'),
+        "the control: the plain key is what it was"
+    );
+    assert_eq!(
+        cms.find_key('←'),
+        None,
+        "the control: the level is not in the reverse index"
+    );
+    assert_eq!(cms.len(), 3);
+
+    let mut builder = LayoutMapBuilder::new(US);
+    builder.set(SCAN_Y, false, Mods::NONE, KeyMapping::from_char('y'));
+    let us = builder.finish();
+
+    assert!(!us.has_level());
+    assert!(
+        us.lookup(SCAN_Y, false, level).is_empty(),
+        "a layout without the level answers nothing on it"
+    );
+    assert!(Mods::NONE.with_level().level() && !Mods::ALTGR.level());
+    assert_eq!(
+        Mods::ALL.iter().filter(|mods| mods.level()).count(),
+        0,
+        "the eight combinations of FR-20 are the plain ones"
+    );
+}
+
 #[test]
 fn the_reverse_index_finds_the_key_that_produces_the_character() {
     let cache = cache();

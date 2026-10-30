@@ -272,16 +272,20 @@ impl StrokeMods {
     pub const CAPS: Self = Self(0b0001_0000);
     /// The `LLKHF_EXTENDED` flag of FR-05.
     pub const EXTENDED: Self = Self(0b0010_0000);
+    /// ⭐ **The level key of the layout held** — the right `Ctrl` of Canadian Multilingual
+    /// Standard ([`crate::layouts::LEVEL_VK`]); stage E110, task T-110-1, решение 204.1. The key
+    /// was pressed on the level, and the conversion asks the target for the same level.
+    pub const LEVEL: Self = Self(0b0100_0000);
 
     /// Every bit this type defines.
-    const ALL_BITS: u8 = 0b0011_1111;
+    const ALL_BITS: u8 = 0b0111_1111;
 
-    /// Keeps the six meaningful bits of `bits` and drops the rest.
+    /// Keeps the seven meaningful bits of `bits` and drops the rest.
     pub const fn from_bits_truncate(bits: u8) -> Self {
         Self(bits & Self::ALL_BITS)
     }
 
-    /// The six meaningful bits — the `mods: u8` of section 4.1.
+    /// The seven meaningful bits — the `mods: u8` of section 4.1, and the level of stage E110.
     pub const fn bits(self) -> u8 {
         self.0
     }
@@ -326,15 +330,27 @@ impl StrokeMods {
         self.contains(Self::EXTENDED)
     }
 
+    /// Whether the key was pressed on the level of the layout — stage E110, task T-110-1.
+    pub const fn level(self) -> bool {
+        self.contains(Self::LEVEL)
+    }
+
     /// Narrows the mask of FR-04 to the three modifiers the cache of FR-20 is keyed by.
     ///
     /// Module `layouts` says it in its own documentation: "The wider stroke mask of FR-04 is
     /// narrowed to this type by the buffer module." `Ctrl` and `Alt` on their own do not
     /// change which character a key produces — they mark a command, and FR-10 flushes on it —
     /// so they have no place in a cache key. `Extended` leaves the mask too, and moves into
-    /// the *key* half of the lookup, which is where task T-02-1a put it.
+    /// the *key* half of the lookup, which is where task T-02-1a put it. The level of stage
+    /// E110 stays: it changes the character, as `AltGr` does.
     pub const fn to_layout_mods(self) -> Mods {
-        Mods::new(self.shift(), self.caps(), self.altgr())
+        let mods = Mods::new(self.shift(), self.caps(), self.altgr());
+
+        if self.level() {
+            mods.with_level()
+        } else {
+            mods
+        }
     }
 }
 
@@ -1001,17 +1017,17 @@ struct Held {
     /// the worst a stale `true` here can do is skip one flip — never latch the command row of
     /// FR-10, which is the defect that function exists for.
     caps_down: bool,
-    /// Whether the level key of the layout (`VK_OEM_8` where it writes nothing — the right `Ctrl`
-    /// of Canadian Multilingual Standard) is held — stage E107, task T-107-6 (г). Not a modifier
-    /// of the model: a stroke made under it marks the ring beyond the model
-    /// ([`Recorder::beyond_the_model`]). Outside [`Held::reconcile`]: a stale `true` can only refuse
-    /// one press, never turn text into a command.
+    /// Whether the level key of the layout ([`crate::layouts::LEVEL_VK`] in a layout that has the
+    /// level — the right `Ctrl` of Canadian Multilingual Standard) is held — stage E107, task
+    /// T-107-6 (г); since stage E110 (task T-110-1) a stroke made under it carries
+    /// [`StrokeMods::LEVEL`]. Outside [`Held::reconcile`]: a stale `true` can only put one stroke on
+    /// the level, never turn text into a command.
     level: bool,
 }
 
 /// `VK_OEM_8` — the key the level of Canadian Multilingual Standard comes as (stage E107, task
 /// T-107-6 (г)); in British English it is the `` ` `` key and writes.
-const VK_OEM_8: u16 = 0xDF;
+const VK_OEM_8: u16 = crate::layouts::LEVEL_VK;
 
 impl Held {
     /// Applies one modifier key event.
@@ -1478,13 +1494,6 @@ pub struct Recorder {
     /// Written **only** by [`Recorder::set_cycle`] — see there for why that matters — with the
     /// one named exception of the struct literal that builds a recorder (task T-69-3).
     cycle: usize,
-    /// **A stroke of the ring was typed on a level the model does not hold** — stage E107, task
-    /// T-107-6 (г), BACKLOG Q-198-7: the level of the right `Ctrl` of Canadian Multilingual
-    /// Standard (`VK_OEM_8`). The model knows `Shift`, `CapsLock` and `AltGr`; such a stroke is
-    /// recorded as the plain key and its conversion would be wrong (`t←t` → `tyt`, 198.27 (г)), so
-    /// the press over this ring is **refused** with the tone of FR-100 instead (решение 201.10а).
-    /// Lowered by [`Recorder::clear_ring`] with the ring, raised by [`Recorder::record`].
-    beyond_the_model: bool,
     /// How to check [`Recorder::held`] against the system — **the repair of defect D**, task
     /// T-10-12. `None` means "trust the stream", which is what this module did unconditionally
     /// before that task.
@@ -1690,7 +1699,6 @@ impl Recorder {
             held: Held::default(),
             converted: false,
             cycle: 0,
-            beyond_the_model: false,
             verify: None,
             stamp: None,
             last_edit: None,
@@ -2021,39 +2029,36 @@ impl Recorder {
     /// not two.
     ///
     /// ⭐ **Stage E107, task T-107-6 (г) — the level key, before everything else.** In a layout
-    /// where `VK_OEM_8` writes nothing (Canadian Multilingual Standard: its right `Ctrl`), it is a
-    /// level of the layout and not a key: it is tracked as held and is not a stroke. A stroke made
-    /// while it is held marks the ring [`Recorder::beyond_the_model`], and the press over it is
-    /// refused. In a layout where `VK_OEM_8` writes (the `` ` `` of British English), it is the key
-    /// it always was. Two comparisons and, for this one key, one lookup — NFR-01…NFR-05 hold.
+    /// that has the level ([`crate::layouts::LayoutMap::has_level`] — Canadian Multilingual
+    /// Standard: its right `Ctrl` comes as `VK_OEM_8` and writes nothing), it is a level of the
+    /// layout and not a key: it is tracked as held and is not a stroke. In a layout where
+    /// `VK_OEM_8` writes (the `` ` `` of British English), it is the key it always was.
+    ///
+    /// ⭐ **Stage E110, task T-110-1, решение 204.1 «Учитывать уровень».** Until E110 a stroke made
+    /// under it was recorded as the plain key and only marked the ring, and the press over it was
+    /// refused (`t←t` came back `tyt` before E107, 198.27 (г)). Now the stroke carries
+    /// [`StrokeMods::LEVEL`] ([`Recorder::mods_now`]): it is recorded with what the level put on the
+    /// screen, and the conversion asks the target for the same key on the same level — a target
+    /// without the level refuses the press (`inject::on_hotkey`). Two comparisons and, for this
+    /// one key, one lookup — NFR-01…NFR-05 hold.
     pub fn record(&mut self, key: KeyEvent) -> Recorded {
         if key.vk == VK_OEM_8 && self.is_a_level_key(key) {
             self.held.level = matches!(key.edge, Edge::Down);
             return Recorded::Modifier;
         }
 
-        let recorded = self.record_key(key);
-
-        if recorded == Recorded::Stored && self.held.level {
-            self.beyond_the_model = true;
-        }
-
-        recorded
+        self.record_key(key)
     }
 
-    /// Whether a stroke of the ring was typed on a level the model does not hold — see
-    /// [`Recorder::beyond_the_model`]; the press over such a ring is refused.
-    pub fn beyond_the_model(&self) -> bool {
-        self.beyond_the_model
-    }
-
-    /// Whether `key` — a `VK_OEM_8` — is a level of the active layout: it writes nothing there. No
-    /// cache, or the active layout outside it: no, and the key is what it was.
+    /// Whether `key` — a `VK_OEM_8` — is the level of the active layout: the layout has the level
+    /// and the key writes nothing there. No cache, or the active layout outside it: no, and the
+    /// key is what it was.
     fn is_a_level_key(&self, key: KeyEvent) -> bool {
         let extended = self.mods_now(key.flags).extended();
 
-        self.active_map()
-            .is_some_and(|map| map.lookup(key.scan, extended, Mods::NONE).is_empty())
+        self.active_map().is_some_and(|map| {
+            map.has_level() && map.lookup(key.scan, extended, Mods::NONE).is_empty()
+        })
     }
 
     /// Records one key event — the rows of FR-10, after the level key of [`Recorder::record`].
@@ -2760,8 +2765,6 @@ impl Recorder {
     fn clear_ring(&mut self) {
         self.ring.clear();
         self.set_cycle(0);
-        // Stage E107, task T-107-6 (г): a ring with nothing in it holds no stroke beyond the model.
-        self.beyond_the_model = false;
 
         // **FR-14** — task Т-48-2, and it is here for the reason the counter of FR-34 is: every
         // rule of the FR-10 table that empties the ring arrives at this one function, so there
@@ -2936,6 +2939,10 @@ impl Recorder {
         // is told from the `/?` key of the main block; task T-04-1 replays it on injection.
         if flags & LLKHF_EXTENDED.0 != 0 {
             mods = mods.with(StrokeMods::EXTENDED);
+        }
+        // Stage E110, task T-110-1: the level key of the layout held ([`Recorder::record`]).
+        if self.held.level {
+            mods = mods.with(StrokeMods::LEVEL);
         }
 
         mods

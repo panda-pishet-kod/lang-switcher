@@ -1208,7 +1208,9 @@ pub fn keystroke_events(erase: usize, strokes: &[Keystroke]) -> usize {
 ///   stroke's own characters (FR-23), the key pressed again would give nothing, or a composition;
 /// * **a key under `AltGr`** — the keystroke path presses `Shift` and nothing else around a key;
 ///   `AltGr` is `Ctrl` with the right `Alt`, a chord the classic console was never measured with
-///   (the two layouts of the measuring machine give no letter under it).
+///   (the two layouts of the measuring machine give no letter under it);
+/// * **a key on the level of the layout** — stage E110, task T-110-1: the right `Ctrl` of Canadian
+///   Multilingual Standard is not a key the packet presses either.
 ///
 /// `CapsLock` is not a reason: it is a lock, not a held key, and the console applies its state to
 /// the repeated keys exactly as it did to the typed ones.
@@ -1219,7 +1221,11 @@ pub fn keys_repeat_the_conversion(strokes: &[Keystroke], target: &LayoutMap) -> 
     strokes.iter().all(|&stroke| {
         let candidate = target.lookup(stroke.scan(), stroke.extended(), stroke.mods());
 
-        !stroke.is_dead() && !stroke.mods().altgr() && !candidate.is_empty() && !candidate.is_dead()
+        !stroke.is_dead()
+            && !stroke.mods().altgr()
+            && !stroke.mods().level()
+            && !candidate.is_empty()
+            && !candidate.is_dead()
     })
 }
 
@@ -2954,14 +2960,16 @@ pub fn on_hotkey() -> Option<Replaced> {
         beyond_the_model,
     } = take_press()?;
 
-    // ⭐ **Stage E107, task T-107-6 (г), решение 201.10а — a word typed on a level the model does
-    // not hold is refused, not converted.** The right `Ctrl` of Canadian Multilingual Standard is a
-    // level of that layout; the model has three modifiers and records such a stroke as the plain
-    // key, so the conversion would put a wrong letter on the screen (`t←t` → `tyt`, 198.27 (г)).
-    // Nothing is erased and nothing is sent; the journal gets the name and nothing beside it
-    // (SEC-07), and `app` answers with the tone of a refusal through [`take_level_refusal`]. The
-    // full model of the level is a stage of its own (BACKLOG Q-198-7). The copy of the strokes is
-    // zeroed by the one zeroing below, as on every other way out of this function.
+    // ⭐ **Stage E107, task T-107-6 (г), решение 201.10а — a word typed on a level the target does
+    // not have is refused, not converted.** The right `Ctrl` of Canadian Multilingual Standard is a
+    // level of that layout. Until E107 such a stroke was recorded as the plain key and the
+    // conversion put a wrong letter on the screen (`t←t` → `tyt`, 198.27 (г)); since stage E110
+    // (task T-110-1, решение 204.1 «Учитывать уровень») the stroke carries its level, a target
+    // with the level gets the character of the same level, and only a target **without** it is
+    // refused ([`crate::convert::level_missing_in`]). Nothing is erased and nothing is sent; the
+    // journal gets the name and nothing beside it (SEC-07), and `app` answers with the tone of a
+    // refusal through [`take_level_refusal`]. The copy of the strokes is zeroed by the one zeroing
+    // below, as on every other way out of this function.
     if beyond_the_model {
         LEVEL_REFUSED.set(true);
         crate::diag::record(
@@ -3125,8 +3133,9 @@ struct Press {
     /// How many layouts the cycle walks, so that the counter can be advanced by the same number
     /// the target was chosen with.
     cycle_len: usize,
-    /// ⭐ Stage E107, task T-107-6 (г): a stroke of the run was typed on a level the model does not
-    /// hold ([`crate::buffer::Recorder::beyond_the_model`]) — the press is refused, nothing is sent.
+    /// ⭐ Stage E107, task T-107-6 (г); since stage E110 (task T-110-1) — a stroke of the run was
+    /// typed on a level the target does not have ([`crate::convert::level_missing_in`]): the press
+    /// is refused, nothing is sent.
     beyond_the_model: bool,
 }
 
@@ -3226,14 +3235,17 @@ fn take_press() -> Option<Press> {
                 |previous| OnScreen::as_injected(&strokes, previous),
             );
 
+        let target = cache.get(target)?.clone();
+
         Some(Press {
+            // Stage E110, task T-110-1: the level of a stroke against the level of the target.
+            beyond_the_model: crate::convert::level_missing_in(&strokes, &target),
             strokes,
-            target: cache.get(target)?.clone(),
+            target,
             on_screen,
             // Stage Э96: the layout the text on the screen is in — see `Press::back`.
             back: previous.unwrap_or(origin),
             cycle_len: cycle.len(),
-            beyond_the_model: recorder.beyond_the_model(),
         })
     })
     .flatten()

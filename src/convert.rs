@@ -241,6 +241,20 @@ pub fn convert_stroke(stroke: Keystroke, target: &LayoutMap) -> KeyMapping {
     candidate
 }
 
+/// **Whether `target` lacks the level a stroke of `strokes` was typed on** — stage E110, task
+/// T-110-1, решение владельца 204.1 «Учитывать уровень» (BACKLOG Q-198-7).
+///
+/// A stroke typed on the level of its layout (the right `Ctrl` of Canadian Multilingual Standard,
+/// [`Mods::level`]) converts into the character the same key gives on the same level of the
+/// target ([`convert_stroke`] asks for it as for any other combination). A target that has no
+/// level at all has no such character to give, and carrying the stroke's own character over
+/// (FR-23) would hide that the word was not converted — the press is **refused** instead, with the
+/// tone of FR-100 (`inject::on_hotkey`). A target that has the level but nothing on that key is
+/// FR-23, as everywhere. No allocation; on the input thread, never in the hook callback.
+pub fn level_missing_in(strokes: &[Keystroke], target: &LayoutMap) -> bool {
+    !target.has_level() && strokes.iter().any(|stroke| stroke.mods.level())
+}
+
 /// **A dead key of the target waiting for the stroke after it** — решение 195.1 (б), stage
 /// Э105. Windows composes a dead key with the next key by the layout's table (`^` + `e` = `ê`),
 /// and puts the accent and the next character side by side when the table has nothing for the

@@ -32,7 +32,7 @@ use lang_switcher::buffer::{
     self, DEFAULT_CAPACITY, MAX_CAPACITY, Physical, ReadError, Recorded, Recorder, ResetOutcome,
     Stroke, StrokeMods,
 };
-use lang_switcher::convert::{Keystroke, convert_stroke, max_units};
+use lang_switcher::convert::{Keystroke, convert_stroke, level_missing_in, max_units};
 use lang_switcher::hook::{self, Decision, Edge, HotkeyState, INJECTED_SIGNATURE, KeyEvent, Mode};
 use lang_switcher::layouts::{
     KeyMapping, LayoutCache, LayoutId, LayoutMap, LayoutMapBuilder, MAX_UNITS, Mods,
@@ -5142,32 +5142,54 @@ const SCAN_RIGHT_CTRL: u16 = 0x1D;
 /// The `` ` `` key, which British English gives `VK_OEM_8`.
 const SCAN_GRAVE_KEY: u16 = 0x29;
 
-/// **Stage E107, task T-107-6 (г), BACKLOG Q-198-7, решение 201.10а — a word typed on the level
-/// of the right `Ctrl` of CMS is marked beyond the model, and the press over it is refused.** CMS
-/// gives `←` for the right `Ctrl` + `Y`; the model has three modifiers and recorded the stroke as a
-/// plain `Y`, so the word came back `tyt` (198.27 (г)). The level key is not a stroke; a stroke
-/// under it marks the ring; the mark goes with the ring.
-///
-/// ⚠ Controls: in British English `VK_OEM_8` is the `` ` `` key, writes, and is a stroke like any
-/// other — no mark; a word typed without the level carries no mark.
-#[test]
-fn a_word_typed_on_the_level_of_the_right_ctrl_is_beyond_the_model() {
-    let cms = map_of(
-        LayoutId::from_raw(0x0001_1009),
+/// The level of the synthetic maps below — `Mods::LEVEL` of stage E110, written as its bit so that
+/// the test also compiles on the base before E110, which is where its red «до» was taken.
+const ON_LEVEL: u8 = 0b1000;
+/// The `Y` key.
+const SCAN_Y: u16 = 0x15;
+
+/// Canadian Multilingual Standard as far as the test of the level needs it: `T`, `Y`, and `Y` on
+/// the level of the right `Ctrl` giving `on_level`.
+fn cms_with_level(layout: LayoutId, on_level: char) -> LayoutMap {
+    map_of(
+        layout,
         &[
             (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('t')),
-            (0x15, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('y')),
+            (SCAN_Y, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('y')),
+            (
+                SCAN_Y,
+                MAIN_BLOCK,
+                Mods::from_bits_truncate(ON_LEVEL),
+                KeyMapping::from_char(on_level),
+            ),
         ],
-    );
+    )
+}
+
+/// **Stage E110, task T-110-1, решение 204.1 «Учитывать уровень» (BACKLOG Q-198-7) — a stroke
+/// typed on the level of the right `Ctrl` of CMS keeps its level.** CMS gives `←` for the right
+/// `Ctrl` + `Y`; until E107 the stroke was recorded as a plain `Y` and the word came back `tyt`
+/// (198.27 (г)), E107 refused the press. Now the stroke is recorded with what the level put on the
+/// screen, and it converts into the character of the same key on the same level of the target: a
+/// second layout with the level (here a twin of CMS that gives `↑` there) gives `t↑t`.
+///
+/// Red «до» on the base `6fe60da` (1.4.0): the stroke under the level read `y` and converted to
+/// `y` — the model had no level to record.
+///
+/// ⚠ Controls: in British English `VK_OEM_8` is the `` ` `` key, writes, and is a stroke like any
+/// other; the level key itself is not a stroke; a word typed without the level is plain.
+#[test]
+fn a_word_typed_on_the_level_of_the_right_ctrl_keeps_its_level() {
+    let cms = LayoutId::from_raw(0x0001_1009);
+    let twin = LayoutId::from_raw(0xF020_0C0C);
     let mut recorder = Recorder::with_capacity(DEFAULT_CAPACITY);
-    recorder.set_cache(LayoutCache::from_maps(vec![cms]).expect("a non-empty map"));
-    recorder.set_active_layout(LayoutId::from_raw(0x0001_1009));
+    recorder.set_cache(
+        LayoutCache::from_maps(vec![cms_with_level(cms, '←'), cms_with_level(twin, '↑')])
+            .expect("non-empty maps"),
+    );
+    recorder.set_active_layout(cms);
 
     assert_eq!(press(&mut recorder, VK_A + 19, SCAN_T), Recorded::Stored);
-    assert!(
-        !recorder.beyond_the_model(),
-        "the control: no level, no mark"
-    );
 
     let extended = LLKHF_EXTENDED.0;
     assert_eq!(
@@ -5182,7 +5204,7 @@ fn a_word_typed_on_the_level_of_the_right_ctrl_is_beyond_the_model() {
         Recorded::Modifier,
         "the level key is not a stroke"
     );
-    assert_eq!(press(&mut recorder, VK_A + 24, 0x15), Recorded::Stored);
+    assert_eq!(press(&mut recorder, VK_A + 24, SCAN_Y), Recorded::Stored);
     deliver(
         &mut recorder,
         VK_OEM_8,
@@ -5192,14 +5214,39 @@ fn a_word_typed_on_the_level_of_the_right_ctrl_is_beyond_the_model() {
         Edge::Up,
     );
     assert_eq!(press(&mut recorder, VK_A + 19, SCAN_T), Recorded::Stored);
-
-    assert!(
-        recorder.beyond_the_model(),
-        "198.27 (г): a stroke under the level marks the word, and the press is refused"
+    assert_eq!(
+        recorder.len(),
+        3,
+        "three strokes, the level key not among them"
     );
 
-    recorder.reset();
-    assert!(!recorder.beyond_the_model(), "the mark goes with the ring");
+    let units = |index: usize| {
+        recorder
+            .stroke(index)
+            .map(|stroke| String::from_utf16_lossy(stroke.units()))
+    };
+    assert_eq!(
+        units(1).as_deref(),
+        Some("←"),
+        "198.27 (г): the stroke under the level is what the level put on the screen"
+    );
+    assert_eq!(
+        units(2).as_deref(),
+        Some("t"),
+        "the control: after it, plain"
+    );
+
+    let twin_map = cms_with_level(twin, '↑');
+    let converted: String = (0..recorder.len())
+        .filter_map(|index| recorder.stroke(index))
+        .map(|stroke| {
+            String::from_utf16_lossy(convert_stroke(stroke.keystroke(), &twin_map).units())
+        })
+        .collect();
+    assert_eq!(
+        converted, "t↑t",
+        "the same key on the same level of the target — not `tyt`"
+    );
 
     // The control: British English, where `VK_OEM_8` writes.
     let british = map_of(
@@ -5220,7 +5267,53 @@ fn a_word_typed_on_the_level_of_the_right_ctrl_is_beyond_the_model() {
         Recorded::Stored,
         "the control: the ` of British English is a key"
     );
-    assert!(!recorder.beyond_the_model());
+    assert_eq!(
+        recorder
+            .stroke(0)
+            .map(|stroke| String::from_utf16_lossy(stroke.units()))
+            .as_deref(),
+        Some("`")
+    );
+}
+
+/// **Stage E110, task T-110-1, решение 204.1 — a target without the level refuses a word typed on
+/// it** (`convert::level_missing_in`, read by `inject::on_hotkey`, which then sends nothing and
+/// answers with the tone of FR-100). The target with the level converts it; a word without the
+/// level converts into any target.
+#[test]
+fn a_target_without_the_level_refuses_a_word_typed_on_it() {
+    let cms = LayoutId::from_raw(0x0001_1009);
+    let twin = cms_with_level(LayoutId::from_raw(0xF020_0C0C), '↑');
+    let us = map_of(
+        LayoutId::from_raw(0x0409_0409),
+        &[
+            (SCAN_T, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('t')),
+            (SCAN_Y, MAIN_BLOCK, Mods::NONE, KeyMapping::from_char('y')),
+        ],
+    );
+    let source = cms_with_level(cms, '←');
+    let stroke = |mods: Mods, scan: u16| Keystroke::recorded_in(&source, scan, MAIN_BLOCK, mods);
+
+    let on_level = [
+        stroke(Mods::NONE, SCAN_T),
+        stroke(Mods::NONE.with_level(), SCAN_Y),
+        stroke(Mods::NONE, SCAN_T),
+    ];
+    let plain = [stroke(Mods::NONE, SCAN_T), stroke(Mods::NONE, SCAN_Y)];
+
+    assert!(
+        level_missing_in(&on_level, &us),
+        "US has no level: the press is refused, not `t←t` carried over"
+    );
+    assert!(
+        !level_missing_in(&on_level, &twin),
+        "a target with the level"
+    );
+    assert!(
+        !level_missing_in(&plain, &us),
+        "the control: no stroke on the level"
+    );
+    assert!(!level_missing_in(&[], &us));
 }
 
 // =========================================================================================

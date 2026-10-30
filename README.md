@@ -94,8 +94,9 @@ The finer points:
   `H`) and the word was not typed just now, the program picks the reading that is more probable in
   the target language. It has letter statistics for English, French, Spanish and Russian, and since
   1.2.0 for Arabic, Persian, Indonesian, Hindi, Tamil and Sinhala.
-- The level of the right `Ctrl` (Canadian Multilingual Standard and similar layouts) is not part of
-  the model: a word typed with it is not converted, and the program sounds a refusal instead.
+- The level of the right `Ctrl` of Canadian Multilingual Standard (the only layout of Windows with
+  such a level, Japanese aside) converts into the same level of a layout that has it; a target
+  layout without it does not take such a word, and the program sounds a refusal instead.
 - A letter the target layout builds from two dead keys in a row (BÉPO: `´`, `´`, `o` for `ő`)
   comes out as the accents and the letter, `´´o`.
 - In selected text the program cannot see `CapsLock`, and a character the target layout does not

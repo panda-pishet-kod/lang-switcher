@@ -266,7 +266,8 @@ impl fmt::Display for LayoutId {
 // Modifier combinations
 // ---------------------------------------------------------------------------------------
 
-/// One of the eight modifier combinations of FR-20.
+/// One of the eight modifier combinations of FR-20 — and, since stage E110, the same eight on
+/// the **level** of the layout.
 ///
 /// Only the three modifiers that change which character a key produces are represented.
 /// `Ctrl` and `Alt` on their own mark a command rather than text and reset the buffer
@@ -274,6 +275,15 @@ impl fmt::Display for LayoutId {
 /// reason: it does not modify a key, it *names* one, so it belongs to the other half of the
 /// cache key — see [`key_index`]. The wider stroke mask of FR-04 is narrowed to this type by
 /// the buffer module (task T-03-2).
+///
+/// ⭐ **The fourth bit, [`Mods::LEVEL`] — stage E110, task T-110-1, решение владельца 204.1
+/// («Учитывать уровень», BACKLOG Q-198-7).** A layout may have a modifier of its own beyond
+/// `Shift`, `Ctrl` and `Alt`: the right `Ctrl` of Canadian Multilingual Standard comes as
+/// [`LEVEL_VK`] and gives a third and a fourth column (`KBDKANA` of `kbd.h`). The bit says the
+/// key was pressed on that level; [`LayoutMap::lookup`] answers it out of the level table of the
+/// layout, and a layout without the level answers nothing. [`Mods::ALL`] stays the eight
+/// combinations without it, which is what the reverse index and every walk over the forward table
+/// mean.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mods(u8);
 
@@ -286,6 +296,8 @@ impl Mods {
     pub const CAPS: Self = Self(0b010);
     /// `AltGr` held, which the keyboard reports as `Ctrl` plus right `Alt`.
     pub const ALTGR: Self = Self(0b100);
+    /// The level key of the layout held — [`LEVEL_VK`]; stage E110, task T-110-1.
+    pub const LEVEL: Self = Self(0b1000);
 
     /// All eight combinations, in the order the forward table indexes them.
     ///
@@ -318,14 +330,24 @@ impl Mods {
         Self(bits)
     }
 
-    /// Keeps the three meaningful bits of `bits` and drops the rest.
+    /// Keeps the four meaningful bits of `bits` and drops the rest.
     pub const fn from_bits_truncate(bits: u8) -> Self {
-        Self(bits & 0b111)
+        Self(bits & 0b1111)
     }
 
-    /// The three meaningful bits.
+    /// The four meaningful bits.
     pub const fn bits(self) -> u8 {
         self.0
+    }
+
+    /// The same combination on the level of the layout — stage E110, task T-110-1.
+    pub const fn with_level(self) -> Self {
+        Self(self.0 | Self::LEVEL.0)
+    }
+
+    /// Whether the combination is on the level of the layout — [`Mods::LEVEL`].
+    pub const fn level(self) -> bool {
+        self.0 & Self::LEVEL.0 != 0
     }
 
     /// Whether `Shift` is part of the combination.
@@ -343,11 +365,23 @@ impl Mods {
         self.0 & Self::ALTGR.0 != 0
     }
 
-    /// Position of this combination inside a forward table row, `0..8`.
+    /// Position of this combination inside a row of its table, `0..8` — the forward table, or
+    /// the level table for a combination on the level ([`Mods::level`] picks the table).
     pub const fn index(self) -> usize {
-        self.0 as usize
+        (self.0 & 0b111) as usize
     }
 }
+
+/// **The key the level of a layout comes as** — `VK_OEM_8`; stage E110, task T-110-1.
+///
+/// Measured, not remembered (`scratchpad-E110\kbd-levels.ps1`, the `VK_TO_BIT` of `KBDTABLES` of
+/// all 218 layout files of Windows 11): two layouts have a modifier beyond `Shift`, `Ctrl` and
+/// `Alt` — Canadian Multilingual Standard (`00011009`, `KBDCAN.DLL`: `VK_OEM_8` = `KBDKANA`, 88
+/// characters on the level) and Japanese (`VK_KANA`, a layout with an IME, which this program
+/// does not convert, FR-35). In British English `VK_OEM_8` is the `` ` `` key and writes: a layout
+/// has the level only where this key writes nothing and the sweep under it finds characters
+/// ([`LayoutMap::has_level`]).
+pub const LEVEL_VK: u16 = 0xDF;
 
 /// A physical key together with the modifiers that make it produce a given character.
 ///
@@ -596,6 +630,11 @@ pub struct LayoutMap {
     layout: LayoutId,
     /// `KEY_SLOTS * MOD_COMBINATIONS` entries, indexed by [`forward_index`].
     forward: Box<[KeyMapping]>,
+    /// **The level of the layout** — stage E110, task T-110-1: the same `KEY_SLOTS *
+    /// MOD_COMBINATIONS` entries for the combinations with [`Mods::LEVEL`], indexed the same way;
+    /// **empty** for a layout without the level, which is every layout but Canadian Multilingual
+    /// Standard (see [`LEVEL_VK`]) — so the others pay nothing for it. See [`LayoutMap::has_level`].
+    level: Box<[KeyMapping]>,
     /// `REVERSE_CAPACITY` slots, open addressed with linear probing.
     reverse: Box<[ReverseSlot]>,
     /// Number of forward entries that carry a character.
@@ -717,8 +756,28 @@ impl LayoutMap {
     /// no branch that depends on how full the table is (NFR-01), and — by the masking in
     /// [`key_index`] — no input that can leave the table. Safe to call from the hook
     /// callback.
+    ///
+    /// ⭐ **On the level** ([`Mods::LEVEL`], stage E110, task T-110-1) the answer comes out of
+    /// the level table, and a layout without the level answers nothing: its table is empty, and
+    /// `get` past it is `None`, not a read out of bounds. Still one index computation and one read.
     pub fn lookup(&self, scan: u16, extended: bool, mods: Mods) -> KeyMapping {
-        self.forward[forward_index(scan, extended, mods)]
+        let index = forward_index(scan, extended, mods);
+
+        if mods.level() {
+            return self.level.get(index).copied().unwrap_or(KeyMapping::EMPTY);
+        }
+
+        self.forward[index]
+    }
+
+    /// **Whether the layout has a level beyond `Shift` and `AltGr`** — the right `Ctrl` of
+    /// Canadian Multilingual Standard ([`LEVEL_VK`]); stage E110, task T-110-1, решение 204.1.
+    ///
+    /// A word typed on the level is converted into a layout that has it — the character of the
+    /// same key on the same level — and refused, with the tone of FR-100, by a layout that does
+    /// not (`inject::on_hotkey`). Decided once, when the map is built.
+    pub fn has_level(&self) -> bool {
+        !self.level.is_empty()
     }
 
     /// Which key produces `ch` — the backward path of step 5 of FR-61.
@@ -780,6 +839,9 @@ impl LayoutMap {
 pub struct LayoutMapBuilder {
     layout: LayoutId,
     forward: Box<[KeyMapping]>,
+    /// The level table — empty until the first entry on the level is set (stage E110, task
+    /// T-110-1); see [`LayoutMap::has_level`].
+    level: Vec<KeyMapping>,
     filled: u32,
     dead: Vec<DeadTransition>,
 }
@@ -817,6 +879,7 @@ impl LayoutMapBuilder {
         Self {
             layout,
             forward: vec![KeyMapping::EMPTY; KEY_SLOTS * MOD_COMBINATIONS].into_boxed_slice(),
+            level: Vec::new(),
             filled: 0,
             dead: Vec::new(),
         }
@@ -835,17 +898,47 @@ impl LayoutMapBuilder {
     /// character at all, so the rule keeps the keypad reading regardless of the order the
     /// two are offered in, and both layouts of the pair read those keys alike. That makes
     /// the result reproducible, which is what FR-21 needs from a rebuild.
+    ///
+    /// An entry on the level ([`Mods::LEVEL`], stage E110) goes into the level table, which is
+    /// made on the first such entry — a layout without the level never has one.
     pub fn set(&mut self, scan: u16, extended: bool, mods: Mods, mapping: KeyMapping) -> bool {
         if mapping.is_empty() {
             return false;
         }
         let index = forward_index(scan, extended, mods);
-        if !self.forward[index].is_empty() {
+        let table: &mut [KeyMapping] = if mods.level() {
+            if self.level.is_empty() {
+                self.level = vec![KeyMapping::EMPTY; KEY_SLOTS * MOD_COMBINATIONS];
+            }
+            &mut self.level
+        } else {
+            &mut self.forward
+        };
+        if !table[index].is_empty() {
             return false;
         }
-        self.forward[index] = mapping;
+        table[index] = mapping;
         self.filled += 1;
         true
+    }
+
+    /// **Drops a level that gives no key anything new** — stage E110, task T-110-1: a key that
+    /// writes nothing, held, and every key still writing what it writes without it, is no level
+    /// at all ([`LayoutMap::has_level`]), whatever the sweep stored on it.
+    fn drop_level_that_changes_nothing(&mut self) {
+        let changes = self
+            .level
+            .iter()
+            .zip(self.forward.iter())
+            .any(|(on_level, plain)| !on_level.is_empty() && on_level != plain);
+
+        if !changes {
+            let stored = self.level.iter().filter(|entry| !entry.is_empty()).count();
+            self.filled = self
+                .filled
+                .saturating_sub(u32::try_from(stored).unwrap_or(u32::MAX));
+            self.level = Vec::new();
+        }
     }
 
     /// Derives the reverse index and freezes the map.
@@ -917,9 +1010,13 @@ impl LayoutMapBuilder {
             (later.accent, later.base) == (earlier.accent, earlier.base)
         });
 
+        // Stage E110, task T-110-1: the level is not in the reverse index, nor among the dead keys
+        // and the ligatures above — the selection path reads text, and a character of the level
+        // is carried over as it stands there (FR-23), as before.
         LayoutMap {
             layout: self.layout,
             forward: self.forward,
+            level: self.level.into_boxed_slice(),
             reverse,
             filled: self.filled,
             altgr,
@@ -1098,6 +1195,10 @@ fn keyboard_state(mods: Mods) -> [u8; 256] {
     }
     if mods.caps() {
         state[VK_CAPITAL.0 as usize] = TOGGLED;
+    }
+    // Stage E110, task T-110-1: the level key held — what `KBDKANA` of the layout reads.
+    if mods.level() {
+        state[usize::from(LEVEL_VK)] = DOWN;
     }
     state
 }
@@ -1429,6 +1530,35 @@ fn build_layout_map(layout: LayoutId) -> LayoutMap {
                 decode(vk, scan, &states[mods.index()], layout),
             );
         }
+    }
+
+    // ⭐ **Stage E110, task T-110-1 — the level.** Only where the level key is a key of the layout
+    // and writes nothing (the right `Ctrl` of Canadian Multilingual Standard; the `` ` `` of
+    // British English writes and is no level): the eight combinations again, with it held. A
+    // layout without the level costs one `MapVirtualKeyExW` and one read here, nothing more; one
+    // with it, a second sweep, stored like the first — what `ToUnicodeEx` gives on the level, and
+    // nothing for a key the level has no column for (Windows types nothing there either).
+    if let Some((level_scan, level_extended)) = physical_key_of(u32::from(LEVEL_VK), layout)
+        && builder.forward[forward_index(level_scan, level_extended, Mods::NONE)].is_empty()
+    {
+        let states: [[u8; 256]; MOD_COMBINATIONS] =
+            core::array::from_fn(|index| keyboard_state(Mods::ALL[index].with_level()));
+
+        for vk in FIRST_VK..=LAST_VK {
+            let Some((scan, extended)) = physical_key_of(vk, layout) else {
+                continue;
+            };
+            for mods in Mods::ALL {
+                builder.set(
+                    scan,
+                    extended,
+                    mods.with_level(),
+                    decode(vk, scan, &states[mods.index()], layout),
+                );
+            }
+        }
+
+        builder.drop_level_that_changes_nothing();
     }
 
     // Решение 195.1: the compositions of the dead keys the sweep found, out of the layout's own

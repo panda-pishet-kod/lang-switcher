@@ -3383,9 +3383,10 @@ fn the_refusal_of_the_classic_console_is_named_in_the_journal_and_handed_to_app(
 
 /// **Stage E107, task T-107-6 (г), решение 201.10а — a word beyond the model is refused, named in
 /// the journal and handed to `app` for the tone of a refusal.** Read off the source of
-/// `on_hotkey`, as the refusal of the classic console is: the branch takes the mark of
-/// `buffer::Recorder::beyond_the_model` out of the press, sends nothing, and sets the cell `app`
-/// reads beside the classic console's.
+/// `on_hotkey`, as the refusal of the classic console is: the branch takes the mark out of the
+/// press, sends nothing, and sets the cell `app` reads beside the classic console's. Since stage
+/// E110 (task T-110-1) the mark is `convert::level_missing_in` over the strokes and the target —
+/// a word on the level is refused only by a target without the level.
 #[test]
 fn a_word_beyond_the_model_is_refused_named_and_handed_to_app() {
     use lang_switcher::diag::{Kind, Operation};
@@ -3425,6 +3426,10 @@ fn a_word_beyond_the_model_is_refused_named_and_handed_to_app() {
     assert!(source.contains(&format!(
         "const LEVEL_REPLACEMENT_REFUSED: &str = \"{name}\";"
     )));
+    assert!(
+        source.contains("beyond_the_model: crate::convert::level_missing_in(&strokes, &target),"),
+        "take_press: the level of the strokes against the level of the target"
+    );
     assert!(
         source_of("app.rs").contains("crate::inject::take_level_refusal()"),
         "app asks for the refusal right after the press"
@@ -3472,6 +3477,19 @@ fn only_keys_that_mean_their_conversion_may_be_repeated() {
         KeyMapping::dead('\u{0301}'),
     );
     assert!(!inject::keys_repeat_the_conversion(&[plain], &dead));
+
+    // Stage E110, task T-110-1: a key on the level of the layout — even into a target that gives a
+    // character there, the packet would press the key without the right `Ctrl` of CMS.
+    let mut builder = LayoutMapBuilder::new(LayoutId::from_raw(0x0001_1009));
+    builder.set(
+        GHBDTN[0],
+        false,
+        Mods::NONE.with_level(),
+        KeyMapping::from_char('←'),
+    );
+    let cms = builder.finish();
+    let on_level = Keystroke::recorded_in(&cms, GHBDTN[0], false, Mods::NONE.with_level());
+    assert!(!inject::keys_repeat_the_conversion(&[on_level], &cms));
 }
 
 /// The live half of the resolver check: a real window of this file's own registered class.
