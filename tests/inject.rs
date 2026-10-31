@@ -168,6 +168,8 @@ enum Step {
     Switch,
     /// ⭐ Stage Э96 — the keystroke path's way back, after a packet that did not reach the screen.
     SwitchBack,
+    /// ⭐ Stage E111, task T-111-9 — `EM_SETSEL` to the field of Notepad.
+    Select(usize, usize),
 }
 
 /// An [`Environment`] that sends nothing and writes down everything.
@@ -191,12 +193,18 @@ struct Bench {
     /// keyboard. (Until task T-40-3 it was also a `Shift` step 6 found and pressed again; and it is
     /// the same property that made step 6 unable to see the user's own keys — finding С12.)
     keyboard: Option<Modifiers>,
-    /// ⭐ **Task T-107-6 (в).** What `parts_typed_ksha` answers — `true` is the field of Notepad of
-    /// Windows 11, which parts the conjunct of Tamil typed by one key.
-    ksha: bool,
     /// ⭐ **Stage E111, task T-111-6.** What `selects_only` answers — `true` is the field of
     /// Notepad of Windows 11, where the method `backspace` goes by the selection.
     selects: bool,
+    /// ⭐ **Stage E111, task T-111-9.** What `field_selection` answers, one entry per call; past the
+    /// end it repeats the last, and with no entries it answers `None`.
+    field: Vec<Option<(usize, usize)>>,
+    /// How many times `field_selection` has been asked.
+    field_asked: usize,
+    /// What `select_in_field` answers, one entry per call; past the end it answers yes.
+    takes: Vec<bool>,
+    /// How many times `select_in_field` has been called.
+    selected: usize,
     /// ⭐ **Stage E110, task T-110-4.** What `switches_ahead` answers — `true` is the field of
     /// Notepad of Windows 11 over Tamil text, where the selection goes out after the switch.
     ahead: bool,
@@ -211,8 +219,11 @@ impl Bench {
             refuse: 0,
             log: Vec::new(),
             keyboard: None,
-            ksha: false,
             selects: false,
+            field: Vec::new(),
+            field_asked: 0,
+            takes: Vec::new(),
+            selected: 0,
             ahead: false,
         }
     }
@@ -318,12 +329,30 @@ impl Environment for Bench {
         self.log.push(Step::Pause(delay_ms));
     }
 
-    fn parts_typed_ksha(&mut self) -> bool {
-        self.ksha
-    }
-
     fn selects_only(&mut self) -> bool {
         self.selects
+    }
+
+    fn field_selection(&mut self) -> Option<(usize, usize)> {
+        let answer = self
+            .field
+            .get(self.field_asked)
+            .or_else(|| self.field.last())
+            .copied()
+            .flatten();
+
+        self.field_asked += 1;
+
+        answer
+    }
+
+    fn select_in_field(&mut self, start: usize, end: usize) -> bool {
+        let answer = self.takes.get(self.selected).copied().unwrap_or(true);
+
+        self.selected += 1;
+        self.log.push(Step::Select(start, end));
+
+        answer
     }
 
     fn switches_ahead(&mut self) -> bool {
@@ -4903,31 +4932,6 @@ fn the_selection_after_a_press_counts_the_letters_the_press_put_there() {
     }
 }
 
-/// How many `Left` the selection packet of one press sends in a field that does (`ksha`) or does
-/// not part the conjunct `க்ஷ` typed by one key — task T-107-6 (в).
-fn lefts_in_field(
-    strokes: &[Keystroke],
-    target: &LayoutMap,
-    on_screen: inject::OnScreen,
-    ksha: bool,
-) -> usize {
-    let mut bench = Bench {
-        ksha,
-        ..Bench::new()
-    };
-    inject::replace_in_with(
-        &mut bench,
-        strokes,
-        target,
-        on_screen,
-        0,
-        ReplacementMethod::Selection,
-    )
-    .expect("the selection packet goes out");
-
-    bench.stream().iter().filter(|e| e.is_left(false)).count()
-}
-
 /// How many `Backspace` and how many `Left` the packet of `method` sends over `strokes` in a field
 /// that does (`notepad`) or does not take the method `backspace` by the selection — stage E111, task
 /// T-111-6. The bench answers both questions of Блокнот alike.
@@ -4939,7 +4943,6 @@ fn erasure_in_field(
     method: ReplacementMethod,
 ) -> (usize, usize) {
     let mut bench = Bench {
-        ksha: notepad,
         selects: notepad,
         ..Bench::new()
     };
@@ -4976,10 +4979,10 @@ fn backspace_in_notepad_goes_by_the_selection_every_word_and_every_press() {
             4,
         ),
         (
-            "ksha by the ligature key, a",
+            "ksha by the ligature key, a — the count of the way back, nothing added (T-111-9)",
             0x0449_0449,
             &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
-            3,
+            2,
             4,
         ),
         (
@@ -5281,93 +5284,398 @@ fn the_selection_over_tamil_in_notepad_goes_out_after_the_switch() {
     assert!(!inject::switches_ahead_in(Some("RichEditD2DPT"), None));
 }
 
-/// ⭐ **Task T-107-6 (в), решение 201.10а — in Блокнот the conjunct `க்ஷ` typed by one key is two
-/// letters to the selection**, one everywhere else, as `ScriptBreak` has it. Test_VM, keys of
-/// Tamil 99 from the host: `க்ஷஅ` took three `Shift+Left` (4 of 4), `ஶ்ரீஅ` two and `க்கஅ` three —
-/// what `ScriptBreak` counts. Two letters left `க்` in front of the word (case 10 of the manual
-/// sheet of Э106, 5 of 6). The same text of three keys was not measured and keeps the count of
-/// `ScriptBreak`: one `Shift+Left` too many would take the character before the run.
-#[test]
-fn the_selection_in_notepad_takes_the_ksha_of_one_key_as_two_letters() {
-    let target = us();
-
-    // (name, keys, lefts in Блокнот, lefts in every other field)
-    let rows: [(&str, &[&str], usize, usize); 4] = [
-        (
-            "ksha by the ligature key, a",
-            &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
-            3,
-            2,
-        ),
-        (
-            "shri by the ligature key, a",
-            &["\u{0BB6}\u{0BCD}\u{0BB0}\u{0BC0}", "\u{0B85}"],
-            2,
-            2,
-        ),
-        (
-            "ka pulli ka a",
-            &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"],
-            3,
-            3,
-        ),
-        (
-            "ksha of three keys, a",
-            &["\u{0B95}", "\u{0BCD}", "\u{0BB7}", "\u{0B85}"],
-            2,
-            2,
-        ),
-    ];
-
-    for (name, keys, notepad, elsewhere) in rows {
-        let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
-        let strokes = typed_from_q(&source, keys.len());
-        let on_screen = inject::OnScreen::as_typed(&strokes);
-
-        assert_eq!(
-            lefts_in_field(&strokes, &target, on_screen, true),
-            notepad,
-            "{name}: Shift+Left in Блокнот"
-        );
-        assert_eq!(
-            lefts_in_field(&strokes, &target, on_screen, false),
-            elsewhere,
-            "{name}: Shift+Left in every other field"
-        );
-    }
-}
-
-/// **What the program put on the screen itself keeps the count of `ScriptBreak` in Блокнот too** —
-/// `க்ஷஅ` inserted took two `Shift+Left` there (Test_VM). `Ta` typed in US and turned into
-/// Tamil by the first press is two letters to the second press.
-#[test]
-fn the_ksha_the_program_inserted_is_one_letter_in_notepad_as_well() {
-    let target = us();
+/// `க்ஷஅ` typed under Tamil 99: two keys, two letters of `ScriptBreak`, four code units.
+fn ksha_a_typed() -> (Vec<Keystroke>, inject::OnScreen) {
     let keys: &[&str] = &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"];
-    let previous = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
-    let strokes = typed_from_q(&target, keys.len());
-    let on_screen = inject::OnScreen::as_injected(&strokes, &previous);
+    let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
+    let strokes = typed_from_q(&source, keys.len());
+    let on_screen = inject::OnScreen::as_typed(&strokes);
 
-    assert_eq!(on_screen.ksha_keys(), 0);
-    assert_eq!(lefts_in_field(&strokes, &target, on_screen, true), 2);
+    assert_eq!(
+        (on_screen.letters(), on_screen.units()),
+        (2, 4),
+        "the word of these tests"
+    );
+
+    (strokes, on_screen)
 }
 
-/// **Only the field of Блокнот parts the conjunct** — by its class, case-insensitively, and an
-/// unreadable class answers no.
+/// The field of Notepad answering `answers` to `EM_GETSEL`, one press over [`ksha_a_typed`] in `method`.
+fn press_in_notepad(
+    mut bench: Bench,
+    answers: &[Option<(usize, usize)>],
+    method: ReplacementMethod,
+) -> (Bench, inject::Replaced) {
+    let (strokes, on_screen) = ksha_a_typed();
+
+    bench.selects = true;
+    bench.field = answers.to_vec();
+
+    let replaced = inject::replace_in_with(&mut bench, &strokes, &us(), on_screen, 0, method)
+        .expect("the packet goes out");
+
+    (bench, replaced)
+}
+
+/// Whether a stream of events is the selection and then the insertion and nothing of ours stays down.
+fn lefts_and_insertion(bench: &Bench) -> (usize, usize) {
+    let stream = bench.stream();
+
+    assert_eq!(
+        stream.iter().filter(|e| e.is_shift(false)).count(),
+        stream.iter().filter(|e| e.is_shift(true)).count(),
+        "our `Shift` is balanced: {stream:?}"
+    );
+
+    (
+        stream.iter().filter(|e| e.is_left(false)).count(),
+        stream.iter().filter(|e| e.is_unicode_edge(false)).count(),
+    )
+}
+
+/// ⭐ **Stage E111, task T-111-9, BACKLOG Q-204-1 — in Блокнот the word is selected by its code units
+/// and only the insertion goes out as a packet.** Red «до» on the stand: `X க்ஷஅTa` in B2 of the
+/// delivery `CA162CE6…0B36`, 3 of 3 (`q111-pass10`), `X க்Ta` in the fresh session of the rule that
+/// came before it, 23 of 30 (`q111-pass9`).
 #[test]
-fn only_the_field_of_notepad_parts_the_ksha_of_one_key() {
-    assert!(inject::parts_typed_ksha_in(Some("RichEditD2DPT")));
-    assert!(inject::parts_typed_ksha_in(Some("richeditd2dpt")));
+fn notepad_selects_the_word_by_its_code_units_and_sends_only_the_insertion() {
+    let (bench, replaced) = press_in_notepad(
+        Bench::machine(Modifiers::NONE),
+        &[Some((6, 6)), Some((6, 6)), Some((5, 6)), Some((2, 6))],
+        ReplacementMethod::Selection,
+    );
 
-    for other in [
-        "Edit",
-        "RichEdit20W",
-        "RICHEDIT50W",
-        "Chrome_RenderWidgetHostHWND",
-        "",
-    ] {
-        assert!(!inject::parts_typed_ksha_in(Some(other)), "{other}");
-    }
+    assert!(replaced.reached_the_screen());
+    assert_eq!(
+        bench.keyboard(),
+        Modifiers::NONE,
+        "nothing of ours stays down"
+    );
 
-    assert!(!inject::parts_typed_ksha_in(None));
+    let packets = bench.sent();
+    assert_eq!(packets.len(), 2, "the marker, the insertion: {packets:?}");
+
+    let marker = &packets[0];
+    assert_eq!(marker.len(), 4, "{marker:?}");
+    assert!(marker[0].is_shift(false) && marker[3].is_shift(true));
+    assert!(marker[1].is_left(false) && marker[2].is_left(true));
+
+    assert_eq!(
+        packets[1].iter().filter(|e| e.is_unicode()).count(),
+        packets[1].len(),
+        "the insertion and nothing else: {:?}",
+        packets[1]
+    );
+    assert_eq!(lefts_and_insertion(&bench), (1, 2), "one arrow, two units");
+
+    let order: Vec<&str> = bench
+        .log
+        .iter()
+        .filter_map(|step| match step {
+            Step::Send(_) => Some("send"),
+            Step::Select(2, 6) => Some("select"),
+            Step::Select(..) => Some("wrong select"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["send", "select", "send"]);
+}
+
+/// ⛔ **The order is the danger of task T-111-9: a message overtakes the input queue.** The answer
+/// before the marker can stand before the last key of the word: here `(5, 5)` with the caret truly at
+/// 6. Only the end of the selection the marker makes is the caret, so the word is `2..6` and not `1..5`.
+#[test]
+fn the_caret_is_taken_only_from_the_answer_behind_the_marker() {
+    let (bench, _) = press_in_notepad(
+        Bench::new(),
+        &[Some((5, 5)), Some((5, 5)), Some((5, 6)), Some((2, 6))],
+        ReplacementMethod::Selection,
+    );
+
+    assert!(
+        bench.log.contains(&Step::Select(2, 6)),
+        "the caret behind the marker: {:?}",
+        bench.log
+    );
+    assert_eq!(bench.selected, 1, "{:?}", bench.log);
+}
+
+/// ⭐ **Every way back of task T-111-9 is the count of `ScriptBreak`, nothing added** — too few is the
+/// allowed side (decision 75), and one letter more ate the space in plain text (`q111-pass10`, B2).
+#[test]
+fn every_way_back_of_the_selection_by_positions_is_the_count_of_letters() {
+    // Not answered: a timeout, a hung window, the refusal of UIPI, −1. The whole packet, in one call.
+    let (bench, replaced) = press_in_notepad(Bench::new(), &[None], ReplacementMethod::Selection);
+    assert!(replaced.reached_the_screen());
+    assert_eq!(bench.sent().len(), 1, "one call: {:?}", bench.log);
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+    assert_eq!(bench.selected, 0);
+
+    // A selection already there.
+    let (bench, _) = press_in_notepad(Bench::new(), &[Some((2, 6))], ReplacementMethod::Selection);
+    assert_eq!(bench.sent().len(), 1, "one call: {:?}", bench.log);
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+    assert_eq!(bench.selected, 0);
+
+    // The marker never shows: the rest of the count behind it, in the same order.
+    let (bench, replaced) =
+        press_in_notepad(Bench::new(), &[Some((6, 6))], ReplacementMethod::Selection);
+    assert!(replaced.reached_the_screen());
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+    assert_eq!(bench.selected, 0);
+    assert!(bench.sent()[0].len() == 4, "the marker first");
+
+    // The caret before the word's units: the same.
+    let (bench, _) = press_in_notepad(
+        Bench::new(),
+        &[Some((3, 3)), Some((2, 3))],
+        ReplacementMethod::Selection,
+    );
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+    assert_eq!(bench.selected, 0);
+
+    // The field took another selection: the caret back, then the whole packet.
+    let (bench, replaced) = press_in_notepad(
+        Bench::new(),
+        &[Some((6, 6)), Some((5, 6)), Some((3, 6))],
+        ReplacementMethod::Selection,
+    );
+    assert!(replaced.reached_the_screen());
+    let selects: Vec<&Step> = bench
+        .log
+        .iter()
+        .filter(|step| matches!(step, Step::Select(..)))
+        .collect();
+    assert_eq!(selects, [&Step::Select(2, 6), &Step::Select(6, 6)]);
+    assert_eq!(
+        lefts_and_insertion(&bench),
+        (3, 2),
+        "the marker and the two of the count"
+    );
+
+    // The field took no message at all after the marker: the same, and it says so.
+    let (bench, _) = press_in_notepad(
+        Bench {
+            takes: vec![false],
+            ..Bench::new()
+        },
+        &[Some((6, 6)), Some((5, 6))],
+        ReplacementMethod::Selection,
+    );
+    assert_eq!(lefts_and_insertion(&bench), (3, 2));
+}
+
+/// **The caret that cannot be put back ends the press:** the word stays selected and nothing is
+/// inserted over a selection nobody knows. Not «reached the screen» (Н12), so no switch of the layout.
+#[test]
+fn a_caret_that_cannot_be_put_back_ends_the_press_without_a_switch() {
+    let (bench, replaced) = press_in_notepad(
+        Bench {
+            takes: vec![true, false],
+            ..Bench::new()
+        },
+        &[Some((6, 6)), Some((5, 6)), Some((3, 6))],
+        ReplacementMethod::Selection,
+    );
+
+    assert!(!replaced.reached_the_screen());
+    assert_eq!(lefts_and_insertion(&bench), (1, 0), "{:?}", bench.log);
+    assert!(
+        !bench.log.contains(&Step::Switch),
+        "no switch: {:?}",
+        bench.log
+    );
+}
+
+/// **A marker the system did not take ends the press as a refused packet does** (FR-45, Н12).
+#[test]
+fn a_marker_refused_by_the_system_ends_the_press() {
+    let (bench, replaced) = press_in_notepad(
+        Bench::refusing(1),
+        &[Some((6, 6)), Some((5, 6))],
+        ReplacementMethod::Selection,
+    );
+
+    assert!(!replaced.reached_the_screen());
+    assert_eq!(bench.selected, 0);
+    assert_eq!(bench.sent().len(), 1, "{:?}", bench.log);
+}
+
+/// **The two orders of the steps stay what they are:** over Tamil the switch goes ahead of the marker
+/// (T-110-4), over other text after the insertion (FR-43); the method `backspace` in Блокнот is the
+/// same selection (T-111-6).
+#[test]
+fn the_selection_by_positions_keeps_both_orders_of_the_steps() {
+    let answers = [Some((6, 6)), Some((5, 6)), Some((2, 6))];
+    let order = |bench: &Bench| -> Vec<&'static str> {
+        bench
+            .log
+            .iter()
+            .filter_map(|step| match step {
+                Step::Send(_) => Some("send"),
+                Step::Select(..) => Some("select"),
+                Step::Switch => Some("switch"),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let (bench, _) = press_in_notepad(
+        Bench {
+            ahead: true,
+            ..Bench::new()
+        },
+        &answers,
+        ReplacementMethod::Selection,
+    );
+    assert_eq!(order(&bench), ["switch", "send", "select", "send"]);
+
+    let (bench, _) = press_in_notepad(Bench::new(), &answers, ReplacementMethod::Selection);
+    assert_eq!(order(&bench), ["send", "select", "send", "switch"]);
+
+    let (bench, _) = press_in_notepad(Bench::new(), &answers, ReplacementMethod::Backspace);
+    assert_eq!(order(&bench), ["send", "select", "send", "switch"]);
+    assert!(
+        bench.stream().iter().all(|e| !e.is_backspace(false)),
+        "no `Backspace` in Блокнот"
+    );
+}
+
+/// **Only the field of Блокнот is asked.** Every other field keeps the one packet of FR-42, and the
+/// other paths the packet of their own; the field is not asked anything there.
+#[test]
+fn every_other_field_and_path_is_not_asked_about_the_selection() {
+    let (strokes, on_screen) = ksha_a_typed();
+    let answers = vec![Some((6, 6)), Some((5, 6)), Some((2, 6))];
+
+    let mut bench = Bench {
+        field: answers.clone(),
+        ..Bench::new()
+    };
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us(),
+        on_screen,
+        0,
+        ReplacementMethod::Selection,
+    )
+    .expect("the packet goes out");
+    assert_eq!(bench.field_asked, 0);
+    assert_eq!(bench.sent().len(), 1);
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+
+    let mut bench = Bench {
+        field: answers.clone(),
+        ..Bench::new()
+    };
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us(),
+        on_screen,
+        0,
+        ReplacementMethod::Backspace,
+    )
+    .expect("the packet goes out");
+    assert_eq!(bench.field_asked, 0, "Backspace elsewhere");
+
+    let mut bench = Bench {
+        selects: true,
+        field: answers,
+        ..Bench::new()
+    };
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us(),
+        on_screen,
+        0,
+        inject::Delivery::Keystrokes,
+    )
+    .expect("the keys go out");
+    assert_eq!(bench.field_asked, 0, "the keys of the classic console");
+}
+
+/// **What the selection by positions takes is code units on the screen**: a surrogate pair is two, the
+/// press of a cycle takes what the previous press inserted, a dead key takes nothing of its own.
+#[test]
+fn the_units_on_the_screen_are_what_the_field_counts_its_positions_in() {
+    let (strokes, _) = ksha_a_typed();
+    let previous = keys_from_q(
+        LayoutId::from_raw(0x0449_0449),
+        &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
+    );
+    assert_eq!(
+        inject::OnScreen::as_injected(&strokes, &previous).units(),
+        4,
+        "what the previous press inserted"
+    );
+    assert_eq!(
+        inject::OnScreen::as_injected(&strokes, &us()).units(),
+        2,
+        "two letters of Latin"
+    );
+
+    let emoji = NON_BMP.to_string();
+    let keys: &[&str] = &[emoji.as_str(), "a"];
+    let source = keys_from_q(LayoutId::from_raw(0x0409_0409), keys);
+    let typed = typed_from_q(&source, keys.len());
+    let on_screen = inject::OnScreen::as_typed(&typed);
+    assert_eq!(on_screen.characters(), 2, "code points");
+    assert_eq!(on_screen.units(), 3, "UTF-16 units");
+    assert_eq!(
+        inject::OnScreen::as_injected(&typed, &source).units(),
+        3,
+        "UTF-16 units of what a previous press inserted"
+    );
+}
+
+/// **The two integers of `EM_GETSEL`:** the low word, the high word; −1, a document past 16 bits, is
+/// no answer.
+#[test]
+fn the_answer_of_the_field_is_two_positions_or_nothing() {
+    assert_eq!(inject::selection_from_answer(0), Some((0, 0)));
+    assert_eq!(inject::selection_from_answer(0x0006_0006), Some((6, 6)));
+    assert_eq!(inject::selection_from_answer(0x0006_0002), Some((2, 6)));
+    assert_eq!(inject::selection_from_answer(0xFFFF_FFFF), None);
+    assert_eq!(inject::selection_from_answer(usize::MAX), None);
+    assert_eq!(inject::selection_from_answer(0xFFFF_0002), None);
+}
+
+/// **SEC: two integers cross the process border and no text; a window that hangs does not hold the
+/// press.** Read from the source, because a bench cannot see what a window is sent. The way back is a
+/// fact of the journal and no value.
+#[test]
+fn the_field_is_asked_two_integers_by_a_message_that_cannot_hang() {
+    use lang_switcher::diag::{Kind, Operation};
+
+    let source = source_of("inject.rs");
+    let body = source
+        .split("let field = self.field?;")
+        .nth(1)
+        .expect("the question of `System`");
+    let body = &body[..body
+        .find("selection_from_answer(answer)")
+        .expect("the end of the body")];
+
+    assert!(body.contains("SendMessageTimeoutW("), "{body}");
+    assert!(body.contains("EM_GETSEL"), "{body}");
+    assert!(body.contains("SMTO_ABORTIFHUNG"), "{body}");
+    assert!(
+        body.contains("WPARAM(0)") && body.contains("LPARAM(0)"),
+        "{body}"
+    );
+
+    let name = "selection by positions fell back";
+    let operation = Operation::from_name(name);
+    assert_ne!(
+        operation,
+        Operation::UNLISTED,
+        "«{name}» must be a name of the journal"
+    );
+    assert_eq!(operation.kind(), Kind::Process);
+    assert!(source.contains(&format!(
+        "const SELECTION_BY_POSITIONS_FELL_BACK: &str = \"{name}\";"
+    )));
 }

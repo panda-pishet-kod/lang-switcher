@@ -837,6 +837,9 @@ static OPERATIONS: &[(&str, Kind)] = &[
     ("level stroke replacement refused", Kind::Process),
     // Stage E111, task T-111-5: `pair_target` names a variant of a language the session lacks.
     ("pair variant layout missing", Kind::Process),
+    // Stage E111, task T-111-9: Блокнот did not give the selection by positions, the press went by
+    // the count of `Shift+Left`. Recorded by `inject::deliver_by_positions`; a fact and no value.
+    ("selection by positions fell back", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

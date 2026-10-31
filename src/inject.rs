@@ -111,16 +111,19 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::UI::Controls::{EM_GETSEL, EM_SETSEL};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, SendInput,
     VIRTUAL_KEY, VK_BACK, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL,
     VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClassNameW, GetForegroundWindow, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
+};
 
 use crate::convert::{self, ConvertError, Keystroke};
 use crate::hook::INJECTED_SIGNATURE;
@@ -525,16 +528,17 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 /// the guard of the stand was eaten (case 4b of 187). [`OnScreen::for_delivery`] hands each
 /// packet its own.
 ///
-/// # ⭐ One letter more in Блокнот — task T-107-6 (в), решение 201.10а
+/// # ⭐ In Блокнот the selection is by positions and not by stops — stage E111, task T-111-9
 ///
-/// Блокнот of Windows 11 stops the caret **inside** the Tamil conjunct `க்ஷ` (KSSA) when one key
-/// typed it — the ligature key `Shift+T` of Tamil 99 — and not when it was inserted, while
-/// `ScriptBreak` keeps it one letter (Test_VM, `tools\vmlab\jobs\e107\q107-*.ps1`, keys from the
-/// host): `க்ஷஅ` typed took three `Shift+Left` (4 of 4) and three `Backspace` (2 of 2), the same
-/// text inserted took two `Shift+Left`; `ஶ்ரீஅ` of the key `Shift+Y` took two typed as well. The
-/// selection of two letters left `க்` in front of the word (case 10 of the manual sheet of Э106,
-/// 5 of 6). [`OnScreen::for_field`] gives the selection there one letter more per such key, and
-/// only there: one `Shift+Left` too many would take the character before the run.
+/// Блокнот of Windows 11 stops the caret on the Tamil conjunct `க்ஷ` typed by one key once or three
+/// times, and what decides it is not visible from outside (Test_VM, no program: the first Tamil text
+/// of a logon session one stop, 9 of 9; a word right after Latin, once Tamil was typed, three stops;
+/// `reports\MEASURE-E111-notepad-stops.md`, `reports\ANALYSIS-Q204-1.md`). No count of `Shift+Left` is
+/// right in both: one letter more ate the space before the word in plain text, one letter fewer left
+/// `க்` in front of it (BACKLOG Q-204-1). So in that field the word is selected by its code units,
+/// [`OnScreen::units`], which the program knows exactly: [`deliver_by_positions`]. The count of
+/// `ScriptBreak` stays as the way back, [`OnScreen::letters`] and nothing more, because too few is the
+/// allowed side (decision 75).
 ///
 /// # ⭐ No count of `Backspace` in Блокнот at all — stage E111, tasks T-111-2 and T-111-6
 ///
@@ -546,7 +550,7 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 pub struct OnScreen {
     characters: usize,
     letters: usize,
-    ksha_keys: usize,
+    units: usize,
 }
 
 impl OnScreen {
@@ -563,28 +567,30 @@ impl OnScreen {
             .collect();
 
         let letters = windows_letters_in(&text);
+        let units = text.len();
         crate::buffer::zero_slice(&mut text);
 
         Self {
             characters: typed_chars(strokes),
             letters,
-            ksha_keys: ksha_keys_in(strokes),
+            units,
         }
     }
 
     /// The run as a **previous step of the cycle injected it** — see [`injected_chars`].
     pub fn as_injected(strokes: &[Keystroke], previous: &LayoutMap) -> Self {
         let mut text = vec![0u16; convert::max_units(strokes.len())];
-        let letters = convert::convert_strokes(strokes, previous, &mut text).map_or_else(
-            |_| injected_chars(strokes, previous),
-            |len| windows_letters_in(&text[..len]),
-        );
+        let characters = injected_chars(strokes, previous);
+        let (letters, units) = convert::convert_strokes(strokes, previous, &mut text)
+            .map_or((characters, characters), |len| {
+                (windows_letters_in(&text[..len]), len)
+            });
         crate::buffer::zero_slice(&mut text);
 
         Self {
-            characters: injected_chars(strokes, previous),
+            characters,
             letters,
-            ksha_keys: 0,
+            units,
         }
     }
 
@@ -598,6 +604,12 @@ impl OnScreen {
         self.letters
     }
 
+    /// UTF-16 code units on the screen — what the selection by positions takes (stage E111, task
+    /// T-111-9): a field counts its positions in them, a surrogate pair is two.
+    pub const fn units(self) -> usize {
+        self.units
+    }
+
     /// The `N` of the packet `delivery` builds: letters for the selection, code points for the
     /// two paths that erase by `Backspace` (FR-41 and the keys of the classic console).
     pub const fn for_delivery(self, delivery: Delivery) -> usize {
@@ -606,40 +618,6 @@ impl OnScreen {
             Delivery::Backspace | Delivery::Keystrokes => self.characters,
         }
     }
-
-    /// Keys of the run that typed the conjunct `க்ஷ` whole — the ligature key of Tamil 99.
-    pub const fn ksha_keys(self) -> usize {
-        self.ksha_keys
-    }
-
-    /// [`OnScreen::for_delivery`] in a field that does or does not part the conjunct `க்ஷ` typed
-    /// by one key ([`parts_typed_ksha_in`]): there the selection takes one letter more per such
-    /// key. The paths of `Backspace` are not touched.
-    pub const fn for_field(self, delivery: Delivery, parts_ksha: bool) -> usize {
-        match delivery {
-            Delivery::Selection if parts_ksha => self.letters + self.ksha_keys,
-            other => self.for_delivery(other),
-        }
-    }
-}
-
-/// The units of the Tamil conjunct `க்ஷ` — KA, PULLI, SSA.
-const KSHA: [u16; 3] = [0x0B95, 0x0BCD, 0x0BB7];
-
-/// How many keys of `strokes` produced [`KSHA`] in one go, dead strokes left out.
-fn ksha_keys_in(strokes: &[Keystroke]) -> usize {
-    strokes
-        .iter()
-        .filter(|stroke| !stroke.is_dead())
-        .map(|stroke| {
-            stroke
-                .produced()
-                .units()
-                .windows(KSHA.len())
-                .filter(|units| *units == KSHA)
-                .count()
-        })
-        .sum()
 }
 
 /// **How many letters of Windows a run of UTF-16 code units is** — the caret stops a control of
@@ -1434,23 +1412,6 @@ pub fn resolve_auto(class: Option<&str>) -> Delivery {
     }
 }
 
-/// ⭐ **Task T-107-6 (в), решение 201.10а — the fields that part the conjunct `க்ஷ` typed by one
-/// key**: Блокнот of Windows 11, see [`OnScreen`]. Edit and RichEdit are not in the list: with the
-/// text inserted they stop as `ScriptBreak` does, and typed by keys they were not measured — the
-/// stand did not put Tamil 99 into a field of WinForms, twice.
-pub const KSHA_PARTING_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
-
-/// **The pure half of task T-107-6 (в)** — whether a field of class `class` parts the conjunct
-/// `க்ஷ` typed by one key. `None` and every other class answer no. Case-insensitively, as
-/// [`resolve_auto`] compares.
-pub fn parts_typed_ksha_in(class: Option<&str>) -> bool {
-    class.is_some_and(|class| {
-        KSHA_PARTING_FIELD_CLASSES
-            .iter()
-            .any(|parting| class.eq_ignore_ascii_case(parting))
-    })
-}
-
 /// ⭐ **Stage E111, task T-111-6 (BACKLOG Q-198-1, слово владельца 206.5) — the fields where the
 /// method `backspace` goes by the selection**, as `auto` does: `RichEditD2DPT`, the text field of
 /// Notepad of Windows 11. A way round a defect of that field, not a repair of it: the cause is not
@@ -1481,9 +1442,6 @@ pub fn selects_in(class: Option<&str>) -> bool {
 /// ⭐ **Stage E111, task T-111-6 — the path a press runs in the field with the focus.**
 /// [`Delivery::Backspace`] in a field of [`SELECTING_FIELD_CLASSES`] is [`Delivery::Selection`], the
 /// first press and the presses of the cycle alike; every other answer is `delivery` itself.
-///
-/// ⚠ The price, measured on the same place under `auto`: over typed Tamil the first replacement
-/// after Блокнот starts can take the space before the word (BACKLOG Q-204-1).
 fn delivery_in_field(delivery: Delivery, env: &mut impl Environment) -> Delivery {
     if matches!(delivery, Delivery::Backspace) && env.selects_only() {
         Delivery::Selection
@@ -1906,6 +1864,15 @@ pub struct Dispatched {
 }
 
 impl Dispatched {
+    /// Two calls of [`dispatch_in`] as one step — stage E111, task T-111-9.
+    pub const fn and(self, next: Self) -> Self {
+        Self {
+            calls: self.calls + next.calls,
+            requested: self.requested + next.requested,
+            accepted: self.accepted + next.accepted,
+        }
+    }
+
     /// Whether the system took everything it was given — FR-45.
     pub const fn is_complete(self) -> bool {
         self.accepted == self.requested
@@ -1947,14 +1914,6 @@ pub trait Environment {
     /// The pause of FR-44 — reached when the configured delay is above zero.
     fn pause(&mut self, delay_ms: u32);
 
-    /// ⭐ **Task T-107-6 (в) — whether the field with the focus parts the conjunct `க்ஷ` typed by
-    /// one key** ([`parts_typed_ksha_in`], [`OnScreen::for_field`]). Asked only for a selection
-    /// whose run holds such a key. The default answers no — the count of `ScriptBreak`;
-    /// [`System`] reads the class of the focused field.
-    fn parts_typed_ksha(&mut self) -> bool {
-        false
-    }
-
     /// ⭐ **Stage E111, task T-111-6 — whether the method `backspace` goes by the selection in
     /// the field with the focus** ([`selects_in`], [`delivery_in_field`]). Asked only for the path
     /// of `Backspace`. The default answers no — the path of FR-41; [`System`] reads the class of the
@@ -1962,6 +1921,21 @@ pub trait Environment {
     fn selects_only(&mut self) -> bool {
         false
     }
+
+    /// ⭐ **Stage E111, task T-111-9 — the selection of that field, `(start, end)`, asked of it**
+    /// (`EM_GETSEL`, two integers and nothing of the text): [`deliver_by_positions`]. `None` is a field
+    /// that did not answer or cannot answer in 16 bits. The default answers `None` — the count of
+    /// `Shift+Left`.
+    fn field_selection(&mut self) -> Option<(usize, usize)> {
+        None
+    }
+
+    /// ⭐ **Stage E111, task T-111-9 — selects `start..end` in that field** (`EM_SETSEL`). Answers
+    /// whether the field took the message. The default answers no.
+    fn select_in_field(&mut self, _start: usize, _end: usize) -> bool {
+        false
+    }
+
     /// ⭐ **Stage E110, task T-110-4 — whether the selection packet goes out after the layout
     /// switch** ([`switches_ahead_in`], [`run_steps_ahead`]). Asked once, for the selection packet
     /// only. The default answers no — FR-43; [`System`] reads the class of the focused field and
@@ -2025,6 +1999,11 @@ pub struct System {
     /// [`Environment::switches_ahead`] is asked of it, and the selection that switched ahead
     /// returns to it when its packet did not reach the screen.
     screen: Option<LayoutId>,
+
+    /// ⭐ **The field of [`SELECTING_FIELD_CLASSES`] with the focus — stage E111, task T-111-9.** Found
+    /// by [`Environment::selects_only`], so that the questions of [`deliver_by_positions`] go to one
+    /// window and do not read a class each.
+    field: Option<HWND>,
 }
 
 impl System {
@@ -2034,6 +2013,7 @@ impl System {
             target: Some(target),
             back: None,
             screen: None,
+            field: None,
         }
     }
 
@@ -2045,6 +2025,7 @@ impl System {
             target: Some(target),
             back: None,
             screen: Some(screen),
+            field: None,
         }
     }
 
@@ -2056,6 +2037,7 @@ impl System {
             target: Some(target),
             back: Some(back),
             screen: None,
+            field: None,
         }
     }
 }
@@ -2076,6 +2058,24 @@ pub fn switches_ahead_in(class: Option<&str>, screen: Option<LayoutId>) -> bool 
     screen.is_some_and(|layout| layout.language_id() == TAMIL) && selects_in(class)
 }
 
+/// How long the field of [`SELECTING_FIELD_CLASSES`] is given to answer one message — the limit of
+/// `guard` for a question to a window.
+const FIELD_ANSWER_TIMEOUT_MS: u32 = crate::guard::PASSWORD_CHAR_TIMEOUT_MS;
+
+/// The control with the focus in the foreground window, through the one body `guard` asks it by
+/// ([`crate::guard::focused_control`]).
+fn focused_field() -> Option<HWND> {
+    // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches no
+    // memory of ours; callable from any thread.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.is_invalid() {
+        return None;
+    }
+
+    crate::guard::focused_control(foreground)
+}
+
 impl Environment for System {
     fn held(&mut self) -> Modifiers {
         held_modifiers()
@@ -2089,52 +2089,82 @@ impl Environment for System {
         sleep_ms(delay_ms);
     }
 
-    /// **Task T-107-6 (в)** — the class of the field with the focus in the foreground window,
-    /// through the one body `guard` asks it by ([`crate::guard::focused_control`]).
-    fn parts_typed_ksha(&mut self) -> bool {
-        // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches
-        // no memory of ours; callable from any thread.
-        let foreground = unsafe { GetForegroundWindow() };
-
-        if foreground.is_invalid() {
-            return false;
-        }
-
-        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
-
-        parts_typed_ksha_in(class.as_deref())
-    }
-
     /// **Stage E110, task T-110-4** — the class of the focused field and the layout on the screen.
     fn switches_ahead(&mut self) -> bool {
         if self.screen.is_none() {
             return false;
         }
 
-        // SAFETY: as in `parts_typed_ksha` above.
-        let foreground = unsafe { GetForegroundWindow() };
-
-        if foreground.is_invalid() {
-            return false;
-        }
-
-        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
+        let class = focused_field().map(crate::guard::class_name);
 
         switches_ahead_in(class.as_deref(), self.screen)
     }
 
-    /// **Stage E111, task T-111-6** — the class of the focused field, the same way as above.
+    /// **Stage E111, task T-111-6** — the class of the focused field. The field is kept for the
+    /// questions of task T-111-9.
     fn selects_only(&mut self) -> bool {
-        // SAFETY: as in `parts_typed_ksha` above.
-        let foreground = unsafe { GetForegroundWindow() };
+        let field = focused_field();
+        let class = field.map(crate::guard::class_name);
+        let selects = selects_in(class.as_deref());
 
-        if foreground.is_invalid() {
-            return false;
+        self.field = field.filter(|_| selects);
+
+        selects
+    }
+
+    /// **Stage E111, task T-111-9** — `EM_GETSEL`, no pointers: the answer is the two positions.
+    fn field_selection(&mut self) -> Option<(usize, usize)> {
+        let field = self.field?;
+        let mut answer = 0usize;
+
+        // SAFETY: `answer` is a live local, written once through the pointer the call is given, and
+        // both parameters of the message are zero, which is what keeps the field from writing
+        // through a pointer across the processes. `SMTO_ABORTIFHUNG` and the timeout are the reason
+        // this and not `SendMessage` is here, as in `guard`. NFR-13: the return is examined below.
+        let taken = unsafe {
+            SendMessageTimeoutW(
+                field,
+                EM_GETSEL,
+                WPARAM(0),
+                LPARAM(0),
+                SMTO_ABORTIFHUNG,
+                FIELD_ANSWER_TIMEOUT_MS,
+                Some(&raw mut answer),
+            )
+        };
+
+        // Zero is a timeout, a hung window or the refusal of UIPI.
+        if taken.0 == 0 {
+            return None;
         }
 
-        let class = crate::guard::focused_control(foreground).map(crate::guard::class_name);
+        selection_from_answer(answer)
+    }
 
-        selects_in(class.as_deref())
+    /// **Stage E111, task T-111-9** — `EM_SETSEL`, two integers.
+    fn select_in_field(&mut self, start: usize, end: usize) -> bool {
+        let Some(field) = self.field else {
+            return false;
+        };
+        let Ok(end) = isize::try_from(end) else {
+            return false;
+        };
+        let mut answer = 0usize;
+
+        // SAFETY: as in `field_selection` above; the two parameters are numbers and not pointers.
+        let taken = unsafe {
+            SendMessageTimeoutW(
+                field,
+                EM_SETSEL,
+                WPARAM(start),
+                LPARAM(end),
+                SMTO_ABORTIFHUNG,
+                FIELD_ANSWER_TIMEOUT_MS,
+                Some(&raw mut answer),
+            )
+        };
+
+        taken.0 != 0
     }
 
     /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
@@ -2662,12 +2692,7 @@ pub fn replace_in_with(
     // the run the two lengths differ (`café` typed is four characters, the same strokes
     // injected are five). Only the caller knows which press this is — `take_press` reads the
     // position counter of FR-32 — so only the caller can pick the right count. See [`OnScreen`].
-    //
-    // ⭐ Task T-107-6 (в): the field is asked only when a key of the run typed `க்ஷ` whole.
-    let parts_ksha = matches!(delivery, Delivery::Selection)
-        && on_screen.ksha_keys() > 0
-        && env.parts_typed_ksha();
-    let erased = on_screen.for_field(delivery, parts_ksha);
+    let erased = on_screen.for_delivery(delivery);
 
     // The whole packet is *formed* here, before anything is sent and long before step 5 —
     // FR-43. `max_units` is the length no conversion of these strokes can exceed, so the
@@ -2765,16 +2790,20 @@ pub fn replace_in_with(
     // it is that check, not this comment, that says so.
     let outcome = built.map(|len| {
         if matches!(delivery, Delivery::Keystrokes) {
-            run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+            run_steps_ahead(env, &events[..len], erased, typed, delay_ms, None)
         } else {
             // ⭐ Stage E110, task T-110-4 (BACKLOG Q-201-1): in Блокнот over Tamil text the selection
             // packet goes out after the switch ([`switches_ahead_in`]).
             let selection = matches!(delivery, Delivery::Selection);
 
+            // ⭐ Stage E111, task T-111-9 (BACKLOG Q-204-1): in Блокнот the word is selected by its
+            // code units ([`deliver_by_positions`]).
+            let positions = (selection && env.selects_only()).then(|| on_screen.units());
+
             if selection && env.switches_ahead() {
-                run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+                run_steps_ahead(env, &events[..len], erased, typed, delay_ms, positions)
             } else {
-                run_steps(env, &events[..len], erased, typed, delay_ms)
+                run_steps(env, &events[..len], erased, typed, delay_ms, positions)
             }
         }
     });
@@ -2797,12 +2826,13 @@ fn run_steps(
     erased: usize,
     typed: usize,
     delay_ms: u32,
+    positions: Option<usize>,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = dispatch_in(env, packet, delay_ms);
+    let replacement = deliver(env, packet, erased, positions, delay_ms);
 
     // ---- step 5 — the connection point of task T-05-1 ----------------------------------
     //
@@ -2854,6 +2884,158 @@ fn run_steps(
     }
 }
 
+/// **FR-40 step 4 on both orders of the steps** — the packet, or in a field of
+/// [`SELECTING_FIELD_CLASSES`] the selection by positions, `positions` being the code units on the
+/// screen.
+fn deliver(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    erased: usize,
+    positions: Option<usize>,
+    delay_ms: u32,
+) -> Dispatched {
+    match positions {
+        Some(units) if erased > 0 && units > 0 => {
+            deliver_by_positions(env, packet, erased, units, delay_ms)
+        }
+        _ => dispatch_in(env, packet, delay_ms),
+    }
+}
+
+/// **How long the marker of [`deliver_by_positions`] is waited for.** A limit and not a pause: the
+/// wait ends as soon as the selection shows, and when it does not, the rest of the count goes out
+/// behind the marker in the same order. The stand took 51…125 ms over a word typed and the marker at
+/// once (`q111-race`, 30 of 30); a font loaded for the first text of a script can take longer.
+const MARKER_SHOWS_MS: u128 = 500;
+
+/// Two positions out of the answer of `EM_GETSEL`: the low word and the high word. `None` when the
+/// field cannot answer in 16 bits: a document past 65 535 units answers −1 in both.
+pub const fn selection_from_answer(answer: usize) -> Option<(usize, usize)> {
+    let start = answer & 0xFFFF;
+    let end = (answer >> 16) & 0xFFFF;
+
+    if start == 0xFFFF || end == 0xFFFF {
+        None
+    } else {
+        Some((start, end))
+    }
+}
+
+/// ⭐ **FR-42 in a field of [`SELECTING_FIELD_CLASSES`] — stage E111, task T-111-9, BACKLOG Q-204-1.**
+/// The word is selected by positions (`EM_SETSEL(caret − units, caret)`), and only the insertion goes
+/// out as a packet, so the caret stops of the field stop mattering.
+///
+/// # ⛔ The order is the whole of the danger
+///
+/// `SendInput` goes through the input queue and is in order with what was typed; a message overtakes
+/// it. Measured on Test_VM, no program (`tools\vmlab\jobs\e111\q111-race.ps1`, 30 of 30 each):
+/// `EM_GETSEL` right after the keys of a word answered 2 or 3 for the true caret 6, and it took
+/// 36…53 ms to come right; right after an insertion it answered 6 for the true 4. So the caret is
+/// taken only from the answer that **proves the queue is behind it**: one `Shift+Left` of the packet
+/// goes out first, by the queue, and the end of the selection it makes is the caret after everything
+/// before it, the word and the previous press included: 6 in 30 of 30. No pause stands in for that.
+///
+/// A selection that is there before the marker is not the marker's. The selection of the press before
+/// stays until its insertion is taken, and the same measurement read it for the marker's in 29 of 30
+/// when nothing looked first. So the first answer is asked for that: a fast cycle goes by the count,
+/// in the queue, behind that insertion.
+///
+/// # The way back, the count of `Shift+Left`
+///
+/// `N` = [`OnScreen::letters`], nothing added: when the messages fail, too few is the allowed side
+/// (decision 75). Asked and not answered, −1, the refusal of UIPI (a base image against a window of an
+/// administrator), a selection already there: the whole packet, nothing was sent yet. The marker did
+/// not show in [`MARKER_SHOWS_MS`], or the caret stands before `units`: the rest of the count behind
+/// the marker. The field did not take the selection as asked: the caret is put back and the whole
+/// packet goes out; if the caret cannot be put back nothing more is sent, the word stays selected and
+/// the press has not reached the screen (Н12).
+fn deliver_by_positions(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    erased: usize,
+    units: usize,
+    delay_ms: u32,
+) -> Dispatched {
+    let selection = selection_events(erased, 0);
+    let insertion = &packet[selection..];
+
+    let Some((start, end)) = env.field_selection() else {
+        note_positions_fell_back();
+        return dispatch_in(env, packet, delay_ms);
+    };
+
+    if start != end {
+        note_positions_fell_back();
+        return dispatch_in(env, packet, delay_ms);
+    }
+
+    // Our `Shift` and one arrow, balanced: the first arrow of the packet.
+    let marker = [packet[0], packet[1], packet[2], packet[selection - 1]];
+    let done = dispatch_in(env, &marker, delay_ms);
+
+    if !done.is_complete() {
+        return done;
+    }
+
+    let started = Instant::now();
+    let caret = loop {
+        match env.field_selection() {
+            Some((start, end)) if start != end => break Some(end),
+            _ if started.elapsed().as_millis() >= MARKER_SHOWS_MS => break None,
+            _ => thread::yield_now(),
+        }
+    };
+
+    let Some(caret) = caret.filter(|caret| *caret >= units) else {
+        note_positions_fell_back();
+        return done.and(rest_of_the_count(env, packet, erased, delay_ms));
+    };
+
+    let wanted = (caret - units, caret);
+
+    if env.select_in_field(wanted.0, wanted.1) && env.field_selection() == Some(wanted) {
+        return done.and(dispatch_in(env, insertion, delay_ms));
+    }
+
+    note_positions_fell_back();
+
+    if env.select_in_field(caret, caret) {
+        done.and(dispatch_in(env, packet, delay_ms))
+    } else {
+        // Nothing of the insertion was taken: not «reached the screen», so no switch either.
+        done.and(Dispatched {
+            calls: 0,
+            requested: insertion.len(),
+            accepted: 0,
+        })
+    }
+}
+
+/// The count of `Shift+Left` behind a marker that is already out: `N − 1` arrows and the insertion.
+fn rest_of_the_count(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    erased: usize,
+    delay_ms: u32,
+) -> Dispatched {
+    if erased == 1 {
+        return dispatch_in(env, &packet[selection_events(erased, 0)..], delay_ms);
+    }
+
+    dispatch_in(env, &packet[..1], delay_ms).and(dispatch_in(env, &packet[3..], delay_ms))
+}
+
+/// The name the journal records the way back of [`deliver_by_positions`] under. A fact and no value
+/// (SEC-01, SEC-07).
+const SELECTION_BY_POSITIONS_FELL_BACK: &str = "selection by positions fell back";
+
+fn note_positions_fell_back() {
+    crate::diag::record(
+        crate::diag::Operation::from_name(SELECTION_BY_POSITIONS_FELL_BACK),
+        crate::diag::OsCode::NONE,
+    );
+}
+
 /// **FR-40 step 3** — the modifiers the user is holding, asked once and released in one call.
 /// Shared by both orders of the steps, so that the hygiene of step 3 cannot differ between them.
 fn release_held(env: &mut impl Environment, delay_ms: u32) -> (Modifiers, Dispatched) {
@@ -2899,6 +3081,7 @@ fn run_steps_ahead(
     erased: usize,
     typed: usize,
     delay_ms: u32,
+    positions: Option<usize>,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
@@ -2907,7 +3090,7 @@ fn run_steps_ahead(
     env.switch_layout();
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = dispatch_in(env, packet, delay_ms);
+    let replacement = deliver(env, packet, erased, positions, delay_ms);
 
     // ---- back, if the packet did not reach the screen — Н12, decision 127.3 -----------
     let replaced = Replaced {
