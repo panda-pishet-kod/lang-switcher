@@ -17,7 +17,8 @@ New in 1.4.2: the interface quotes in the marks of its language (English, German
 Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
 `auto`; the pair of the configuration file accepts the identifier of a variant of a language
 (`0x00020422`), a layout that is not there is refused with a line in the journal, and the pair looks
-at the first 64 layouts of the session. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
+at the first 64 layouts of the session; the emergency chord `Ctrl+Alt+Shift+F12` no longer reaches
+the window under it. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
 Windows builds it (French BÉPO `´`, `´`, `o` is `ő`); a word typed on the level of the right `Ctrl`
 of Canadian Multilingual Standard converts into the same level of a layout that has it; in Notepad
 with Tamil 99 the replacement no longer lands after the word with nothing erased. Version 1.4.0
