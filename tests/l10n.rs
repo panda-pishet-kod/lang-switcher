@@ -866,6 +866,51 @@ fn the_languages_where_guillemets_are_not_the_norm_quote_in_their_own_marks() {
     );
 }
 
+/// **The line of the installer that names the button quotes it as the windows of the language do**
+/// — stage E111, tasks T-111-1 and T-111-1а. Both Portuguese files: the windows of `pt` are the same
+/// for `pt-BR` and `pt-PT` (`settings::language_of_ui_tag`), and 155.12 keeps the two files equal.
+/// Red «до»: `«Não»` in the two Portuguese files, `«Nein»`, `«Ne»`, `«Nie»`, `«Hayır»` before T-111-1.
+#[test]
+fn the_installer_quotes_the_no_button_in_the_marks_of_the_windows() {
+    let folder = resource_script::root().join("installer/lang");
+    let mut refused = Vec::new();
+
+    for (file, open, close) in [
+        ("German", '„', '“'),
+        ("Czech", '„', '“'),
+        ("Polish", '„', '”'),
+        ("Turkish", '“', '”'),
+        ("Portuguese", '“', '”'),
+        ("BrazilianPortuguese", '“', '”'),
+        ("Danish", '»', '«'),
+        ("Slovenian", '»', '«'),
+    ] {
+        let path = folder.join(format!("{file}.isl"));
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("RemoveSettingsKeep="))
+            .unwrap_or_else(|| panic!("{file}.isl has no RemoveSettingsKeep"));
+
+        assert_eq!(
+            line.chars().filter(|c| *c == open).count(),
+            1,
+            "{file}.isl: the name of the button is quoted once: {line}"
+        );
+
+        for fault in quote_faults(line, open, close) {
+            refused.push(format!("{file}.isl: {fault}: {line}"));
+        }
+    }
+
+    assert!(
+        refused.is_empty(),
+        "{} отказов:\n{}",
+        refused.len(),
+        refused.join("\n")
+    );
+}
+
 /// **The files on disk are the files app.rc includes, every shipped language has one, and every
 /// file is a language of the registry.** A translation written and not included would build into
 /// nothing; an include without its file would fail rc.exe with a message about a path.
