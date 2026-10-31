@@ -776,6 +776,94 @@ fn typing_an_ordinary_phrase_costs_fourteen_probes_per_hundred_characters() {
 // FR-96 — the emergency combination
 // -------------------------------------------------------------------------------------
 
+/// ⭐ **Stage E111, task T-111-8 (BACKLOG Q-206-3) — FR-96 ends the process from a thread parked in
+/// advance, and the callback returns the suppression.** Read where it is written: a test cannot end
+/// its own process, and the behaviour is measured on the stand (`X ghbdtn` stays, 18.8…22.2 ms). Red
+/// «до» on `b998fe6`: `TerminateProcess` in the body of `emergency_exit`.
+///
+/// ⛔ FR-96 outranks the suppression: the keyboard goes back first, the thread waits on nothing of the
+/// program's, and a thread that could not be started is the old order.
+#[test]
+fn fr96_ends_the_process_from_a_parked_thread_and_the_callback_returns_the_suppression() {
+    let source = include_str!("../src/hook.rs").replace("\r\n", "\n");
+    let body_of = |head: &str| {
+        source
+            .split(head)
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .unwrap_or_else(|| panic!("no {head}"))
+            .to_owned()
+    };
+
+    let exit = body_of("fn emergency_exit() {");
+    let position = |what: &str| {
+        exit.find(what)
+            .unwrap_or_else(|| panic!("emergency_exit has no {what}"))
+    };
+    assert!(
+        position("uninstall()") < position("give_back_quietly()")
+            && position("give_back_quietly()") < position("EXIT_THREAD.get()"),
+        "the keyboard goes back first"
+    );
+    assert!(
+        position("EXIT_ASKED.store(true") < position("thread.unpark()"),
+        "the request is written before the thread is woken"
+    );
+    assert!(
+        exit.contains("None => terminate_now()"),
+        "no thread is the old order"
+    );
+    assert!(
+        !exit.contains("TerminateProcess"),
+        "the callback does not end the process itself when there is a thread"
+    );
+
+    let thread = body_of("fn exit_thread() {");
+    assert!(thread.contains("terminate_now()"), "the thread ends it");
+    for forbidden in [
+        "PostMessage",
+        "SendMessage",
+        "File",
+        "diag::",
+        "Mutex",
+        "recv",
+    ] {
+        assert!(
+            !thread.contains(forbidden),
+            "the thread waits on nothing of the program's: {forbidden}"
+        );
+    }
+
+    let install = body_of("pub fn install(notify: HWND");
+    let armed = install
+        .find("arm_the_exit_thread()")
+        .expect("the thread is there before the hook: it is started");
+    let hooked = install.find("SetWindowsHookExW").expect("the hook");
+    assert!(armed < hooked, "the thread is there before the hook");
+
+    let callback = body_of("unsafe extern \"system\" fn keyboard_hook_proc(");
+    let section = callback
+        .split("if is_emergency_key(vk, message) && emergency_modifiers_held() {")
+        .nth(1)
+        .expect("the section of FR-96");
+    let exit_asked = section
+        .find("emergency_exit()")
+        .expect("the section asks for the exit");
+    let suppressed = section.find("return SUPPRESS").expect("and suppresses");
+    assert!(
+        exit_asked < suppressed,
+        "the exit is asked, then the key is suppressed"
+    );
+
+    assert_eq!(
+        source
+            .matches("TerminateProcess(GetCurrentProcess()")
+            .count(),
+        1,
+        "one place ends the process"
+    );
+}
+
 #[test]
 fn the_emergency_key_is_f12_going_down_and_nothing_else() {
     const VK_F12: u16 = 0x7B;

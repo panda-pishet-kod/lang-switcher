@@ -74,7 +74,10 @@
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::thread::Thread;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
@@ -1329,6 +1332,9 @@ pub enum HotkeyMemory {
 /// flight** ([`HookCell::Cancelled`]): the hook is taken back off immediately and the error is
 /// returned, because the caller that asked for the removal is entitled to have got one.
 pub fn install(notify: HWND, instance: HINSTANCE, memory: HotkeyMemory) -> WinResult<Installed> {
+    // Stage E111, task T-111-8: before there is a hook to press FR-96 on.
+    arm_the_exit_thread();
+
     // **Task T-36-7, finding Н35 — the claim.** The cell goes from `Free` to `INSTALLING` in one
     // indivisible operation, so from this line on the invariant of FR-01 is held by the machine:
     // a second `install` is refused, and a `uninstall` from any thread sees a claim in flight
@@ -2119,6 +2125,17 @@ pub fn caps_lock_on() -> bool {
 /// after the hook is off (решение 159.25). The tray icon can be left behind as
 /// a ghost until the shell next repaints the notification area; that is a cosmetic price for
 /// a guaranteed escape, and the user pressing this combination has a worse problem.
+///
+/// # ⭐ The process ends right after the callback returns — stage E111, task T-111-8 (Q-206-3)
+///
+/// "Комбинация подавляется" takes a return of the callback, and a process ended inside the callback
+/// never returns: the system gave `F12` to the window after all (Test_VM, Notepad: `X ghbdtn` became
+/// `X ghbdt6E`, 3 of 3, its own hex shortcut). So the ending is handed to [`exit_thread`], parked in
+/// advance, and the callback returns [`SUPPRESS`].
+///
+/// ⛔ **FR-96 outranks this.** The thread waits on nothing but the kernel: not on the UI thread,
+/// not on a message, not on a file, so a hung main thread stops it no more than it stopped the old
+/// order. No thread to hand to — it could not be started — is the old order: the process ends here.
 fn emergency_exit() {
     uninstall();
 
@@ -2130,14 +2147,68 @@ fn emergency_exit() {
     // and without a line of the journal (NFR-05).
     crate::sticky::give_back_quietly();
 
+    match EXIT_THREAD.get() {
+        Some(thread) => {
+            EXIT_ASKED.store(true, Ordering::Release);
+            thread.unpark();
+        }
+        None => terminate_now(),
+    }
+}
+
+/// Ends this process with the exit code of FR-96 — the one `TerminateProcess` of the program.
+fn terminate_now() {
     // SAFETY: `GetCurrentProcess` returns the process pseudo-handle, a constant that names
     // the calling process, needs no closing and cannot be invalid. `TerminateProcess` on it
     // is the documented way for a process to end itself immediately; it takes an exit code by
     // value and dereferences nothing.
     if unsafe { TerminateProcess(GetCurrentProcess(), EXIT_EMERGENCY) }.is_err() {
-        // NFR-13: examined, and recorded without journalling because this is the callback —
-        // NFR-05. There is nothing else to be done: the hook is already gone.
+        // NFR-13: examined, and recorded without journalling — NFR-05. There is nothing else to
+        // be done: the hook is already gone.
         EMERGENCY_TERMINATE_FAILED.store(true, Ordering::Relaxed);
+    }
+}
+
+/// The thread that ends the process for FR-96 — task T-111-8. Started before the hook exists.
+static EXIT_THREAD: OnceLock<Thread> = OnceLock::new();
+
+/// FR-96 was pressed. Written once, by the callback.
+static EXIT_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// What the callback gets to return through the kernel before the process ends: the suppression is
+/// taken when it has returned. A spin and not a sleep: a `Sleep` of one millisecond can take a whole
+/// tick of the system timer, 15.6 ms, and FR-96 must not end later than it did (18.8…22.2 ms from the
+/// key on Test_VM, of which this is 0.5).
+const EXIT_GRACE: Duration = Duration::from_micros(500);
+
+/// Parks until FR-96 is pressed, lets the callback return, ends the process.
+fn exit_thread() {
+    while !EXIT_ASKED.load(Ordering::Acquire) {
+        std::thread::park();
+    }
+
+    let asked = Instant::now();
+
+    while asked.elapsed() < EXIT_GRACE {
+        std::hint::spin_loop();
+    }
+
+    terminate_now();
+}
+
+/// Starts [`exit_thread`] once. A thread that cannot be started is no failure of [`install`]:
+/// [`emergency_exit`] then keeps the old order.
+fn arm_the_exit_thread() {
+    if EXIT_THREAD.get().is_some() {
+        return;
+    }
+
+    if let Ok(handle) = std::thread::Builder::new()
+        .name("fr96-exit".to_owned())
+        .stack_size(64 * 1024)
+        .spawn(exit_thread)
+    {
+        let _ = EXIT_THREAD.set(handle.thread().clone());
     }
 }
 
@@ -2697,9 +2768,9 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     if is_emergency_key(vk, message) && emergency_modifiers_held() {
         emergency_exit();
 
-        // FR-96: "Комбинация подавляется." Reached only if `TerminateProcess` refused, in
-        // which case the hook is already gone and this return is the last thing the callback
-        // ever does.
+        // FR-96: "Комбинация подавляется." This return is what swallows the key, and the thread
+        // of [`emergency_exit`] ends the process right after it (task T-111-8). It is the last
+        // thing the callback ever does: the hook is already gone.
         return SUPPRESS;
     }
     // ----------------------------- end of the FR-96 section ------------------------------
