@@ -205,6 +205,10 @@ struct Bench {
     takes: Vec<bool>,
     /// How many times `select_in_field` has been called.
     selected: usize,
+    /// What `arrows_may_be_queued` answers.
+    arrows_queued: bool,
+    /// How many times `note_arrows_sent` has been called.
+    arrows_noted: usize,
     /// ⭐ **Stage E110, task T-110-4.** What `switches_ahead` answers — `true` is the field of
     /// Notepad of Windows 11 over Tamil text, where the selection goes out after the switch.
     ahead: bool,
@@ -224,6 +228,8 @@ impl Bench {
             field_asked: 0,
             takes: Vec::new(),
             selected: 0,
+            arrows_queued: false,
+            arrows_noted: 0,
             ahead: false,
         }
     }
@@ -353,6 +359,14 @@ impl Environment for Bench {
         self.log.push(Step::Select(start, end));
 
         answer
+    }
+
+    fn arrows_may_be_queued(&mut self) -> bool {
+        self.arrows_queued
+    }
+
+    fn note_arrows_sent(&mut self) {
+        self.arrows_noted += 1;
     }
 
     fn switches_ahead(&mut self) -> bool {
@@ -5367,6 +5381,10 @@ fn notepad_selects_the_word_by_its_code_units_and_sends_only_the_insertion() {
         packets[1]
     );
     assert_eq!(lefts_and_insertion(&bench), (1, 2), "one arrow, two units");
+    assert_eq!(
+        bench.arrows_noted, 0,
+        "the marker is proved, nothing stays in the queue"
+    );
 
     let order: Vec<&str> = bench
         .log
@@ -5424,6 +5442,10 @@ fn every_way_back_of_the_selection_by_positions_is_the_count_of_letters() {
     assert_eq!(lefts_and_insertion(&bench), (2, 2));
     assert_eq!(bench.selected, 0);
     assert!(bench.sent()[0].len() == 4, "the marker first");
+    assert_eq!(
+        bench.arrows_noted, 1,
+        "the arrows of the count are written down"
+    );
 
     // The caret before the word's units: the same.
     let (bench, _) = press_in_notepad(
@@ -5597,10 +5619,10 @@ fn every_other_field_and_path_is_not_asked_about_the_selection() {
     assert_eq!(bench.field_asked, 0, "the keys of the classic console");
 }
 
-/// **What the selection by positions takes is code units on the screen**: a surrogate pair is two, the
-/// press of a cycle takes what the previous press inserted, a dead key takes nothing of its own.
+/// **What the selection by positions takes is the code units the user typed**: a surrogate pair is
+/// two. A press of a cycle has none: it goes by the count.
 #[test]
-fn the_units_on_the_screen_are_what_the_field_counts_its_positions_in() {
+fn the_units_are_what_the_user_typed_and_a_cycle_has_none() {
     let (strokes, _) = ksha_a_typed();
     let previous = keys_from_q(
         LayoutId::from_raw(0x0449_0449),
@@ -5608,13 +5630,8 @@ fn the_units_on_the_screen_are_what_the_field_counts_its_positions_in() {
     );
     assert_eq!(
         inject::OnScreen::as_injected(&strokes, &previous).units(),
-        4,
+        0,
         "what the previous press inserted"
-    );
-    assert_eq!(
-        inject::OnScreen::as_injected(&strokes, &us()).units(),
-        2,
-        "two letters of Latin"
     );
 
     let emoji = NON_BMP.to_string();
@@ -5624,11 +5641,74 @@ fn the_units_on_the_screen_are_what_the_field_counts_its_positions_in() {
     let on_screen = inject::OnScreen::as_typed(&typed);
     assert_eq!(on_screen.characters(), 2, "code points");
     assert_eq!(on_screen.units(), 3, "UTF-16 units");
-    assert_eq!(
-        inject::OnScreen::as_injected(&typed, &source).units(),
-        3,
-        "UTF-16 units of what a previous press inserted"
+}
+
+/// ⛔ **A press of a cycle goes by the count, through the queue** — P1 of task T-111-9: three presses
+/// at once took the selection of the second, still in the queue, for the marker of the third and ate
+/// `X␣` (`க்ஷTaa`, 1 of 10). The field is not asked anything, one call, the letters of what the
+/// previous press inserted, and the arrows are written down for the press after this one.
+#[test]
+fn a_press_of_a_cycle_goes_by_the_count_through_the_queue() {
+    let (strokes, _) = ksha_a_typed();
+    let previous = keys_from_q(
+        LayoutId::from_raw(0x0449_0449),
+        &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
     );
+    let mut bench = Bench {
+        selects: true,
+        field: vec![Some((6, 6)), Some((5, 6)), Some((2, 6))],
+        ..Bench::new()
+    };
+
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &us(),
+        inject::OnScreen::as_injected(&strokes, &previous),
+        0,
+        ReplacementMethod::Selection,
+    )
+    .expect("the packet goes out");
+
+    assert_eq!(bench.field_asked, 0, "{:?}", bench.log);
+    assert_eq!(bench.selected, 0, "{:?}", bench.log);
+    assert_eq!(bench.sent().len(), 1, "one call: {:?}", bench.log);
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+    assert_eq!(bench.arrows_noted, 1, "the arrows are written down");
+}
+
+/// ⛔ **A first press right after arrows sent by the queue goes by the count too:** press, press, a
+/// letter, press within the time the field takes. Their selection cannot be told from the marker's.
+#[test]
+fn a_first_press_behind_arrows_in_the_queue_goes_by_the_count() {
+    let (bench, replaced) = press_in_notepad(
+        Bench {
+            arrows_queued: true,
+            ..Bench::new()
+        },
+        &[Some((6, 6)), Some((5, 6)), Some((2, 6))],
+        ReplacementMethod::Selection,
+    );
+
+    assert!(replaced.reached_the_screen());
+    assert_eq!(bench.field_asked, 0, "{:?}", bench.log);
+    assert_eq!(bench.sent().len(), 1, "one call: {:?}", bench.log);
+    assert_eq!(lefts_and_insertion(&bench), (2, 2));
+}
+
+/// **The moment of the arrows on the real machine:** nothing written down answers no, a moment
+/// written down answers yes for a limit that outlasts what the field took on the stand, then no.
+#[test]
+fn arrows_in_the_queue_are_a_matter_of_a_limit() {
+    let mut system = inject::System::default();
+
+    assert!(!system.arrows_may_be_queued(), "nothing was sent yet");
+
+    system.note_arrows_sent();
+    assert!(system.arrows_may_be_queued(), "just sent");
+
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert!(!system.arrows_may_be_queued(), "past the limit");
 }
 
 /// **The two integers of `EM_GETSEL`:** the low word, the high word; −1, a document past 16 bits, is

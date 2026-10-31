@@ -580,17 +580,16 @@ impl OnScreen {
     /// The run as a **previous step of the cycle injected it** — see [`injected_chars`].
     pub fn as_injected(strokes: &[Keystroke], previous: &LayoutMap) -> Self {
         let mut text = vec![0u16; convert::max_units(strokes.len())];
-        let characters = injected_chars(strokes, previous);
-        let (letters, units) = convert::convert_strokes(strokes, previous, &mut text)
-            .map_or((characters, characters), |len| {
-                (windows_letters_in(&text[..len]), len)
-            });
+        let letters = convert::convert_strokes(strokes, previous, &mut text).map_or_else(
+            |_| injected_chars(strokes, previous),
+            |len| windows_letters_in(&text[..len]),
+        );
         crate::buffer::zero_slice(&mut text);
 
         Self {
-            characters,
+            characters: injected_chars(strokes, previous),
             letters,
-            units,
+            units: 0,
         }
     }
 
@@ -604,8 +603,9 @@ impl OnScreen {
         self.letters
     }
 
-    /// UTF-16 code units on the screen — what the selection by positions takes (stage E111, task
-    /// T-111-9): a field counts its positions in them, a surrogate pair is two.
+    /// UTF-16 code units **the user typed** — what the selection by positions takes (stage E111, task
+    /// T-111-9): a field counts its positions in them, a surrogate pair is two. Zero over what a
+    /// previous press inserted: the presses of a cycle go by the count, see [`deliver_by_positions`].
     pub const fn units(self) -> usize {
         self.units
     }
@@ -1936,6 +1936,17 @@ pub trait Environment {
         false
     }
 
+    /// ⭐ **Stage E111, task T-111-9 — arrows of an earlier press can still stand in the input queue.**
+    /// Their selection cannot be told from the marker's, so such a press goes by the count. The
+    /// default answers no; [`System`] reads the moment [`Environment::note_arrows_sent`] wrote down.
+    fn arrows_may_be_queued(&mut self) -> bool {
+        false
+    }
+
+    /// ⭐ **Stage E111, task T-111-9 — a press in that field sent arrows by the queue.** The default
+    /// writes nothing down.
+    fn note_arrows_sent(&mut self) {}
+
     /// ⭐ **Stage E110, task T-110-4 — whether the selection packet goes out after the layout
     /// switch** ([`switches_ahead_in`], [`run_steps_ahead`]). Asked once, for the selection packet
     /// only. The default answers no — FR-43; [`System`] reads the class of the focused field and
@@ -2165,6 +2176,17 @@ impl Environment for System {
         };
 
         taken.0 != 0
+    }
+
+    /// **Stage E111, task T-111-9** — on this thread, the only one a press runs on.
+    fn arrows_may_be_queued(&mut self) -> bool {
+        ARROWS_SENT
+            .get()
+            .is_some_and(|sent| sent.elapsed().as_millis() < MARKER_SHOWS_MS)
+    }
+
+    fn note_arrows_sent(&mut self) {
+        ARROWS_SENT.set(Some(Instant::now()));
     }
 
     /// **FR-40 step 5 — task T-05-1.** The chain of FR-50, in module `switch`.
@@ -2895,11 +2917,21 @@ fn deliver(
     delay_ms: u32,
 ) -> Dispatched {
     match positions {
-        Some(units) if erased > 0 && units > 0 => {
+        Some(units) if erased > 0 && units > 0 && !env.arrows_may_be_queued() => {
             deliver_by_positions(env, packet, erased, units, delay_ms)
         }
-        _ => dispatch_in(env, packet, delay_ms),
+        Some(_) => {
+            env.note_arrows_sent();
+            dispatch_in(env, packet, delay_ms)
+        }
+        None => dispatch_in(env, packet, delay_ms),
     }
+}
+
+thread_local! {
+    /// ⭐ **When a press in the field of Notepad last sent arrows by the queue** — stage E111, task
+    /// T-111-9, [`Environment::note_arrows_sent`]. On the input thread, like every press.
+    static ARROWS_SENT: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
 }
 
 /// **How long the marker of [`deliver_by_positions`] is waited for.** A limit and not a pause: the
@@ -2937,8 +2969,13 @@ pub const fn selection_from_answer(answer: usize) -> Option<(usize, usize)> {
 ///
 /// A selection that is there before the marker is not the marker's. The selection of the press before
 /// stays until its insertion is taken, and the same measurement read it for the marker's in 29 of 30
-/// when nothing looked first. So the first answer is asked for that: a fast cycle goes by the count,
-/// in the queue, behind that insertion.
+/// when nothing looked first. So the first answer is asked for that, and goes by the count.
+///
+/// Arrows of an earlier press still in the queue make a selection nobody can tell from the marker's:
+/// three presses at once took the second press's for the third's, selected from a caret that was not
+/// there and ate `X␣` (`க்ஷTaa`, 1 of 10, P1). So positions are only for a first press over what the
+/// user typed, and not within [`MARKER_SHOWS_MS`] of arrows sent by the queue; every press of a
+/// cycle goes by the count through the queue, over text whose stops are those of `ScriptBreak`.
 ///
 /// # The way back, the count of `Shift+Left`
 ///
@@ -2960,12 +2997,12 @@ fn deliver_by_positions(
     let insertion = &packet[selection..];
 
     let Some((start, end)) = env.field_selection() else {
-        note_positions_fell_back();
+        note_positions_fell_back(env);
         return dispatch_in(env, packet, delay_ms);
     };
 
     if start != end {
-        note_positions_fell_back();
+        note_positions_fell_back(env);
         return dispatch_in(env, packet, delay_ms);
     }
 
@@ -2987,7 +3024,7 @@ fn deliver_by_positions(
     };
 
     let Some(caret) = caret.filter(|caret| *caret >= units) else {
-        note_positions_fell_back();
+        note_positions_fell_back(env);
         return done.and(rest_of_the_count(env, packet, erased, delay_ms));
     };
 
@@ -2997,7 +3034,7 @@ fn deliver_by_positions(
         return done.and(dispatch_in(env, insertion, delay_ms));
     }
 
-    note_positions_fell_back();
+    note_positions_fell_back(env);
 
     if env.select_in_field(caret, caret) {
         done.and(dispatch_in(env, packet, delay_ms))
@@ -3029,7 +3066,9 @@ fn rest_of_the_count(
 /// (SEC-01, SEC-07).
 const SELECTION_BY_POSITIONS_FELL_BACK: &str = "selection by positions fell back";
 
-fn note_positions_fell_back() {
+fn note_positions_fell_back(env: &mut impl Environment) {
+    env.note_arrows_sent();
+
     crate::diag::record(
         crate::diag::Operation::from_name(SELECTION_BY_POSITIONS_FELL_BACK),
         crate::diag::OsCode::NONE,
