@@ -15,7 +15,8 @@ It is a small tray program for Windows 10 and 11. It is free and open source, li
 **Status:** version **1.4.2**. The interface speaks **66 languages** (see [Languages](#languages)).
 New in 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
 Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
-`auto`; the pair of the configuration file accepts the identifier of a variant of a language
+`auto`, and a typed word is selected by its position, so a Tamil word no longer takes the space
+before it or leaves a piece of itself behind; the pair of the configuration file accepts the identifier of a variant of a language
 (`0x00020422`), a layout that is not there is refused with a line in the journal, and the pair looks
 at the first 64 layouts of the session; the emergency chord `Ctrl+Alt+Shift+F12` no longer reaches
 the window under it. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
@@ -101,7 +102,9 @@ The finer points:
   program counts letters the way Windows does (Thai `สวัสดี` is 4 letters and 6 code points).
   In Notepad of Windows 11 the `backspace` method goes by the selection, like `auto`: that field
   loses or repeats characters of an insertion after `Backspace`, and it takes a typed Tamil
-  consonant with its pulli (`க்`) off sometimes with one press, sometimes with two.
+  consonant with its pulli (`க்`) off sometimes with one press, sometimes with two. The first press
+  over a typed word selects it there by its position in the text, not by caret stops: one stop or
+  three on the Tamil conjunct `க்ஷ`, and no count is right for both.
 - When a key of the layout is ambiguous (Arabic 101: `لا` is one key, `B`, and also two, `G` and
   `H`) and the word was not typed just now, the program picks the reading that is more probable in
   the target language. It has letter statistics for English, French, Spanish and Russian, and since
