@@ -1,3 +1,5 @@
+<img src="docs/img/icon.png" width="96" alt="Lang Switcher icon">
+
 # Lang Switcher
 
 [English](README.md)
