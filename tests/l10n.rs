@@ -911,6 +911,51 @@ fn the_installer_quotes_the_no_button_in_the_marks_of_the_windows() {
     );
 }
 
+/// **The Ukrainian strings say one word for one thing and write the apostrophe of the language** —
+/// stage E111, task T-111-1б, Q-206-4, the list of the Ukrainian site glossary, section 9. The word
+/// of the installer is the one of its wizard: «програма встановлення» 15 times in the official
+/// `Ukrainian.isl`, «установник» never. `IDS_WIZARD_CONTACT` keeps its straight apostrophe: 206.10
+/// leaves the strings about the channels alone. Red «до»: on `961b838` all of it.
+#[test]
+fn the_ukrainian_strings_keep_the_words_of_the_glossary() {
+    const CALQUES: [&str; 6] = [
+        "невірн",
+        "переключ",
+        "Тека",
+        "теку",
+        "Установник",
+        "Два питання",
+    ];
+
+    let files = resource_script::language_files();
+    let (_, text) = files
+        .iter()
+        .find(|(file, _)| file == "uk")
+        .expect("app.rc must include res/lang/uk.rc");
+    let strings = read_language_file("uk.rc", text).strings;
+    assert!(strings.contains_key("IDS_WIZARD_CONTACT"), "the control");
+
+    let mut refused = Vec::new();
+    for (id, raw) in &strings {
+        for calque in CALQUES.into_iter().filter(|calque| raw.contains(calque)) {
+            refused.push(format!("{id} — «{calque}»: {raw}"));
+        }
+        if raw.contains('\'') && id != "IDS_WIZARD_CONTACT" {
+            refused.push(format!("{id} — прямой апостроф: {raw}"));
+        }
+    }
+    if strings["IDS_WIZARD_CARD_WRONG_SUB"].contains("букви") {
+        refused.push("IDS_WIZARD_CARD_WRONG_SUB — «букви»: рядом «літера в літеру»".to_string());
+    }
+
+    assert!(
+        refused.is_empty(),
+        "{} отказов:\n{}",
+        refused.len(),
+        refused.join("\n")
+    );
+}
+
 /// **The files on disk are the files app.rc includes, every shipped language has one, and every
 /// file is a language of the registry.** A translation written and not included would build into
 /// nothing; an include without its file would fail rc.exe with a message about a path.
