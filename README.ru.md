@@ -6,6 +6,20 @@
 По нажатию `Pause/Break` последнее набранное слово перекодируется в другую раскладку,
 а раскладка активного окна переключается на соответствующую.
 
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/img/ru-notepad-before.png" width="400" alt="Блокнот: ghbdtn, индикатор языка ENG"><br>Набрано не в той раскладке</td>
+    <td align="center" valign="top"><img src="docs/img/ru-notepad-after.png" width="400" alt="Блокнот: привет, индикатор языка РУС"><br>После одного нажатия <code>Pause</code></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/img/ru-tray-menu.png" width="246" alt="Меню в трее: Приостановить, Настройки, Запускать при входе в систему, Написать автору, О программе, Выход"><br>Меню в трее</td>
+    <td align="center" valign="top"><img src="docs/img/ru-settings.png" width="336" alt="Окно настроек: Общие, Горячая клавиша, Раскладки"><br>Настройки</td>
+  </tr>
+</table>
+
 [Страница программы](https://panda-pishet-kod.dev/langswitcher/) · [Скачать](https://panda-pishet-kod.dev/langswitcher/download/) · [Конвертер раскладки](https://panda-pishet-kod.dev/raskladka/)
 
 Пошаговая установка: [Edge](https://panda-pishet-kod.dev/langswitcher/download/edge/) · [Chrome](https://panda-pishet-kod.dev/langswitcher/download/chrome/) · [Opera](https://panda-pishet-kod.dev/langswitcher/download/opera/) · [Яндекс Браузер](https://panda-pishet-kod.dev/langswitcher/download/yandex/) · [Firefox](https://panda-pishet-kod.dev/langswitcher/download/firefox/)

@@ -7,8 +7,22 @@ Russian layout was on, so the screen shows `руддщ`. Press `Pause/Break`: th
 and the window switches to the English layout. Press it again and you get the original back,
 exactly as you typed it. One key, no setup, nothing to learn.
 
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/img/en-notepad-before.png" width="400" alt="Notepad showing руддщ, the language indicator on РУС"><br>Typed with the wrong layout on</td>
+    <td align="center" valign="top"><img src="docs/img/en-notepad-after.png" width="400" alt="Notepad showing hello, the language indicator on ENG"><br>After one press of <code>Pause</code></td>
+  </tr>
+</table>
+
 It is a small tray program for Windows 10 and 11. It is free and open source, licensed under
 `MIT OR Apache-2.0`.
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/img/en-tray-menu.png" width="246" alt="The tray menu: Suspend, Settings, Start when I sign in, Write to the author, About, Exit"><br>The tray menu</td>
+    <td align="center" valign="top"><img src="docs/img/en-settings.png" width="336" alt="The settings window: General, Hotkey, Layouts"><br>Settings</td>
+  </tr>
+</table>
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
