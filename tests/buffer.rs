@@ -5620,7 +5620,10 @@ fn whatever_the_program_cannot_see_leaves_the_word_unparted() {
     let later = SOME_TIME.wrapping_add(20);
     deliver(&mut partial, VK_A, SCAN_A, 0, first, Edge::Down);
     deliver(&mut partial, VK_A, SCAN_A, 0, later, Edge::Down);
-    assert!(partial.run_parts_ksha(), "the premise of the partial branch");
+    assert!(
+        partial.run_parts_ksha(),
+        "the premise of the partial branch"
+    );
     let outcome = partial.reset_up_to(first.wrapping_add(1));
     assert!(
         matches!(outcome, ResetOutcome::Partial { .. }),
