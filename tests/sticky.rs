@@ -372,9 +372,19 @@ fn every_way_out_gives_the_shortcut_back() {
     let quietly = emergency
         .find("crate::sticky::give_back_quietly();")
         .expect("FR-96 gives the shortcut back (T-95-6)");
+    // Stage E111, task T-111-8: the process is ended by a thread parked in advance, or here if there
+    // is no thread; `terminate_now` is the one `TerminateProcess` of the program.
     let ended = emergency
-        .find("TerminateProcess(")
-        .expect("FR-96 ends the process");
+        .find("EXIT_ASKED.store(")
+        .expect("FR-96 hands the ending to its thread (T-111-8)");
+    assert!(
+        emergency[ended..].contains("terminate_now()"),
+        "no thread to hand to: the process ends here"
+    );
+    assert!(
+        body_of(&hook, "fn terminate_now()").contains("TerminateProcess("),
+        "FR-96 ends the process"
+    );
     assert!(
         unhooked < quietly && quietly < ended,
         "the hook off, the shortcut back, then the end"
