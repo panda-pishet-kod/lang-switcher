@@ -1247,6 +1247,10 @@ pub type PhysicalProbe = fn() -> Physical;
 /// 11 two-sided without a live keyboard, exactly as `PhysicalProbe` did for defect D.
 pub type LayoutProbe = fn() -> LayoutId;
 
+/// Whether the field with the focus is the field of Notepad of Windows 11 — stage E111, task T-111-3а.
+/// A function and not a value for the reason [`LayoutProbe`] is one.
+pub type FieldProbe = fn() -> bool;
+
 /// How a caller tells [`Recorder`] what the machine's `CapsLock` really is — **task T-13-4**.
 ///
 /// A bare function pointer for the same three reasons [`PhysicalProbe`] and [`LayoutProbe`] are
@@ -1532,6 +1536,18 @@ pub struct Recorder {
     /// probe travels with the recorder across the FR-70 gate — the same arrangement `verify`
     /// already relies on.
     stamp: Option<LayoutProbe>,
+    /// ⭐ **Stage E111, task T-111-3а (BACKLOG Q-204-1).** Asks whether a word is being typed in the
+    /// field of Notepad. Asked on the first stroke of a Tamil word, and only until the answer is yes;
+    /// that stroke pays Win32 reads already, see [`Recorder::restamp`].
+    notepad: Option<FieldProbe>,
+    /// Tamil has been typed in Notepad in the life of this program, before the run the ring holds.
+    tamil_in_notepad: bool,
+    /// The language of the stroke before the one being recorded. `None` after anything that is not
+    /// typing ended the run: a click, a command, another field.
+    previous_language: Option<u16>,
+    /// The run the ring holds began right after text of another language, once
+    /// [`Recorder::tamil_in_notepad`] was true. See [`Recorder::run_parts_ksha`].
+    run_after_other_language: bool,
     /// **When the user last edited what they are typing — FR-14**, task Т-48-2. `None` while
     /// nothing has been typed since the last flush.
     ///
@@ -1701,6 +1717,10 @@ impl Recorder {
             cycle: 0,
             verify: None,
             stamp: None,
+            notepad: None,
+            tamil_in_notepad: false,
+            previous_language: None,
+            run_after_other_language: false,
             last_edit: None,
             // FR-15, task T-52-4. A recorder built without a configuration behaves as section 7
             // describes the program, which is what every other default in this constructor does.
@@ -1747,6 +1767,48 @@ impl Recorder {
     /// layout of the foreground window is while the test feeds its synthetic strokes.
     pub fn stamp_layout_with(&mut self, probe: LayoutProbe) {
         self.stamp = Some(probe);
+    }
+
+    /// Gives this recorder a way to ask whether the field with the focus is the field of Notepad
+    /// — stage E111, task T-111-3а. Set by [`install`] on the product's path; a test states the answer.
+    pub fn ask_field_with(&mut self, probe: FieldProbe) {
+        self.notepad = Some(probe);
+    }
+
+    /// ⭐ **Stage E111, task T-111-3а (BACKLOG Q-204-1) — whether Notepad stops the caret inside a
+    /// conjunct typed by one key in this run.** Test_VM, no program, keys from the host, the
+    /// selection read after each `Shift+Left` (`tools\vmlab\jobs\e111\q111-pass5.ps1` to `pass8`,
+    /// `reports\MEASURE-E111-notepad-stops.md`): it does when the run **began right after text of
+    /// another language**, and Tamil has been typed in Notepad before. In every other
+    /// place tried it stops as `ScriptBreak` does, one stop on the conjunct: the first Tamil text of a
+    /// logon session, the next word after a Tamil space, after a Backspace, after `Ctrl+A` and
+    /// `Delete` under the same layout, after a new line, in a new Notepad with Tamil only.
+    ///
+    /// ⚠ A wrong `true` takes the character before the word and a wrong `false` leaves `க்` in
+    /// front of the replacement, so whatever this program cannot see is a `false` (decision 75):
+    /// Tamil typed before it started, a click, another field.
+    pub const fn run_parts_ksha(&self) -> bool {
+        self.run_after_other_language
+    }
+
+    /// The first stroke of a run, with the layout already restamped — see [`Recorder::run_parts_ksha`].
+    /// One boolean for a word in any language but Tamil.
+    fn note_run_start(&mut self) {
+        let language = self.active.language_id();
+
+        if language != crate::inject::TAMIL {
+            self.run_after_other_language = false;
+            return;
+        }
+
+        self.run_after_other_language = self.tamil_in_notepad
+            && self
+                .previous_language
+                .is_some_and(|previous| previous != language);
+
+        if !self.tamil_in_notepad && self.notepad.is_some_and(|in_notepad| in_notepad()) {
+            self.tamil_in_notepad = true;
+        }
     }
 
     /// A buffer sized by the `[buffer]` section of the configuration — FR-07.
@@ -2361,7 +2423,10 @@ impl Recorder {
                 return Recorded::Flushed;
             }
         } else if self.tail_is_open() {
+            // The soft boundary is typing, not the end of it (stage E111, task T-111-3а).
+            let previous = self.previous_language;
             self.clear_ring();
+            self.previous_language = previous;
         }
 
         // ---------------------------------------------------------------------------------
@@ -2520,6 +2585,11 @@ impl Recorder {
             self.clear_ring();
             return Recorded::Flushed;
         }
+
+        if self.ring.len() == 0 {
+            self.note_run_start();
+        }
+        self.previous_language = Some(self.active.language_id());
 
         let stroke = Stroke::new(key.vk, key.scan, mods, self.active, key.time, produced);
 
@@ -2772,6 +2842,10 @@ impl Recorder {
         // and an exemption resting on a memory the flush left standing would be an exemption
         // for typing the user has already had thrown away.
         self.last_edit = None;
+
+        // Stage E111, task T-111-3а: what was typed before a flush says nothing about the next word.
+        self.previous_language = None;
+        self.run_after_other_language = false;
     }
 
     /// Flushes the buffer of everything typed at or before `event_time` — **FR-12**.
@@ -2831,6 +2905,9 @@ impl Recorder {
             // is exactly the situation the requirement was written for.
             return ResetOutcome::Kept { kept: live };
         }
+
+        // Stage E111, task T-111-3а: the run no longer begins where it began.
+        self.run_after_other_language = false;
 
         let kept = self.ring.retain_after(event_time);
 
@@ -3183,6 +3260,7 @@ pub fn install(config: &settings::Buffer) {
     let mut recorder = Recorder::from_config(config);
     recorder.verify_held_with(crate::hook::physical_modifiers);
     recorder.stamp_layout_with(crate::switch::current);
+    recorder.ask_field_with(crate::inject::focus_is_in_selecting_field);
     install_recorder(recorder);
 }
 

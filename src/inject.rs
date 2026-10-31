@@ -525,16 +525,16 @@ fn injected_chars(strokes: &[Keystroke], previous: &LayoutMap) -> usize {
 /// the guard of the stand was eaten (case 4b of 187). [`OnScreen::for_delivery`] hands each
 /// packet its own.
 ///
-/// # ⭐ One letter more in Блокнот — task T-107-6 (в), решение 201.10а
+/// # ⭐ One letter more in Блокнот, in one place only — tasks T-107-6 (в) and T-111-3а
 ///
-/// Блокнот of Windows 11 stops the caret **inside** the Tamil conjunct `க்ஷ` (KSSA) when one key
-/// typed it — the ligature key `Shift+T` of Tamil 99 — and not when it was inserted, while
-/// `ScriptBreak` keeps it one letter (Test_VM, `tools\vmlab\jobs\e107\q107-*.ps1`, keys from the
-/// host): `க்ஷஅ` typed took three `Shift+Left` (4 of 4) and three `Backspace` (2 of 2), the same
-/// text inserted took two `Shift+Left`; `ஶ்ரீஅ` of the key `Shift+Y` took two typed as well. The
-/// selection of two letters left `க்` in front of the word (case 10 of the manual sheet of Э106,
-/// 5 of 6). [`OnScreen::for_field`] gives the selection there one letter more per such key, and
-/// only there: one `Shift+Left` too many would take the character before the run.
+/// `ScriptBreak` keeps the conjunct `க்ஷ` (KSSA) one letter, and Блокнот of Windows 11 stops the
+/// caret the same way almost everywhere, the text the program inserted included. The exception is a
+/// run with the ligature key `Shift+T` of Tamil 99 that **began right after text of another
+/// language**, once Tamil has been typed in Notepad before: three stops on `க்ஷஅ`, and two
+/// `Shift+Left` leave `க்` in front of the word. [`crate::buffer::Recorder::run_parts_ksha`] says
+/// when, with the measurements, and [`OnScreen::as_typed_parted`] gives that run one letter more.
+/// Until task T-111-3а every such key had it, and the first Tamil text of a logon session, and every
+/// word after a Tamil space, lost the space before them: one `Shift+Left` too many (BACKLOG Q-204-1).
 ///
 /// # ⭐ No count of `Backspace` in Блокнот at all — stage E111, tasks T-111-2 and T-111-6
 ///
@@ -568,7 +568,17 @@ impl OnScreen {
         Self {
             characters: typed_chars(strokes),
             letters,
-            ksha_keys: ksha_keys_in(strokes),
+            ksha_keys: 0,
+        }
+    }
+
+    /// [`OnScreen::as_typed`] for a run that Notepad parts: one letter more if a key of it typed the
+    /// conjunct `க்ஷ` whole — stage E111, task T-111-3а, see [`OnScreen`]. One for the run however many
+    /// such keys it holds: a second one was not measured, and too few is the allowed side (decision 75).
+    pub fn as_typed_parted(strokes: &[Keystroke]) -> Self {
+        Self {
+            ksha_keys: usize::from(a_key_typed_ksha(strokes)),
+            ..Self::as_typed(strokes)
         }
     }
 
@@ -607,7 +617,7 @@ impl OnScreen {
         }
     }
 
-    /// Keys of the run that typed the conjunct `க்ஷ` whole — the ligature key of Tamil 99.
+    /// The letter more Notepad wants for this run: a ligature key of Tamil 99 in a parted run.
     pub const fn ksha_keys(self) -> usize {
         self.ksha_keys
     }
@@ -626,20 +636,18 @@ impl OnScreen {
 /// The units of the Tamil conjunct `க்ஷ` — KA, PULLI, SSA.
 const KSHA: [u16; 3] = [0x0B95, 0x0BCD, 0x0BB7];
 
-/// How many keys of `strokes` produced [`KSHA`] in one go, dead strokes left out.
-fn ksha_keys_in(strokes: &[Keystroke]) -> usize {
+/// Whether a key of `strokes` produced [`KSHA`] in one go, dead strokes left out.
+fn a_key_typed_ksha(strokes: &[Keystroke]) -> bool {
     strokes
         .iter()
         .filter(|stroke| !stroke.is_dead())
-        .map(|stroke| {
+        .any(|stroke| {
             stroke
                 .produced()
                 .units()
                 .windows(KSHA.len())
-                .filter(|units| *units == KSHA)
-                .count()
+                .any(|units| units == KSHA)
         })
-        .sum()
 }
 
 /// **How many letters of Windows a run of UTF-16 code units is** — the caret stops a control of
@@ -1478,6 +1486,41 @@ pub fn selects_in(class: Option<&str>) -> bool {
     })
 }
 
+/// **The class of a field, as its code units, against [`SELECTING_FIELD_CLASSES`]** — no allocation,
+/// for the hook path of task T-111-3а. Case-insensitively, as [`resolve_auto`] compares.
+pub fn selects_in_units(class: &[u16]) -> bool {
+    SELECTING_FIELD_CLASSES.iter().any(|selecting| {
+        class.len() == selecting.len()
+            && class.iter().zip(selecting.bytes()).all(|(unit, byte)| {
+                u8::try_from(*unit).is_ok_and(|unit| unit.eq_ignore_ascii_case(&byte))
+            })
+    })
+}
+
+/// **Whether the field with the focus is one of [`SELECTING_FIELD_CLASSES`]** — the probe of
+/// [`crate::buffer::Recorder::ask_field_with`]. Reached from the hook callback, on the first stroke
+/// of a Tamil word, until the first yes: three Win32 reads, no allocation, no lock, no file.
+pub fn focus_is_in_selecting_field() -> bool {
+    // SAFETY: as in [`System::parts_typed_ksha`].
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.is_invalid() {
+        return false;
+    }
+
+    let Some(field) = crate::guard::focused_control(foreground) else {
+        return false;
+    };
+
+    let mut class = [0u16; 32];
+
+    // SAFETY: `class` is a live local array and the call is given the slice itself, so the binding
+    // derives the bound from the array. NFR-13: zero is the documented failure and matches no class.
+    let length = unsafe { GetClassNameW(field, &mut class) };
+
+    usize::try_from(length).is_ok_and(|length| selects_in_units(&class[..length.min(class.len())]))
+}
+
 /// ⭐ **Stage E111, task T-111-6 — the path a press runs in the field with the focus.**
 /// [`Delivery::Backspace`] in a field of [`SELECTING_FIELD_CLASSES`] is [`Delivery::Selection`], the
 /// first press and the presses of the cycle alike; every other answer is `delivery` itself.
@@ -2061,7 +2104,7 @@ impl System {
 }
 
 /// The language of the Tamil layouts (Tamil 99, `00020449`) — stage E110, task T-110-4.
-const TAMIL: u16 = 0x0449;
+pub(crate) const TAMIL: u16 = 0x0449;
 
 /// ⭐ **The pure half of task T-110-4 (BACKLOG Q-201-1)** — whether the selection packet goes out
 /// **after** the layout switch: in a field of [`SELECTING_FIELD_CLASSES`] (Блокнот of Windows 11)
@@ -3252,7 +3295,13 @@ fn take_press() -> Option<Press> {
         let on_screen = previous
             .and_then(|previous| cache.get(previous))
             .map_or_else(
-                || OnScreen::as_typed(&strokes),
+                || {
+                    if recorder.run_parts_ksha() {
+                        OnScreen::as_typed_parted(&strokes)
+                    } else {
+                        OnScreen::as_typed(&strokes)
+                    }
+                },
                 |previous| OnScreen::as_injected(&strokes, previous),
             );
 

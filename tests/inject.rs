@@ -4979,7 +4979,7 @@ fn backspace_in_notepad_goes_by_the_selection_every_word_and_every_press() {
             "ksha by the ligature key, a",
             0x0449_0449,
             &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
-            3,
+            2,
             4,
         ),
         (
@@ -5281,27 +5281,43 @@ fn the_selection_over_tamil_in_notepad_goes_out_after_the_switch() {
     assert!(!inject::switches_ahead_in(Some("RichEditD2DPT"), None));
 }
 
-/// ⭐ **Task T-107-6 (в), решение 201.10а — in Блокнот the conjunct `க்ஷ` typed by one key is two
-/// letters to the selection**, one everywhere else, as `ScriptBreak` has it. Test_VM, keys of
-/// Tamil 99 from the host: `க்ஷஅ` took three `Shift+Left` (4 of 4), `ஶ்ரீஅ` two and `க்கஅ` three —
-/// what `ScriptBreak` counts. Two letters left `க்` in front of the word (case 10 of the manual
-/// sheet of Э106, 5 of 6). The same text of three keys was not measured and keeps the count of
-/// `ScriptBreak`: one `Shift+Left` too many would take the character before the run.
+/// ⭐ **Task T-107-6 (в), решение 201.10а, and stage E111, task T-111-3а — in Блокнот the conjunct `க்ஷ`
+/// typed by one key is two letters to the selection only where the run was found
+/// parted**, one everywhere else, as `ScriptBreak` has it. Test_VM, keys of Tamil 99 from the host,
+/// `reports\MEASURE-E111-notepad-stops.md`: `க்ஷஅ` right after text of another language, Tamil typed
+/// before, took three `Shift+Left`; two left `க்` in front of the word (case 10 of the manual sheet of
+/// Э106, 5 of 6). Anywhere else it took two, and three took the space before the word (Q-204-1).
 #[test]
-fn the_selection_in_notepad_takes_the_ksha_of_one_key_as_two_letters() {
+fn the_selection_in_notepad_takes_the_ksha_of_one_key_as_two_letters_only_when_parted() {
     let target = us();
 
-    // (name, keys, lefts in Блокнот, lefts in every other field)
-    let rows: [(&str, &[&str], usize, usize); 4] = [
+    // (name, keys, lefts in Блокнот when parted, lefts in Блокнот otherwise, in every other field)
+    let rows: [(&str, &[&str], usize, usize, usize); 6] = [
         (
             "ksha by the ligature key, a",
             &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B85}"],
             3,
             2,
+            2,
+        ),
+        (
+            "a, then ksha by the ligature key",
+            &["\u{0B85}", "\u{0B95}\u{0BCD}\u{0BB7}"],
+            3,
+            2,
+            2,
+        ),
+        (
+            "ksha twice by the ligature key: one letter more for the run",
+            &["\u{0B95}\u{0BCD}\u{0BB7}", "\u{0B95}\u{0BCD}\u{0BB7}"],
+            3,
+            2,
+            2,
         ),
         (
             "shri by the ligature key, a",
             &["\u{0BB6}\u{0BCD}\u{0BB0}\u{0BC0}", "\u{0B85}"],
+            2,
             2,
             2,
         ),
@@ -5310,29 +5326,91 @@ fn the_selection_in_notepad_takes_the_ksha_of_one_key_as_two_letters() {
             &["\u{0B95}", "\u{0BCD}", "\u{0B95}", "\u{0B85}"],
             3,
             3,
+            3,
         ),
         (
             "ksha of three keys, a",
             &["\u{0B95}", "\u{0BCD}", "\u{0BB7}", "\u{0B85}"],
             2,
             2,
+            2,
         ),
     ];
 
-    for (name, keys, notepad, elsewhere) in rows {
+    for (name, keys, parted, unparted, elsewhere) in rows {
         let source = keys_from_q(LayoutId::from_raw(0x0449_0449), keys);
         let strokes = typed_from_q(&source, keys.len());
-        let on_screen = inject::OnScreen::as_typed(&strokes);
+        let typed = inject::OnScreen::as_typed(&strokes);
 
         assert_eq!(
-            lefts_in_field(&strokes, &target, on_screen, true),
-            notepad,
+            lefts_in_field(
+                &strokes,
+                &target,
+                inject::OnScreen::as_typed_parted(&strokes),
+                true
+            ),
+            parted,
+            "{name}: Shift+Left in Блокнот, the run parted"
+        );
+        assert_eq!(
+            lefts_in_field(&strokes, &target, typed, true),
+            unparted,
             "{name}: Shift+Left in Блокнот"
         );
         assert_eq!(
-            lefts_in_field(&strokes, &target, on_screen, false),
+            lefts_in_field(&strokes, &target, typed, false),
             elsewhere,
             "{name}: Shift+Left in every other field"
+        );
+    }
+}
+
+/// **The press asks the recorder, and the recorder is given the question** — stage E111, task T-111-3а.
+/// The two ends of a rule a test of either end alone would pass without: read where they are written.
+#[test]
+fn the_press_asks_the_recorder_and_the_recorder_is_given_the_field() {
+    let take_press = include_str!("../src/inject.rs")
+        .split("fn take_press()")
+        .nth(1)
+        .and_then(|rest| rest.split("\nfn ").next())
+        .expect("fn take_press");
+    assert!(
+        take_press.contains("recorder.run_parts_ksha()")
+            && take_press.contains("OnScreen::as_typed_parted(&strokes)"),
+        "the press takes the parted count from the recorder"
+    );
+
+    let install = include_str!("../src/buffer.rs")
+        .split("pub fn install(config")
+        .nth(1)
+        .and_then(|rest| rest.split("\npub fn ").next())
+        .expect("fn install");
+    assert!(
+        install.contains("ask_field_with(crate::inject::focus_is_in_selecting_field)"),
+        "the product's recorder is given the field"
+    );
+}
+
+/// **The class of the field, as code units on the hook path, says what [`inject::selects_in`] says.**
+#[test]
+fn the_class_read_on_the_hook_path_answers_as_the_class_read_elsewhere() {
+    for class in [
+        "RichEditD2DPT",
+        "richeditd2dpt",
+        "RICHEDITD2DPT",
+        "Edit",
+        "RichEdit20W",
+        "RichEditD2DPTX",
+        "RichEditD2DP",
+        "Rich\u{0415}ditD2DPT",
+        "",
+    ] {
+        let units: Vec<u16> = class.encode_utf16().collect();
+
+        assert_eq!(
+            inject::selects_in_units(&units),
+            inject::selects_in(Some(class)),
+            "{class}"
         );
     }
 }
