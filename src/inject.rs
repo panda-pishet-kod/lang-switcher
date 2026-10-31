@@ -1521,6 +1521,13 @@ pub fn focus_is_in_selecting_field() -> bool {
     usize::try_from(length).is_ok_and(|length| selects_in_units(&class[..length.min(class.len())]))
 }
 
+/// ⭐ **Stage E111, task T-111-7 (BACKLOG Q-206-2, слово владельца 206.8) — the pause between the
+/// selection and the insertion in a field of [`SELECTING_FIELD_CLASSES`].** One call came back with the
+/// tail of the insertion wrong in 2 trials of 60 (`X l;uuuu` and `X l;llfu` for `X l;ylfu`, Test_VM,
+/// `e111-lab2` and the delivery `b998fe6`): the failure of Q-197-1, which a pause took off the path
+/// of `Backspace` (35…100 ms 48 of 48, 50 ms 32 of 32, `reports\ITOG-E106.md`).
+pub const SELECTION_SETTLE_MS: u32 = 50;
+
 /// ⭐ **Stage E111, task T-111-6 — the path a press runs in the field with the focus.**
 /// [`Delivery::Backspace`] in a field of [`SELECTING_FIELD_CLASSES`] is [`Delivery::Selection`], the
 /// first press and the presses of the cycle alike; every other answer is `delivery` itself.
@@ -1940,7 +1947,8 @@ pub fn inter_event_delay_ms() -> u32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Dispatched {
     /// `SendInput` calls made. **Exactly one** whenever the packet is non-empty and the pause
-    /// of FR-44 is zero, which is what FR-41 requires.
+    /// of FR-44 is zero, which is what FR-41 requires — and two for the selection in the field of
+    /// Notepad of Windows 11 (task T-111-7, [`dispatch_settled`]).
     pub calls: usize,
     /// Events handed to `SendInput`, summed over the calls.
     pub requested: usize,
@@ -1987,7 +1995,8 @@ pub trait Environment {
     /// Hands one portion to the system and answers how many events it accepted — FR-41, FR-45.
     fn send(&mut self, events: &[INPUT]) -> u32;
 
-    /// The pause of FR-44 — reached when the configured delay is above zero.
+    /// The pause of FR-44 — reached when the configured delay is above zero — and the pause of task
+    /// T-111-7 between the selection and the insertion in the field of Notepad.
     fn pause(&mut self, delay_ms: u32);
 
     /// ⭐ **Task T-107-6 (в) — whether the field with the focus parts the conjunct `க்ஷ` typed by
@@ -2409,6 +2418,44 @@ pub fn dispatch_in(env: &mut impl Environment, events: &[INPUT], delay_ms: u32) 
     done
 }
 
+/// ⭐ **Stage E111, task T-111-7 — the packet of FR-42 in two calls** ([`SELECTION_SETTLE_MS`]): the
+/// first `selection_events` of `packet`, the pause `settle_ms`, then the rest — the insertion. Each
+/// half goes as [`dispatch_in`] sends a packet, so the portions of FR-44, when there are any, are kept
+/// inside each half.
+///
+/// FR-45 across the halves: a selection the system did not take whole is **not** followed by the
+/// insertion. In one call `SendInput` stops at the first blocked event and sends nothing after it;
+/// the two calls keep that, and the answer counts the whole packet as asked for, so the replacement
+/// does not pass for one that reached the screen.
+fn dispatch_settled(
+    env: &mut impl Environment,
+    packet: &[INPUT],
+    selection_events: usize,
+    delay_ms: u32,
+    settle_ms: u32,
+) -> Dispatched {
+    let (selection, insertion) = packet.split_at(selection_events.min(packet.len()));
+
+    let first = dispatch_in(env, selection, delay_ms);
+
+    if !first.is_complete() || insertion.is_empty() {
+        return Dispatched {
+            requested: first.requested + insertion.len(),
+            ..first
+        };
+    }
+
+    env.pause(settle_ms);
+
+    let second = dispatch_in(env, insertion, delay_ms);
+
+    Dispatched {
+        calls: first.calls + second.calls,
+        requested: first.requested + second.requested,
+        accepted: first.accepted + second.accepted,
+    }
+}
+
 /// Where the portion starting at `start` ends — one event, or the whole of a character outside
 /// the BMP.
 ///
@@ -2808,16 +2855,24 @@ pub fn replace_in_with(
     // it is that check, not this comment, that says so.
     let outcome = built.map(|len| {
         if matches!(delivery, Delivery::Keystrokes) {
-            run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+            run_steps_ahead(env, &events[..len], erased, typed, delay_ms, 0)
         } else {
             // ⭐ Stage E110, task T-110-4 (BACKLOG Q-201-1): in Блокнот over Tamil text the selection
             // packet goes out after the switch ([`switches_ahead_in`]).
             let selection = matches!(delivery, Delivery::Selection);
 
-            if selection && env.switches_ahead() {
-                run_steps_ahead(env, &events[..len], erased, typed, delay_ms)
+            // ⭐ Stage E111, task T-111-7 (BACKLOG Q-206-2): a selection that takes text off and types
+            // asks the field whether the insertion must wait ([`SELECTION_SETTLE_MS`]).
+            let settle_ms = if selection && erased > 0 && env.selects_only() {
+                SELECTION_SETTLE_MS
             } else {
-                run_steps(env, &events[..len], erased, typed, delay_ms)
+                0
+            };
+
+            if selection && env.switches_ahead() {
+                run_steps_ahead(env, &events[..len], erased, typed, delay_ms, settle_ms)
+            } else {
+                run_steps(env, &events[..len], erased, typed, delay_ms, settle_ms)
             }
         }
     });
@@ -2834,18 +2889,32 @@ pub fn replace_in_with(
 
 /// Steps 3 to 5 of FR-40 around a packet that is already built — step 6 is not performed (task
 /// T-40-3, see the end of the body).
+///
+/// `settle_ms` above zero — task T-111-7 — sends the selection of FR-42 and the insertion in two
+/// calls with that pause between them; see [`dispatch_settled`].
 fn run_steps(
     env: &mut impl Environment,
     packet: &[INPUT],
     erased: usize,
     typed: usize,
     delay_ms: u32,
+    settle_ms: u32,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = dispatch_in(env, packet, delay_ms);
+    let replacement = if settle_ms > 0 {
+        dispatch_settled(
+            env,
+            packet,
+            selection_events(erased, 0),
+            delay_ms,
+            settle_ms,
+        )
+    } else {
+        dispatch_in(env, packet, delay_ms)
+    };
 
     // ---- step 5 — the connection point of task T-05-1 ----------------------------------
     //
@@ -2942,6 +3011,7 @@ fn run_steps_ahead(
     erased: usize,
     typed: usize,
     delay_ms: u32,
+    settle_ms: u32,
 ) -> Replaced {
     // ---- step 3 -----------------------------------------------------------------------
     let (released, release) = release_held(env, delay_ms);
@@ -2950,7 +3020,17 @@ fn run_steps_ahead(
     env.switch_layout();
 
     // ---- step 4, FR-41 ----------------------------------------------------------------
-    let replacement = dispatch_in(env, packet, delay_ms);
+    let replacement = if settle_ms > 0 {
+        dispatch_settled(
+            env,
+            packet,
+            selection_events(erased, 0),
+            delay_ms,
+            settle_ms,
+        )
+    } else {
+        dispatch_in(env, packet, delay_ms)
+    };
 
     // ---- back, if the packet did not reach the screen — Н12, decision 127.3 -----------
     let replaced = Replaced {
