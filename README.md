@@ -2,7 +2,7 @@
 
 # Lang Switcher
 
-[Русский](README.ru.md)
+[По-русски](README.ru.md) — переключатель раскладки клавиатуры, который исправляет слово, набранное не в той раскладке.
 
 **Lang Switcher fixes text typed in the wrong keyboard layout.** You meant to type `hello`, but the
 Russian layout was on, so the screen shows `руддщ`. Press `Pause/Break`: the word becomes `hello`,
@@ -11,13 +11,14 @@ exactly as you typed it. One key, no setup, nothing to learn.
 
 <table>
   <tr>
-    <td align="center" valign="top"><img src="docs/img/en-notepad-before.png" width="400" alt="Notepad showing руддщ, the language indicator on РУС"><br>Typed with the wrong layout on</td>
-    <td align="center" valign="top"><img src="docs/img/en-notepad-after.png" width="400" alt="Notepad showing hello, the language indicator on ENG"><br>After one press of <code>Pause</code></td>
+    <td align="center" valign="top"><img src="docs/img/en-notepad-before.png" width="400" alt="Lang Switcher, before: Notepad shows руддщ, the language indicator says РУС"><br>Typed with the wrong layout on</td>
+    <td align="center" valign="top"><img src="docs/img/en-notepad-after.png" width="400" alt="Lang Switcher, after one press of Pause: Notepad shows hello, the indicator says ENG"><br>After one press of <code>Pause</code></td>
   </tr>
 </table>
 
-It is a small tray program for Windows 10 and 11. It is free and open source, licensed under
-`MIT OR Apache-2.0`.
+A keyboard layout switcher for Windows 10 and 11 that fixes what is already typed instead of guessing
+while you type: a small tray program, free and open source, licensed under `MIT OR Apache-2.0`, with
+the interface in 66 languages.
 
 <table>
   <tr>
@@ -28,20 +29,8 @@ It is a small tray program for Windows 10 and 11. It is free and open source, li
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.4.2**. The interface speaks **66 languages** (see [Languages](#languages)).
-New in 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
-Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
-`auto`, and a typed word is selected by its position, so a Tamil word no longer takes the space
-before it or leaves a piece of itself behind; the pair of the configuration file accepts the identifier of a variant of a language
-(`0x00020422`), a layout that is not there is refused with a line in the journal, and the pair looks
-at the first 64 layouts of the session; the emergency chord `Ctrl+Alt+Shift+F12` no longer reaches
-the window under it. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
-Windows builds it (French BÉPO `´`, `´`, `o` is `ő`); a word typed on the level of the right `Ctrl`
-of Canadian Multilingual Standard converts into the same level of a layout that has it; in Notepad
-with Tamil 99 the replacement no longer lands after the word with nothing erased. Version 1.4.0
-added 22 interface languages, 1.3.0 another 30; 1.2.0 brought the **Send** button of the "Write to
-the author" wizard and the letter statistics of six more languages. Since 1.0.0 the program
-updates itself.
+**Status:** version **1.4.2**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
+What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
 
@@ -87,7 +76,7 @@ certificate, which works everywhere except in programs run as administrator.
 
 Windows 10 or Windows 11, 64-bit. No runtime to install, no account, no internet needed to work.
 
-## Languages
+## Interface languages and keyboard layouts
 
 **The interface** speaks 66 languages — 64 languages, Serbian and Uzbek in both of their scripts:
 English, Russian, Ukrainian, German, French, Spanish, Portuguese, Italian, Polish, Czech, Turkish,
@@ -187,6 +176,22 @@ How it works, in detail:
   or to save it to a file.
 
 There is no other network activity. The details are in section 9 of the specification (in Russian).
+
+## What's new
+
+New in 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
+Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
+`auto`, and a typed word is selected by its position, so a Tamil word no longer takes the space
+before it or leaves a piece of itself behind; the pair of the configuration file accepts the identifier of a variant of a language
+(`0x00020422`), a layout that is not there is refused with a line in the journal, and the pair looks
+at the first 64 layouts of the session; the emergency chord `Ctrl+Alt+Shift+F12` no longer reaches
+the window under it. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
+Windows builds it (French BÉPO `´`, `´`, `o` is `ő`); a word typed on the level of the right `Ctrl`
+of Canadian Multilingual Standard converts into the same level of a layout that has it; in Notepad
+with Tamil 99 the replacement no longer lands after the word with nothing erased. Version 1.4.0
+added 22 interface languages, 1.3.0 another 30; 1.2.0 brought the **Send** button of the "Write to
+the author" wizard and the letter statistics of six more languages. Since 1.0.0 the program
+updates itself.
 
 ## Reporting a problem or an idea
 
