@@ -29,7 +29,7 @@ the interface in 66 languages.
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.4.2**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
+**Status:** version **1.4.3**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
 What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
@@ -179,7 +179,9 @@ There is no other network activity. The details are in section 9 of the specific
 
 ## What's new
 
-New in 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
+New in 1.4.3: in Ukrainian, Arabic and Persian the name of the program and the download button open
+the pages of the site in that language; the numeral in the Arabic line under the news is corrected.
+Version 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
 Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
 `auto`, and a typed word is selected by its position, so a Tamil word no longer takes the space
 before it or leaves a piece of itself behind; the pair of the configuration file accepts the identifier of a variant of a language
