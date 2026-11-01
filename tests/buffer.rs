@@ -4625,7 +4625,7 @@ fn with_the_grave_key_bound() -> Recorder {
 fn a_bound_grave_key_is_a_switcher_and_the_word_survives_it() {
     // Measured on the stand (208.20): bound, the key switches the language and writes nothing, and
     // with `Shift` beside it just the same. A stroke kept in the ring is what turned `hello␣` +
-    // the key + a word + the hotkey into `hello_กดส` on 1.4.3.
+    // the key + a word + the hotkey into `hello_กดส` on the build before.
     let cases: [(&str, &[u16]); 3] = [
         ("гравис", &[]),
         ("левый Shift + гравис", &[VK_LSHIFT]),
@@ -4648,7 +4648,7 @@ fn a_bound_grave_key_is_a_switcher_and_the_word_survives_it() {
 
 #[test]
 fn a_bound_grave_key_right_after_a_conversion_keeps_the_rollback() {
-    // The second half of the measure: on 1.4.3 the conversion, the key and the hotkey came out as
+    // The second half of the measure: on the build before the conversion, the key and the hotkey came out as
     // `กด`` — no rollback, and a letter replaced by the grave. The row has to stand above the last
     // row of the FR-10 table for the same reason Р-44 gives for every switcher.
     let cases: [(&str, &[u16]); 2] = [("гравис", &[]), ("Shift + гравис", &[VK_LSHIFT])];

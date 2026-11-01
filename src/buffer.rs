@@ -2293,7 +2293,7 @@ impl Recorder {
         // first test and the key is the character it always was.
         //
         // **Measured on `Test_VM` (208.20, 208.21), judged by the typed text.** Bound, the key
-        // switches and writes nothing — and with a stroke kept in the ring 1.4.3 spoiled the text
+        // switches and writes nothing — and with a stroke kept in the ring the build before spoiled the text
         // around it: `hello␣` + the key + a word + the hotkey came out as `hello_กดส`, a conversion
         // + the key + the hotkey as `กด``, the key inside a word as `Xกด_สร` with the space before
         // the word gone. The stroke is one more to erase than the screen has characters.
