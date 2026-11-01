@@ -926,7 +926,7 @@ pub mod links {
     ///
     /// ⚠ **Since stage E112 the pages ask [`OWN_PAGES`] first** (Q-206-1): a language of that table
     /// reads the site in its own language and goes on writing to the author on its side here —
-    /// Ukrainian to the group, Arabic and Persian to GitHub Issues.
+    /// Ukrainian to the group, Arabic, Persian and Thai to GitHub Issues.
     ///
     /// ⭐ **Stage E108, решение 202.6** — дословно: «Делаем так, пока нет адаптированных страниц
     /// сайта под каждый из языков»: Kazakh, Belarusian, Tatar and Uzbek in Cyrillic read the
@@ -1023,16 +1023,17 @@ pub mod links {
     ///
     /// ⛔ **A row only on a line from the controller of the languages of the site** that the pages
     /// are out: the mark outranks the browser and the site remembers it, so `?lang=` of a language
-    /// the site does not have would strand the reader. `th` and `he` come next.
+    /// the site does not have would strand the reader. `he` comes next.
     ///
     /// ⚠ The addresses are written out whole and not put together by `concat!`: ворота 3 of
     /// `tools\verify-perimeter.ps1` read the declared addresses as string literals of this file, and
     /// one built by a macro would stand in the image undeclared.
     #[rustfmt::skip]
-    const OWN_PAGES: [(Language, &str, &str); 3] = [
+    const OWN_PAGES: [(Language, &str, &str); 4] = [
         (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"),
         (Language::Ar, "https://panda-pishet-kod.dev/ar/langswitcher/download/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/?lang=ar"),
         (Language::Fa, "https://panda-pishet-kod.dev/fa/langswitcher/download/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/?lang=fa"),
+        (Language::Th, "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th", "https://panda-pishet-kod.dev/th/langswitcher/?lang=th"),
     ];
 
     /// The row of [`OWN_PAGES`] for this language, if it has one.

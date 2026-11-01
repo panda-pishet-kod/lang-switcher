@@ -1682,12 +1682,13 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
 
 /// The languages the site has pages of their own for — Q-206-1, the signals of the controller of the
 /// languages of the site (site 1.23.0) — with the code the site gives each. Written down apart from
-/// the table of `links`: `th` and `he` come next, and neither goes out without a line from that
-/// controller.
-const THE_OWN_PAGES: [(Language, &str); 3] = [
+/// the table of `links`: `he` comes next, and it does not go out without a line from that
+/// controller. In the order of `Language::ALL`: the controls below compare against it as a list.
+const THE_OWN_PAGES: [(Language, &str); 4] = [
     (Language::Uk, "uk"),
     (Language::Ar, "ar"),
     (Language::Fa, "fa"),
+    (Language::Th, "th"),
 ];
 
 /// The languages that read one of the two sides of the site — every row of the table of languages
@@ -1776,13 +1777,34 @@ fn ukrainian_opens_the_pages_the_site_made_for_it() {
     assert_eq!(links::feedback_url(Language::Uk), THE_GROUP);
 }
 
+/// **Задача T-113-3 — Thai opens the two pages the site made for it** (line of the controller of the
+/// languages of the site; both answered 200 with `lang="th"` when the controller opened them). Its
+/// page «What's new» does not exist yet (404), so the English one with no mark, as for `uk`, `ar`,
+/// `fa`. Where a Thai reader writes stays GitHub Issues.
+#[test]
+fn thai_opens_the_pages_the_site_made_for_it() {
+    assert_eq!(
+        links::download_url(Language::Th),
+        "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th"
+    );
+    assert_eq!(
+        links::program_url(Language::Th),
+        "https://panda-pishet-kod.dev/th/langswitcher/?lang=th"
+    );
+    assert_eq!(
+        links::changelog_url(Language::Th),
+        "https://panda-pishet-kod.dev/en/langswitcher/changelog/"
+    );
+    assert_eq!(links::feedback_url(Language::Th), THE_ISSUES);
+}
+
 /// **Задача T-112-1, Q-206-1 — each of the sixty-six rows of the table of languages opens what the
-/// decisions give it**, and only `uk`, `fa`, `ar` moved. A language with no line from the controller
-/// of the languages of the site (`th`, `he`) must not carry a mark of its own; a language moved off
+/// decisions give it**, and only `uk`, `fa`, `ar`, `th` moved. A language with no line from the
+/// controller of the languages of the site (`he`) must not carry a mark of its own; a language moved off
 /// its side by accident shows up here by name (стоп-условие C4).
 ///
-/// ⚠ Controls: the rule of 1.4.2 — the side alone — is caught on exactly the three languages; `th`
-/// sent to `?lang=th` ahead of its line is caught on `th` alone; Ukrainian sent to GitHub Issues,
+/// ⚠ Controls: the rule of 1.4.2 — the side alone — is caught on exactly the four languages; `he`
+/// sent to `?lang=he` ahead of its line is caught on `he` alone; Ukrainian sent to GitHub Issues,
 /// the road of the channel changed along with the pages, is caught on `uk` alone.
 #[test]
 fn all_sixty_six_languages_open_what_the_decisions_give_them() {
@@ -1829,21 +1851,21 @@ fn all_sixty_six_languages_open_what_the_decisions_give_them() {
     assert_eq!(
         addresses_mismatches(the_side_alone),
         THE_OWN_PAGES.map(|(language, _)| language),
-        "the control: the rule of 1.4.2 must be caught on the three languages and no other"
+        "the control: the rule of 1.4.2 must be caught on the four languages and no other"
     );
 
     assert_eq!(
         addresses_mismatches(|language| {
             let mut addresses = the_addresses_of(language);
 
-            if language == Language::Th {
+            if language == Language::He {
                 addresses.0 =
-                    "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th".to_owned();
+                    "https://panda-pishet-kod.dev/he/langswitcher/download/?lang=he".to_owned();
             }
 
             addresses
         }),
-        [Language::Th],
+        [Language::He],
         "the control: a mark ahead of the line from the controller must be caught"
     );
 
