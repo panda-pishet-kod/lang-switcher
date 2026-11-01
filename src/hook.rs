@@ -84,8 +84,8 @@ use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE,
     VK_F1, VK_F12, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT,
-    VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
-    VK_SNAPSHOT,
+    VK_NUMLOCK, VK_OEM_3, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL,
+    VK_SHIFT, VK_SNAPSHOT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW,
@@ -607,6 +607,18 @@ fn is_layout_probe(key: KeyEvent) -> bool {
     matches!(key.edge, Edge::Up) && LAYOUT_PROBE_MODIFIERS.contains(&key.vk)
 }
 
+/// Whether this stroke is the release of the grave key while it is bound as a switcher — the one
+/// switcher of FR-11 with no modifier to go up afterwards, stage Э113.
+///
+/// The release and not the press, for the reason [`is_layout_probe`] gives and because the stand
+/// shows no switch on the press (208.21). The flag is the last test, so an ordinary key pays one
+/// comparison of the edge and one of the code, and the flag itself is one thread-local read: no
+/// Win32, nothing that can block (NFR-01 to NFR-05). A release of it with `Ctrl` held costs one
+/// probe more than it needs, and only for those who bound the key.
+fn is_bound_grave_release(key: KeyEvent) -> bool {
+    matches!(key.edge, Edge::Up) && key.vk == VK_OEM_3.0 && crate::buffer::bare_grave_switches()
+}
+
 /// Turns the `wParam` of the callback into an [`Edge`].
 ///
 /// `None` for anything else. `WH_KEYBOARD_LL` is documented to deliver only these four
@@ -841,7 +853,7 @@ fn ordinary_stroke(key: KeyEvent) -> Outcome {
     // nothing, our own injected input (FR-03) switches no layout, and a suspended one (FR-90) has
     // no buffer to record under — all three answer `Outcome::PASS`, whose `probe_layout` is false.
     Outcome {
-        probe_layout: is_layout_probe(key),
+        probe_layout: is_layout_probe(key) || is_bound_grave_release(key),
         ..Outcome::PASS
     }
 }

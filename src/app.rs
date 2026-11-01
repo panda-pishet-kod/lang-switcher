@@ -1851,6 +1851,35 @@ fn install_buffer() {
     });
 
     crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
+
+    publish_grave_binding();
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What the registry says of the grave key — for a test, a value it states itself, so that it
+    /// asserts what the program does with a reading and not what the machine it runs on has bound.
+    static GRAVE_READING: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// **Tells the buffer whether the grave key is bound as a switcher of FR-11** — stage Э113, решение
+/// 207.8 and 207.14.
+///
+/// Two moments, both on the input thread outside the callback: start-up ([`install_buffer`]), and
+/// the probe of FR-21 ([`refresh_layout_and_cache`]). The second is what follows a change of the
+/// setting on a running program, because **no message says so**: measured on the stand (208.21),
+/// neither the system dialog nor `SPI_SETLANGTOGGLE` nor a write to the registry produces a
+/// `WM_SETTINGCHANGE` here, while the closing of the dialog produces the probe, 14 to 18 times.
+///
+/// ⚠ **FR-11: this flushes nothing.** Through [`with_recorder_wherever_it_is`] because the probe of
+/// a focus change arrives with the buffer parked (FR-70).
+fn publish_grave_binding() {
+    #[cfg(not(test))]
+    let bound = crate::layouts::read_grave_is_bound();
+    #[cfg(test)]
+    let bound = GRAVE_READING.get().unwrap_or(false);
+
+    with_recorder_wherever_it_is(|recorder| recorder.set_bare_grave_switches(bound));
 }
 
 /// Resizes the buffer to the capacity the UI thread published, if it is not that size already.
@@ -2158,6 +2187,8 @@ pub fn note_layout_switched(layout: LayoutId) {
 /// `layout_probes=1` against `window_flushes=12` and a first press that converted a stale
 /// direction «в себя»; see [`with_recorder_wherever_it_is`] for the measurement that pinned it.
 fn refresh_layout_and_cache() {
+    publish_grave_binding();
+
     let observed = foreground_layout();
 
     // FR-04: the stamp follows the window, exactly as it always did.
@@ -5115,6 +5146,42 @@ mod tests {
              {rebuilt_while_parked}; one at a window that is not the input one rebuilt it: \
              {rebuilt_elsewhere}"
         );
+    }
+
+    /// **Stage Э113, решение 207.8.** What the registry says of the grave key reaches the recorder
+    /// at both moments it is read — start-up and the probe — and wherever FR-70 keeps the recorder:
+    /// the probe of a focus change arrives with the buffer parked, which is the whole lesson of
+    /// [`with_recorder_wherever_it_is`]. Before each probe the flag is set to the opposite of the
+    /// reading, so that nothing left over from an earlier moment can pass for an answer.
+    #[test]
+    fn the_reading_of_the_grave_key_reaches_the_recorder_at_start_up_and_on_the_probe() {
+        for reading in [true, false] {
+            GRAVE_READING.set(Some(reading));
+
+            install_buffer();
+            let at_start_up = buffer::with(|recorder| recorder.bare_grave_switches());
+
+            buffer::with(|recorder| recorder.set_bare_grave_switches(!reading));
+            refresh_layout_and_cache();
+            let on_the_probe = buffer::with(|recorder| recorder.bare_grave_switches());
+
+            buffer::with(|recorder| recorder.set_bare_grave_switches(!reading));
+            park_buffer();
+            refresh_layout_and_cache();
+            restore_buffer();
+            let parked = buffer::with(|recorder| recorder.bare_grave_switches());
+
+            buffer::uninstall();
+            GRAVE_READING.set(None);
+
+            assert_eq!(at_start_up, Some(reading), "старт, чтение {reading}");
+            assert_eq!(on_the_probe, Some(reading), "проба, чтение {reading}");
+            assert_eq!(
+                parked,
+                Some(reading),
+                "проба при запаркованном буфере, чтение {reading}"
+            );
+        }
     }
 
     /// **FR-11.** Neither a new active layout nor a rebuilt cache flushes the buffer — the two

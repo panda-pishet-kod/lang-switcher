@@ -614,6 +614,88 @@ fn every_layout_switcher_of_fr11_ends_in_a_stroke_that_asks_for_the_probe() {
     }
 }
 
+/// **The grave key bound as a switcher — stage Э113.** Measured on the stand (208.20, 208.21): a
+/// bare press of it moves the language, with no modifier to go up afterwards, so the release of the
+/// key itself has to ask, or `Recorder::active` stays behind and the next word gets the wrong
+/// direction. Only while it is bound: for everybody else it is a character and costs no probe.
+#[test]
+fn a_bound_grave_key_asks_for_the_probe_on_its_release_and_a_character_does_not() {
+    use lang_switcher::buffer::{self, Recorder};
+
+    /// The events of a stroke, and the probes it costs bound and not bound.
+    type Case = (&'static str, &'static [(u16, Edge)], usize, usize);
+
+    let cases: [Case; 3] = [
+        (
+            "гравис",
+            &[(VK_OEM_3, Edge::Down), (VK_OEM_3, Edge::Up)],
+            1,
+            0,
+        ),
+        (
+            "Shift+гравис",
+            &[
+                (VK_LSHIFT, Edge::Down),
+                (VK_OEM_3, Edge::Down),
+                (VK_OEM_3, Edge::Up),
+                (VK_LSHIFT, Edge::Up),
+            ],
+            2,
+            1,
+        ),
+        (
+            "Ctrl+Shift+гравис",
+            &[
+                (VK_LCONTROL, Edge::Down),
+                (VK_LSHIFT, Edge::Down),
+                (VK_OEM_3, Edge::Down),
+                (VK_OEM_3, Edge::Up),
+                (VK_LSHIFT, Edge::Up),
+                (VK_LCONTROL, Edge::Up),
+            ],
+            3,
+            2,
+        ),
+    ];
+
+    let probes_of = |events: &[(u16, Edge)], bound: bool| {
+        let mut recorder = Recorder::with_capacity(8);
+        recorder.set_bare_grave_switches(bound);
+        buffer::install_recorder(recorder);
+
+        let mut state = HotkeyState::default();
+        let mut asked = Vec::new();
+
+        for &(vk, edge) in events {
+            let outcome = classify(armed(), &mut state, user_key(vk, edge));
+
+            // The system does the switching: the stroke has to reach it whatever we think of it.
+            assert_eq!(outcome.decision, Decision::Pass, "{vk:#04x} {edge:?}");
+            asked.push((vk, edge, outcome.probe_layout));
+        }
+
+        buffer::uninstall();
+        asked
+    };
+
+    for (name, events, bound_cost, plain_cost) in cases {
+        let bound = probes_of(events, true);
+        let plain = probes_of(events, false);
+        let count = |asked: &[(u16, Edge, bool)]| asked.iter().filter(|step| step.2).count();
+
+        assert_eq!(count(&bound), bound_cost, "{name}, назначен: {bound:?}");
+        assert_eq!(count(&plain), plain_cost, "{name}, символ: {plain:?}");
+        assert!(
+            bound.contains(&(VK_OEM_3, Edge::Up, true)),
+            "{name}: отпускание назначенного грависа обязано просить пробу"
+        );
+        assert!(
+            !bound.contains(&(VK_OEM_3, Edge::Down, true)),
+            "{name}: нажатие просить не должно, на нём смены ещё нет (208.21)"
+        );
+    }
+}
+
 #[test]
 fn the_probe_is_asked_for_by_a_modifier_going_up_and_by_nothing_else() {
     for vk in PROBE_MODIFIERS {

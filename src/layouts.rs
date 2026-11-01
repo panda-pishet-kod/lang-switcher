@@ -1335,6 +1335,92 @@ fn machine_string(subkey: &str, value: &str) -> Option<String> {
     String::from_utf16(&text[..end]).ok()
 }
 
+/// The text of a value of `HKCU\Keyboard Layout\Toggle` that names the grave key.
+const TOGGLE_GRAVE: u16 = b'4' as u16;
+
+/// Whether one value of `HKCU\Keyboard Layout\Toggle`, as the registry holds its text, names the
+/// grave key — stage Э113. The text up to the first NUL is exactly `4`: that is what the system
+/// dialog writes (208.21) and all the measure gave any meaning to.
+pub fn toggle_value_is_grave(units: &[u16]) -> bool {
+    let end = units
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(units.len());
+
+    units[..end] == [TOGGLE_GRAVE]
+}
+
+/// **Whether the grave key is bound as a switcher, given the three values of
+/// `HKCU\Keyboard Layout\Toggle`** — stage Э113, решение 207.8. Each argument is
+/// [`toggle_value_is_grave`] of the value, `None` when there is no such `REG_SZ`.
+///
+/// **The shape is the measure's, not a guess** (`Test_VM`, 208.20, 208.21, judged by typed text):
+///
+/// * `Language Hotkey` decides when it is there: with `Hotkey=4` and `Language Hotkey=1` the key is
+///   a character, and with `Hotkey=1` and `Language Hotkey=4` it switches;
+/// * `Hotkey` answers only when `Language Hotkey` is not there;
+/// * `Layout Hotkey=4` needs nobody else: the key then writes nothing whatever the other two say,
+///   and it has no place in the buffer, even though with one layout per language nothing switches.
+///
+/// "Any of the three" is what the stage started with and it is wrong: the row `Hotkey=4`,
+/// `Language Hotkey=1` would take a real character out of the buffer.
+pub fn grave_is_bound(
+    hotkey: Option<bool>,
+    language_hotkey: Option<bool>,
+    layout_hotkey: Option<bool>,
+) -> bool {
+    language_hotkey.or(hotkey).unwrap_or(false) || layout_hotkey.unwrap_or(false)
+}
+
+/// One value of `HKCU\Keyboard Layout\Toggle` for [`grave_is_bound`]: [`toggle_value_is_grave`] of
+/// its text, `None` when there is no such `REG_SZ`.
+fn toggle_value(name: windows::core::PCWSTR) -> Option<bool> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
+
+    let mut buffer = [0u16; 8];
+    let mut bytes = u32::try_from(size_of_val(&buffer)).unwrap_or(0);
+
+    // SAFETY: both names are NUL-terminated `'static` UTF-16 literals; `buffer` is a live local of
+    // `bytes` bytes, and the call writes at most that many and says how many it wrote. A kind other
+    // than `REG_SZ` and a text longer than the buffer are refused by the call, examined below
+    // (NFR-13).
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::w!("Keyboard Layout\\Toggle"),
+            name,
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+
+    // A refusal is not journalled: no key and no value are what most profiles have (208.20).
+    if status.is_err() {
+        return None;
+    }
+
+    let units = usize::try_from(bytes).unwrap_or(0) / 2;
+
+    Some(toggle_value_is_grave(&buffer[..units.min(buffer.len())]))
+}
+
+/// **Reads from the registry whether the grave key is bound as a switcher** — stage Э113, решение
+/// 207.8, which reversed the refusal of the survey of 2026-09-09 for this one key.
+///
+/// ⚠ **Never from the hook callback**: three registry reads. Both callers are on the input thread
+/// outside it, see `app::publish_grave_binding`. These three values and nothing else are read.
+pub fn read_grave_is_bound() -> bool {
+    use windows::core::w;
+
+    grave_is_bound(
+        toggle_value(w!("Hotkey")),
+        toggle_value(w!("Language Hotkey")),
+        toggle_value(w!("Layout Hotkey")),
+    )
+}
+
 /// **The `KLID` of a loaded layout** — the subkey of [`KEYBOARD_LAYOUTS`] its file is named
 /// under. Решение 195.1, stage Э105 (197.12).
 ///

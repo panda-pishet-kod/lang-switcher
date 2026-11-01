@@ -4598,10 +4598,11 @@ fn the_neighbours_of_the_switcher_row_are_still_commands() {
 
 #[test]
 fn the_grave_key_without_modifiers_is_a_character_and_not_a_switcher() {
-    // Section 10, and it is a limitation rather than a rule: the *user* can bind the bare grave
-    // key as a switcher in the system dialog, and from the hook it is then indistinguishable
-    // from typing the character. We read it as the character it is, because that is what it is
-    // for everybody who has not bound it — and reading the registry to find out is refused.
+    // For everybody who has not bound it, and that is what a recorder knows until it is told
+    // otherwise. A user who *has* bound it in the system dialog is the case of the next tests: from
+    // the hook the stroke looks the same, so the answer is read from the registry outside the
+    // callback (решение 207.8, which reversed the refusal of the survey of 2026-09-09) and comes
+    // here as a flag.
     let mut recorder = fresh();
     type_ghbdtn(&mut recorder);
 
@@ -4610,6 +4611,155 @@ fn the_grave_key_without_modifiers_is_a_character_and_not_a_switcher() {
         Recorded::Stored,
         "гравис без модификаторов — символ, а не переключатель"
     );
+    assert_eq!(typed(&recorder), "ghbdtn`");
+}
+
+/// A recorder told that the grave key is a switcher of the system dialog — stage Э113.
+fn with_the_grave_key_bound() -> Recorder {
+    let mut recorder = fresh();
+    recorder.set_bare_grave_switches(true);
+    recorder
+}
+
+#[test]
+fn a_bound_grave_key_is_a_switcher_and_the_word_survives_it() {
+    // Measured on the stand (208.20): bound, the key switches the language and writes nothing, and
+    // with `Shift` beside it just the same. A stroke kept in the ring is what turned `hello␣` +
+    // the key + a word + the hotkey into `hello_กดส` on 1.4.3.
+    let cases: [(&str, &[u16]); 3] = [
+        ("гравис", &[]),
+        ("левый Shift + гравис", &[VK_LSHIFT]),
+        ("правый Shift + гравис", &[VK_RSHIFT]),
+    ];
+
+    for (name, modifiers) in cases {
+        let mut recorder = with_the_grave_key_bound();
+        type_ghbdtn(&mut recorder);
+
+        assert_eq!(
+            switch_with(&mut recorder, modifiers, VK_OEM_3, SCAN_GRAVE),
+            Recorded::Ignored,
+            "{name}: переключатель FR-11, в кольцо не пишется"
+        );
+        assert_eq!(typed(&recorder), "ghbdtn", "{name}: кольцо цело");
+        assert_eq!(recorder.len(), 6, "{name}: кольцо цело");
+    }
+}
+
+#[test]
+fn a_bound_grave_key_right_after_a_conversion_keeps_the_rollback() {
+    // The second half of the measure: on 1.4.3 the conversion, the key and the hotkey came out as
+    // `กด`` — no rollback, and a letter replaced by the grave. The row has to stand above the last
+    // row of the FR-10 table for the same reason Р-44 gives for every switcher.
+    let cases: [(&str, &[u16]); 2] = [("гравис", &[]), ("Shift + гравис", &[VK_LSHIFT])];
+
+    for (name, modifiers) in cases {
+        let mut recorder = with_the_grave_key_bound();
+        fill(&mut recorder, 3);
+        recorder.note_conversion();
+        counter_at_three(&mut recorder);
+
+        assert_eq!(
+            switch_with(&mut recorder, modifiers, VK_OEM_3, SCAN_GRAVE),
+            Recorded::Ignored,
+            "{name}"
+        );
+        assert_eq!(recorder.len(), 3, "{name}: штрихи переживают переключение");
+        assert_eq!(recorder.cycle_position(), 3, "{name}: и счётчик цикла тоже");
+        assert!(
+            recorder.in_conversion(),
+            "{name}: сессия жива, откат FR-33 ещё возможен"
+        );
+    }
+}
+
+#[test]
+fn the_flag_changes_the_bare_grave_key_and_nothing_else() {
+    // Решение 207.14: `Ctrl` or `Alt` plus the key stay what they were, though the system switches
+    // on them too (208.21) — a command flushes and spoils nothing. Every row is run both ways and
+    // compared, so that it says "the flag has no say here" and not only what the answer is today.
+    let cases: [(&str, &[u16], u16, u16, Recorded); 7] = [
+        (
+            "Ctrl+гравис",
+            &[VK_LCONTROL],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Flushed,
+        ),
+        (
+            "Alt+гравис",
+            &[VK_LMENU],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Flushed,
+        ),
+        (
+            "Win+гравис",
+            &[VK_LWIN],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Flushed,
+        ),
+        (
+            "Ctrl+Shift+гравис",
+            &[VK_LCONTROL, VK_LSHIFT],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Ignored,
+        ),
+        (
+            "Alt+Shift+гравис",
+            &[VK_LMENU, VK_LSHIFT],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Ignored,
+        ),
+        // Flushed because the stand of this file has nothing on `AltGr` of the grave key; the point
+        // of the row is that the flag does not move it.
+        (
+            "AltGr+гравис",
+            &[VK_LCONTROL, VK_RMENU],
+            VK_OEM_3,
+            SCAN_GRAVE,
+            Recorded::Flushed,
+        ),
+        ("обычная буква", &[], VK_A, SCAN_A, Recorded::Stored),
+    ];
+
+    for (name, modifiers, vk, scan, expected) in cases {
+        let mut bound = with_the_grave_key_bound();
+        let mut not_bound = fresh();
+        type_ghbdtn(&mut bound);
+        type_ghbdtn(&mut not_bound);
+
+        assert_eq!(
+            switch_with(&mut bound, modifiers, vk, scan),
+            expected,
+            "{name}"
+        );
+        assert_eq!(
+            switch_with(&mut not_bound, modifiers, vk, scan),
+            expected,
+            "{name}, без назначения"
+        );
+        assert_eq!(typed(&bound), typed(&not_bound), "{name}: кольцо то же");
+    }
+}
+
+#[test]
+fn taking_the_binding_back_makes_the_grave_key_a_character_again() {
+    let mut recorder = with_the_grave_key_bound();
+    type_ghbdtn(&mut recorder);
+    assert_eq!(
+        press(&mut recorder, VK_OEM_3, SCAN_GRAVE),
+        Recorded::Ignored
+    );
+
+    // The dialog took it back: the probe has read that. A layout question flushes nothing (FR-11).
+    recorder.set_bare_grave_switches(false);
+    assert_eq!(recorder.len(), 6, "смена настройки буфер не трогает");
+
+    assert_eq!(press(&mut recorder, VK_OEM_3, SCAN_GRAVE), Recorded::Stored);
     assert_eq!(typed(&recorder), "ghbdtn`");
 }
 

@@ -18,8 +18,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use lang_switcher::layouts::{
     Configured, Cycle, KeyMapping, KeyPress, LayoutCache, LayoutError, LayoutId, LayoutMap,
     LayoutMapBuilder, LayoutSpec, MAX_CYCLE, MAX_SESSION, MappingKind, Mods, PAIR_VARIANT_REFUSED,
-    REBUILD_MESSAGES, SelectionError, Session, cycle_for, enumerate, enumerate_all,
-    layout_list_changed, needs_rebuild, published, selection_failures,
+    REBUILD_MESSAGES, SelectionError, Session, cycle_for, enumerate, enumerate_all, grave_is_bound,
+    layout_list_changed, needs_rebuild, published, selection_failures, toggle_value_is_grave,
 };
 use lang_switcher::settings::{LayoutMode, Layouts};
 
@@ -1844,4 +1844,76 @@ fn every_map_of_the_cache_is_asked_and_the_first_yes_is_enough() {
         with_dead.produces_in_any_map(SCAN_DEAD, MAIN_BLOCK, Mods::NONE),
         "мёртвая клавиша FR-24 прочитана как непишущая"
     );
+}
+
+/// The text of a value of `HKCU\Keyboard Layout\Toggle`, as the registry hands it over.
+fn toggle_text(text: &str) -> Vec<u16> {
+    text.encode_utf16().collect()
+}
+
+#[test]
+fn only_the_text_four_of_a_toggle_value_names_the_grave_key() {
+    // Stage Э113, 208.21: the system dialog writes `1`, `2`, `3` and `4`, and only the last is the
+    // grave key. `RegGetValueW` hands over the terminating NUL as well, so it must not matter. Text
+    // nobody measured means nothing: a wrong answer here takes a real character out of the buffer.
+    for (text, expected) in [
+        ("4", true),
+        ("4\0", true),
+        ("4\0\0\0", true),
+        ("1", false),
+        ("2", false),
+        ("3", false),
+        ("", false),
+        ("\0", false),
+        ("44", false),
+        ("04", false),
+        (" 4", false),
+        ("4 ", false),
+        ("\u{0664}", false),
+    ] {
+        assert_eq!(
+            toggle_value_is_grave(&toggle_text(text)),
+            expected,
+            "значение {text:?}"
+        );
+    }
+}
+
+#[test]
+fn the_grave_key_is_bound_as_the_measure_on_the_stand_says() {
+    /// A value that is there and names the grave key.
+    const G: Option<bool> = Some(true);
+    /// A value that is there and names something else.
+    const O: Option<bool> = Some(false);
+    /// No such `REG_SZ`: no value, no key, or a value of another kind.
+    const NO: Option<bool> = None;
+
+    // `Hotkey`, `Language Hotkey`, `Layout Hotkey`, and what the grave key did on `Test_VM` in the
+    // rows of records 208.20 and 208.21. **Not a table of intentions**: every row was typed there
+    // and judged by the text.
+    let measured = [
+        ("пустой ключ lab-base: символ", NO, NO, NO, false),
+        ("диалог, язык — гравис, 4/4/2: переключает", G, G, O, true),
+        ("диалог, Left Alt, 1/1/2: символ", O, O, O, false),
+        (
+            "диалог, раскладка — гравис, 1/1/4: съедается",
+            O,
+            O,
+            G,
+            true,
+        ),
+        ("диалог, не назначено, 3/3/3: символ", O, O, O, false),
+        ("только Language=4: переключает", NO, G, NO, true),
+        ("только Hotkey=4: переключает", G, NO, NO, true),
+        ("только Layout=4: съедается", NO, NO, G, true),
+        ("Hotkey=1, Language=4: переключает", O, G, NO, true),
+        ("Hotkey=4, Language=1: символ", G, O, NO, false),
+        ("Language=1, Layout=4: съедается", NO, O, G, true),
+        ("Hotkey=1, Layout=4: съедается", O, NO, G, true),
+        ("Language — REG_DWORD 4: символ", NO, NO, NO, false),
+    ];
+
+    for (name, hotkey, language, layout, expected) in measured {
+        assert_eq!(grave_is_bound(hotkey, language, layout), expected, "{name}");
+    }
 }

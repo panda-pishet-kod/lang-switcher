@@ -1562,6 +1562,12 @@ pub struct Recorder {
     idle_timeout_ms: u32,
     /// The short memory of the typing — решение 196.1; see [`Recent`].
     recent: Recent,
+    /// **Whether the grave key is a switcher of the system dialog — FR-11, stage Э113**, решение
+    /// 207.8. Found out **outside** the callback ([`crate::layouts::read_grave_is_bound`], published
+    /// by `app::publish_grave_binding`) and only read inside it: one `bool` of a thread-local value,
+    /// so NFR-01 to NFR-05 hold. `false` until somebody publishes it and for everybody who has not
+    /// bound the key, whose grave key stays the character it is.
+    bare_grave_switches: bool,
 }
 
 /// How many strokes the short memory of the typing keeps — a few words (решение 196.1).
@@ -1706,6 +1712,7 @@ impl Recorder {
             // describes the program, which is what every other default in this constructor does.
             idle_timeout_ms: settings::Buffer::default().idle_timeout_s * MS_PER_SECOND,
             recent: Recent::default(),
+            bare_grave_switches: false,
         }
     }
 
@@ -1855,6 +1862,20 @@ impl Recorder {
     /// Whether a cache has been published.
     pub fn has_cache(&self) -> bool {
         self.cache.is_some()
+    }
+
+    /// Publishes whether the grave key is a switcher of the system dialog — FR-11, stage Э113.
+    ///
+    /// Called from the input thread, outside the callback, at the two moments
+    /// `app::publish_grave_binding` names. It touches nothing else: FR-11 says a layout question
+    /// never flushes, and this is one.
+    pub fn set_bare_grave_switches(&mut self, switches: bool) {
+        self.bare_grave_switches = switches;
+    }
+
+    /// Whether the grave key is a switcher of the system dialog, as last published.
+    pub fn bare_grave_switches(&self) -> bool {
+        self.bare_grave_switches
     }
 
     /// The mapping cache of FR-20 as it stands — `None` until one has been published.
@@ -2246,11 +2267,8 @@ impl Recorder {
         // still not the one they meant, switched to it by its number and reached for the hotkey
         // again must still have the rollback of FR-33.
         //
-        // ⚠ **The bare grave key is not here and cannot be** — section 10. The dialog lets the
-        // user bind it with no modifiers at all, and from inside the hook that stroke is
-        // indistinguishable from typing the character. We read it as the character, because
-        // that is what it is for everybody who has not bound it; asking the registry which it
-        // is was refused with the rest of the registry reading.
+        // The dialog also lets the user bind the grave key with no modifiers at all. That is the
+        // next row: the composition of the stroke cannot tell it from typing the character.
         //
         // **NFR-01 and NFR-02.** For an ordinary letter the first test — `Shift` in the mask —
         // is usually false and the row ends there; a capital letter pays the second, which is
@@ -2261,6 +2279,42 @@ impl Recorder {
             && (mods.ctrl() != mods.alt())
             && !self.held.win()
             && is_layout_switch_key(key.vk)
+        {
+            return Recorded::Ignored;
+        }
+
+        // ---------------------------------------------------------------------------------
+        // ⭐ **The last switcher of FR-11 — the grave key bound with no modifier**, stage Э113,
+        // решение 207.8.
+        //
+        // From inside the hook the stroke looks exactly like typing the character, so the answer
+        // is found out **outside** the callback (`app::publish_grave_binding`, from the registry)
+        // and read here as one `bool`. For everybody who has not bound the key the row ends at its
+        // first test and the key is the character it always was.
+        //
+        // **Measured on `Test_VM` (208.20, 208.21), judged by the typed text.** Bound, the key
+        // switches and writes nothing — and with a stroke kept in the ring 1.4.3 spoiled the text
+        // around it: `hello␣` + the key + a word + the hotkey came out as `hello_กดส`, a conversion
+        // + the key + the hotkey as `กด``, the key inside a word as `Xกด_สร` with the space before
+        // the word gone. The stroke is one more to erase than the screen has characters.
+        //
+        // `Shift` beside it is the same switch on the stand, so it is the same row. `Ctrl` or
+        // `Alt` beside it switch as well, and решение 207.14 leaves them what they were: a command
+        // flushes, which loses the word and spoils nothing — section 10. With `Ctrl` and `Alt`
+        // and `Shift` together the row above has answered already.
+        //
+        // ⚠ **Auto-repeat is not told apart** — section 10. A key held past the repeat delay writes
+        // characters on the stand and does not switch, and they are not in the ring.
+        //
+        // **NFR-01 and NFR-02.** One `bool`, and for those who bound the key two more comparisons
+        // and two more reads of what the row above already read. No allocation (NFR-03), no lock
+        // (NFR-04), no I/O (NFR-05), no Win32 call (NFR-02).
+        // ---------------------------------------------------------------------------------
+        if self.bare_grave_switches
+            && key.vk == VK_OEM_3.0
+            && !mods.ctrl()
+            && !mods.alt()
+            && !self.held.win()
         {
             return Recorded::Ignored;
         }
@@ -3221,6 +3275,12 @@ pub fn with<R>(action: impl FnOnce(&mut Recorder) -> R) -> Option<R> {
 /// of `tests\hook.rs` — takes one thread-local read and returns [`Recorded::Ignored`].
 pub fn record(key: KeyEvent) -> Recorded {
     with(|recorder| recorder.record(key)).unwrap_or(Recorded::Ignored)
+}
+
+/// [`Recorder::bare_grave_switches`] of this thread's buffer, for the hook — stage Э113. No buffer
+/// is a no: one thread-local read and nothing else, the shape of [`record`] above.
+pub fn bare_grave_switches() -> bool {
+    with(|recorder| recorder.bare_grave_switches()).unwrap_or(false)
 }
 
 /// Seeds the `CapsLock` of the buffer of the calling thread from `probe` — **task T-13-4**.
