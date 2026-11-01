@@ -7504,7 +7504,8 @@ fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
 /// asked by the door of the task which pages «Открыть страницу загрузки» and the name of the program
 /// would open — the very calls `perform` reads them by. Built in Russian, the Russian pages; the
 /// language moved to English and [`letters::language_changed`] told the window, the pages under
-/// `/en/`; Ukrainian, the Russian ones again (181.33 п. 2).
+/// `/en/`; Ukrainian, its own under `/uk/` since stage E112 (Q-206-1); Kazakh, the Russian ones
+/// again (181.33 п. 2, 202.6).
 ///
 /// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
 /// the window shows.
@@ -7535,6 +7536,10 @@ fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
     letters::language_changed(author.owner);
     seen.push(("Uk, told", pages(&author)));
 
+    settings::set_ui_language(Language::Kk);
+    letters::language_changed(author.owner);
+    seen.push(("Kk, told", pages(&author)));
+
     settings::set_ui_language(Language::Ru);
 
     println!("{seen:#?}");
@@ -7544,6 +7549,10 @@ fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
         letters::links::DOWNLOAD_URL_EN,
         letters::links::PROGRAM_URL_EN,
     );
+    let ukrainian = (
+        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk",
+        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk",
+    );
 
     assert_eq!(
         seen,
@@ -7551,7 +7560,8 @@ fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
             ("built in Ru", russian),
             ("En, not told", russian),
             ("En, told", english),
-            ("Uk, told", russian),
+            ("Uk, told", ukrainian),
+            ("Kk, told", russian),
         ],
         "181.33: the pages follow the language of the window, and move when it moves"
     );

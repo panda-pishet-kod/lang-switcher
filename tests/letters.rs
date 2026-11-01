@@ -1586,9 +1586,9 @@ fn pages_of_decision_181_33(language: Language) -> (&'static str, &'static str) 
     }
 }
 
-/// The languages whose pages by `rule` are not the ones решение 181.33 gives them.
+/// The languages on a side whose pages by `rule` are not the ones решение 181.33 gives them.
 fn pages_mismatches(rule: impl Fn(Language) -> (&'static str, &'static str)) -> Vec<Language> {
-    Language::ALL
+    the_languages_on_a_side()
         .into_iter()
         .filter(|language| rule(*language) != pages_of_decision_181_33(*language))
         .collect()
@@ -1605,6 +1605,9 @@ fn pages_mismatches(rule: impl Fn(Language) -> (&'static str, &'static str)) -> 
 /// (поправка 181.34), so the page alone would not decide it. `?lang=ru` on the Russian side,
 /// `?lang=en` on the English one — the name and the values the site already uses for that word.
 ///
+/// ⭐ **Stage E112, Q-206-1:** Ukrainian, Arabic and Persian left the two sides for pages of their
+/// own, held by `all_sixty_six_languages_open_what_the_decisions_give_them`; this holds the rest.
+///
 /// ⚠ Controls: the rule of the third build — the Russian pages for every language — is caught on
 /// exactly the twelve of the English side; the addresses of the fourth build — the right pages with
 /// no mark — are caught in all fourteen.
@@ -1617,7 +1620,7 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
     );
 
     // One side for writing and for reading: the pages follow the line 181.1 drew.
-    let off_the_side_of_181_1: Vec<Language> = Language::ALL
+    let off_the_side_of_181_1: Vec<Language> = the_languages_on_a_side()
         .into_iter()
         .filter(|language| {
             let russian = links::feedback_url(*language) == links::GROUP_URL;
@@ -1657,7 +1660,7 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         assert!(links::is_allowed(english), "{english} must reach the shell");
     }
 
-    let english_side: Vec<Language> = Language::ALL
+    let english_side: Vec<Language> = the_languages_on_a_side()
         .into_iter()
         .filter(|language| !THE_RUSSIAN_SIDE.contains(language))
         .collect();
@@ -1672,8 +1675,190 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
             let (download, program) = pages_of_decision_181_33(language);
             (page_of(download), page_of(program))
         }),
-        Language::ALL,
+        the_languages_on_a_side(),
         "the control: the right pages with no mark must be caught in every language"
+    );
+}
+
+/// The languages the site has pages of their own for — Q-206-1, the signals of the controller of the
+/// languages of the site (site 1.23.0) — with the code the site gives each. Written down apart from
+/// the table of `links`: `th` and `he` come next, and neither goes out without a line from that
+/// controller.
+const THE_OWN_PAGES: [(Language, &str); 3] = [
+    (Language::Uk, "uk"),
+    (Language::Ar, "ar"),
+    (Language::Fa, "fa"),
+];
+
+/// The languages that read one of the two sides of the site — every row of the table of languages
+/// but [`THE_OWN_PAGES`].
+fn the_languages_on_a_side() -> Vec<Language> {
+    Language::ALL
+        .into_iter()
+        .filter(|language| !THE_OWN_PAGES.iter().any(|(own, _)| own == language))
+        .collect()
+}
+
+/// The page «What's new» of a language with pages of its own: it has none yet, so the English one,
+/// **with no mark** — the mark outranks the browser and the site remembers it, so `?lang=en` would
+/// take the reader off their language (Q-206-1).
+const THE_UNMARKED_CHANGELOG: &str = "https://panda-pishet-kod.dev/en/langswitcher/changelog/";
+
+/// What `language` opens and where it writes: `(download, program, changelog, feedback)`, by the
+/// decisions and apart from the code. Pages of its own first (Q-206-1); otherwise the side of
+/// решения 181.1, 181.33 и 202.6. Where a person writes does not move with the pages.
+fn the_addresses_of(language: Language) -> (String, String, String, &'static str) {
+    let feedback = if THE_RUSSIAN_SIDE.contains(&language) {
+        THE_GROUP
+    } else {
+        THE_ISSUES
+    };
+
+    if let Some((_, code)) = THE_OWN_PAGES.iter().find(|(own, _)| *own == language) {
+        return (
+            format!("https://panda-pishet-kod.dev/{code}/langswitcher/download/?lang={code}"),
+            format!("https://panda-pishet-kod.dev/{code}/langswitcher/?lang={code}"),
+            THE_UNMARKED_CHANGELOG.to_owned(),
+            feedback,
+        );
+    }
+
+    let (root, code) = if THE_RUSSIAN_SIDE.contains(&language) {
+        ("", "ru")
+    } else {
+        ("en/", "en")
+    };
+
+    (
+        format!("https://panda-pishet-kod.dev/{root}langswitcher/download/?lang={code}"),
+        format!("https://panda-pishet-kod.dev/{root}langswitcher/?lang={code}"),
+        format!("https://panda-pishet-kod.dev/{root}langswitcher/changelog/?lang={code}"),
+        feedback,
+    )
+}
+
+/// The languages whose four addresses by `rule` are not the ones [`the_addresses_of`] gives them.
+fn addresses_mismatches(
+    rule: impl Fn(Language) -> (String, String, String, &'static str),
+) -> Vec<Language> {
+    Language::ALL
+        .into_iter()
+        .filter(|language| rule(*language) != the_addresses_of(*language))
+        .collect()
+}
+
+/// What `links` answers for `language`, in the order of [`the_addresses_of`].
+fn the_addresses_of_links(language: Language) -> (String, String, String, &'static str) {
+    (
+        links::download_url(language).to_owned(),
+        links::program_url(language).to_owned(),
+        links::changelog_url(language).to_owned(),
+        links::feedback_url(language),
+    )
+}
+
+/// **Задача T-112-1, Q-206-1 — Ukrainian opens the three pages the site made for it**, and not the
+/// Russian ones it opened until 1.4.2. The address of its feedback stays the group.
+#[test]
+fn ukrainian_opens_the_pages_the_site_made_for_it() {
+    assert_eq!(
+        links::download_url(Language::Uk),
+        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk"
+    );
+    assert_eq!(
+        links::program_url(Language::Uk),
+        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"
+    );
+    assert_eq!(
+        links::changelog_url(Language::Uk),
+        "https://panda-pishet-kod.dev/en/langswitcher/changelog/"
+    );
+    assert_eq!(links::feedback_url(Language::Uk), THE_GROUP);
+}
+
+/// **Задача T-112-1, Q-206-1 — each of the sixty-six rows of the table of languages opens what the
+/// decisions give it**, and only `uk`, `fa`, `ar` moved. A language with no line from the controller
+/// of the languages of the site (`th`, `he`) must not carry a mark of its own; a language moved off
+/// its side by accident shows up here by name (стоп-условие C4).
+///
+/// ⚠ Controls: the rule of 1.4.2 — the side alone — is caught on exactly the three languages; `th`
+/// sent to `?lang=th` ahead of its line is caught on `th` alone; Ukrainian sent to GitHub Issues,
+/// the road of the channel changed along with the pages, is caught on `uk` alone.
+#[test]
+fn all_sixty_six_languages_open_what_the_decisions_give_them() {
+    assert_eq!(Language::ALL.len(), 66, "the table of languages has grown");
+
+    assert_eq!(
+        addresses_mismatches(the_addresses_of_links),
+        Vec::<Language>::new(),
+        "Q-206-1: these languages do not open what the decisions give them"
+    );
+
+    for language in Language::ALL {
+        let (download, program, changelog, feedback) = the_addresses_of_links(language);
+
+        for url in [
+            download.as_str(),
+            program.as_str(),
+            changelog.as_str(),
+            feedback,
+        ] {
+            assert!(!links::is_placeholder(url), "{language:?}: {url}");
+            assert!(
+                links::is_allowed(url),
+                "{language:?}: {url} must reach the shell"
+            );
+        }
+    }
+
+    let the_side_alone = |language: Language| {
+        let (root, code) = if THE_RUSSIAN_SIDE.contains(&language) {
+            ("", "ru")
+        } else {
+            ("en/", "en")
+        };
+
+        (
+            format!("https://panda-pishet-kod.dev/{root}langswitcher/download/?lang={code}"),
+            format!("https://panda-pishet-kod.dev/{root}langswitcher/?lang={code}"),
+            format!("https://panda-pishet-kod.dev/{root}langswitcher/changelog/?lang={code}"),
+            links::feedback_url(language),
+        )
+    };
+
+    assert_eq!(
+        addresses_mismatches(the_side_alone),
+        THE_OWN_PAGES.map(|(language, _)| language),
+        "the control: the rule of 1.4.2 must be caught on the three languages and no other"
+    );
+
+    assert_eq!(
+        addresses_mismatches(|language| {
+            let mut addresses = the_addresses_of(language);
+
+            if language == Language::Th {
+                addresses.0 =
+                    "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th".to_owned();
+            }
+
+            addresses
+        }),
+        [Language::Th],
+        "the control: a mark ahead of the line from the controller must be caught"
+    );
+
+    assert_eq!(
+        addresses_mismatches(|language| {
+            let mut addresses = the_addresses_of(language);
+
+            if language == Language::Uk {
+                addresses.3 = THE_ISSUES;
+            }
+
+            addresses
+        }),
+        [Language::Uk],
+        "the control: the channel of Ukrainian moved along with its pages must be caught"
     );
 }
 

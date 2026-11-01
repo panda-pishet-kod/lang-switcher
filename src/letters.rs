@@ -924,6 +924,10 @@ pub mod links {
     /// `match` without a wildcard on purpose: a language added to [`Language`] does not compile
     /// until somebody has said which side its readers are on.
     ///
+    /// ⚠ **Since stage E112 the pages ask [`OWN_PAGES`] first** (Q-206-1): a language of that table
+    /// reads the site in its own language and goes on writing to the author on its side here —
+    /// Ukrainian to the group, Arabic and Persian to GitHub Issues.
+    ///
     /// ⭐ **Stage E108, решение 202.6** — дословно: «Делаем так, пока нет адаптированных страниц
     /// сайта под каждый из языков»: Kazakh, Belarusian, Tatar and Uzbek in Cyrillic read the
     /// Russian side too; the other twenty-six of group A — the English one.
@@ -1013,6 +1017,32 @@ pub mod links {
         }
     }
 
+    /// **The pages the site has in the language of a person** — Q-206-1, решение 207.3:
+    /// `(language, download page, program's page)`. One row is one language, and a language with a
+    /// row leaves the pages of its side ([`reads_the_russian_side`]) for these.
+    ///
+    /// ⛔ **A row only on a line from the controller of the languages of the site** that the pages
+    /// are out: the mark outranks the browser and the site remembers it, so `?lang=` of a language
+    /// the site does not have would strand the reader. `th` and `he` come next.
+    ///
+    /// ⚠ The addresses are written out whole and not put together by `concat!`: ворота 3 of
+    /// `tools\verify-perimeter.ps1` read the declared addresses as string literals of this file, and
+    /// one built by a macro would stand in the image undeclared.
+    #[rustfmt::skip]
+    const OWN_PAGES: [(Language, &str, &str); 3] = [
+        (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"),
+        (Language::Ar, "https://panda-pishet-kod.dev/ar/langswitcher/download/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/?lang=ar"),
+        (Language::Fa, "https://panda-pishet-kod.dev/fa/langswitcher/download/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/?lang=fa"),
+    ];
+
+    /// The row of [`OWN_PAGES`] for this language, if it has one.
+    fn own_pages(language: Language) -> Option<(Language, &'static str, &'static str)> {
+        OWN_PAGES
+            .iter()
+            .copied()
+            .find(|(own, _, _)| *own == language)
+    }
+
     /// The support page — FR-103, one link and no payment details of any kind in the program
     /// (вопрос 101 п. 6).
     pub const SUPPORT_URL: &str = "https://panda-pishet-kod.dev/donate/";
@@ -1042,21 +1072,21 @@ pub mod links {
     pub const DOWNLOAD_URL_EN: &str =
         "https://panda-pishet-kod.dev/en/langswitcher/download/?lang=en";
 
-    /// **The download page in the language a person reads the program in** — решение 181.33
-    /// ([`reads_the_russian_side`]): «Открыть страницу загрузки» of «От автора» and of the letter
-    /// about an update.
+    /// **The download page in the language a person reads the program in** — [`OWN_PAGES`], or else
+    /// решение 181.33 ([`reads_the_russian_side`]): «Открыть страницу загрузки» of «От автора» and
+    /// of the letter about an update.
     ///
     /// ⚠ **Why each address carries `?lang=`** — решение 181.35. The page alone does not decide the
     /// language a person sees: the script of the language of a page on the site (П-179 of the site)
     /// moves a person to the choice they made with the site's own language button, or else to the
     /// language of the browser (поправка 181.34). The mark tells the site the language of the
-    /// program; the name `lang` and the values `ru` / `en` are the ones the site already gives that
-    /// word. A site that does not read the mark yet simply ignores it.
+    /// program; the name `lang` and its values are the ones the site already gives that word. A
+    /// site that does not read the mark yet simply ignores it.
     pub fn download_url(language: Language) -> &'static str {
-        if reads_the_russian_side(language) {
-            DOWNLOAD_URL
-        } else {
-            DOWNLOAD_URL_EN
+        match own_pages(language) {
+            Some((_, download, _)) => download,
+            None if reads_the_russian_side(language) => DOWNLOAD_URL,
+            None => DOWNLOAD_URL_EN,
         }
     }
 
@@ -1075,14 +1105,14 @@ pub mod links {
     /// marked `?lang=en` (решение 181.35).
     pub const PROGRAM_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/?lang=en";
 
-    /// **The program's page in the language a person reads the program in** — решение 181.33
-    /// ([`reads_the_russian_side`]): the name in «О программе» and in «От автора». The mark of the
-    /// language is there for the reason [`download_url`] gives.
+    /// **The program's page in the language a person reads the program in** — [`OWN_PAGES`], or else
+    /// решение 181.33 ([`reads_the_russian_side`]): the name in «О программе» and in «От автора». The
+    /// mark of the language is there for the reason [`download_url`] gives.
     pub fn program_url(language: Language) -> &'static str {
-        if reads_the_russian_side(language) {
-            PROGRAM_URL
-        } else {
-            PROGRAM_URL_EN
+        match own_pages(language) {
+            Some((_, _, program)) => program,
+            None if reads_the_russian_side(language) => PROGRAM_URL,
+            None => PROGRAM_URL_EN,
         }
     }
 
@@ -1096,13 +1126,20 @@ pub mod links {
     pub const CHANGELOG_URL_EN: &str =
         "https://panda-pishet-kod.dev/en/langswitcher/changelog/?lang=en";
 
+    /// The English page «What's new» **with no mark** — for a language of [`OWN_PAGES`], whose page
+    /// «Что нового» the site does not have yet (Q-206-1). ⛔ `?lang=en` would take the reader off
+    /// their language: the mark outranks the browser and the site remembers it.
+    pub const CHANGELOG_URL_UNMARKED: &str =
+        "https://panda-pishet-kod.dev/en/langswitcher/changelog/";
+
     /// **The page «Что нового» in the language a person reads the program in** — the side of
-    /// [`reads_the_russian_side`], as for the two pages above.
+    /// [`reads_the_russian_side`], as for the two pages above; a language of [`OWN_PAGES`] has no
+    /// such page of its own and reads [`CHANGELOG_URL_UNMARKED`].
     pub fn changelog_url(language: Language) -> &'static str {
-        if reads_the_russian_side(language) {
-            CHANGELOG_URL
-        } else {
-            CHANGELOG_URL_EN
+        match own_pages(language) {
+            Some(_) => CHANGELOG_URL_UNMARKED,
+            None if reads_the_russian_side(language) => CHANGELOG_URL,
+            None => CHANGELOG_URL_EN,
         }
     }
 
@@ -1184,7 +1221,13 @@ pub mod links {
                 PROGRAM_URL_EN,
                 CHANGELOG_URL,
                 CHANGELOG_URL_EN,
+                CHANGELOG_URL_UNMARKED,
             ])
+            .chain(
+                OWN_PAGES
+                    .iter()
+                    .flat_map(|(_, download, program)| [*download, *program]),
+            )
             .filter_map(host_of)
     }
 
