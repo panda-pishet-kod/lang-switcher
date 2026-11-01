@@ -956,6 +956,24 @@ fn the_ukrainian_strings_keep_the_words_of_the_glossary() {
     );
 }
 
+/// **The Arabic foot of the letters counts its news in the masculine** — stage E112, task T-112-2,
+/// the finding of the controller of the languages of the site: the numeral from three to ten takes
+/// the opposite gender of its noun, and «خبر» is masculine, so «ثلاثة أخبار», as the fourth in the same
+/// sentence is «الرابع». Red «до»: on `87b778f` «ثلاث أخبار».
+#[test]
+fn the_arabic_foot_of_the_letters_counts_its_news_in_the_masculine() {
+    let files = resource_script::language_files();
+    let (_, text) = files
+        .iter()
+        .find(|(file, _)| file == "ar")
+        .expect("app.rc must include res/lang/ar.rc");
+    let strings = read_language_file("ar.rc", text).strings;
+    let foot = &strings["IDS_LETTERS_FOOT"];
+
+    assert!(foot.contains("ثلاثة أخبار"), "{foot}");
+    assert!(!foot.contains("ثلاث أخبار"), "{foot}");
+}
+
 /// **The files on disk are the files app.rc includes, every shipped language has one, and every
 /// file is a language of the registry.** A translation written and not included would build into
 /// nothing; an include without its file would fail rc.exe with a message about a path.
