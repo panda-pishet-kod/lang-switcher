@@ -122,7 +122,9 @@ use windows::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT,
     WPARAM,
 };
-use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+use windows::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 #[cfg(debug_assertions)]
@@ -1582,7 +1584,9 @@ fn join_all(threads: Vec<JoinHandle<WinResult<()>>>) -> bool {
 ///
 /// # ⭐ Two guards, in the order that releases the probe's client inside its apartment
 ///
-/// The watcher thread is the only COM apartment in the process, and it is an STA: section 6.1 puts
+/// The watcher thread is the only single-threaded COM apartment in the process (since stage E114
+/// the listener of focus events of `guard` has a multithreaded one of its own, task T-114-0, and
+/// releases its client inside it): section 6.1 puts
 /// the level-3 probe of FR-72 here, and that probe requires a single-threaded apartment. Its client
 /// lives in a thread-local of this thread (module `guard`), and a COM interface must be released
 /// inside the apartment it was created in; a thread-local destructor runs at thread exit, **after**
@@ -1625,7 +1629,7 @@ pub(crate) fn note_teardown(step: &'static str) {
 /// The body of every one of the three threads.
 fn thread_body(role: Role) -> WinResult<()> {
     match role {
-        // The watcher thread is the only COM apartment in the process, and it is an STA:
+        // The watcher thread is the only single-threaded COM apartment in the process:
         // section 6.1 puts UI Automation here, and UI Automation requires a single-threaded
         // apartment. The apartment and the release of the probe's client are two guards of
         // [`watcher_body`] since task T-37-2 — see there for why their order is the point.
@@ -1775,6 +1779,14 @@ fn serve_window(role: Role) -> WinResult<()> {
 
     let _win_events = match role {
         Role::Watcher => Some(crate::watchdog::watch()?),
+        Role::Input | Role::Ui => None,
+    };
+    // ⭐ Stage E114, task T-114-0 (решения 208.9 и 208.15 (а)): the second source of focus events,
+    // for the moves between the fields of a Chromium or Firefox page that raise no `WinEvent`
+    // (209.22, 209.24). Its own thread in the multithreaded apartment (`guard`). Not fatal: a
+    // listener that cannot be had leaves the program as 1.4.4 was, and the journal says why.
+    let _focus_events = match role {
+        Role::Watcher => listen_for_focus_events(_window.handle),
         Role::Input | Role::Ui => None,
     };
 
@@ -3747,6 +3759,14 @@ unsafe extern "system" fn window_proc(
                 let _ = crate::guard::run_pending_probe();
             }
 
+            // **FR-71 — stage E114, task T-114-0.** A focus event of the second source, posted by
+            // the listener thread of `guard`; passed on only while a Chromium or Firefox window is
+            // in front.
+            // The watcher window only — the gate the probe above uses (SEC-05).
+            if message == crate::guard::WM_APP_FOCUS_EVENT && is_watcher_window(hwnd) {
+                let _ = crate::guard::forward_focus_event();
+            }
+
             // **FR-80 — task T-06-2.** Four messages, and each is answered on one window only:
             // `WM_POWERBROADCAST` and `WM_WTSSESSION_CHANGE` on the UI window, which is the only
             // top-level window of this process and therefore the only one they can arrive at,
@@ -3978,6 +3998,17 @@ impl ComApartment {
 
         Ok(Self)
     }
+
+    /// Enters the multithreaded apartment — `COINIT_MULTITHREADED`. Stage E114, task T-114-0: the
+    /// listener of focus events ([`listen_for_focus_events`]), whose handler UI Automation calls on
+    /// threads of its own and which pumps no messages.
+    fn enter_mta() -> WinResult<Self> {
+        // SAFETY: as in `enter_sta` — no reserved pointer, the calling thread's apartment only,
+        // before anything COM-related on it; `S_FALSE` still owes the `CoUninitialize` of `Drop`.
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.ok()?;
+
+        Ok(Self)
+    }
 }
 
 impl Drop for ComApartment {
@@ -3987,12 +4018,136 @@ impl Drop for ComApartment {
         note_teardown("apartment");
 
         // SAFETY: balances exactly one successful CoInitializeEx on this same thread — the
-        // value is created and dropped inside `watcher_body` and never leaves it — and it
+        // value is created and dropped inside `watcher_body` (or the body of the listener thread
+        // of [`listen_for_focus_events`], after its subscription) and never leaves it — and it
         // runs after the message loop has returned or unwound, and after the guard declared
         // below it there has released the one COM object of this apartment that outlives a
         // probe (task T-37-2), so none is still in use. The call returns nothing, so NFR-13 has
         // no result to check.
         unsafe { CoUninitialize() };
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// FR-71а — the listener thread of the focus events of UI Automation (stage E114, T-114-0)
+// ---------------------------------------------------------------------------------------
+
+/// How long the watcher thread waits for the listener — for the subscription at the start, for
+/// the unsubscription at the end. The removal is a call into UI Automation like the others, which
+/// are bounded at `guard::UIA_TIMEOUT_MS`; twice that, so that one merely slow is still waited for.
+const FOCUS_LISTENER_WAIT: core::time::Duration =
+    core::time::Duration::from_millis(crate::guard::FOCUS_EVENTS_EXIT_MS);
+
+/// The listener thread of the focus events of UI Automation — решения 208.9 и 208.15 (а), FR-71а.
+/// Held by the watcher thread for its whole life (`serve_window`), so it comes down before the
+/// watcher window does; its `Drop` stops the posts, asks the thread to unsubscribe and waits for
+/// that at most [`FOCUS_LISTENER_WAIT`]: a removal that does not come back leaves its thread to
+/// the end of the process (FR-96 ends it with `TerminateProcess` in any case) rather than holding
+/// the exit, and the journal says so.
+///
+/// The thread lives here and not in `guard` because its start, its end and the waits for both need
+/// channels, and module `guard` names no blocking primitive (acceptance point 19, NFR-04); the
+/// subscription itself — every name of UI Automation — stays there (`guard::FocusSubscription`).
+struct FocusListener {
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    finished: std::sync::mpsc::Receiver<()>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for FocusListener {
+    fn drop(&mut self) {
+        // No post after this line can reach the watcher window, which is about to go.
+        crate::guard::stop_focus_posts();
+
+        // The listener wakes on the closed channel, unsubscribes and leaves its apartment.
+        drop(self.stop.take());
+
+        if let Some(thread) = self.thread.take() {
+            match self.finished.recv_timeout(FOCUS_LISTENER_WAIT) {
+                // The thread dropped its end after leaving its apartment: the join is at once.
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = thread.join();
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    report_non_critical(
+                        "password probe: focus events",
+                        &WinError::from_hresult(windows::core::HRESULT::from_win32(
+                            windows::Win32::Foundation::ERROR_TIMEOUT.0,
+                        )),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Starts the listener of focus events for the watcher window `watcher` — FR-71а. `None` when the
+/// thread, its apartment or the subscription could not be had: the program runs on as 1.4.4 did,
+/// with the `WinEvent` source alone, and the refusal is in the journal under «password probe:
+/// focus events».
+///
+/// Waits for the subscription at most [`FOCUS_LISTENER_WAIT`] — the watcher thread has a window to
+/// serve. A subscription still on its way by then is kept: the thread either makes it and listens,
+/// or journals the refusal and ends, and the `Drop` of [`FocusListener`] copes with both.
+fn listen_for_focus_events(watcher: HWND) -> Option<FocusListener> {
+    use std::sync::mpsc;
+
+    let (stop, stopped) = mpsc::channel::<()>();
+    let (ready, answer) = mpsc::channel::<bool>();
+    let (finished_here, finished) = mpsc::channel::<()>();
+    // A handle by value: it crosses to the thread as a number and goes on as one (SEC-05).
+    let target = watcher.0 as isize;
+
+    let thread = std::thread::Builder::new()
+        .name("focus-events".to_owned())
+        .spawn(move || {
+            listener_body(target, &stopped, &ready);
+            // Dropped last, after the apartment is left: what the owner's `Drop` waits for.
+            drop(finished_here);
+        })
+        .ok()?;
+
+    match answer.recv_timeout(FOCUS_LISTENER_WAIT) {
+        Ok(true) | Err(mpsc::RecvTimeoutError::Timeout) => Some(FocusListener {
+            stop: Some(stop),
+            finished,
+            thread: Some(thread),
+        }),
+        Ok(false) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+            drop(stop);
+            let _ = thread.join();
+            None
+        }
+    }
+}
+
+/// The body of the listener thread: the apartment, the subscription, the wait for the end — and
+/// the two taken down in the reverse order, the subscription first, by the order of declaration.
+fn listener_body(
+    target: isize,
+    stopped: &std::sync::mpsc::Receiver<()>,
+    ready: &std::sync::mpsc::Sender<bool>,
+) {
+    let _apartment = match ComApartment::enter_mta() {
+        Ok(apartment) => apartment,
+        Err(error) => {
+            report_non_critical("password probe: focus events", &error);
+            let _ = ready.send(false);
+            return;
+        }
+    };
+
+    match crate::guard::subscribe_focus_events(target) {
+        Ok(subscription) => {
+            let _ = ready.send(true);
+            // Blocks until the owner drops its sender — the end of the watcher thread.
+            let _ = stopped.recv();
+            drop(subscription);
+        }
+        Err(error) => {
+            report_non_critical("password probe: focus events", &error);
+            let _ = ready.send(false);
+        }
     }
 }
 

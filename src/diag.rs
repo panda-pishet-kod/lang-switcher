@@ -840,6 +840,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // Stage E111, task T-111-9: Блокнот did not give the selection by positions, the press went by
     // the count of `Shift+Left`. Recorded by `inject::deliver_by_positions`; a fact and no value.
     ("selection by positions fell back", Kind::Process),
+    // Stage E114, task T-114-0, решения 208.9 и 208.15: the subscription of the password probe to
+    // the focus events of UI Automation could not be had, or did not come down within its time at
+    // the end. Named by the step, as the three rows of the probe above are; appended at the end so
+    // that no index above it moves; a fact and no value, `Kind::Process`, no new `Kind`.
+    ("password probe: focus events", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

@@ -236,22 +236,28 @@
 //! concerned, and a UI Automation call that fails is [`Field::Undetermined`], which FR-73 fixes
 //! the meaning of. Every `unsafe` block carries a `// SAFETY:` comment.
 
-use core::sync::atomic::{AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicIsize, AtomicU8, AtomicU32, AtomicUsize, Ordering, fence};
 use std::cell::RefCell;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, MAX_PATH, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, E_NOINTERFACE, E_POINTER, HANDLE, HWND, LPARAM, MAX_PATH, S_OK, WPARAM,
+};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
 };
-use windows::Win32::UI::Accessibility::{CUIAutomation8, IUIAutomation, IUIAutomation2};
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationFocusChangedEventHandler,
+    IUIAutomationFocusChangedEventHandler_Vtbl,
+};
 use windows::Win32::UI::Controls::EM_GETPASSWORDCHAR;
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowExW, GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
-    GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_APP,
+    GetMessageTime, GetWindowThreadProcessId, PostMessageW, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
+    WM_APP,
 };
-use windows::core::{Interface, PCWSTR, PWSTR, Result as WinResult, w};
+use windows::core::{GUID, HRESULT, Interface, PCWSTR, PWSTR, Result as WinResult, w};
 
 // ---------------------------------------------------------------------------------------
 // Public constants
@@ -2633,6 +2639,294 @@ fn release_automation() {
 }
 
 // ---------------------------------------------------------------------------------------
+// The focus events of UI Automation — stage E114, task T-114-0, решения 208.9 и 208.15 (а)
+// ---------------------------------------------------------------------------------------
+//
+// ⭐ **Why a second source of focus events.** FR-71 asks the probe on `EVENT_SYSTEM_FOREGROUND`
+// and `EVENT_OBJECT_FOCUS`, and a Chromium window — Chrome, Edge, Electron — raises the second
+// one for a move **between the fields of a page** only after a client of a certain kind has
+// asked it about itself. Measured on the stand (209.22, `out\q114\chromium-20261110-170327.md`
+// and `chromium2-20261110-171534.md`, Edge 155): nobody asking — no event for `Tab` at all; one
+// touch of MSAA — none either; the questions of this very probe (1.4.4, `diag2-20261110-170854.md`)
+// — none either, so a `Tab` into the password field went unseen and the password was recorded. A
+// client that listens for the focus events of UI Automation itself is told of every move, and
+// the probe asked on that event answers right at once (`IsPassword=True` for the password field,
+// `False` for an ordinary one). Chrome 157 the same (209.23); Firefox 160 the same as far as the
+// stand went — 1.4.4 as the first client does not tell its password field after `Tab`, and does
+// once another client has asked (209.24, `r1-20261110-185511.md`) — so its top window is in the
+// list too (решение 208.15).
+//
+// ⚠ **The price, and who chose to pay it.** The subscription itself costs a browser nothing
+// (209.24, п. 1); the question the probe then asks about the field inside a page makes the
+// browser build the accessibility tree of the page and keep it: Edge +80 % private memory, +37 %
+// processor at rest, Chrome +72 % and +48 % on a page of 27 010 elements (209.23). The cheaper
+// roads measured (a look every 250 ms, a question only on the press) cost as much or did not
+// recognise more; the owner chose this one by those numbers (решение 208.15).
+//
+// The listener runs on a thread of its own (`app` owns it) in the **multithreaded** apartment — not on the
+// watcher thread, an STA with a message queue, where UI Automation lets sent messages in while a
+// call is out (the урок of stage Э37) — and does nothing in the handler but post
+// [`WM_APP_FOCUS_EVENT`] to the watcher window. The watcher thread decides there
+// ([`forward_focus_event`]): only while the window in front is a browser's of the list
+// ([`class_wants_focus_events`]), because every other window already raises the `WinEvent` and a
+// second flush of the same move would buy nothing. Its client is made by [`automation`], so the
+// subscription is bounded by the two timeouts every other call of level 3 has (FR-73).
+//
+// ⚠ **FR-96** ends the process with `TerminateProcess` from inside the hook; the subscription ends
+// with the process, as every client registration of UI Automation does, and nothing of it is
+// waited for. An ordinary exit takes it down in order — [`FocusSubscription`] unsubscribes in its
+// `Drop`, on the listener thread, and the watcher thread waits for that at most
+// [`FOCUS_EVENTS_EXIT_MS`]: a removal
+// that does not come back leaves its thread to the end of the process rather than holding the exit.
+
+/// The private message the listener of focus events posts to the **watcher** window — stage
+/// E114, task T-114-0. `WM_APP + 22`, the next free number of the program.
+///
+/// SEC-05: it carries nothing. A forged one buys its sender one flush and one probe of the field
+/// in front of a browser window of the list — what a `Tab` would have bought it.
+pub const WM_APP_FOCUS_EVENT: u32 = WM_APP + 22;
+
+/// The head of the class of the top window of a Chromium program — Chrome, Edge, and every
+/// Electron application (`Chrome_WidgetWin_1`; `_0` for some of their other windows).
+pub const CHROMIUM_WINDOW_PREFIX: &str = "Chrome_WidgetWin_";
+
+/// The class of the top window of Firefox — the whole name, not a head (решение 208.15; the stand,
+/// 209.24: Firefox 160). Its other top-level classes (`MozillaDropShadowWindowClass` of a popup,
+/// `MozillaHiddenWindowClass`) are not windows a person types in.
+pub const FIREFOX_WINDOW_CLASS: &str = "MozillaWindowClass";
+
+/// Whether a top-level class is one whose page raises no `WinEvent` for a move between its fields
+/// until a client of UI Automation has asked — a Chromium window ([`CHROMIUM_WINDOW_PREFIX`]) or
+/// Firefox's ([`FIREFOX_WINDOW_CLASS`]), any case.
+pub fn class_wants_focus_events(class: &str) -> bool {
+    class
+        .get(..CHROMIUM_WINDOW_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(CHROMIUM_WINDOW_PREFIX))
+        || class.eq_ignore_ascii_case(FIREFOX_WINDOW_CLASS)
+}
+
+/// How long the end of the program waits for the subscription to come down — stage E114, task
+/// T-114-0. The removal is a call into UI Automation like the others, and the others are bounded
+/// at [`UIA_TIMEOUT_MS`]; twice that, so that a removal which is merely slow is still waited for.
+pub const FOCUS_EVENTS_EXIT_MS: u64 = 2 * UIA_TIMEOUT_MS as u64;
+
+/// The watcher window the handler posts to — published by [`subscribe_focus_events`] before the
+/// subscription is made and cleared after it is taken down. A value; never dereferenced here.
+static FOCUS_TARGET: AtomicIsize = AtomicIsize::new(0);
+
+/// **The handler UI Automation calls on a focus change**, on a thread of its own choosing: one
+/// object for the life of the process, written out by hand.
+///
+/// ⚠ **By hand, and why.** The `implement` macro of the `windows` crate expands into paths of the
+/// crate `windows_core`, which this program does not name as a dependency — naming it would be a
+/// new dependency (развилка C2 of the stage). So the object is the plain COM shape: a pointer to a
+/// table of functions, the table typed by the crate itself (`IUIAutomationFocusChangedEventHandler_Vtbl`),
+/// so that every slot's signature is checked by the compiler. It lives in a `static`, so `AddRef`
+/// and `Release` count nothing: no caller can outlive it.
+#[repr(C)]
+struct FocusForwarder {
+    vtable: &'static IUIAutomationFocusChangedEventHandler_Vtbl,
+}
+
+static FOCUS_FORWARDER_VTABLE: IUIAutomationFocusChangedEventHandler_Vtbl =
+    IUIAutomationFocusChangedEventHandler_Vtbl {
+        base__: windows::core::IUnknown_Vtbl {
+            QueryInterface: forwarder_query_interface,
+            AddRef: forwarder_add_ref,
+            Release: forwarder_release,
+        },
+        HandleFocusChangedEvent: forwarder_handle,
+    };
+
+static FOCUS_FORWARDER: FocusForwarder = FocusForwarder {
+    vtable: &FOCUS_FORWARDER_VTABLE,
+};
+
+/// `IAgileObject` — the object may be called from any thread without marshaling, which is what an
+/// object of the multithreaded apartment that touches nothing but an atomic is.
+const IID_IAGILE_OBJECT: GUID = GUID::from_u128(0x94ea2b94_e9cc_49e0_c0ff_ee64ca8f5b90);
+
+/// `QueryInterface` of [`FocusForwarder`]: itself for `IUnknown`, the handler interface and
+/// `IAgileObject`; nothing else.
+///
+/// # Safety
+///
+/// Called by COM with `iid` pointing at a GUID and `out` at a pointer to fill — the contract of
+/// `IUnknown::QueryInterface`. Both are checked for null before use.
+unsafe extern "system" fn forwarder_query_interface(
+    this: *mut core::ffi::c_void,
+    iid: *const GUID,
+    out: *mut *mut core::ffi::c_void,
+) -> HRESULT {
+    if out.is_null() || iid.is_null() {
+        return E_POINTER;
+    }
+
+    // SAFETY: both pointers were checked for null above and are the caller's, by the contract.
+    let wanted = unsafe { *iid };
+    let known = wanted == windows::core::IUnknown::IID
+        || wanted == IUIAutomationFocusChangedEventHandler::IID
+        || wanted == IID_IAGILE_OBJECT;
+
+    // SAFETY: as above.
+    unsafe { *out = if known { this } else { core::ptr::null_mut() } };
+
+    if known { S_OK } else { E_NOINTERFACE }
+}
+
+/// `AddRef` of the static [`FocusForwarder`] — nothing to count.
+unsafe extern "system" fn forwarder_add_ref(_this: *mut core::ffi::c_void) -> u32 {
+    1
+}
+
+/// `Release` of the static [`FocusForwarder`] — nothing to free.
+unsafe extern "system" fn forwarder_release(_this: *mut core::ffi::c_void) -> u32 {
+    1
+}
+
+/// `HandleFocusChangedEvent`: posts [`WM_APP_FOCUS_EVENT`] to the watcher window and returns.
+/// Reads nothing of the element it is given, and does not release it — an in-parameter is the
+/// caller's.
+///
+/// # Safety
+///
+/// Called by UI Automation with the contract of the interface; nothing passed in is dereferenced.
+unsafe extern "system" fn forwarder_handle(
+    _this: *mut core::ffi::c_void,
+    _sender: *mut core::ffi::c_void,
+) -> HRESULT {
+    let target = FOCUS_TARGET.load(Ordering::Acquire);
+
+    if target != 0 {
+        // SAFETY: the handle travels by value; a window that is gone makes the post fail, which is
+        // the whole of what can go wrong, and nothing is waited for (NFR-04).
+        let _ = unsafe {
+            PostMessageW(
+                Some(HWND(target as *mut core::ffi::c_void)),
+                WM_APP_FOCUS_EVENT,
+                WPARAM(0),
+                LPARAM(0),
+            )
+        };
+    }
+
+    S_OK
+}
+
+/// The handler as the interface UI Automation takes — the address of the static object.
+fn focus_forwarder() -> IUIAutomationFocusChangedEventHandler {
+    // SAFETY: the pointer is the address of a `#[repr(C)]` object whose first field is the table
+    // of the interface, which is the whole of what COM requires of it; the object is a `static`, so
+    // it outlives the interface value, and its `Release` frees nothing.
+    unsafe {
+        IUIAutomationFocusChangedEventHandler::from_raw(
+            (&raw const FOCUS_FORWARDER).cast_mut().cast(),
+        )
+    }
+}
+
+/// The subscription of this process to the focus events of UI Automation — stage E114, task
+/// T-114-0. Made by [`subscribe_focus_events`] on the listener thread of `app` (its own, in the
+/// multithreaded apartment) and dropped on that same thread: the `Drop` stops the posts and
+/// unsubscribes, inside the apartment the client was made in.
+///
+/// ⚠ **The thread is not here, and why.** Its start, its end and the bounded waits for both need
+/// channels, and this module names no blocking primitive (acceptance point 19, NFR-04: the list
+/// of exclusions is published, not shared — `tests\guard.rs`). So `app`, which owns every thread
+/// of the program, owns this one too, and this module keeps what speaks UI Automation — the
+/// rule that keeps every such name here (`no_ui_automation_name_occurs_anywhere_near_the_hook`).
+///
+/// `!Send` through the marker: a COM interface is released on the thread that holds it.
+#[must_use = "dropped at once, it unsubscribes at once"]
+pub struct FocusSubscription {
+    client: IUIAutomation,
+    handler: IUIAutomationFocusChangedEventHandler,
+    _this_thread_only: core::marker::PhantomData<*const ()>,
+}
+
+impl Drop for FocusSubscription {
+    fn drop(&mut self) {
+        stop_focus_posts();
+
+        // SAFETY: the handler registered by `subscribe_focus_events`, on the client that
+        // registered it, on the thread that holds both. A refusal changes nothing: the
+        // registration ends with the process at the latest, and the posts are already off.
+        let _ = unsafe { self.client.RemoveFocusChangedEventHandler(&self.handler) };
+    }
+}
+
+/// Subscribes this process to the focus events of UI Automation, the handler posting
+/// [`WM_APP_FOCUS_EVENT`] to the watcher window `watcher` (a handle by value) — stage E114, task
+/// T-114-0. Call it on a thread that has entered the **multithreaded** apartment.
+///
+/// The client is made by [`automation`], so the subscription is bounded by the two timeouts every
+/// other call of level 3 has (FR-73). An error leaves no posting behind; the caller journals it
+/// under «password probe: focus events» and the program runs on as 1.4.4 did, with the `WinEvent`
+/// source alone.
+pub fn subscribe_focus_events(watcher: isize) -> WinResult<FocusSubscription> {
+    // Published before the subscription, so the first event already knows where to go.
+    FOCUS_TARGET.store(watcher, Ordering::Release);
+
+    let subscribed = automation().and_then(|client| {
+        let handler = focus_forwarder();
+        // SAFETY: both interfaces are live for the call; no cache request is asked for.
+        unsafe { client.AddFocusChangedEventHandler(None, &handler) }?;
+        Ok(FocusSubscription {
+            client,
+            handler,
+            _this_thread_only: core::marker::PhantomData,
+        })
+    });
+
+    if subscribed.is_err() {
+        stop_focus_posts();
+    }
+
+    subscribed
+}
+
+/// Stops the posts of the handler — the watcher window is about to go. Called by the owner of
+/// the listener thread before it asks that thread to unsubscribe, and by the `Drop` of
+/// [`FocusSubscription`]; a store, safe from any thread and idempotent.
+pub fn stop_focus_posts() {
+    FOCUS_TARGET.store(0, Ordering::Release);
+}
+
+/// What the watcher thread does with [`WM_APP_FOCUS_EVENT`] — answers whether the move was
+/// passed on.
+///
+/// Only while a browser window of the list is in front ([`class_wants_focus_events`] of the
+/// foreground window): there the move between fields raises no `WinEvent` and this is the one
+/// source of it; every other window raises `EVENT_OBJECT_FOCUS` and has been answered already.
+/// Passed on exactly as
+/// `watchdog`'s `WinEvent` callback passes on `EVENT_OBJECT_FOCUS` — the flush of FR-10 timed at
+/// the post, the input thread told, the layout stamp re-read — so the probe of FR-71 follows by
+/// the one road it always has (`app::window_proc`, `WM_APP_FLUSH`).
+pub fn forward_focus_event() -> bool {
+    let Some(foreground) = foreground_window() else {
+        return false;
+    };
+
+    if !class_wants_focus_events(&class_name(foreground)) {
+        return false;
+    }
+
+    // SAFETY: no arguments; the time the message being handled was posted, in the tick domain
+    // of the `WinEvent` times `watchdog::request_flush` is given everywhere else.
+    let time = unsafe { GetMessageTime() } as u32;
+
+    crate::watchdog::request_flush(time, crate::watchdog::Cause::FocusChange);
+
+    if !crate::app::post_to_input_thread(crate::watchdog::WM_APP_FLUSH) {
+        crate::watchdog::note_flush_post_refused();
+    }
+
+    let _ = crate::app::post_to_input_thread(crate::watchdog::WM_APP_LAYOUT);
+
+    true
+}
+
+// ---------------------------------------------------------------------------------------
 // Tests of what can be driven without a window, a focus or a keyboard
 // ---------------------------------------------------------------------------------------
 
@@ -2822,6 +3116,39 @@ mod tests {
         }
     }
 
+    /// ⭐ **Stage E114, task T-114-0 — which windows get the second source of focus events.** The top
+    /// window of Chrome, Edge and every Electron application is `Chrome_WidgetWin_<n>` (the stand,
+    /// 209.22: Edge 155, `Chrome_WidgetWin_1`), Firefox's is `MozillaWindowClass` (209.24, Firefox
+    /// 160; решение 208.15); the page inside is another window and is not asked about here, and
+    /// neither is any other program — they raise `EVENT_OBJECT_FOCUS` themselves. Firefox by the whole
+    /// name: its popup and hidden windows share the head of the name and are not typed in.
+    #[test]
+    fn the_second_source_of_focus_events_is_for_chromium_and_firefox_windows_only() {
+        for class in [
+            "Chrome_WidgetWin_1",
+            "Chrome_WidgetWin_0",
+            "chrome_widgetwin_1",
+            "MozillaWindowClass",
+            "mozillawindowclass",
+        ] {
+            assert!(class_wants_focus_events(class), "{class}");
+        }
+
+        for class in [
+            "Chrome_RenderWidgetHostHWND",
+            "Chrome_Widget",
+            "MozillaDropShadowWindowClass",
+            "MozillaHiddenWindowClass",
+            "MozillaWindowClass2",
+            "Mozilla",
+            "Notepad",
+            "WindowsForms10.Window.8.app.0.2dc4f4e_r13_ad1",
+            "",
+        ] {
+            assert!(!class_wants_focus_events(class), "{class}");
+        }
+    }
+
     /// The two private messages of this module are distinct from each other and from every other
     /// one in the program. Two private messages that collide do so silently.
     #[test]
@@ -2835,6 +3162,7 @@ mod tests {
             crate::switch::WM_APP_SWITCH,
             WM_APP_PROBE,
             WM_APP_FIELD,
+            WM_APP_FOCUS_EVENT,
         ];
 
         for (index, message) in all.iter().enumerate() {
