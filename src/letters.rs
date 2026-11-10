@@ -915,9 +915,10 @@ pub mod links {
     pub const APPEAL_URL: &str = "https://panda-pishet-kod.dev/langswitcher/feedback";
 
     /// **Which side of the author's places a person reads, by the language they read the program
-    /// in** — решения 181.1 и 181.33: Russian and Ukrainian read the Russian side (the topic of the
-    /// group, the pages of the site without `/en/`), the other twelve the English one (GitHub
-    /// Issues, the pages under `/en/`).
+    /// in** — решения 181.1, 181.33 и 202.6: the Russian side (the topic of the group, the pages of
+    /// the site without `/en/`) for the six languages below, the English one (GitHub Issues, the pages
+    /// under `/en/`) for every other. ⚠ Until stage E114 this sentence said «Russian and Ukrainian …
+    /// the other twelve», which was true of fourteen languages and stopped being true at sixty-six.
     ///
     /// The one place the line is drawn — [`feedback_url`], [`download_url`] and [`program_url`]
     /// all ask here, so a person is never sent to write on one side and to read on the other. A
@@ -1003,12 +1004,26 @@ pub mod links {
         }
     }
 
+    /// **Which pages of the site a person without pages of their own reads** — the side of
+    /// [`reads_the_russian_side`], and, since stage E114 (task T-114-3, решение 208.6, 1а; Q-208-5),
+    /// the Russian pages for Armenian and Uzbek in the Latin script too: a reader of either script of
+    /// Uzbek and a reader of Armenian read Russian more often than English, while their channel stays
+    /// where it was ([`feedback_url`]). The pages and the channel are two decisions, as in task
+    /// T-112-1.
+    fn reads_the_russian_pages(language: Language) -> bool {
+        reads_the_russian_side(language) || matches!(language, Language::Hy | Language::Uz)
+    }
+
     /// **Where a person writes to the author, by the language they read the program in** —
     /// решение 181.1: Russian and Ukrainian go to the topic of the group, the other twelve to the
     /// issues on GitHub ([`reads_the_russian_side`]).
     ///
     /// The one place that choice is made — the wizard of FR-104 and the letter «Спасибо» both ask
     /// here, with the language of their own window.
+    ///
+    /// ⚠ **Only the channel.** The pages are another decision ([`reads_the_russian_pages`], stage
+    /// E114): Armenian and Uzbek in the Latin script read the pages of the Russian side and still
+    /// write to the issues on GitHub.
     pub fn feedback_url(language: Language) -> &'static str {
         if reads_the_russian_side(language) {
             GROUP_URL
@@ -1029,11 +1044,31 @@ pub mod links {
     /// `tools\verify-perimeter.ps1` read the declared addresses as string literals of this file, and
     /// one built by a macro would stand in the image undeclared.
     #[rustfmt::skip]
-    const OWN_PAGES: [(Language, &str, &str); 4] = [
+    ///
+    /// ⭐ **Stage E114, task T-114-3** (Q-208-1…4, Q-208-6, Q-208-8, решения 208.6 и 208.8) — fourteen
+    /// more, each on the line of the controller that its pages are out (2026-11-10: every address
+    /// 200 and in its own `lang`). Both Serbian scripts read `/sr/` under the mark `sr` (the page is
+    /// `lang="sr-Latn"`), Portuguese reads `/pt/` under `pt` (the page is `lang="pt-BR"`). In the
+    /// order of [`Language::ALL`].
+    const OWN_PAGES: [(Language, &str, &str); 18] = [
         (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"),
+        (Language::De, "https://panda-pishet-kod.dev/de/langswitcher/download/?lang=de", "https://panda-pishet-kod.dev/de/langswitcher/?lang=de"),
+        (Language::Fr, "https://panda-pishet-kod.dev/fr/langswitcher/download/?lang=fr", "https://panda-pishet-kod.dev/fr/langswitcher/?lang=fr"),
+        (Language::Pt, "https://panda-pishet-kod.dev/pt/langswitcher/download/?lang=pt", "https://panda-pishet-kod.dev/pt/langswitcher/?lang=pt"),
+        (Language::It, "https://panda-pishet-kod.dev/it/langswitcher/download/?lang=it", "https://panda-pishet-kod.dev/it/langswitcher/?lang=it"),
+        (Language::Pl, "https://panda-pishet-kod.dev/pl/langswitcher/download/?lang=pl", "https://panda-pishet-kod.dev/pl/langswitcher/?lang=pl"),
+        (Language::Cs, "https://panda-pishet-kod.dev/cs/langswitcher/download/?lang=cs", "https://panda-pishet-kod.dev/cs/langswitcher/?lang=cs"),
+        (Language::Tr, "https://panda-pishet-kod.dev/tr/langswitcher/download/?lang=tr", "https://panda-pishet-kod.dev/tr/langswitcher/?lang=tr"),
+        (Language::El, "https://panda-pishet-kod.dev/el/langswitcher/download/?lang=el", "https://panda-pishet-kod.dev/el/langswitcher/?lang=el"),
+        (Language::He, "https://panda-pishet-kod.dev/he/langswitcher/download/?lang=he", "https://panda-pishet-kod.dev/he/langswitcher/?lang=he"),
         (Language::Ar, "https://panda-pishet-kod.dev/ar/langswitcher/download/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/?lang=ar"),
         (Language::Fa, "https://panda-pishet-kod.dev/fa/langswitcher/download/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/?lang=fa"),
         (Language::Th, "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th", "https://panda-pishet-kod.dev/th/langswitcher/?lang=th"),
+        (Language::Az, "https://panda-pishet-kod.dev/az/langswitcher/download/?lang=az", "https://panda-pishet-kod.dev/az/langswitcher/?lang=az"),
+        (Language::Sr, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr"),
+        (Language::SrLatn, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr"),
+        (Language::Bg, "https://panda-pishet-kod.dev/bg/langswitcher/download/?lang=bg", "https://panda-pishet-kod.dev/bg/langswitcher/?lang=bg"),
+        (Language::Nl, "https://panda-pishet-kod.dev/nl/langswitcher/download/?lang=nl", "https://panda-pishet-kod.dev/nl/langswitcher/?lang=nl"),
     ];
 
     /// The row of [`OWN_PAGES`] for this language, if it has one.
@@ -1086,7 +1121,7 @@ pub mod links {
     pub fn download_url(language: Language) -> &'static str {
         match own_pages(language) {
             Some((_, download, _)) => download,
-            None if reads_the_russian_side(language) => DOWNLOAD_URL,
+            None if reads_the_russian_pages(language) => DOWNLOAD_URL,
             None => DOWNLOAD_URL_EN,
         }
     }
@@ -1112,7 +1147,7 @@ pub mod links {
     pub fn program_url(language: Language) -> &'static str {
         match own_pages(language) {
             Some((_, _, program)) => program,
-            None if reads_the_russian_side(language) => PROGRAM_URL,
+            None if reads_the_russian_pages(language) => PROGRAM_URL,
             None => PROGRAM_URL_EN,
         }
     }
@@ -1139,7 +1174,7 @@ pub mod links {
     pub fn changelog_url(language: Language) -> &'static str {
         match own_pages(language) {
             Some(_) => CHANGELOG_URL_UNMARKED,
-            None if reads_the_russian_side(language) => CHANGELOG_URL,
+            None if reads_the_russian_pages(language) => CHANGELOG_URL,
             None => CHANGELOG_URL_EN,
         }
     }

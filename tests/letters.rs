@@ -1579,7 +1579,8 @@ fn page_of(url: &str) -> &str {
 /// The pages решение 181.33 gives `language`: the Russian ones on the Russian side (Russian,
 /// Ukrainian and, since stage E108, the four of решение 202.6), the English ones on the other.
 fn pages_of_decision_181_33(language: Language) -> (&'static str, &'static str) {
-    if THE_RUSSIAN_SIDE.contains(&language) {
+    // Stage E114, task T-114-3 (решение 208.6, 1а): hy and uz read the Russian pages too.
+    if THE_RUSSIAN_SIDE.contains(&language) || THE_RUSSIAN_PAGES_TOO.contains(&language) {
         RUSSIAN_PAGES
     } else {
         ENGLISH_PAGES
@@ -1629,9 +1630,11 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         })
         .collect();
 
+    // ⭐ Stage E114, task T-114-3 (решение 208.6, 1а): Armenian and Uzbek in the Latin script are the
+    // one deliberate split — the Russian pages, the issues on GitHub. Nobody else.
     assert_eq!(
         off_the_side_of_181_1,
-        Vec::<Language>::new(),
+        THE_RUSSIAN_PAGES_TOO.to_vec(),
         "a person reads the site on the side they write to the author on"
     );
 
@@ -1660,15 +1663,19 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
         assert!(links::is_allowed(english), "{english} must reach the shell");
     }
 
+    // Stage E114, task T-114-3: the English pages are read by the English side less hy and uz,
+    // whose pages are the Russian ones (решение 208.6, 1а).
     let english_side: Vec<Language> = the_languages_on_a_side()
         .into_iter()
-        .filter(|language| !THE_RUSSIAN_SIDE.contains(language))
+        .filter(|language| {
+            !THE_RUSSIAN_SIDE.contains(language) && !THE_RUSSIAN_PAGES_TOO.contains(language)
+        })
         .collect();
 
     assert_eq!(
         pages_mismatches(|_| RUSSIAN_PAGES),
         english_side,
-        "the control: the Russian pages for every language must be caught on the English side"
+        "the control: the Russian pages for every language must be caught on the English pages"
     );
     assert_eq!(
         pages_mismatches(|language| {
@@ -1684,12 +1691,36 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
 /// languages of the site (site 1.23.0) — with the code the site gives each. Written down apart from
 /// the table of `links`: `he` comes next, and it does not go out without a line from that
 /// controller. In the order of `Language::ALL`: the controls below compare against it as a list.
-const THE_OWN_PAGES: [(Language, &str); 4] = [
+///
+/// ⭐ Stage E114, task T-114-3 (Q-208-1…4, Q-208-6, Q-208-8, решения 208.6 и 208.8): fourteen more,
+/// every address checked by the controller (200, the page's own `lang`). Both Serbian scripts read
+/// `/sr/` and are marked `sr` (the page is `lang="sr-Latn"`); Portuguese is marked `pt` (the page is
+/// `lang="pt-BR"`).
+const THE_OWN_PAGES: [(Language, &str); 18] = [
     (Language::Uk, "uk"),
+    (Language::De, "de"),
+    (Language::Fr, "fr"),
+    (Language::Pt, "pt"),
+    (Language::It, "it"),
+    (Language::Pl, "pl"),
+    (Language::Cs, "cs"),
+    (Language::Tr, "tr"),
+    (Language::El, "el"),
+    (Language::He, "he"),
     (Language::Ar, "ar"),
     (Language::Fa, "fa"),
     (Language::Th, "th"),
+    (Language::Az, "az"),
+    (Language::Sr, "sr"),
+    (Language::SrLatn, "sr"),
+    (Language::Bg, "bg"),
+    (Language::Nl, "nl"),
 ];
+
+/// ⭐ Stage E114, task T-114-3 (решение 208.6, 1а; Q-208-5): Armenian and Uzbek in the Latin script
+/// read the **pages** of the Russian side and go on writing where they wrote — the issues on GitHub.
+/// The pages and the channel are two decisions, as in task T-112-1.
+const THE_RUSSIAN_PAGES_TOO: [Language; 2] = [Language::Uz, Language::Hy];
 
 /// The languages that read one of the two sides of the site — every row of the table of languages
 /// but [`THE_OWN_PAGES`].
@@ -1724,11 +1755,12 @@ fn the_addresses_of(language: Language) -> (String, String, String, &'static str
         );
     }
 
-    let (root, code) = if THE_RUSSIAN_SIDE.contains(&language) {
-        ("", "ru")
-    } else {
-        ("en/", "en")
-    };
+    let (root, code) =
+        if THE_RUSSIAN_SIDE.contains(&language) || THE_RUSSIAN_PAGES_TOO.contains(&language) {
+            ("", "ru")
+        } else {
+            ("en/", "en")
+        };
 
     (
         format!("https://panda-pishet-kod.dev/{root}langswitcher/download/?lang={code}"),
@@ -1848,24 +1880,35 @@ fn all_sixty_six_languages_open_what_the_decisions_give_them() {
         )
     };
 
+    // Stage E114, task T-114-3: the rule of 1.4.2 is caught on the eighteen languages of their own
+    // pages and on hy and uz, whose pages moved to the Russian side — and on no other.
+    let moved: Vec<Language> = Language::ALL
+        .into_iter()
+        .filter(|language| {
+            THE_OWN_PAGES.iter().any(|(own, _)| own == language)
+                || THE_RUSSIAN_PAGES_TOO.contains(language)
+        })
+        .collect();
+
     assert_eq!(
         addresses_mismatches(the_side_alone),
-        THE_OWN_PAGES.map(|(language, _)| language),
-        "the control: the rule of 1.4.2 must be caught on the four languages and no other"
+        moved,
+        "the control: the rule of 1.4.2 must be caught on these languages and no other"
     );
 
     assert_eq!(
         addresses_mismatches(|language| {
             let mut addresses = the_addresses_of(language);
 
-            if language == Language::He {
+            // Stage E114: Hebrew has pages of its own now, so the control takes Hindi, which has none.
+            if language == Language::Hi {
                 addresses.0 =
-                    "https://panda-pishet-kod.dev/he/langswitcher/download/?lang=he".to_owned();
+                    "https://panda-pishet-kod.dev/hi/langswitcher/download/?lang=hi".to_owned();
             }
 
             addresses
         }),
-        [Language::He],
+        [Language::Hi],
         "the control: a mark ahead of the line from the controller must be caught"
     );
 
