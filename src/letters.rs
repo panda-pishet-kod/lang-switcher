@@ -2299,8 +2299,10 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "сәлам",
             badge: ["EN", "TT"],
         },
+        // Bulgarian: Phonetic Traditional (`00040402`, 208.6) — «здравей» in the keys of KBDUS is
+        // «zdrawej» (stage E114, the tables of the guest by ToUnicodeEx, `out\q114\c-probe.txt`).
         Language::Bg => DemoPair {
-            typed: "po,dlex",
+            typed: "zdrawej",
             fixed: "здравей",
             badge: ["EN", "BG"],
         },
@@ -2410,14 +2412,15 @@ pub fn demo_pair(language: Language) -> DemoPair {
             fixed: "hallå",
             badge: ["EN", "NN"],
         },
-        // Dutch: the layout of nl-NL is US-International (KBDUSX), which types «hallo» with the keys of
-        // KBDUS — so the other way of 178.5, as Uzbek and Latvian: «hallo» typed while the Russian
-        // layout was on (`pairs-nl-reverse.out.txt`). Luxembourgish: KBDSF, the layout of lb-LU
-        // (`0000046E`), `ä` with `Shift` on the key of `'`.
+        // Dutch: since stage E114 (208.8) the Belgian AZERTY of nl-BE, «Belgian (Period)» `00000813` —
+        // «zaterdag» in the keys of KBDUS is «wqterdqg» (the tables of the guest by ToUnicodeEx,
+        // `out\q114\c-probe.txt`); the US-International of nl-NL types «hallo» with the keys of
+        // KBDUS, which is why 178.5 had taken the other way («рфддщ» → «hallo») until then.
+        // Luxembourgish: KBDSF, the layout of lb-LU (`0000046E`), `ä` with `Shift` on the key of `'`.
         Language::Nl => DemoPair {
-            typed: "рфддщ",
-            fixed: "hallo",
-            badge: ["RU", "NL"],
+            typed: "wqterdqg",
+            fixed: "zaterdag",
+            badge: ["EN", "NL"],
         },
         Language::Lb => DemoPair {
             typed: "\"ddi",

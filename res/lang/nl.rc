@@ -116,7 +116,7 @@ BEGIN
     IDS_SUPPORT_OPEN        "De auteur steunen"
     IDS_HELLO_TITLE         "Hallo! Ik ben Panda."
     IDS_HELLO_LEAD          "Ik heb Lang Switcher gemaakt en ben blij dat je het hebt geïnstalleerd. Het programma doet één ding: het herstelt een woord dat in de verkeerde toetsenbordindeling is getypt. Zo ziet dat eruit:"
-    IDS_HELLO_DEMO_CAP      "Je typte “рфддщ”, drukte op {0} en kreeg “hallo”, de toetsenbordindeling schakelde over naar het Nederlands. Nog een keer drukken en het staat er weer zoals het was."
+    IDS_HELLO_DEMO_CAP      "Je typte “wqterdqg”, drukte op {0} en kreeg “zaterdag”, de toetsenbordindeling schakelde over naar het Nederlands. Nog een keer drukken en het staat er weer zoals het was."
     IDS_HELLO_PANEL         "Drie dingen voor de eerste dag"
     IDS_HELLO_ROW_1         "{0} zet het laatst getypte woord om en schakelt de toetsenbordindeling over. Werkt in elk venster."
     IDS_HELLO_ROW_2         "Druk nogmaals op {0} en het woord komt terug zoals het was, letter voor letter."
