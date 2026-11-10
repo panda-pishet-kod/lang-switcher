@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Markéiert Text an dréckt op {0} — de markéierten Text gëtt ëmgewandelt (wann dat aktivéiert ass a Ctrl+C funktionéiert)."
     IDS_ABOUT_HELP_4        "Pauséieren, Astellungen a Verloosse fannt Dir am Symbol am Notifikatiounsberäich."
     IDS_ABOUT_HELP_5        "Fir d'Tast ze änneren: Astellungen → Tastekuerzel."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc oder e Klick anzwuesch brécht of"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "pauséiert"

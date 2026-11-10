@@ -103,6 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Pažymėkite tekstą ir paspauskite {0} — bus perkoduotas pažymėtas tekstas (jei tai įjungta ir veikia Ctrl+C)."
     IDS_ABOUT_HELP_4        "Pristabdymas, parametrai ir išėjimas — pranešimų srities piktogramoje."
     IDS_ABOUT_HELP_5        "Klavišui pakeisti: Parametrai → Spartusis klavišas."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc arba spustelėjimas kitur atšaukia"
     IDS_TIP_ACTIVE          "veikia"
     IDS_TIP_PAUSED          "pristabdyta"

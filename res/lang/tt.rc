@@ -104,6 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Текстны сайлап {0} басыгыз — сайланган текст үзгәртелә (кабызылган булса һәм Ctrl+C эшләсә)."
     IDS_ABOUT_HELP_4        "Туктатып тору, көйләүләр һәм чыгу — белдерү мәйданындагы билгедә."
     IDS_ABOUT_HELP_5        "Клавишны үзгәртү өчен: Көйләүләр → Кайнар клавиш."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc яки читтә басу — баш тарту"
     IDS_TIP_ACTIVE          "актив"
     IDS_TIP_PAUSED          "туктатылган"

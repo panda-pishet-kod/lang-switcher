@@ -103,6 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Tīpakohia he tuhinga, ā, pēhia {0} — ka whakahurihia te tuhinga kua tīpakohia (mēnā kua whakahohea, ā, e mahi ana a Ctrl+C)."
     IDS_ABOUT_HELP_4        "Kei te tohu i te wāhi whakamōhiotanga te whakatā, ngā tautuhinga me te puta."
     IDS_ABOUT_HELP_5        "Hei whakarerekē i te kī: Tautuhinga → Kī ara poto."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc, pāwhiri rānei ki wāhi kē hei whakakore"
     IDS_TIP_ACTIVE          "e mahi ana"
     IDS_TIP_PAUSED          "kua whakatāhia"

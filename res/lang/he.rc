@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "סמנו טקסט והקישו {0} — המסומן מומר (אם האפשרות מופעלת והצירוף Ctrl+C עובד)."
     IDS_ABOUT_HELP_4        "השהיה, הגדרות ויציאה נמצאים בסמל אזור ההודעות."
     IDS_ABOUT_HELP_5        "החלפת מקש: הגדרות ← מקש קיצור."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc או קליק בחוץ מבטלים"
     IDS_TIP_ACTIVE          "פעילה"
     IDS_TIP_PAUSED          "מושהית"

@@ -110,6 +110,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Valige tekst ja vajutage {0} — valitud tekst teisendatakse (kui see on lubatud ja Ctrl+C töötab)."
     IDS_ABOUT_HELP_4        "Peatamine, sätted ja väljumine asuvad teavitusala ikoonil."
     IDS_ABOUT_HELP_5        "Klahvi vahetamiseks: Sätted → Kiirklahv."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc või klõps mujal tühistab"
     IDS_TIP_ACTIVE          "aktiivne"
     IDS_TIP_PAUSED          "peatatud"

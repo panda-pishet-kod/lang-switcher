@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Mətni seçin və {0} düyməsini basın — seçilmiş hissə çevrilir (əgər bu aktivdirsə və Ctrl+C işləyirsə)."
     IDS_ABOUT_HELP_4        "Dayandırma, parametrlər və çıxış bildiriş sahəsindəki nişandadır."
     IDS_ABOUT_HELP_5        "Düyməni dəyişmək: Parametrlər → Qısayol düyməsi."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc və ya başqa yerə klik — ləğv"
     IDS_TIP_ACTIVE          "aktivdir"
     IDS_TIP_PAUSED          "dayandırılıb"

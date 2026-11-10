@@ -103,6 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Izberite besedilo in pritisnite {0} — pretvori se izbrano (če je to vklopljeno in Ctrl+C deluje)."
     IDS_ABOUT_HELP_4        "Začasna ustavitev, nastavitve in izhod so v ikoni v obvestilnem območju."
     IDS_ABOUT_HELP_5        "Za zamenjavo tipke: Nastavitve → Bližnjična tipka."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc ali klik drugam prekliče"
     IDS_TIP_ACTIVE          "aktiven"
     IDS_TIP_PAUSED          "začasno ustavljen"

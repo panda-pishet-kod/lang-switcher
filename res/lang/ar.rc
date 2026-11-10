@@ -106,6 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "حدد نصًا واضغط {0} — يتحول المحدد (إذا كان ذلك مفعّلًا وكان Ctrl+C يعمل)."
     IDS_ABOUT_HELP_4        "الإيقاف المؤقت والإعدادات والخروج في أيقونة منطقة الإشعارات."
     IDS_ABOUT_HELP_5        "تغيير المفتاح: الإعدادات ← مفتاح الاختصار."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc أو نقرة خارجه تُلغي"
     IDS_TIP_ACTIVE          "نشط"
     IDS_TIP_PAUSED          "متوقف مؤقتًا"

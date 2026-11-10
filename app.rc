@@ -205,6 +205,11 @@
 // The «От автора» button of FR-103, task Т-32-4 — the one control the about window gains. It
 // stands to the left of «ОК» and the window does not grow: решение 101 п. 7.
 #define IDC_ABOUT_AUTHOR       1136
+// ⭐ The sixth row of the panel — stage E114, task T-114-2, решение 208.5 (6а): a press over nothing
+// typed and nothing selected switches the layout. The run above is closed by 1136, so the numeral
+// and the row take the next two free numbers.
+#define IDC_ABOUT_HELP_N6      1137
+#define IDC_ABOUT_HELP_6       1138
 
 // Controls of the letter template IDD_LETTER — FR-101, task Т-32-2. A block of their own from
 // 1200, contiguous and clear of everything above.
@@ -1136,6 +1141,15 @@ BEGIN
     LTEXT           "", IDC_ABOUT_HELP_4, 30, 166, 207, 19, SS_OWNERDRAW
     LTEXT           "5", IDC_ABOUT_HELP_N5, 19, 189, 7, 10, SS_OWNERDRAW
     LTEXT           "", IDC_ABOUT_HELP_5, 30, 189, 207, 10, SS_OWNERDRAW
+    // ⭐ Шестая строка — этап Э114, задача T-114-2, решение 208.5 (6а): «Ничего не набрано и не
+    // выделено — нажмите {0}: раскладка переключится». Встаёт под пятой с прежним воздухом в 4
+    // единицы (199 + 4 = 203), в запас панели, который задача T-81-4 отдала блоку справки. Окно,
+    // панель и кнопки не двигаются: 276 — типовая высота семейства окон (решение 142.2 п. 8).
+    // Высота — три строки (29, как у первой и третьей): русской и английской хватает двух при
+    // любом имени клавиши, включая «Shift, Shift» и «Ctrl + Alt + Shift + PrintScreen» (замер
+    // теста влезания), а третья — запас переводам 64 языков; 203 + 29 = 232, внутри панели (240).
+    LTEXT           "6", IDC_ABOUT_HELP_N6, 19, 203, 7, 10, SS_OWNERDRAW
+    LTEXT           "", IDC_ABOUT_HELP_6, 30, 203, 207, 29, SS_OWNERDRAW
 
     // FR-103, task Т-32-4: the way into «От автора». It stands to the left of «ОК» and the
     // window does not grow — решение 101 п. 7 — which is why it takes the air that was already
@@ -1609,6 +1623,9 @@ END
 #define IDS_ABOUT_HELP_3        3069
 #define IDS_ABOUT_HELP_4        3070
 #define IDS_ABOUT_HELP_5        3071
+// Stage E114, task T-114-2: the sixth row. 3072 is the menu's and the block 3056 is full, so the row
+// takes the last free number of the block the wizard opened, 3248..3263.
+#define IDS_ABOUT_HELP_6        3263
 
 // ---------------------------------------------------------------------------------------
 // FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.

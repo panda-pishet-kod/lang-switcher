@@ -114,6 +114,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Επιλέξτε κείμενο και πατήστε {0} — μετατρέπεται η επιλογή (αν είναι ενεργό και λειτουργεί το Ctrl+C)."
     IDS_ABOUT_HELP_4        "Παύση, ρυθμίσεις και έξοδος είναι στο εικονίδιο ειδοποιήσεων."
     IDS_ABOUT_HELP_5        "Αλλαγή πλήκτρου: Ρυθμίσεις → Συντόμευση."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc ή κλικ αλλού ακυρώνει"
     IDS_TIP_ACTIVE          "ενεργή"
     IDS_TIP_PAUSED          "σε παύση"

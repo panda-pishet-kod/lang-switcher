@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "მონიშნეთ ტექსტი და დააჭირეთ {0} — მონიშნული გადაკოდირდება (თუ ეს ჩართულია და Ctrl+C მუშაობს)."
     IDS_ABOUT_HELP_4        "შეჩერება, პარამეტრები და გასვლა — ხატულაშია შეტყობინებების არეში."
     IDS_ABOUT_HELP_5        "შეცვლა: პარამეტრები → ცხელი კლავიში."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc ან დაწკაპუნება სხვაგან — გაუქმება"
     IDS_TIP_ACTIVE          "აქტიურია"
     IDS_TIP_PAUSED          "შეჩერებულია"

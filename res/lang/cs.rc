@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Vyberte text a stiskněte {0} — převede se výběr (pokud je to zapnuto a Ctrl+C funguje)."
     IDS_ABOUT_HELP_4        "Pozastavení, nastavení a ukončení jsou v ikoně v oznamovací oblasti."
     IDS_ABOUT_HELP_5        "Změna klávesy: Nastavení → Klávesová zkratka."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc nebo kliknutí vedle zruší"
     IDS_TIP_ACTIVE          "aktivní"
     IDS_TIP_PAUSED          "pozastavena"

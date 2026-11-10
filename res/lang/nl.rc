@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Selecteer tekst en druk op {0} — de geselecteerde tekst wordt omgezet (als dat aan staat en Ctrl+C werkt)."
     IDS_ABOUT_HELP_4        "Onderbreken, instellingen en afsluiten vind je via het pictogram in het systeemvak."
     IDS_ABOUT_HELP_5        "De toets wijzigen: Instellingen → Sneltoets."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc of een klik elders annuleert"
     IDS_TIP_ACTIVE          "actief"
     IDS_TIP_PAUSED          "onderbroken"

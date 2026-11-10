@@ -109,6 +109,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Jelöljön ki egy szöveget, és nyomja meg a(z) {0} gyorsbillentyűt – a kijelölt szöveg átalakul (ha ez be van kapcsolva, és a Ctrl+C működik)."
     IDS_ABOUT_HELP_4        "A felfüggesztés, a beállítások és a kilépés az értesítési területen lévő ikonban érhető el."
     IDS_ABOUT_HELP_5        "A billentyű módosítása: Beállítások → Gyorsbillentyű."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Az Esc vagy egy máshová kattintás megszakítja"
     IDS_TIP_ACTIVE          "aktív"
     IDS_TIP_PAUSED          "felfüggesztve"

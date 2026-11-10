@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Agħżel it-test u agħfas {0} — jiġi kkonvertit dak magħżul (jekk dan huwa mixgħul u Ctrl+C jaħdem)."
     IDS_ABOUT_HELP_4        "Is-sospensjoni, l-issettjar u l-ħruġ jinsabu fl-ikona fl-area tan-notifiki."
     IDS_ABOUT_HELP_5        "Biex tibdel iċ-ċavetta: Issettjar → Ċavetta tax-shortcut."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc jew klikk x'imkien ieħor jikkanċella"
     IDS_TIP_ACTIVE          "attiv"
     IDS_TIP_PAUSED          "sospiż"

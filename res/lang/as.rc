@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "টেক্সট নিৰ্বাচন কৰি {0} টিপক — নিৰ্বাচিত অংশ ৰূপান্তৰ হয় (সক্ৰিয় থাকিলে আৰু Ctrl+C কাম কৰিলে)।"
     IDS_ABOUT_HELP_4        "স্থগিত কৰা, ছেটিংছ আৰু প্ৰস্থান — জাননী ক্ষেত্ৰৰ আইকনত।"
     IDS_ABOUT_HELP_5        "কী সলনি কৰিবলৈ: ছেটিংছ → হটকী।"
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc বা আন ঠাইত ক্লিক কৰিলে বাতিল"
     IDS_TIP_ACTIVE          "সক্ৰিয়"
     IDS_TIP_PAUSED          "স্থগিত"

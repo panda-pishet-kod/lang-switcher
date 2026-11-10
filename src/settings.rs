@@ -3730,6 +3730,12 @@ pub const IDS_ABOUT_HELP_3: u16 = 3069;
 pub const IDS_ABOUT_HELP_4: u16 = 3070;
 /// Fifth row: where the key is changed. No `{0}` either — it points at the field, not at a key.
 pub const IDS_ABOUT_HELP_5: u16 = 3071;
+/// Sixth row: a press over nothing typed and nothing selected switches the layout — stage E114,
+/// task T-114-2, решение 208.5 (6а). `{0}` is the name of the hotkey, as in the first three.
+///
+/// ⚠ Not 3072: that is the menu's, and the block 3056 the help opened is full. 3263 is the last
+/// free number of the block 3248..3263 the wizard opened (`app.rc`).
+pub const IDS_ABOUT_HELP_6: u16 = 3263;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4293,7 +4299,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// [`IDS_WIZARD_SEND`] … [`IDS_WIZARD_SENT_TEXT`] (3254…3262); eight left with the group, the
 /// issues, the note of the letter of a trouble and the two thanks — 3202, 3204, 3205, 3208…3211 and
 /// 3243 are holes that are not walked. 240 − 8 + 9.
-pub const INTERFACE_STRINGS: [u16; 241] = [
+pub const INTERFACE_STRINGS: [u16; 242] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4370,6 +4376,7 @@ pub const INTERFACE_STRINGS: [u16; 241] = [
     IDS_ABOUT_HELP_3,
     IDS_ABOUT_HELP_4,
     IDS_ABOUT_HELP_5,
+    IDS_ABOUT_HELP_6,
     IDS_MENU_SUSPEND,
     IDS_MENU_RESUME,
     IDS_MENU_RESUME_RESTART,
@@ -6585,6 +6592,13 @@ const IDC_ABOUT_HELP_5: i32 = 1135;
 /// stands to the left of «ОК» and the window did not grow (решение 101 п. 7).
 const IDC_ABOUT_AUTHOR: i32 = 1136;
 
+// ⭐ The sixth row of the «Как пользоваться» panel — stage E114, task T-114-2, решение 208.5 (6а):
+// a press over nothing typed and nothing selected switches the layout. The run 1125..1135 is closed
+// by «От автора…» at 1136, so the numeral and the row take the next two free numbers; mirrored by
+// hand in `app.rc`.
+const IDC_ABOUT_HELP_N6: i32 = 1137;
+const IDC_ABOUT_HELP_6: i32 = 1138;
+
 /// The rows of the «Как пользоваться» panel: the numeral, the text and the string row each
 /// text is set from — FR-92а, task Т-23-4.
 ///
@@ -6592,12 +6606,13 @@ const IDC_ABOUT_AUTHOR: i32 = 1136;
 /// this is the list a reader wants in one place and the list a test has to walk. The numerals
 /// are **not** in it — they are template literals with no string row, because a digit reads
 /// the same in both locales.
-const ABOUT_HELP_ROWS: [(i32, i32, u16); 5] = [
+const ABOUT_HELP_ROWS: [(i32, i32, u16); 6] = [
     (IDC_ABOUT_HELP_N1, IDC_ABOUT_HELP_1, IDS_ABOUT_HELP_1),
     (IDC_ABOUT_HELP_N2, IDC_ABOUT_HELP_2, IDS_ABOUT_HELP_2),
     (IDC_ABOUT_HELP_N3, IDC_ABOUT_HELP_3, IDS_ABOUT_HELP_3),
     (IDC_ABOUT_HELP_N4, IDC_ABOUT_HELP_4, IDS_ABOUT_HELP_4),
     (IDC_ABOUT_HELP_N5, IDC_ABOUT_HELP_5, IDS_ABOUT_HELP_5),
+    (IDC_ABOUT_HELP_N6, IDC_ABOUT_HELP_6, IDS_ABOUT_HELP_6),
 ];
 
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
@@ -8313,7 +8328,7 @@ pub const OWNER_DRAWN_LABELS: [i32; 18] = [
 /// `PUSHBUTTON` now — it opens the program's own page — so it belongs to [`ABOUT_BUTTONS`] and
 /// not here. The two lists move together and a guard holds them to it: a control named in both
 /// would be drawn twice, and one named in neither goes blank.
-pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 13] = [
+pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 15] = [
     IDC_ABOUT_VERSION,
     IDC_ABOUT_LINE_1,
     IDC_ABOUT_LINE_2,
@@ -8327,9 +8342,12 @@ pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 13] = [
     IDC_ABOUT_HELP_4,
     IDC_ABOUT_HELP_N5,
     IDC_ABOUT_HELP_5,
+    IDC_ABOUT_HELP_N6,
+    IDC_ABOUT_HELP_6,
 ];
 
-/// The ten statics that stand **inside** the «Как пользоваться» panel — task Т-23-4.
+/// The twelve statics that stand **inside** the «Как пользоваться» panel — task Т-23-4; ten until
+/// stage E114 (task T-114-2) added the sixth row.
 ///
 /// An `SS_OWNERDRAW` static fills the whole of its own rectangle before it writes a word, so
 /// a label on a panel has to be filled with the panel's own colour or it cuts a hole in the
@@ -8337,7 +8355,7 @@ pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 13] = [
 /// works out containment from the rectangles; this window has one panel and ten labels on it,
 /// so the list is written down instead of computed — and a test holds it against the
 /// containment the template actually declares.
-pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 10] = [
+pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 12] = [
     IDC_ABOUT_HELP_N1,
     IDC_ABOUT_HELP_1,
     IDC_ABOUT_HELP_N2,
@@ -8348,20 +8366,23 @@ pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 10] = [
     IDC_ABOUT_HELP_4,
     IDC_ABOUT_HELP_N5,
     IDC_ABOUT_HELP_5,
+    IDC_ABOUT_HELP_N6,
+    IDC_ABOUT_HELP_6,
 ];
 
-/// The five **sentences** of the help panel — the labels that carry a key chip, task Т-26-2.
+/// The six **sentences** of the help panel (five until task T-114-2) — the labels that carry a key chip, task Т-26-2.
 ///
 /// The numerals of [`ABOUT_LABELS_ON_THE_PANEL`] are deliberately absent: a digit has no
 /// placeholder and no chip, and it is drawn by the shared label path like every other label of
 /// this window. The split is what [`on_about_draw_item`] routes on, and it is written down here
 /// rather than tested for at the call site so that the list is one name and not a condition.
-pub const ABOUT_HELP_SENTENCES: [i32; 5] = [
+pub const ABOUT_HELP_SENTENCES: [i32; 6] = [
     IDC_ABOUT_HELP_1,
     IDC_ABOUT_HELP_2,
     IDC_ABOUT_HELP_3,
     IDC_ABOUT_HELP_4,
     IDC_ABOUT_HELP_5,
+    IDC_ABOUT_HELP_6,
 ];
 
 /// The colour roles of one button in one state — FR-92а, task T-11-5a, widened by the
@@ -19577,7 +19598,7 @@ pub fn about_static_color_role(control: i32) -> StaticColorRole {
         // themselves are the full-strength ink of the mock-up's row text and fall to the
         // catch-all below with the name.
         IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
-        | IDC_ABOUT_HELP_N5 => StaticColorRole::Muted,
+        | IDC_ABOUT_HELP_N5 | IDC_ABOUT_HELP_N6 => StaticColorRole::Muted,
         // Spelled out rather than swallowed by the catch-all, so the mirrored identifiers
         // of the template stay load-bearing in exactly one function.
         IDC_ABOUT_ICON | IDC_ABOUT_NAME => StaticColorRole::Label,
@@ -19660,7 +19681,7 @@ fn about_label_face(control: i32, fonts: &DialogFonts) -> (HFONT, Option<i32>) {
         IDC_ABOUT_NAME => (fonts.name(), None),
         IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => (fonts.body(), Some(fonts.body_pitch())),
         IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
-        | IDC_ABOUT_HELP_N5 => (fonts.number(), None),
+        | IDC_ABOUT_HELP_N5 | IDC_ABOUT_HELP_N6 => (fonts.number(), None),
         _ => (fonts.text(), None),
     }
 }

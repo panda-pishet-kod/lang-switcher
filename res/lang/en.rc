@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Select text and press {0} — the selection is converted (if enabled and Ctrl+C works)."
     IDS_ABOUT_HELP_4        "Suspend, settings and exit are in the tray icon."
     IDS_ABOUT_HELP_5        "To change the key: Settings → Hotkey."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc or a click elsewhere cancels"
     IDS_TIP_ACTIVE          "active"
     IDS_TIP_PAUSED          "suspended"

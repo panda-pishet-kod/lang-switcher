@@ -103,6 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Markér tekst, og tryk på {0} — den markerede tekst konverteres (hvis det er slået til, og Ctrl+C virker)."
     IDS_ABOUT_HELP_4        "Pause, indstillinger og afslutning findes på ikonet i meddelelsesområdet."
     IDS_ABOUT_HELP_5        "Skift tast: Indstillinger → Genvejstast."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc eller et klik andetsteds annullerer"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "på pause"

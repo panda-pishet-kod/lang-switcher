@@ -5597,7 +5597,7 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
 ///
 /// Four until task Т-23-4 (решение 82.5) added the «Как пользоваться» block: five numerals and
 /// five rows.
-const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 13] = [
+const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 15] = [
     (1122, "О программе: версия"),
     (1123, "О программе: первая строка"),
     (1124, "О программе: вторая строка"),
@@ -5611,6 +5611,9 @@ const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 13] = [
     (1134, "Как пользоваться: строка 4"),
     (1130, "Как пользоваться: номер 5"),
     (1135, "Как пользоваться: строка 5"),
+    // Stage E114, task T-114-2, решение 208.5 (6а): the sixth row.
+    (1137, "Как пользоваться: номер 6"),
+    (1138, "Как пользоваться: строка 6"),
 ];
 
 /// **Criterion 9 of T-11-18** — read out of the **built** `LangSwitcher.exe`, exactly as the
@@ -9087,6 +9090,7 @@ fn about_client_by_model(face: i32, drawing_dpi: i32, key: &str) -> i32 {
         (1133, settings::IDS_ABOUT_HELP_3),
         (1134, settings::IDS_ABOUT_HELP_4),
         (1135, settings::IDS_ABOUT_HELP_5),
+        (1138, settings::IDS_ABOUT_HELP_6),
     ];
 
     let sheet = Sheet::new(64);
@@ -11574,6 +11578,26 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
             .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
             .expect("the program must name at least one key");
 
+        // ⭐ Stage E114, task T-114-2: the long names a person can give the hotkey, through the one
+        // function every window shows it with — the double press («Shift, Shift», вопрос 159) and
+        // the longest combination, all three modifiers over the widest key (вопрос 157).
+        let double_press = settings::effective_hotkey_name(&settings::Hotkey {
+            key: settings::DOUBLE_TAP_KEY.to_owned(),
+            trigger: "double_tap".to_owned(),
+            ..settings::Hotkey::default()
+        });
+        let combination = settings::effective_hotkey_name(&settings::Hotkey {
+            key: widest_key.clone(),
+            modifiers: vec!["Ctrl".to_owned(), "Alt".to_owned(), "Shift".to_owned()],
+            ..settings::Hotkey::default()
+        });
+
+        assert!(
+            double_press.contains(settings::DOUBLE_TAP_JOINER)
+                && combination.contains(settings::HOTKEY_JOINER),
+            "the long names did not come out as long names: «{double_press}», «{combination}»"
+        );
+
         let mut tightest = (i32::MAX, String::new());
 
         for language in Language::shipped() {
@@ -11585,6 +11609,7 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
                 (1133, settings::IDS_ABOUT_HELP_3),
                 (1134, settings::IDS_ABOUT_HELP_4),
                 (1135, settings::IDS_ABOUT_HELP_5),
+                (1138, settings::IDS_ABOUT_HELP_6),
             ] {
                 let sentence = settings::text(string);
 
@@ -11598,7 +11623,20 @@ fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
                 let width = (units_w * unit_x + 2) / 4;
                 let height = (units_h * unit_y + 4) / 8;
 
-                for key in [widest_key.as_str(), "Pause"] {
+                // ⚠ The combination is held for the sixth row only. Measured by this very test at
+                // stage E114: rows 1132 and 1133 (and 1131 once) wrap past their template slots
+                // with «Ctrl + Alt + Shift + PrintScreen» in many locales — ever since combinations
+                // arrived (вопрос 157), the live fit (`settings::fit_about_help`) lays them out; to
+                // give them taller slots would change the look beyond the sixth row (развилка C4).
+                let keys = [
+                    widest_key.as_str(),
+                    "Pause",
+                    double_press.as_str(),
+                    combination.as_str(),
+                ];
+                let measured = if row == 1138 { &keys[..] } else { &keys[..3] };
+
+                for &key in measured {
                     // SAFETY: the sheet's DC is live and both faces outlive the call; nothing is
                     // drawn — this is the measuring half of the pair.
                     let (lines, needed) = unsafe {
@@ -11707,6 +11745,7 @@ fn the_help_rows_never_overlap_at_any_scale_or_locale() {
         (1133, 1128, settings::IDS_ABOUT_HELP_3),
         (1134, 1129, settings::IDS_ABOUT_HELP_4),
         (1135, 1130, settings::IDS_ABOUT_HELP_5),
+        (1138, 1137, settings::IDS_ABOUT_HELP_6),
     ];
 
     let panel = bounds(1125);
@@ -15361,7 +15400,7 @@ fn the_about_dialog_template_carries_its_elements() {
     // Every element the task names: the icon, the name row, the version row, the two
     // description lines, the «Как пользоваться» block of task Т-23-4 and the one button. One
     // row per element, so a lost control is a failing test and not a smaller window.
-    const ABOUT_CONTROLS: [(u32, &str); 18] = [
+    const ABOUT_CONTROLS: [(u32, &str); 20] = [
         (1120, "иконка программы"),
         (1121, "имя программы"),
         (1122, "строка версии"),
@@ -15380,6 +15419,9 @@ fn the_about_dialog_template_carries_its_elements() {
         (1135, "Как пользоваться: строка 5"),
         // Task Т-32-4, FR-103: the one control this window gained — the way into «От автора».
         (1136, "кнопка «От автора…»"),
+        // Stage E114, task T-114-2, решение 208.5 (6а): the sixth row of the help, numeral and text.
+        (1137, "Как пользоваться: номер 6"),
+        (1138, "Как пользоваться: строка 6"),
         (1, "кнопка «ОК»"),
     ];
 
@@ -15393,7 +15435,7 @@ fn the_about_dialog_template_carries_its_elements() {
     assert_eq!(
         template.controls.len(),
         ABOUT_CONTROLS.len(),
-        "the about dialog carries exactly its eighteen controls and nothing else"
+        "the about dialog carries exactly its twenty controls and nothing else"
     );
 
     // The visible literals, in template order. The version row is empty on purpose — it is
@@ -15413,6 +15455,8 @@ fn the_about_dialog_template_carries_its_elements() {
             "3",
             "4",
             "5",
+            // Stage E114, task T-114-2: the numeral of the sixth row.
+            "6",
             // Task Т-32-4: the button that leads to «От автора». Its caption is a template
             // literal like every other, and FR-94 replaces it on the live window.
             "От автора…",
@@ -15780,6 +15824,9 @@ fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
     assert_eq!(settings::IDS_ABOUT_HELP_3, 3069);
     assert_eq!(settings::IDS_ABOUT_HELP_4, 3070);
     assert_eq!(settings::IDS_ABOUT_HELP_5, 3071);
+    // Stage E114, task T-114-2: the sixth row could not join them — 3072 is the menu's — and takes
+    // the last free number of the block the wizard opened, 3248..3263.
+    assert_eq!(settings::IDS_ABOUT_HELP_6, 3263);
     assert_eq!(
         settings::IDS_MENU_SUSPEND,
         3072,
@@ -16517,6 +16564,7 @@ fn the_help_rows_substitute_the_key_name_where_the_mock_up_names_a_key() {
             settings::IDS_ABOUT_HELP_3,
             settings::IDS_ABOUT_HELP_4,
             settings::IDS_ABOUT_HELP_5,
+            settings::IDS_ABOUT_HELP_6,
         ]
         .iter()
         .map(|id| settings::format_text(*id, &["ScrollLock"]))
@@ -16530,11 +16578,14 @@ fn the_help_rows_substitute_the_key_name_where_the_mock_up_names_a_key() {
                 !row.contains("{0}"),
                 "row {index} kept its placeholder: «{row}»"
             );
+            // Stage E114, task T-114-2: the sixth row names the key again — «нажмите {0}».
+            let carries = index < 3 || index == 5;
+
             assert_eq!(
                 row.contains("ScrollLock"),
-                index < 3,
+                carries,
                 "row {index} must {} the key name: «{row}»",
-                if index < 3 { "carry" } else { "not carry" }
+                if carries { "carry" } else { "not carry" }
             );
             // The mock-up's own word: no row of the help spells a key of its own, or the
             // window would tell a person about a key their program does not answer to.
@@ -16617,6 +16668,8 @@ fn the_about_static_colour_roles_follow_their_table() {
         (1133, theme::StaticColorRole::Label, "справка: строка 3"),
         (1134, theme::StaticColorRole::Label, "справка: строка 4"),
         (1135, theme::StaticColorRole::Label, "справка: строка 5"),
+        (1137, theme::StaticColorRole::Muted, "справка: номер 6"),
+        (1138, theme::StaticColorRole::Label, "справка: строка 6"),
     ];
 
     for (control, expected, what) in cases {
@@ -18292,7 +18345,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// site from the last step of the wizard. Nine arrived and eight left (the group, the issues, the
 /// note of the letter of a trouble, the two thanks) — 240 − 8 + 9, row for row with
 /// `settings::INTERFACE_STRINGS`.
-const FR_94_STRINGS: [(u16, &str, &str); 241] = [
+const FR_94_STRINGS: [(u16, &str, &str); 242] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18561,6 +18614,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 241] = [
         settings::IDS_ABOUT_HELP_5,
         "Сменить клавишу: Настройки → Горячая клавиша.",
         "To change the key: Settings → Hotkey.",
+    ),
+    // Stage E114, task T-114-2, решение 208.5 (6а): the press over nothing typed and nothing
+    // selected switches the layout, and the help says so in its sixth row.
+    (
+        settings::IDS_ABOUT_HELP_6,
+        "Ничего не набрано и не выделено — нажмите {0}: раскладка переключится.",
+        "Nothing typed or selected — press {0} to switch the layout.",
     ),
     (settings::IDS_MENU_SUSPEND, "Приостановить", "Suspend"),
     (settings::IDS_MENU_RESUME, "Возобновить", "Resume"),
@@ -26981,8 +27041,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        241,
-        "two hundred and FORTY-ONE identifiers in use since stage E107, task T-107-3 (решения \
+        242,
+        "two hundred and FORTY-TWO identifiers in use since stage E114, task T-114-2 (решение \
+         208.5, 6а): the sixth row of the help, 3263. Two hundred and forty-one since stage \
+         E107, task T-107-3 (решения \
          199.3, 199.10, 199.11): the appeal goes to the site — nine arrived (3254…3262), eight \
          left. Two hundred and forty since stage L10N, task T-L10N-10 (решения \
          200.10, 200.10а): the separator of a list, the arrow of a cycle and the form of the \

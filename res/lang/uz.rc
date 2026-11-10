@@ -106,6 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Matnni tanlang va {0} bosing — tanlangan qism aylantiriladi (yoqilgan boʻlsa va Ctrl+C ishlasa)."
     IDS_ABOUT_HELP_4        "Toʻxtatib turish, sozlamalar va chiqish — trey belgisida."
     IDS_ABOUT_HELP_5        "Tugmani oʻzgartirish: Sozlamalar → Tezkor tugma."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc yoki boshqa joyni bosish — bekor qilish"
     IDS_TIP_ACTIVE          "faol"
     IDS_TIP_PAUSED          "toʻxtatib turilgan"

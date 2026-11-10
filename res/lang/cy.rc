@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Dewiswch destun a gwasgwch {0} — caiff y testun a ddewiswyd ei drosi (os yw wedi'i alluogi a bod Ctrl+C yn gweithio)."
     IDS_ABOUT_HELP_4        "Mae oedi, gosodiadau a gadael ar gael drwy eicon yr ardal hysbysu."
     IDS_ABOUT_HELP_5        "I newid y fysell: Gosodiadau → Bysell boeth."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Mae Esc neu glicio yn rhywle arall yn canslo"
     IDS_TIP_ACTIVE          "gweithredol"
     IDS_TIP_PAUSED          "wedi oedi"

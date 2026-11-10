@@ -104,6 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Маркирайте текст и натиснете {0} — маркираното се преобразува (ако е включено и Ctrl+C работи)."
     IDS_ABOUT_HELP_4        "Временното спиране, настройките и изходът са в иконата в областта за уведомяване."
     IDS_ABOUT_HELP_5        "За смяна на клавиша: Настройки → Бърз клавиш."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc или щракване другаде — отказ"
     IDS_TIP_ACTIVE          "активна"
     IDS_TIP_PAUSED          "временно спряна"

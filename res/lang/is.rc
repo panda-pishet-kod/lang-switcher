@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Veldu texta og ýttu á {0} — völdum texta er umbreytt (ef kveikt er á því og Ctrl+C virkar)."
     IDS_ABOUT_HELP_4        "Hlé, stillingar og að hætta eru í tákninu á tilkynningasvæðinu."
     IDS_ABOUT_HELP_5        "Til að breyta lyklinum: Stillingar → Flýtilykill."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc eða smellur annars staðar hættir við"
     IDS_TIP_ACTIVE          "virkt"
     IDS_TIP_PAUSED          "í hléi"

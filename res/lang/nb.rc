@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Merk tekst og trykk {0} – den merkede teksten konverteres (hvis det er slått på og Ctrl+C fungerer)."
     IDS_ABOUT_HELP_4        "Du finner pause, innstillinger og avslutting i ikonet i varslingsområdet."
     IDS_ABOUT_HELP_5        "Slik bytter du tast: Innstillinger → Hurtigtast."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc eller et klikk utenfor avbryter"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "på pause"

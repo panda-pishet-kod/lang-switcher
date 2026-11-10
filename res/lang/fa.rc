@@ -110,6 +110,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "متنی را انتخاب کنید و {0} را فشار دهید — متن انتخاب‌شده تبدیل می‌شود (اگر فعال باشد و Ctrl+C کار کند)."
     IDS_ABOUT_HELP_4        "توقف موقت، تنظیمات و خروج در نماد سینی هستند."
     IDS_ABOUT_HELP_5        "برای تغییر کلید: تنظیمات ← کلید میان‌بر."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc یا کلیک در جای دیگر آن را لغو می‌کند"
     IDS_TIP_ACTIVE          "فعال"
     IDS_TIP_PAUSED          "متوقف"

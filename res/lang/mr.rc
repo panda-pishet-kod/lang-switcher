@@ -104,6 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "मजकूर निवडा आणि {0} दाबा — निवडलेला मजकूर रूपांतरित होतो (हे चालू असल्यास आणि Ctrl+C काम करत असल्यास)."
     IDS_ABOUT_HELP_4        "थांबवणे, सेटिंग्ज आणि बाहेर पडणे — सूचना क्षेत्रातील चिन्हात आहेत."
     IDS_ABOUT_HELP_5        "की बदलण्यासाठी: सेटिंग्ज → हॉटकी."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "रद्द करण्यासाठी Esc दाबा किंवा इतरत्र क्लिक करा"
     IDS_TIP_ACTIVE          "सक्रिय"
     IDS_TIP_PAUSED          "थांबवले"

@@ -107,6 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "వచనాన్ని ఎంచుకుని {0} నొక్కండి — ఎంచుకున్నది మారుతుంది (ఇది ఆన్‌లో ఉండి, Ctrl+C పని చేస్తే)."
     IDS_ABOUT_HELP_4        "నిలిపివేయడం, సెట్టింగ్‌లు, నిష్క్రమణ — ట్రే చిహ్నంలో ఉన్నాయి."
     IDS_ABOUT_HELP_5        "కీని మార్చడానికి: సెట్టింగ్‌లు → హాట్‌కీ."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc లేదా వేరే చోట క్లిక్ చేస్తే రద్దవుతుంది"
     IDS_TIP_ACTIVE          "సక్రియం"
     IDS_TIP_PAUSED          "నిలిపివేయబడింది"

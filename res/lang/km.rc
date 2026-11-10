@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ជ្រើសរើសអត្ថបទ រួចចុច {0} — អត្ថបទដែលបានជ្រើសរើសនឹងត្រូវបានបម្លែង (បើបានបើក ហើយ Ctrl+C ដំណើរការ)។"
     IDS_ABOUT_HELP_4        "ការផ្អាក ការកំណត់ និងការចាកចេញ មាននៅក្នុងរូបតំណាងក្នុងតំបន់ជូនដំណឹង។"
     IDS_ABOUT_HELP_5        "ដើម្បីប្ដូរគ្រាប់ចុច: ការកំណត់ → គ្រាប់ចុចផ្លូវកាត់។"
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc ឬចុចកន្លែងផ្សេង ដើម្បីបោះបង់"
     IDS_TIP_ACTIVE          "សកម្ម"
     IDS_TIP_PAUSED          "បានផ្អាក"

@@ -106,6 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Selecione o texto e pressione {0} — a seleção é convertida (se ativado e o Ctrl+C funcionar)."
     IDS_ABOUT_HELP_4        "Pausa, configurações e saída ficam no ícone da área de notificação."
     IDS_ABOUT_HELP_5        "Trocar a tecla: Configurações → Atalho."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc ou um clique fora cancela"
     IDS_TIP_ACTIVE          "ativo"
     IDS_TIP_PAUSED          "pausado"

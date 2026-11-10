@@ -104,6 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Означете текст и притиснете {0} — означеното се претвора (ако е вклучено и Ctrl+C работи)."
     IDS_ABOUT_HELP_4        "Паузирањето, поставките и излезот се во иконата во областа за известување."
     IDS_ABOUT_HELP_5        "За промена на тастерот: Поставки → Кратенка."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc или клик на друго место — откажување"
     IDS_TIP_ACTIVE          "активна"
     IDS_TIP_PAUSED          "паузирана"

@@ -111,6 +111,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Seleziona il testo e premi {0} — la selezione viene convertita (se l'opzione è attiva e Ctrl+C funziona)."
     IDS_ABOUT_HELP_4        "Sospensione, impostazioni e uscita sono nell'icona dell'area di notifica."
     IDS_ABOUT_HELP_5        "Cambiare tasto: Impostazioni → Scorciatoia."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc o un clic fuori annulla"
     IDS_TIP_ACTIVE          "attivo"
     IDS_TIP_PAUSED          "sospeso"

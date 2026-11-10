@@ -109,6 +109,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Valitse teksti ja paina {0} — valittu teksti muunnetaan (jos asetus on käytössä ja Ctrl+C toimii)."
     IDS_ABOUT_HELP_4        "Keskeytys, asetukset ja lopetus löytyvät ilmaisinalueen kuvakkeesta."
     IDS_ABOUT_HELP_5        "Näppäimen vaihtaminen: Asetukset → Pikanäppäin."
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc tai napsautus muualle peruuttaa"
     IDS_TIP_ACTIVE          "aktiivinen"
     IDS_TIP_PAUSED          "keskeytetty"

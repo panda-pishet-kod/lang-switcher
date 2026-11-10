@@ -105,6 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "टेक्स्ट चुनें और {0} दबाएँ — चुना हुआ टेक्स्ट रूपांतरित हो जाएगा (अगर यह सुविधा चालू है और Ctrl+C काम करता है)।"
     IDS_ABOUT_HELP_4        "रोकना, सेटिंग्स और बाहर निकलना — ट्रे आइकन में।"
     IDS_ABOUT_HELP_5        "कुंजी बदलने के लिए: सेटिंग्स → हॉटकी।"
+    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
     IDS_CAPTURE_HINT        "Esc या कहीं और क्लिक करने पर रद्द हो जाएगा"
     IDS_TIP_ACTIVE          "सक्रिय"
     IDS_TIP_PAUSED          "रुका हुआ"
