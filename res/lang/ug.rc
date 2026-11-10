@@ -110,7 +110,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "تېكىستنى تاللاپ {0} نى بېسىڭ — تاللانغان تېكىست ئايلىنىدۇ (ئەگەر ئوچۇق بولسا ۋە Ctrl+C ئىشلىسە)."
     IDS_ABOUT_HELP_4        "توختىتىش، تەڭشەكلەر ۋە چىقىش ئۇقتۇرۇش رايونىدىكى سىنبەلگىدە."
     IDS_ABOUT_HELP_5        "كۇنۇپكىنى ئۆزگەرتىش ئۈچۈن: تەڭشەكلەر ← تېز كۇنۇپكا."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "ھېچنېمە يېزىلمىغان ۋە تاللانمىغان بولسا، {0} نى بېسىڭ: ھەرپتاختا ئالمىشىدۇ."
     IDS_CAPTURE_HINT        "Esc ياكى باشقا يەرنى چېكىش بىكار قىلىدۇ"
     IDS_TIP_ACTIVE          "ئاكتىپ"
     IDS_TIP_PAUSED          "توختىتىلغان"

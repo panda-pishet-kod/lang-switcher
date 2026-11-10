@@ -106,7 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "पाठ चयन गरेर {0} थिच्नुहोस् — चयन गरिएको पाठ रूपान्तरण हुन्छ (यो सक्रिय र Ctrl+C काम गरिरहेको भए)।"
     IDS_ABOUT_HELP_4        "स्थगित, सेटिङ र बाहिर निस्कने विकल्प सूचना क्षेत्रको आइकनमा छन्।"
     IDS_ABOUT_HELP_5        "कुञ्जी बदल्न: सेटिङ → सर्टकट कुञ्जी।"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "केही पनि टाइप वा चयन गरिएको छैन भने {0} थिच्नुहोस्: लेआउट बदलिन्छ।"
     IDS_CAPTURE_HINT        "रद्द गर्न Esc थिच्नुहोस् वा अन्त क्लिक गर्नुहोस्"
     IDS_TIP_ACTIVE          "सक्रिय"
     IDS_TIP_PAUSED          "स्थगित"

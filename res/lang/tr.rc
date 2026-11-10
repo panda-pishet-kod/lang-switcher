@@ -110,7 +110,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Metni seçip {0} tuşuna basın — seçim dönüştürülür (özellik açıksa ve Ctrl+C çalışıyorsa)."
     IDS_ABOUT_HELP_4        "Duraklatma, ayarlar ve çıkış bildirim alanı simgesindedir."
     IDS_ABOUT_HELP_5        "Tuşu değiştirmek: Ayarlar → Kısayol tuşu."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Yazılmış veya seçilmiş bir şey yok — {0} tuşuna basın: düzen değişir."
     IDS_CAPTURE_HINT        "Esc ya da dışarı tıklamak iptal eder"
     IDS_TIP_ACTIVE          "etkin"
     IDS_TIP_PAUSED          "duraklatıldı"

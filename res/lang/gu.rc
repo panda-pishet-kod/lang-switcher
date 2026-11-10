@@ -105,7 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ટેક્સ્ટ પસંદ કરો અને {0} દબાવો — પસંદ કરેલો ભાગ રૂપાંતરિત થશે (જો આ ચાલુ હોય અને Ctrl+C કામ કરતું હોય)."
     IDS_ABOUT_HELP_4        "થોભાવવું, સેટિંગ્સ અને બહાર નીકળવું — સૂચના ક્ષેત્રના આઇકનમાં છે."
     IDS_ABOUT_HELP_5        "કી બદલવા માટે: સેટિંગ્સ → હોટકી."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "કંઈ ટાઇપ કે પસંદ કરેલું નથી — {0} દબાવો: લેઆઉટ બદલાઈ જશે."
     IDS_CAPTURE_HINT        "Esc અથવા બીજે ક્યાંક ક્લિક કરવાથી રદ થાય છે"
     IDS_TIP_ACTIVE          "સક્રિય"
     IDS_TIP_PAUSED          "થોભાવેલ"

@@ -111,7 +111,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Zaznacz tekst i naciśnij {0} — zaznaczenie zostanie przekonwertowane (jeśli jest to włączone i Ctrl+C działa)."
     IDS_ABOUT_HELP_4        "Wstrzymanie, ustawienia i wyjście są w ikonie w zasobniku."
     IDS_ABOUT_HELP_5        "Zmiana klawisza: Ustawienia → Skrót klawiszowy."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Nic nie napisano ani nie zaznaczono — naciśnij {0}: układ się przełączy."
     IDS_CAPTURE_HINT        "Esc albo kliknięcie obok anuluje"
     IDS_TIP_ACTIVE          "aktywna"
     IDS_TIP_PAUSED          "wstrzymana"

@@ -105,7 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ਟੈਕਸਟ ਚੁਣੋ ਅਤੇ {0} ਦਬਾਓ — ਚੁਣਿਆ ਹਿੱਸਾ ਰੂਪਾਂਤਰਿਤ ਹੋ ਜਾਵੇਗਾ (ਜੇ ਇਹ ਚਾਲੂ ਹੈ ਅਤੇ Ctrl+C ਕੰਮ ਕਰਦਾ ਹੈ)।"
     IDS_ABOUT_HELP_4        "ਰੋਕਣਾ, ਸੈਟਿੰਗਾਂ ਅਤੇ ਬਾਹਰ ਜਾਣਾ — ਸੂਚਨਾ ਖੇਤਰ ਦੇ ਆਈਕਨ ਵਿੱਚ ਹਨ।"
     IDS_ABOUT_HELP_5        "ਕੁੰਜੀ ਬਦਲਣ ਲਈ: ਸੈਟਿੰਗਾਂ → ਹੌਟਕੀ।"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "ਕੁਝ ਵੀ ਟਾਈਪ ਜਾਂ ਚੁਣਿਆ ਨਹੀਂ ਗਿਆ — {0} ਦਬਾਓ: ਲੇਆਉਟ ਬਦਲ ਜਾਵੇਗਾ।"
     IDS_CAPTURE_HINT        "Esc ਜਾਂ ਕਿਤੇ ਹੋਰ ਕਲਿੱਕ ਕਰਨ ਨਾਲ ਰੱਦ ਹੋ ਜਾਂਦਾ ਹੈ"
     IDS_TIP_ACTIVE          "ਸਰਗਰਮ"
     IDS_TIP_PAUSED          "ਰੁਕਿਆ ਹੋਇਆ"

@@ -107,7 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "உரையைத் தேர்ந்தெடுத்து {0} அழுத்தவும் — தேர்வு மாற்றப்படும் (இயக்கப்பட்டு Ctrl+C செயல்பட்டால்)."
     IDS_ABOUT_HELP_4        "இடைநிறுத்தம், அமைப்புகள், வெளியேறுதல் — அறிவிப்புப் பகுதி ஐகானில்."
     IDS_ABOUT_HELP_5        "மாற்ற: அமைப்புகள் → குறுக்குவழி விசை."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "தட்டச்சோ தேர்வோ இல்லையா? {0} அழுத்தவும் — தளவமைப்பு மாறும்."
     IDS_CAPTURE_HINT        "Esc அல்லது வேறிடத்தில் சொடுக்கினால் ரத்தாகும்"
     IDS_TIP_ACTIVE          "செயலில்"
     IDS_TIP_PAUSED          "இடைநிறுத்தப்பட்டது"

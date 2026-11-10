@@ -105,7 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Виділіть текст і натисніть {0} — конвертується виділене (якщо це увімкнено і працює Ctrl+C)."
     IDS_ABOUT_HELP_4        "Призупинення, налаштування та вихід — у значку в треї."
     IDS_ABOUT_HELP_5        "Змінити клавішу: Налаштування → Гаряча клавіша."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Нічого не набрано й не виділено — натисніть {0}: розкладка перемкнеться."
     IDS_CAPTURE_HINT        "Esc або клік повз — скасування"
     IDS_TIP_ACTIVE          "активна"
     IDS_TIP_PAUSED          "призупинена"

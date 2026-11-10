@@ -103,7 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Markera text och tryck på {0} — den markerade texten konverteras (om det är aktiverat och Ctrl+C fungerar)."
     IDS_ABOUT_HELP_4        "Paus, inställningar och avslut finns på ikonen i meddelandefältet."
     IDS_ABOUT_HELP_5        "Byt tangent: Inställningar → Kortkommando."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Inget skrivet eller markerat? Tryck på {0}: layouten byts."
     IDS_CAPTURE_HINT        "Esc eller ett klick någon annanstans avbryter"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "pausad"

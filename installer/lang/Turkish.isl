@@ -8,3 +8,9 @@ LocalCertFailed=Lang Switcher kuruldu, ancak yönetici olarak çalıştırılan 
 RemoveSettingsQuestion=Lang Switcher ayar dosyası da kaldırılsın mı?
 RemoveSettingsKeep=Ayarlarınızı sonraki bir yeniden kurulum için saklamak üzere “Hayır” seçin.
 AuthorSlogan=sevgiyle yapılmış programlar
+
+; Stage E114 (decision 208.8): the official ReadyLabel2b names the button Sonraki, while the button
+; of the Ready page is ButtonInstall = Kur. The message is given again here with the name of the button
+; in the Turkish quotation marks, without its & accelerator, and the anchor word düğme (RULES 16, 17).
+[Messages]
+ReadyLabel2b=Kuruluma başlamak için “Kur” düğmesine tıklayın.

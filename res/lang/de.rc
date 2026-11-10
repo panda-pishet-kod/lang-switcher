@@ -109,7 +109,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Text markieren und {0} drücken — die Markierung wird umgewandelt (falls aktiviert und Ctrl+C funktioniert)."
     IDS_ABOUT_HELP_4        "Anhalten, Einstellungen und Beenden sind im Infobereichssymbol."
     IDS_ABOUT_HELP_5        "Taste ändern: Einstellungen → Tastenkürzel."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Nichts getippt oder markiert — {0} drücken: das Layout wechselt."
     IDS_CAPTURE_HINT        "Esc oder ein Klick daneben bricht ab"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "angehalten"

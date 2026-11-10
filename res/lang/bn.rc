@@ -104,7 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "টেক্সট নির্বাচন করে {0} চাপুন — নির্বাচিত অংশ রূপান্তরিত হবে (চালু থাকলে এবং Ctrl+C কাজ করলে)।"
     IDS_ABOUT_HELP_4        "স্থগিত করা, সেটিংস ও প্রস্থান — বিজ্ঞপ্তি এলাকার আইকনে।"
     IDS_ABOUT_HELP_5        "কী বদলাতে: সেটিংস → হটকি।"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "কিছু টাইপ বা নির্বাচন করা নেই? {0} চাপুন: লেআউট বদলে যাবে।"
     IDS_CAPTURE_HINT        "Esc বা অন্য কোথাও ক্লিক করলে বাতিল"
     IDS_TIP_ACTIVE          "সক্রিয়"
     IDS_TIP_PAUSED          "স্থগিত"

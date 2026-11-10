@@ -106,7 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Матнни танланг ва {0} босинг — танланган қисм айлантирилади (ёқилган бўлса ва Ctrl+C ишласа)."
     IDS_ABOUT_HELP_4        "Тўхтатиб туриш, созламалар ва чиқиш — трей белгисида."
     IDS_ABOUT_HELP_5        "Тугмани ўзгартириш: Созламалар → Тезкор тугма."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Ҳеч нарса ёзилмаган ва танланмаган — {0} босинг: схема алмашади."
     IDS_CAPTURE_HINT        "Esc ёки бошқа жойни босиш — бекор қилиш"
     IDS_TIP_ACTIVE          "фаол"
     IDS_TIP_PAUSED          "тўхтатиб турилган"
