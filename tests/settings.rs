@@ -20426,21 +20426,25 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
 
     // The subject per locale, as the panel already spelled it before this task (glossary of the
     // stage, `scratchpad-E34\glossary.md`); lower-case stems, matched case-insensitively.
-    let subject: [(&str, &str); 14] = [
-        ("ru", "перехват"),
-        ("en", "hook"),
-        ("uk", "перехоплення"),
-        ("de", "hook"),
-        ("fr", "interception"),
-        ("es", "interceptación"),
-        ("pt", "interceptação"),
-        ("it", "intercettazione"),
-        ("pl", "przechwytywani"),
-        ("cs", "zachytávání"),
-        ("tr", "yakalama"),
-        ("el", "παρακολούθηση"),
-        ("he", "מעקב"),
-        ("ar", "مراقبة"),
+    // ⭐ Stage E114, T-114-7 (б): Greek and Hebrew took the words of the site — «πιάσιμο» (in the
+    // line of the health in the genitive, «πιασίματος», so a locale may name more than one form)
+    // and «לכידת ההקשות», instead of «παρακολούθηση» and «מעקב», which read as «surveillance»
+    // beside the promise that there is none.
+    let subject: [(&str, &[&str]); 14] = [
+        ("ru", &["перехват"]),
+        ("en", &["hook"]),
+        ("uk", &["перехоплення"]),
+        ("de", &["hook"]),
+        ("fr", &["interception"]),
+        ("es", &["interceptación"]),
+        ("pt", &["interceptação"]),
+        ("it", &["intercettazione"]),
+        ("pl", &["przechwytywani"]),
+        ("cs", &["zachytávání"]),
+        ("tr", &["yakalama"]),
+        ("el", &["πιάσιμο", "πιασίματος"]),
+        ("he", &["לכידת ההקשות"]),
+        ("ar", &["مراقبة"]),
     ];
 
     let mut missing: Vec<String> = Vec::new();
@@ -20454,7 +20458,7 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
         // ⚠ A run and not a word: Thai, Lao and Khmer put no space between words (wave 1 of
         // stage E108 — «การดักจับ» stood in both Thai lines inside longer runs); and three, not
         // four: the Urdu word for the hook is «ہُک», three code points with its damma.
-        let Some(stem) = subject.iter().find(|(t, _)| *t == tag).map(|(_, s)| *s) else {
+        let Some(forms) = subject.iter().find(|(t, _)| *t == tag).map(|(_, s)| *s) else {
             let letters = |id| -> Vec<char> {
                 product
                     .string_of_langid(langid, id)
@@ -20493,8 +20497,8 @@ fn the_state_lines_carry_their_subject_in_every_locale() {
             let line = product.string_of_langid(langid, id).to_lowercase();
             println!("{tag} {id}: {line}");
 
-            if !line.contains(stem) {
-                missing.push(format!("{tag} {id}: «{line}» lacks «{stem}»"));
+            if !forms.iter().any(|form| line.contains(form)) {
+                missing.push(format!("{tag} {id}: «{line}» lacks any of {forms:?}"));
             }
         }
     }
