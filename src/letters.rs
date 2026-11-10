@@ -1049,8 +1049,9 @@ pub mod links {
     /// more, each on the line of the controller that its pages are out (2026-11-10: every address
     /// 200 and in its own `lang`). Both Serbian scripts read `/sr/` under the mark `sr` (the page is
     /// `lang="sr-Latn"`), Portuguese reads `/pt/` under `pt` (the page is `lang="pt-BR"`). In the
-    /// order of [`Language::ALL`].
-    const OWN_PAGES: [(Language, &str, &str); 18] = [
+    /// order of [`Language::ALL`]. Hungarian after them, on the line of the controller of the same
+    /// day (208.1: both addresses 200, `lang=hu`).
+    const OWN_PAGES: [(Language, &str, &str); 19] = [
         (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"),
         (Language::De, "https://panda-pishet-kod.dev/de/langswitcher/download/?lang=de", "https://panda-pishet-kod.dev/de/langswitcher/?lang=de"),
         (Language::Fr, "https://panda-pishet-kod.dev/fr/langswitcher/download/?lang=fr", "https://panda-pishet-kod.dev/fr/langswitcher/?lang=fr"),
@@ -1069,6 +1070,7 @@ pub mod links {
         (Language::SrLatn, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr"),
         (Language::Bg, "https://panda-pishet-kod.dev/bg/langswitcher/download/?lang=bg", "https://panda-pishet-kod.dev/bg/langswitcher/?lang=bg"),
         (Language::Nl, "https://panda-pishet-kod.dev/nl/langswitcher/download/?lang=nl", "https://panda-pishet-kod.dev/nl/langswitcher/?lang=nl"),
+        (Language::Hu, "https://panda-pishet-kod.dev/hu/langswitcher/download/?lang=hu", "https://panda-pishet-kod.dev/hu/langswitcher/?lang=hu"),
     ];
 
     /// The row of [`OWN_PAGES`] for this language, if it has one.
