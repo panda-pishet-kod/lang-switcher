@@ -2663,6 +2663,19 @@ fn release_automation() {
 // roads measured (a look every 250 ms, a question only on the press) cost as much or did not
 // recognise more; the owner chose this one by those numbers (решение 208.15).
 //
+// ⭐ **Why the event is passed on, and not only listened for — the experiments of 209.29.** With the
+// pass-on removed whole (the handler returning at once) Edge and Firefox still raised the `WinEvent`
+// for the move into the password field, 3 of 3 each — a listener of UI Automation alone is what they
+// wait for; **Chrome 157 did not: the password after `Tab` was converted, 0 of 3** (`out\q114\
+// d-20261110-213406.md`, row F), and with the pass-on it is kept, 3 of 3 (`b-20261110-205405.md`).
+// With no listener at all Edge converts it too, 3 of 3 (row N0). So the pass-on stays.
+//
+// ⚠ **Not measured — the echo of an Electron window.** The pass-on goes past the deduplication of
+// Т-10-0е (the triple window / object / child of a `WinEvent`), which keeps the trailing focus echo
+// of VS Code from erasing what was typed after a click, an Enter or this program's own injection;
+// FR-14 covers only the echo of typing. Whether an Electron window echoes through UI Automation too
+// is not measured (no Electron application on the stand) — SPEC §10, row 48.
+//
 // The listener runs on a thread of its own (`app` owns it) in the **multithreaded** apartment — not on the
 // watcher thread, an STA with a message queue, where UI Automation lets sent messages in while a
 // call is out (the урок of stage Э37) — and does nothing in the handler but post
