@@ -134,10 +134,10 @@ use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 // is what let four repairs of defect E go past both. See [`foreground_layout`].
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
-    MB_ICONINFORMATION, MB_OK, MB_RIGHT, MB_RTLREADING, MB_SETFOREGROUND, MESSAGEBOX_STYLE, MSG,
-    MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW, UnregisterClassW,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WNDCLASSEXW, WS_EX_TOOLWINDOW,
-    WS_POPUP,
+    KillTimer, MB_ICONINFORMATION, MB_OK, MB_RIGHT, MB_RTLREADING, MB_SETFOREGROUND,
+    MESSAGEBOX_STYLE, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW, SetTimer,
+    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WM_TIMER,
+    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 // FR-100, task Т-21-5 and the tuning after the acceptance by ear. `PlaySoundW` is exported by
 // `winmm.dll`; the `windows` crate puts it under `Win32::Media::Audio` — hence the import
@@ -3765,6 +3765,41 @@ unsafe extern "system" fn window_proc(
             // The watcher window only — the gate the probe above uses (SEC-05).
             if message == crate::guard::WM_APP_FOCUS_EVENT && is_watcher_window(hwnd) {
                 let _ = crate::guard::forward_focus_event();
+            }
+
+            // **FR-10, FR-84 — stage E114, решение 208.14.** A window change the gate of Р-60
+            // turned away, posted by the `WinEvent` callback of `watchdog` to this very thread: the
+            // watcher looks at the window in front again for two seconds, on a timer of its own
+            // window. The watcher window only (SEC-05); the message carries nothing, and a look
+            // acts only on a change the program has not been told of.
+            if message == crate::watchdog::WM_APP_RECHECK_FOREGROUND && is_watcher_window(hwnd) {
+                crate::watchdog::arm_foreground_recheck();
+
+                // SAFETY: the window is this thread's own (checked above) and the timer is
+                // replaced, not doubled, when it is set again; `None` asks for `WM_TIMER`.
+                let set = unsafe {
+                    SetTimer(
+                        Some(hwnd),
+                        crate::watchdog::FOREGROUND_RECHECK_TIMER_ID,
+                        crate::watchdog::FOREGROUND_RECHECK_MS,
+                        None,
+                    )
+                };
+
+                if set == 0 {
+                    report_non_critical("SetTimer", &WinError::from_thread());
+                }
+            }
+
+            if message == WM_TIMER
+                && wparam.0 == crate::watchdog::FOREGROUND_RECHECK_TIMER_ID
+                && is_watcher_window(hwnd)
+                && !crate::watchdog::recheck_foreground()
+            {
+                // SAFETY: the timer of this window set by the arm above; a timer already gone
+                // makes the call fail, which changes nothing.
+                let _ =
+                    unsafe { KillTimer(Some(hwnd), crate::watchdog::FOREGROUND_RECHECK_TIMER_ID) };
             }
 
             // **FR-80 — task T-06-2.** Four messages, and each is answered on one window only:

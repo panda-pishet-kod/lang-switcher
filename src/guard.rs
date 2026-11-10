@@ -2915,13 +2915,8 @@ pub fn forward_focus_event() -> bool {
     // of the `WinEvent` times `watchdog::request_flush` is given everywhere else.
     let time = unsafe { GetMessageTime() } as u32;
 
-    crate::watchdog::request_flush(time, crate::watchdog::Cause::FocusChange);
-
-    if !crate::app::post_to_input_thread(crate::watchdog::WM_APP_FLUSH) {
-        crate::watchdog::note_flush_post_refused();
-    }
-
-    let _ = crate::app::post_to_input_thread(crate::watchdog::WM_APP_LAYOUT);
+    // The body the `WinEvent` callback passes its own events on by (stage E114: one body).
+    crate::watchdog::pass_on(time, crate::watchdog::Cause::FocusChange);
 
     true
 }

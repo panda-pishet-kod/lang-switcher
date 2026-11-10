@@ -356,6 +356,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::RemoteDesktop::{
     NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
 };
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::{
     GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
@@ -364,12 +365,12 @@ use windows::Win32::UI::Input::{
 use windows::Win32::UI::WindowsAndMessaging::{
     DBT_DEVTYP_DEVICEINTERFACE, DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE,
     EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GA_ROOT, GetAncestor,
-    GetForegroundWindow, GetMessageTime, HDEVNOTIFY, KillTimer, PBT_APMRESUMEAUTOMATIC,
-    RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_4_DOWN,
-    RI_MOUSE_BUTTON_5_DOWN, RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT,
-    WM_INPUT_DEVICE_CHANGE, WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE,
-    WTS_CONSOLE_DISCONNECT, WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK,
+    GetForegroundWindow, GetMessageTime, GetWindowThreadProcessId, HDEVNOTIFY, KillTimer,
+    PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN,
+    RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN, RegisterDeviceNotificationW, SetTimer,
+    UnregisterDeviceNotification, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
+    WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_POWERBROADCAST, WM_TIMER,
+    WM_WTSSESSION_CHANGE, WTS_CONSOLE_DISCONNECT, WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK,
 };
 use windows::core::{Error as WinError, GUID, PCWSTR, Result as WinResult};
 
@@ -2109,6 +2110,148 @@ impl Drop for Watching {
     }
 }
 
+/// The private message the `WinEvent` callback posts to the **watcher** thread when the gate of
+/// [`concerns_the_foreground`] has turned away an `EVENT_SYSTEM_FOREGROUND` — stage E114, решение
+/// 208.14. `WM_APP + 23`, the next free number. `app::window_proc` answers it on the watcher window
+/// by arming [`FOREGROUND_RECHECK_TIMER_ID`]; SEC-05: it carries nothing, and a forged one buys a
+/// few looks at the foreground that act only on a change the program has not been told of.
+pub const WM_APP_RECHECK_FOREGROUND: u32 = WM_APP + 23;
+
+/// The timer of the watcher window that drives the re-check — stage E114, решение 208.14. The
+/// other two timers of this module ([`LIVENESS_TIMER_ID`], the fault timer of SEC-04a) live on the
+/// input window; this one on the watcher window, where the gate runs.
+pub const FOREGROUND_RECHECK_TIMER_ID: usize = 3;
+
+/// The period of the re-check, ms, and how many looks one turned-away event buys: two seconds in
+/// all. A person who has just come to a window types a word before pressing the hotkey, which
+/// takes longer than one period; the stand's `j-np-open` (a window started, 0.7 s, then brought
+/// to the front) falls inside the two seconds.
+pub const FOREGROUND_RECHECK_MS: u32 = 250;
+
+/// See [`FOREGROUND_RECHECK_MS`].
+pub const FOREGROUND_RECHECK_TICKS: u32 = 8;
+
+/// The root window of the last flush event that passed the gate — the window the program was last
+/// told is in front. A value, compared and never dereferenced. Stage E114, решение 208.14.
+static LAST_FOREGROUND: AtomicIsize = AtomicIsize::new(0);
+
+/// The looks the re-check has left; zero when none is running.
+static RECHECK_LEFT: AtomicU32 = AtomicU32::new(0);
+
+/// How many times a re-check found a change of window the gate had turned away, and passed it on.
+static FOREGROUND_RECHECKS: AtomicU32 = AtomicU32::new(0);
+
+/// The count of [`FOREGROUND_RECHECKS`] — public for the tests of the module.
+pub fn foreground_rechecks() -> u32 {
+    FOREGROUND_RECHECKS.load(Ordering::Relaxed)
+}
+
+/// One look of the re-check — what it decides, given what it sees. Stage E114, решение 208.14.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecheckStep {
+    /// The window in front is not the one the program was last told of: pass the change on.
+    PassOn,
+    /// Nothing unseen yet: look again, this many looks left.
+    Again(u32),
+    /// No look left, or none was running: stop the timer.
+    Stop,
+}
+
+/// The decision of one look, as a pure function: `left` looks remain, `foreground` is the window
+/// in front now (0 — none, the moment between two windows), `last` the root of the last event
+/// that passed the gate, `own` whether the window in front belongs to this process.
+///
+/// **This process's own windows are not a change** — `WINEVENT_SKIPOWNPROCESS` keeps their events
+/// away on purpose (the tray menu must not flush the word about to be converted), and a re-check
+/// must not bring that flush back by the side door.
+pub fn recheck_step(left: u32, foreground: isize, last: isize, own: bool) -> RecheckStep {
+    if left == 0 {
+        return RecheckStep::Stop;
+    }
+
+    if foreground != 0 && foreground != last && !own {
+        return RecheckStep::PassOn;
+    }
+
+    match left - 1 {
+        0 => RecheckStep::Stop,
+        more => RecheckStep::Again(more),
+    }
+}
+
+/// Arms the re-check: [`FOREGROUND_RECHECK_TICKS`] looks. Called by `app::window_proc` on
+/// [`WM_APP_RECHECK_FOREGROUND`], which then sets the timer; a re-check already running starts
+/// over.
+pub fn arm_foreground_recheck() {
+    RECHECK_LEFT.store(FOREGROUND_RECHECK_TICKS, Ordering::Relaxed);
+}
+
+/// One look of the re-check, on the tick of [`FOREGROUND_RECHECK_TIMER_ID`] — answers whether the
+/// timer is to go on. A change of window the program has not been told of is passed on exactly as
+/// the `WinEvent` callback passes on `EVENT_SYSTEM_FOREGROUND` ([`pass_on`]: the flush of FR-10,
+/// the probe of FR-72 and FR-84, the layout question of FR-21), timed at the tick.
+///
+/// Two read-only window queries and one more for the owner of the window in front — the budget
+/// of the callback itself, four times a second for at most two seconds after a turned-away event.
+pub fn recheck_foreground() -> bool {
+    // SAFETY: no arguments, nothing of ours is touched; null when no window is in front.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    let own = !foreground.0.is_null() && {
+        let mut pid = 0u32;
+        // SAFETY: the handle is read by value and the one pointer is a local of this frame; a
+        // window that is gone answers 0 and leaves `pid` 0, which is not this process.
+        let _ = unsafe { GetWindowThreadProcessId(foreground, Some(&raw mut pid)) };
+        // SAFETY: no arguments.
+        pid == unsafe { GetCurrentProcessId() }
+    };
+
+    let step = recheck_step(
+        RECHECK_LEFT.load(Ordering::Relaxed),
+        foreground.0 as isize,
+        LAST_FOREGROUND.load(Ordering::Relaxed),
+        own,
+    );
+
+    match step {
+        RecheckStep::PassOn => {
+            RECHECK_LEFT.store(0, Ordering::Relaxed);
+            LAST_FOREGROUND.store(foreground.0 as isize, Ordering::Relaxed);
+            FOREGROUND_RECHECKS.fetch_add(1, Ordering::Relaxed);
+            // SAFETY: no arguments; the time of the `WM_TIMER` being handled, in the tick domain
+            // of the `WinEvent` times.
+            let time = unsafe { GetMessageTime() } as u32;
+            pass_on(time, Cause::WindowChange);
+            false
+        }
+        RecheckStep::Again(left) => {
+            RECHECK_LEFT.store(left, Ordering::Relaxed);
+            true
+        }
+        RecheckStep::Stop => {
+            RECHECK_LEFT.store(0, Ordering::Relaxed);
+            false
+        }
+    }
+}
+
+/// The root of `window` when that root is the window in front, `None` otherwise — the gate of
+/// task T-10-0 with the root kept, so that the callback can remember the window it was told of
+/// ([`LAST_FOREGROUND`]) without a third query.
+fn foreground_root(window: HWND) -> Option<isize> {
+    // SAFETY: as in `concerns_the_foreground` below, whose two calls these are.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    if foreground.0.is_null() {
+        return None;
+    }
+
+    // SAFETY: as in `concerns_the_foreground` below.
+    let root = unsafe { GetAncestor(window, GA_ROOT) };
+
+    (root == foreground).then_some(root.0 as isize)
+}
+
 /// Whether a flush event's window is part of the user's actual input context — the user's
 /// foreground window — rather than the internal churn of some background process. Task
 /// **T-10-0**, decision **Р-60**.
@@ -2151,6 +2294,17 @@ impl Drop for Watching {
 /// windows, or a secure desktop — answers `false` for the same reason: the gain that follows
 /// carries the flush.
 ///
+/// ⛔ **Except when no event follows — stage E114, решение 208.14.** Measured on the stand
+/// (`out\q114\axt-20261110-203454.md`, `axt-probe.txt`; 209.42, `xdiag`): the
+/// `EVENT_SYSTEM_FOREGROUND` of a Блокнот started under the running program arrived while
+/// `GetForegroundWindow` still answered another window (the taskbar, a `Windows.UI.Core.CoreWindow`
+/// of `ShellExperienceHost.exe`), was turned away here, and no event came after it: the verdict of
+/// FR-84 stayed the taskbar's, and the excluded Блокнот had its word converted, 2 of 2. So a
+/// turned-away `EVENT_SYSTEM_FOREGROUND` — that one only, never the focus churn this gate is for —
+/// arms a re-check of the window in front ([`WM_APP_RECHECK_FOREGROUND`], [`recheck_foreground`]):
+/// for two seconds the watcher compares the window in front with the one it was last told of, and
+/// a difference is passed on as the event would have been.
+///
 /// # Cost — NFR-01…NFR-05, NFR-10
 ///
 /// Two read-only `user32` queries. `GetForegroundWindow` reads one pointer out of the session's
@@ -2168,22 +2322,12 @@ impl Drop for Watching {
 /// Public because the verdict is the whole of what task T-10-0 changed, and the tests of
 /// `tests\watchdog.rs` drive it with real windows — their own, and the foreground's.
 pub fn concerns_the_foreground(window: HWND) -> bool {
-    // SAFETY: takes no arguments and touches no memory of ours; returns the current foreground
-    // window by value, or null when there is none — which the check below treats as "not the
-    // user's context", the conservative answer for a moment between two windows.
-    let foreground = unsafe { GetForegroundWindow() };
-
-    if foreground.0.is_null() {
-        return false;
-    }
-
-    // SAFETY: `window` is read by value; `GetAncestor` walks the ancestor chain in the window
-    // manager's own state and dereferences nothing of ours. A handle that is stale or null —
-    // both possible for an asynchronous event — comes back null, and null fails the comparison
-    // against a foreground that was just established to be non-null.
-    let root = unsafe { GetAncestor(window, GA_ROOT) };
-
-    root == foreground
+    // The two calls live in `foreground_root` since stage E114, which keeps the root as well.
+    // `GetForegroundWindow` takes no arguments and touches no memory of ours; a null foreground —
+    // the moment between two windows — is "not the user's context", the conservative answer.
+    // `GetAncestor` reads `window` by value and walks the ancestor chain in the window manager's
+    // own state; a stale or null handle comes back null and fails the comparison.
+    foreground_root(window).is_some()
 }
 
 /// Whether a flush event is an `EVENT_OBJECT_FOCUS` that re-announces the element the focus is
@@ -2387,7 +2531,7 @@ unsafe extern "system" fn win_event_proc(
         return;
     }
 
-    if !concerns_the_foreground(window) {
+    let Some(root) = foreground_root(window) else {
         // **Task T-10-0, Р-60: the internal churn of a background process is not a change of
         // the user's input context.** Before this gate, the idle focus traffic of background
         // Electron windows — ~0.8 events a second, measured — flushed the buffer between the
@@ -2396,8 +2540,20 @@ unsafe extern "system" fn win_event_proc(
         // question below is about the thread of the **foreground** window, which a background
         // event says nothing about. Every event that passes the gate still asks it.
         BACKGROUND_SKIPS.fetch_add(1, Ordering::Relaxed);
+
+        // ⭐ **Stage E114, решение 208.14.** A window change turned away here may be the last word
+        // the system says about it (see [`concerns_the_foreground`]): the watcher thread looks
+        // again. Only `EVENT_SYSTEM_FOREGROUND` — the churn of focus events this gate exists for
+        // arms nothing. A post to this very thread, the one call this callback is allowed.
+        if event == EVENT_SYSTEM_FOREGROUND {
+            let _ = crate::app::post_to_watcher_thread(WM_APP_RECHECK_FOREGROUND);
+        }
+
         return;
-    }
+    };
+
+    // The window the program is told of from here on — what the re-check compares with.
+    LAST_FOREGROUND.store(root, Ordering::Relaxed);
 
     if focus_repeated(event, window, object_id, child_id) {
         // **Task T-10-0e: the frontmost window's own churn re-announces the focus it
@@ -2426,7 +2582,17 @@ unsafe extern "system" fn win_event_proc(
         Cause::WindowChange
     };
 
-    request_flush(event_time, cause);
+    pass_on(event_time, cause);
+}
+
+/// What a focus or window change that concerns the user does — the body of [`win_event_proc`] past
+/// its gates, shared since stage E114 with the two other roads a change arrives by: the re-check
+/// of a turned-away window change ([`recheck_foreground`], решение 208.14) and the focus events of
+/// UI Automation for a browser page (`guard::forward_focus_event`, FR-71а). One body, so that the
+/// three cannot drift apart: the flush of FR-10 timed at `time` (FR-12) with its `cause` (FR-14),
+/// the input thread told, the layout question of FR-21 asked.
+pub(crate) fn pass_on(time: u32, cause: Cause) {
+    request_flush(time, cause);
 
     // ⭐ **Finding С23, task T-37-1: the answer of the post is used.** A refused post used to
     // cancel the flush of FR-10, the wipe of SEC-02 and the probe of FR-70 in silence. It now marks

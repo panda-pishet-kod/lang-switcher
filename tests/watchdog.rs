@@ -1218,6 +1218,10 @@ fn the_private_messages_of_this_process_are_all_distinct() {
         lang_switcher::app::WM_APP_SOUND_IDLE,
         lang_switcher::letters::WM_APP_FEED,
         lang_switcher::app::WM_APP_SOUND_REFUSED,
+        // Stage E114: the focus events of UI Automation (FR-71а) and the re-check of a turned-away
+        // window change (решение 208.14).
+        guard::WM_APP_FOCUS_EVENT,
+        watchdog::WM_APP_RECHECK_FOREGROUND,
     ];
 
     for (index, message) in messages.iter().enumerate() {
@@ -4596,5 +4600,54 @@ fn the_rehook_arm_asks_for_the_probe_of_a_return_after_it_puts_the_hook_back() {
         sites.len(),
         1,
         "the probe of a return is asked for from one place in src\\watchdog.rs: {sites:?}"
+    );
+}
+
+/// ⭐ **Stage E114, решение 208.14 — the re-check of a window change the gate turned away.** On the
+/// stand (209.42, `xdiag`; `axt-probe.txt`) the `EVENT_SYSTEM_FOREGROUND` of a Блокнот started under
+/// the running program arrived while another window was still in front, was turned away by the
+/// gate of Р-60, and nothing followed: the excluded Блокнот kept the taskbar's verdict. One look of
+/// the re-check passes on exactly a change the program was not told of, and nothing else.
+#[test]
+fn a_look_of_the_recheck_passes_on_only_a_change_it_was_not_told_of() {
+    use watchdog::{FOREGROUND_RECHECK_TICKS, RecheckStep, recheck_step};
+
+    let notepad = 0x6_006a_isize;
+    let taskbar = 0x1_00d0_isize;
+
+    // The case of the stand: told of the taskbar, Блокнот in front — pass it on.
+    assert_eq!(
+        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, taskbar, false),
+        RecheckStep::PassOn
+    );
+    assert_eq!(
+        recheck_step(1, notepad, taskbar, false),
+        RecheckStep::PassOn
+    );
+
+    // Told of the window that is in front: nothing to pass on, look again until the looks run out.
+    assert_eq!(
+        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, notepad, false),
+        RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 1)
+    );
+    assert_eq!(recheck_step(1, notepad, notepad, false), RecheckStep::Stop);
+
+    // No window in front — the moment between two: not a change, look again.
+    assert_eq!(recheck_step(3, 0, taskbar, false), RecheckStep::Again(2));
+
+    // A window of this very process (the tray menu, the settings): never a change — the events of
+    // its own windows are kept away by `WINEVENT_SKIPOWNPROCESS` on purpose.
+    assert_eq!(
+        recheck_step(3, notepad, taskbar, true),
+        RecheckStep::Again(2)
+    );
+
+    // No look left, or none running: stop, whatever is in front.
+    assert_eq!(recheck_step(0, notepad, taskbar, false), RecheckStep::Stop);
+
+    // Two seconds in all, four looks a second.
+    assert_eq!(
+        u64::from(FOREGROUND_RECHECK_TICKS) * u64::from(watchdog::FOREGROUND_RECHECK_MS),
+        2000
     );
 }
