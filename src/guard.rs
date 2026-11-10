@@ -2299,9 +2299,26 @@ pub fn class_name(window: HWND) -> String {
 /// the `Edit` of a browser's accessibility tree are different controls with different
 /// behaviours, and `EM_GETPASSWORDCHAR` means nothing to them; a substring match would send the
 /// message to a window that may answer anything at all. They are level 3's business.
+///
+/// ⭐ **And the text box of WinForms — stage E114, task T-114-0, решение 208.9.** The framework
+/// superclasses `Edit` and registers it as `WindowsForms10.EDIT.app.<n>.<hash>…`
+/// ([`WINFORMS_EDIT_PREFIX`]); the window **is** an `Edit` underneath and answers
+/// `EM_GETPASSWORDCHAR` as one — `42` for `UseSystemPasswordChar` and `0` for an ordinary box,
+/// measured on the stand (`out\q114\chromium-20261110-170327.md`, section W). Until this stage such
+/// a box went on to level 3, whose first answer about the window of that process is no answer
+/// (209.41: `Pane`, `IsPassword=False`), and a password typed there was recorded. The prefix is
+/// whole up to `.app.`: the rich edit, the combo box and the form of the same framework carry
+/// other names after `WindowsForms10.` and stay out.
 pub fn class_is_edit(class: &str) -> bool {
     class.eq_ignore_ascii_case(EDIT_CLASS)
+        || class
+            .get(..WINFORMS_EDIT_PREFIX.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(WINFORMS_EDIT_PREFIX))
 }
+
+/// The head of the class name WinForms registers its text box under — stage E114, task T-114-0.
+/// See [`class_is_edit`].
+pub const WINFORMS_EDIT_PREFIX: &str = "WindowsForms10.EDIT.app.";
 
 /// Asks `window` for its mask character — **level 2 of FR-72**, with the timeout FR-72 names.
 ///
@@ -2758,6 +2775,41 @@ mod tests {
             "MyEdit",
             "Chrome_RenderWidgetHostHWND",
             "",
+        ] {
+            assert!(!class_is_edit(class), "{class}");
+        }
+    }
+
+    /// ⭐ **Stage E114, task T-114-0, решение 208.9 — the text box of WinForms is an `Edit` too.**
+    ///
+    /// Measured on the stand (`out\q114\chromium-20261110-170327.md`, section W): the focused box of
+    /// a WinForms form has the class `WindowsForms10.EDIT.app.0.<hash>_r<n>_ad<n>` — the framework
+    /// superclasses `Edit` and registers it under its own name — and it answers
+    /// `EM_GETPASSWORDCHAR` as `Edit` does: `42` for `UseSystemPasswordChar`, `0` for an ordinary
+    /// box. Level 2 compared the class with `Edit` whole, so a WinForms password box went on to
+    /// level 3, whose first answer about a window of that process is no answer (209.41: `Pane`,
+    /// `IsPassword=False`), and the password was recorded. The two names are the ones the stand
+    /// showed in two processes.
+    ///
+    /// The neighbours stay out: a rich edit, a combo box and a form of the same framework are not
+    /// editors, and a class that merely begins like it is not the framework's.
+    #[test]
+    fn a_winforms_text_box_reaches_level_two() {
+        for class in [
+            "WindowsForms10.EDIT.app.0.13664a5_r10_ad1",
+            "WindowsForms10.EDIT.app.0.2dc4f4e_r13_ad1",
+            "windowsforms10.edit.app.0.2dc4f4e_r13_ad1",
+        ] {
+            assert!(class_is_edit(class), "{class}");
+        }
+
+        for class in [
+            "WindowsForms10.RichEdit20W.app.0.2dc4f4e_r13_ad1",
+            "WindowsForms10.COMBOBOX.app.0.2dc4f4e_r13_ad1",
+            "WindowsForms10.Window.8.app.0.2dc4f4e_r13_ad1",
+            "WindowsForms10.EDITBOX.app.0.2dc4f4e_r13_ad1",
+            "WindowsForms10.EDIT",
+            "MyWindowsForms10.EDIT.app.0.2dc4f4e_r13_ad1",
         ] {
             assert!(!class_is_edit(class), "{class}");
         }
