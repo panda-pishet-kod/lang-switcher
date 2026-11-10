@@ -676,14 +676,21 @@ impl Tone {
 /// the sound path at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Press {
-    /// Text on the screen changed — «чк-чк».
+    /// Text on the screen changed — «чк-чк». ⭐ And, since stage E114 (task T-114-1, решение
+    /// 208.5), the layout of the window in front changed: a press over nothing typed and nothing
+    /// selected, or in a password field (208.5а), switches it, and a switch the window took sounds
+    /// the same «чк-чк» — the program did what the press asked.
     Replaced,
-    /// The press was answered and changed nothing: an empty buffer, a word with no direction,
-    /// a verdict that has not come back yet. **Not a refusal** — nothing was forbidden, there
-    /// was simply nothing to do.
+    /// The press was answered and changed nothing: a word with no direction, no layout to switch
+    /// to. **Not a refusal** — nothing was forbidden, there was simply nothing to do. ⚠ Until stage
+    /// E114 an empty buffer was here too; a press over nothing switches the layout now.
     Idle,
-    /// **This program would not act here** — FR-70 (a password field), FR-84 (an excluded
-    /// process), and, since task T-42-6, a **window** that refused what the hand asked of it.
+    /// **This program would not act here** — FR-84 (an excluded process), and, since task T-42-6,
+    /// a **window** that refused what the hand asked of it — since stage E114 also a switch of the
+    /// layout the window did not take.
+    ///
+    /// ⚠ **FR-70 (a password field) was one of them until 1.5.0.** Решение 208.5а: a press there
+    /// switches the layout and converts nothing, so it sounds the switch, not the knock.
     ///
     /// ⚠ The wording used to say «those two only», and task T-42-6 (finding Н112) is what made
     /// it untrue: the settings window refuses the ninth tick of the cycle list and says so with
@@ -810,6 +817,68 @@ pub const fn press_outcome(buffered: bool, refuses: bool, replaced: bool) -> Opt
     })
 }
 
+/// **What one press on the typing-buffer path does** — the fork of stage E114, task T-114-1,
+/// решения 208.5 и 208.5а. See [`press_act`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PressAct {
+    /// Nothing, and no tone: a press handed back over a buffer that filled meanwhile (finding
+    /// С13), or a thread with no buffer where nothing is refused.
+    Nothing,
+    /// Convert the word in the buffer — FR-40, exactly as before.
+    Replace,
+    /// Switch the window in front to the next layout of the cycle — nothing typed and nothing
+    /// selected (208.5), a password field (208.5а), a field whose verdict is on its way.
+    Switch,
+    /// The knock of a refusal — a process the user excluded (FR-84).
+    Refuse,
+}
+
+/// **The fork of a press on the typing-buffer path** — stage E114, task T-114-1, решения 208.5 и
+/// 208.5а. A pure function of what the input window reads, so the whole rule is a table a test walks.
+///
+/// * **the buffer is here and holds a word** — [`PressAct::Replace`], as since FR-40; a press handed
+///   back by the selection path over a word typed **after** it is [`PressAct::Nothing`] (finding
+///   С13, task T-40-5 — the press was made over an empty buffer, see [`buffer_path_outcome`]);
+/// * **the buffer is here and empty** — [`PressAct::Switch`]. Nothing is typed, and a press on this
+///   path is one the selection path of FR-60 either did not take (FR-65 off, a console, no cache) or
+///   took and found no selection in (`WM_APP_BUFFER_PATH`): «ничего не набрано и не выделено». Until
+///   1.5.0 this press was the idle click and changed nothing (209.20);
+/// * **the buffer is parked** — FR-70 and FR-84 park it, and so does the interval of FR-71:
+///   * an excluded process (FR-84) — [`PressAct::Refuse`], the knock it was (208.6, 4а);
+///   * a password field — [`PressAct::Switch`]: решение 208.5а, «переключает раскладку, но не
+///     переводит набранный текст». Until 1.5.0 the knock;
+///   * [`crate::guard::Field::Pending`] — [`PressAct::Switch`] too: the verdict is on its way, and
+///     either answer leads to a switch (ТЗ Э114). Until 1.5.0 silence;
+///   * anything else — [`PressAct::Nothing`]: a thread with no buffer, nothing refused.
+pub const fn press_act(
+    handed_back: bool,
+    buffered: bool,
+    buffer_is_empty: bool,
+    field: crate::guard::Field,
+    excluded: bool,
+) -> PressAct {
+    if buffered {
+        return if !buffer_is_empty {
+            if handed_back {
+                PressAct::Nothing
+            } else {
+                PressAct::Replace
+            }
+        } else {
+            PressAct::Switch
+        };
+    }
+
+    if excluded {
+        return PressAct::Refuse;
+    }
+
+    match field {
+        crate::guard::Field::Password | crate::guard::Field::Pending => PressAct::Switch,
+        crate::guard::Field::Ordinary | crate::guard::Field::Undetermined => PressAct::Nothing,
+    }
+}
+
 /// **What the input window answers to a press on the typing-buffer path** — the body of the
 /// hotkey branch of [`window_proc`], as a function of what it reads, task **T-40-5**.
 ///
@@ -845,20 +914,33 @@ pub const fn press_outcome(buffered: bool, refuses: bool, replaced: bool) -> Opt
 /// [`park_buffer`] empties the ring through `buffer::reset` **before** it takes the recorder off the
 /// thread, and `is_empty` answers «empty» for a thread with no buffer at all. A generation stamp on
 /// the ring (variant 2 of the finding) is not needed for that and is not introduced.
+///
+/// ⭐ **Stage E114, task T-114-1 — the fork is [`press_act`], and a press over nothing switches.**
+/// `switch` is the switch itself — `inject::switch_on_empty_press` in the product — answering
+/// `Some(true)` when the window took the new layout, `Some(false)` when it did not, `None` when
+/// there was nothing to switch to. A switch that took sounds «чк-чк» ([`Press::Replaced`], решение
+/// 208.5), one the window refused knocks ([`Press::Refused`], as a window that refused does since
+/// task T-42-6), and no target is the idle click it always was. Each closure is called at most
+/// once, and only on its own arm: a switch never converts, a conversion never switches here.
 fn buffer_path_outcome(
-    handed_back: bool,
-    buffered: bool,
-    buffer_is_empty: bool,
-    refuses: bool,
+    act: PressAct,
     replace: impl FnOnce() -> bool,
+    switch: impl FnOnce() -> Option<bool>,
 ) -> Option<Press> {
-    if handed_back && buffered && !buffer_is_empty {
-        return None;
+    match act {
+        PressAct::Nothing => None,
+        PressAct::Replace => Some(if replace() {
+            Press::Replaced
+        } else {
+            Press::Idle
+        }),
+        PressAct::Switch => Some(match switch() {
+            Some(true) => Press::Replaced,
+            Some(false) => Press::Refused,
+            None => Press::Idle,
+        }),
+        PressAct::Refuse => Some(Press::Refused),
     }
-
-    let replaced = buffered && replace();
-
-    press_outcome(buffered, refuses, replaced)
 }
 
 /// ⭐ **The press the classic console refused is a refusal** — stage Э96, decision 160.8.
@@ -3586,13 +3668,24 @@ unsafe extern "system" fn window_proc(
                 // converted, is what the finding measured. The rule, the silence on that arm and
                 // why the tone count stays at one are in `buffer_path_outcome`, which is this
                 // branch as a function of what it reads — the only shape a test can drive.
+                //
+                // ⭐ **Stage E114, task T-114-1 (решения 208.5 и 208.5а).** The fork is
+                // `press_act`: a word converts as before, a press over nothing switches the layout
+                // of the window in front, a password field switches and converts nothing, an
+                // excluded process knocks. The state of FR-70 and FR-84 is read in one word.
+                let (field, excluded) = crate::guard::state_now();
+
                 if is_input_window(hwnd)
                     && let Some(press) = buffer_path_outcome(
-                        handed_back,
-                        crate::buffer::is_installed(),
-                        crate::buffer::is_empty(),
-                        crate::guard::refuses(),
+                        press_act(
+                            handed_back,
+                            crate::buffer::is_installed(),
+                            crate::buffer::is_empty(),
+                            field,
+                            excluded,
+                        ),
                         || crate::inject::on_hotkey().is_some(),
+                        crate::inject::switch_on_empty_press,
                     )
                 {
                     // ⭐ Stage Э96: a press the classic console refused — its keys would not
@@ -4662,14 +4755,18 @@ mod tests {
         // Step 3 of FR-61 found no selection, and the press comes back as `WM_APP_BUFFER_PATH`.
         let asked = std::cell::Cell::new(0);
         let answer = buffer_path_outcome(
-            true,
-            buffer::is_installed(),
-            buffer::is_empty(),
-            false,
+            press_act(
+                true,
+                buffer::is_installed(),
+                buffer::is_empty(),
+                crate::guard::Field::Ordinary,
+                false,
+            ),
             || {
                 asked.set(asked.get() + 1);
                 true
             },
+            || panic!("a press handed back over a word is no press over nothing"),
         );
 
         buffer::uninstall();
@@ -4714,21 +4811,29 @@ mod tests {
 
         // Press 2, direct.
         let second = buffer_path_outcome(
-            false,
-            buffer::is_installed(),
-            buffer::is_empty(),
-            false,
+            press_act(
+                false,
+                buffer::is_installed(),
+                buffer::is_empty(),
+                crate::guard::Field::Ordinary,
+                false,
+            ),
             replace,
+            || panic!("press 2 is over a word"),
         );
         let converted = position();
 
         // Press 1, handed back.
         let first = buffer_path_outcome(
-            true,
-            buffer::is_installed(),
-            buffer::is_empty(),
-            false,
+            press_act(
+                true,
+                buffer::is_installed(),
+                buffer::is_empty(),
+                crate::guard::Field::Ordinary,
+                false,
+            ),
             replace,
+            || panic!("press 1 comes back over a word"),
         );
         let after = position();
 
@@ -4743,44 +4848,180 @@ mod tests {
         assert_eq!(first, None, "press 1, handed back, answers nothing");
     }
 
-    /// **The rule of [`buffer_path_outcome`] in full** — which presses ask the replacement, and what
-    /// they sound. Only one row moved in task T-40-5: handed back over a buffer that filled.
+    /// **The rule of [`buffer_path_outcome`] in full** — which presses ask the replacement, which
+    /// ask the switch, and what they sound. Task T-40-5 moved one row (handed back over a buffer that
+    /// filled); stage E114, task T-114-1, moved the press over nothing and the password field from the
+    /// idle click and the knock to the switch, whose tone is «чк-чк» when the window took it.
     #[test]
     fn a_handed_back_press_is_answered_by_the_buffer_that_is_there_now() {
-        let run =
-            |handed_back: bool, buffered: bool, empty: bool, refuses: bool, replaced: bool| {
-                let asked = std::cell::Cell::new(0);
-                let answer = buffer_path_outcome(handed_back, buffered, empty, refuses, || {
+        use crate::guard::Field;
+
+        // (handed back, buffered, empty, field, excluded, what the replacement answers, what the
+        // switch answers) -> (replacement asked, switch asked, the tone).
+        let run = |handed_back: bool,
+                   buffered: bool,
+                   empty: bool,
+                   field: Field,
+                   excluded: bool,
+                   replaced: bool,
+                   switched: Option<bool>| {
+            let asked = std::cell::Cell::new(0);
+            let switches = std::cell::Cell::new(0);
+            let answer = buffer_path_outcome(
+                press_act(handed_back, buffered, empty, field, excluded),
+                || {
                     asked.set(asked.get() + 1);
                     replaced
-                });
+                },
+                || {
+                    switches.set(switches.get() + 1);
+                    switched
+                },
+            );
 
-                (asked.get(), answer)
-            };
+            (asked.get(), switches.get(), answer)
+        };
 
-        // Handed back over a buffer that is still empty: FR-60's other half runs as it always did —
-        // the replacement is asked, and with nothing to convert the press is the idle click.
-        assert_eq!(run(true, true, true, false, false), (1, Some(Press::Idle)));
-        // ⭐ Handed back over a buffer that filled meanwhile: not asked, and silent.
-        assert_eq!(run(true, true, false, false, true), (0, None));
+        // ⭐ Over nothing, handed back or direct: the switch is asked and the replacement is not; a
+        // switch that took is «чк-чк», one the window refused knocks, no target is the idle click.
+        for handed_back in [true, false] {
+            assert_eq!(
+                run(
+                    handed_back,
+                    true,
+                    true,
+                    Field::Ordinary,
+                    false,
+                    true,
+                    Some(true)
+                ),
+                (0, 1, Some(Press::Replaced))
+            );
+            assert_eq!(
+                run(
+                    handed_back,
+                    true,
+                    true,
+                    Field::Ordinary,
+                    false,
+                    true,
+                    Some(false)
+                ),
+                (0, 1, Some(Press::Refused))
+            );
+            assert_eq!(
+                run(handed_back, true, true, Field::Ordinary, false, true, None),
+                (0, 1, Some(Press::Idle))
+            );
+        }
+        // ⭐ Handed back over a buffer that filled meanwhile: nothing is asked, and silent.
+        assert_eq!(
+            run(true, true, false, Field::Ordinary, false, true, Some(true)),
+            (0, 0, None)
+        );
         // A direct press over a non-empty buffer is the ordinary press of the typing buffer.
         assert_eq!(
-            run(false, true, false, false, true),
-            (1, Some(Press::Replaced))
+            run(false, true, false, Field::Ordinary, false, true, Some(true)),
+            (1, 0, Some(Press::Replaced))
         );
         assert_eq!(
-            run(false, true, false, false, false),
-            (1, Some(Press::Idle))
+            run(
+                false,
+                true,
+                false,
+                Field::Ordinary,
+                false,
+                false,
+                Some(true)
+            ),
+            (1, 0, Some(Press::Idle))
         );
-        // The buffer parked by FR-70, handed back or not: nothing is asked, and a refusal speaks.
+        // ⭐ A password field (208.5а) and a verdict on its way: the switch, never the replacement.
+        for field in [Field::Password, Field::Pending] {
+            assert_eq!(
+                run(false, false, true, field, false, true, Some(true)),
+                (0, 1, Some(Press::Replaced))
+            );
+        }
+        // An excluded process: nothing is asked, and the knock speaks (FR-84, 208.6 4а).
         assert_eq!(
-            run(true, false, true, true, false),
-            (0, Some(Press::Refused))
+            run(
+                false,
+                false,
+                true,
+                Field::Undetermined,
+                true,
+                true,
+                Some(true)
+            ),
+            (0, 0, Some(Press::Refused))
         );
-        assert_eq!(run(true, false, true, false, false), (0, None));
+        // No buffer and nothing refused: nothing at all.
         assert_eq!(
-            run(false, false, true, true, false),
-            (0, Some(Press::Refused))
+            run(true, false, true, Field::Ordinary, false, true, Some(true)),
+            (0, 0, None)
+        );
+    }
+
+    /// ⭐ **Stage E114, task T-114-1, решения 208.5 и 208.5а — the fork of a press, in full.** Every
+    /// row of the table written out: the buffer here and holding a word — convert it, unless the
+    /// press came back over a word typed after it (С13); the buffer here and empty — nothing typed,
+    /// and a press on this path is one the selection path did not take or found nothing for — switch;
+    /// the buffer parked — an excluded process knocks (FR-84), a password field and a verdict on its
+    /// way switch (208.5а: «переключает раскладку, но не переводит набранный текст»), anything else
+    /// is a thread with no buffer and does nothing.
+    #[test]
+    fn a_press_over_nothing_switches_and_a_password_field_switches_too() {
+        use crate::guard::Field;
+
+        for handed_back in [false, true] {
+            for field in [Field::Ordinary, Field::Undetermined] {
+                assert_eq!(
+                    press_act(handed_back, true, true, field, false),
+                    PressAct::Switch,
+                    "nothing typed, nothing selected — handed back {handed_back}, {field:?}"
+                );
+            }
+
+            for field in [
+                Field::Pending,
+                Field::Password,
+                Field::Ordinary,
+                Field::Undetermined,
+            ] {
+                assert_eq!(
+                    press_act(handed_back, false, true, field, true),
+                    PressAct::Refuse,
+                    "an excluded process knocks — handed back {handed_back}, {field:?}"
+                );
+            }
+
+            for field in [Field::Password, Field::Pending] {
+                assert_eq!(
+                    press_act(handed_back, false, true, field, false),
+                    PressAct::Switch,
+                    "208.5а: {field:?} switches and converts nothing — handed back {handed_back}"
+                );
+            }
+
+            for field in [Field::Ordinary, Field::Undetermined] {
+                assert_eq!(
+                    press_act(handed_back, false, true, field, false),
+                    PressAct::Nothing,
+                    "no buffer, nothing refused — handed back {handed_back}, {field:?}"
+                );
+            }
+        }
+
+        assert_eq!(
+            press_act(false, true, false, Field::Ordinary, false),
+            PressAct::Replace,
+            "a word in the buffer is converted, as before"
+        );
+        assert_eq!(
+            press_act(true, true, false, Field::Ordinary, false),
+            PressAct::Nothing,
+            "С13: handed back over a word typed after the press — nothing"
         );
     }
 

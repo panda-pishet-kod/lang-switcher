@@ -3426,17 +3426,9 @@ fn take_press() -> Option<Press> {
 
         let cache = recorder.cache()?;
 
-        // The participating layouts of FR-35, in system order — the list section 4.4 chooses
-        // from. A fixed array on the stack: no allocation on the hotkey path.
-        let mut available = [LayoutId::default(); layouts::MAX_SESSION];
-        let count = cache.layouts(&mut available);
-
-        // **Task Т-22-5.** Whether the array above holds the session or only the front of it. A
-        // pair that resolves against nothing means two opposite things in the two cases, and only
-        // the caller knows which list it handed over.
-        let session = layouts::Session::of(count, cache.len());
-
-        let cycle = layouts::cycle_for(layouts::published(), &available[..count], session).ok()?;
+        // The cycle of section 4.4 — one body with the switch of a press over nothing (stage
+        // E114, task T-114-1): see [`cycle_of_cache`].
+        let cycle = cycle_of_cache(cache)?;
 
         // **FR-26: the direction comes from the HKL recorded with the stroke**, and never from
         // the layout that happens to be active now. The difference is the whole of FR-33: step 5
@@ -3492,6 +3484,65 @@ fn take_press() -> Option<Press> {
         })
     })
     .flatten()
+}
+
+/// **The cycle of section 4.4 for the layouts a cache holds** — the participating layouts of FR-35
+/// in system order, chosen from by the published mode (FR-30, FR-31).
+///
+/// One body for the two presses that choose a target: the press over a word ([`take_press`]) and,
+/// since stage E114 (task T-114-1, решение 208.5), the press over nothing
+/// ([`switch_on_empty_press`]) — «цель — той же функцией выбора, что у перевода». A fixed array
+/// on the stack: no allocation on the hotkey path.
+fn cycle_of_cache(cache: &layouts::LayoutCache) -> Option<layouts::Cycle> {
+    let mut available = [LayoutId::default(); layouts::MAX_SESSION];
+    let count = cache.layouts(&mut available);
+
+    // **Task Т-22-5.** Whether the array above holds the session or only the front of it. A pair
+    // that resolves against nothing means two opposite things in the two cases, and only the
+    // caller knows which list it handed over.
+    let session = layouts::Session::of(count, cache.len());
+
+    layouts::cycle_for(layouts::published(), &available[..count], session).ok()
+}
+
+/// ⭐ **A press over nothing typed and nothing selected switches the layout** — stage E114, task
+/// T-114-1, решения 208.5 и 208.5а. The window in front goes to the **next** layout of the cycle
+/// after the one it is in: the target is the one a word would be converted into ([`cycle_of_cache`],
+/// step 1 from the layout stamp of FR-04), so a second press goes on round the cycle — and with two
+/// layouts back.
+///
+/// `None` when there is no target to switch to — no cache yet, a cycle that cannot be formed, a
+/// stamp the cycle does not hold: the press then changes nothing, the idle click it always was.
+/// `Some(true)` when the switch took (the stamp of FR-04 follows, `switch::stamp_follows`),
+/// `Some(false)` when the window did not take it (the verdict of FR-52 by re-reading).
+///
+/// The switch itself is the one FR-50 already has: [`switch_layout_in`], and in a classic console
+/// window ([`CLASSIC_CONSOLE_CLASS`]) [`switch_classic_in`], which posts and believes — the reading
+/// of a console thread does not follow its layout (stage Э96). No new way to switch.
+///
+/// The recorder is asked **wherever it is** (`app::with_recorder_wherever_it_is`): in a password
+/// field and while the verdict of FR-72 is on its way the buffer is parked, and its cache and stamp
+/// with it — and those are exactly the two places решение 208.5а sends here.
+pub fn switch_on_empty_press() -> Option<bool> {
+    let target = crate::app::with_recorder_wherever_it_is(|recorder| {
+        let cycle = cycle_of_cache(recorder.cache()?)?;
+
+        cycle.target(recorder.active_layout(), 1).ok()
+    })
+    .flatten()?;
+
+    // SAFETY: `GetForegroundWindow` takes no arguments, returns a handle by value and touches no
+    // memory of ours; callable from any thread. A null result is no window at all.
+    let foreground = unsafe { GetForegroundWindow() };
+    let classic = !foreground.is_invalid()
+        && window_class(foreground)
+            .is_some_and(|class| class.eq_ignore_ascii_case(CLASSIC_CONSOLE_CLASS));
+
+    Some(if classic {
+        switch_classic_in(&mut crate::switch::System, target)
+    } else {
+        switch_layout_in(&mut crate::switch::System, target)
+    })
 }
 
 // ---------------------------------------------------------------------------------------

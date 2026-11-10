@@ -40,6 +40,9 @@ What changed in each version is in [What's new](#whats-new) below and on the [Re
   and never overwrites them with the result.
 - **Selected text.** Select any text, press `Pause/Break`, and the selection is converted. The
   clipboard is put back exactly as it was afterwards, every format of it.
+- **Nothing typed, nothing selected.** Press `Pause/Break` and the layout switches to the next one
+  of the program's cycle; press again to go on, or back with two layouts. In a password field the
+  key only switches the layout and never converts what was typed.
 - **Which layouts.** By default, the two layouts you use most; you can name a pair or a cycle of
   several in the settings window.
 - **Where.** Notepad, Word, browsers, messengers, Windows Terminal and the classic console. It also

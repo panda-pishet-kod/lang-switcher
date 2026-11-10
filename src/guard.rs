@@ -534,6 +534,13 @@ pub fn excluded() -> bool {
     state().1
 }
 
+/// Both halves of the state as published, out of one load — the field of FR-70 and the exclusion of
+/// FR-84 together. What `app` reads for the fork of a press (stage E114, task T-114-1): the two
+/// answers must belong to one moment, which two separate loads would not promise.
+pub fn state_now() -> (Field, bool) {
+    state()
+}
+
 /// Whether the typing buffer may be kept right now — the question
 /// [`crate::app::apply_buffering_gate`] asks once per message of the input thread.
 ///
