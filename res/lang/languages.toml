@@ -182,7 +182,7 @@ inno = "Greek"
 inno_official = false
 group = "shipped"
 state = "shipped"
-note = "the installer has no Greek: Inno 6.7.3 ships no Greek.isl, the Greek user gets English (155.11)"
+note = "Inno 6.7.3 ships no Greek.isl: since stage E114 (208.6, 155.11 lifted) installer/lang/Greek.isl carries all of Inno's messages, after Default.isl"
 
 [[language]]
 tag = "he"

@@ -39,8 +39,9 @@
 ;    for the messages that are this installer's own, the files lang\<Language>.isl,
 ;    UTF-8 without a byte order mark -- read as UTF-8 by this compiler since Inno
 ;    Setup 6.3.0, measured on 6.7.3 (scratchpad-E91, probe P12: MATCH).  English is
-;    the first language and the fallback; Greek has no official translation, so a
-;    Greek Windows gets English (155.11).  No language dialog: ShowLanguageDialog=no,
+;    the first language and the fallback.  Greek has no official translation of Inno:
+;    since stage E114 (decision 208.6, 155.11 lifted) lang\Greek.isl carries all of
+;    Inno's messages too, after Default.isl.  No language dialog: ShowLanguageDialog=no,
 ;    and /LANG=<name> picks one by hand.
 ;
 ;  WHY THE INSTALL DIRECTORY IS NOT A CHOICE
@@ -282,7 +283,8 @@ WizardSmallImageFileDynamicDark=
 ; of each entry (stage E91): the line of the Ready page, the window of a failed certificate and
 ; the question about the settings file. English first: it is the fallback. Then the twelve
 ; official translations for the languages of the program, and Brazilian Portuguese with the
-; same messages as Portuguese (155.12). Greek: no official file -- English (155.11).
+; same messages as Portuguese (155.12). Greek (stage E114, 208.6): no official file -- Default.isl
+; first and lang\Greek.isl with all of Inno's messages, as for group A below.
 ; tests\installer_languages.rs holds every entry to its file and every file to English.isl.
 ; Stage E108 (decision 202.2): the languages of group A follow, in the order of the registry
 ; res\lang\languages.toml. Where Inno has no translation of its own (inno_official = false) the
@@ -299,6 +301,7 @@ Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl,lang\Italian.isl"
 Name: "polish"; MessagesFile: "compiler:Languages\Polish.isl,lang\Polish.isl"
 Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl,lang\Czech.isl"
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl,lang\Turkish.isl"
+Name: "greek"; MessagesFile: "compiler:Default.isl,lang\Greek.isl"
 Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl,lang\Hebrew.isl"
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl,lang\Arabic.isl"
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl,lang\BrazilianPortuguese.isl"

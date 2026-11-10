@@ -110,7 +110,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Ընտրեք տեքստը և սեղմեք {0} — ընտրվածը կվերակոդավորվի (եթե դա միացված է և Ctrl+C-ն աշխատում է)։"
     IDS_ABOUT_HELP_4        "Կասեցումը, կարգավորումները և ելքը՝ ծանուցումների տարածքի պատկերակում։"
     IDS_ABOUT_HELP_5        "Փոփոխում: Կարգավորումներ → Թեժ ստեղն։"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Ոչինչ մուտքագրված կամ ընտրված չէ՝ սեղմեք {0}. դասավորությունը կփոխվի։"
     IDS_CAPTURE_HINT        "Esc կամ սեղմում այլ տեղ՝ չեղարկում"
     IDS_TIP_ACTIVE          "ակտիվ է"
     IDS_TIP_PAUSED          "կասեցված է"

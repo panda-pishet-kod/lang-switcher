@@ -163,8 +163,9 @@ fn registry() -> Vec<Entry> {
 ///
 /// Groups and states are closed sets; tags, LANGIDs and installer names are unique; 12 of the
 /// 52 planned languages have a translation of their own in Inno Setup 6.7.3 (premise П5); every
-/// shipped language with an official Inno translation has the installer's own file
-/// `installer/lang/<inno>.isl`, Greek — the one without — has none (155.11).
+/// shipped language has the installer's own file `installer/lang/<inno>.isl` — since stage E114
+/// Greek too, the one without an official Inno translation (208.6 lifts 155.11): its file carries
+/// all of Inno's messages, as a language of group A does.
 ///
 /// ⭐ **Stage E108, task T-108-2:** the values of `Language::ALL` are the fourteen and group A, all
 /// forty-four, each held to its entry — tag, LANGID, direction, name; the languages the build
@@ -286,10 +287,10 @@ fn the_registry_holds_sixty_six_languages_and_the_shipped_ones_are_the_programs(
 
     for entry in registry.iter().filter(|e| e.group == "shipped") {
         let own = resource_script::root().join(format!("installer/lang/{}.isl", entry.inno));
-        assert_eq!(
+        assert!(
             own.is_file(),
-            entry.inno_official,
-            "{}: installer/lang/{}.isl exists exactly when Inno has the language",
+            "{}: installer/lang/{}.isl — every shipped language has the installer's own file \
+             (Greek since stage E114, 208.6)",
             entry.tag,
             entry.inno
         );

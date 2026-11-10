@@ -1,9 +1,10 @@
 //! The installer speaks the language of Windows, and every language says everything — task
 //! **T-91-6**, decisions 155.10…155.12.
 //!
-//! `installer\LangSwitcher.iss` lists fourteen languages: English first (the fallback), the twelve
-//! official Inno Setup translations of the program's other languages, and Brazilian Portuguese
-//! with the messages of Portuguese. Greek has no official translation and gets English. The
+//! `installer\LangSwitcher.iss` lists fifteen languages first: English (the fallback), the twelve
+//! official Inno Setup translations of the program's other languages, Greek — no official
+//! translation, its own file carries all of Inno's messages since stage E114 (208.6) — and
+//! Brazilian Portuguese with the messages of Portuguese. The
 //! messages that are the installer's own live in `installer\lang\<Language>.isl`, one file per
 //! language, read after the official file; `English.isl` is the sample the others translate.
 //!
@@ -27,8 +28,9 @@ mod scripts;
 /// without an official translation carries every one of them in its own file (decision 202.2).
 const INNO_MESSAGES: usize = 281;
 
-/// The internal names of [Languages] of 1.2.0, in order: English first — it is the fallback.
-const LANGUAGES: [&str; 14] = [
+/// The internal names of [Languages] of 1.2.0, in order: English first — it is the fallback. Greek
+/// since stage E114 (208.6), in the place of the registry: after Turkish.
+const LANGUAGES: [&str; 15] = [
     "english",
     "russian",
     "ukrainian",
@@ -40,6 +42,7 @@ const LANGUAGES: [&str; 14] = [
     "polish",
     "czech",
     "turkish",
+    "greek",
     "hebrew",
     "arabic",
     "brazilianportuguese",
@@ -225,10 +228,14 @@ fn every_language_of_the_installer_has_its_file_and_every_message() {
         }
         let file = &ours[0]["lang\\".len()..];
         // Stage E108: a language of group A or B without a translation of Inno's own starts from
-        // Default.isl, and its own file carries all of Inno's messages (202.2).
+        // Default.isl, and its own file carries all of Inno's messages (202.2) — and since stage
+        // E114 Greek, the one shipped language without one (208.6).
         let unofficial = added
             .iter()
-            .any(|(of, official, _)| of == name && !official);
+            .any(|(of, official, _)| of == name && !official)
+            || registry::shipped()
+                .iter()
+                .any(|entry| entry.inno.to_lowercase() == *name && !entry.inno_official);
         let official = if name == "english" || unofficial {
             "compiler:Default.isl".to_owned()
         } else {
@@ -858,9 +865,11 @@ fn every_language_of_group_a_speaks_its_own_language_in_the_installer() {
         out
     }
 
+    // Stage E114 (208.6): Greek too — shipped among the fourteen, but without Inno's own translation
+    // its file is the whole translation, held to the same rules as a file of group A.
     let added: Vec<registry::Entry> = registry::shipped()
         .into_iter()
-        .filter(|entry| matches!(entry.group.as_str(), "A" | "B"))
+        .filter(|entry| matches!(entry.group.as_str(), "A" | "B") || !entry.inno_official)
         .collect();
 
     let mut problems = Vec::new();

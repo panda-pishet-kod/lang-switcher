@@ -104,7 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Мәтінді таңдап, {0} басыңыз — таңдалған мәтін түрленеді (қосулы болса және Ctrl+C жұмыс істесе)."
     IDS_ABOUT_HELP_4        "Кідірту, параметрлер және шығу — хабарландыру аймағындағы белгішеде."
     IDS_ABOUT_HELP_5        "Пернені өзгерту: Параметрлер → Жылдам перне."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Ештеңе терілмеген және таңдалмаған — {0} басыңыз: орналасу ауысады."
     IDS_CAPTURE_HINT        "Esc немесе басқа жерді басу — бас тарту"
     IDS_TIP_ACTIVE          "белсенді"
     IDS_TIP_PAUSED          "кідіртілген"

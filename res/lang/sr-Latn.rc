@@ -106,7 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Označite tekst i pritisnite {0} — konvertuje se označeno (ako je to uključeno i ako Ctrl+C radi)."
     IDS_ABOUT_HELP_4        "Pauziranje, podešavanja i izlaz nalaze se u meniju ikone u oblasti za obaveštenja."
     IDS_ABOUT_HELP_5        "Promena tastera: Podešavanja → Tasterska prečica."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Ništa nije otkucano ni označeno? Pritisnite {0}: raspored će biti promenjen."
     IDS_CAPTURE_HINT        "Esc ili klik izvan polja — otkazivanje"
     IDS_TIP_ACTIVE          "aktivan"
     IDS_TIP_PAUSED          "na pauzi"

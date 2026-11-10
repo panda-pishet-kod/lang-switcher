@@ -111,7 +111,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Sélectionnez du texte et appuyez sur {0} — la sélection est convertie (si c'est activé et que Ctrl+C fonctionne)."
     IDS_ABOUT_HELP_4        "Suspendre, paramètres et sortie sont dans l'icône de la zone de notification."
     IDS_ABOUT_HELP_5        "Changer de touche : Paramètres → Raccourci."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Rien de tapé ni de sélectionné — appuyez sur {0} : la disposition change."
     IDS_CAPTURE_HINT        "Esc ou un clic à côté annule"
     IDS_TIP_ACTIVE          "actif"
     IDS_TIP_PAUSED          "suspendu"

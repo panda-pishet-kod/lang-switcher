@@ -107,7 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ಪಠ್ಯವನ್ನು ಆಯ್ಕೆಮಾಡಿ {0} ಒತ್ತಿ — ಆಯ್ದ ಭಾಗ ಪರಿವರ್ತನೆಯಾಗುತ್ತದೆ (ಇದು ಆನ್ ಆಗಿದ್ದು, Ctrl+C ಕಾರ್ಯನಿರ್ವಹಿಸಿದರೆ)."
     IDS_ABOUT_HELP_4        "ವಿರಾಮ, ಸೆಟ್ಟಿಂಗ್‌ಗಳು ಮತ್ತು ನಿರ್ಗಮನ — ಟ್ರೇ ಐಕಾನ್‌ನಲ್ಲಿವೆ."
     IDS_ABOUT_HELP_5        "ಕೀ ಬದಲಾಯಿಸಲು: ಸೆಟ್ಟಿಂಗ್‌ಗಳು → ಹಾಟ್‌ಕೀ."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "ಏನೂ ಟೈಪ್ ಅಥವಾ ಆಯ್ಕೆ ಮಾಡಿಲ್ಲವೇ? {0} ಒತ್ತಿ — ಲೇಔಟ್ ಬದಲಾಗುತ್ತದೆ."
     IDS_CAPTURE_HINT        "Esc ಅಥವಾ ಬೇರೆಡೆ ಕ್ಲಿಕ್ ಮಾಡಿದರೆ ರದ್ದಾಗುತ್ತದೆ"
     IDS_TIP_ACTIVE          "ಸಕ್ರಿಯ"
     IDS_TIP_PAUSED          "ವಿರಾಮಗೊಳಿಸಲಾಗಿದೆ"

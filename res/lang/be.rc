@@ -106,7 +106,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Вылучыце тэкст і націсніце {0} — перакадзіруецца вылучанае (калі гэта ўключана і працуе Ctrl+C)."
     IDS_ABOUT_HELP_4        "Прыпыненне, налады і выхад — у значку ў вобласці паведамленняў."
     IDS_ABOUT_HELP_5        "Каб змяніць клавішу: Налады → Гарачая клавіша."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Нічога не набрана і не вылучана — націсніце {0}: раскладка пераключыцца."
     IDS_CAPTURE_HINT        "Esc або пстрычка ў іншым месцы — скасаванне"
     IDS_TIP_ACTIVE          "актыўная"
     IDS_TIP_PAUSED          "прыпынена"

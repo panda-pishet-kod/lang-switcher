@@ -103,7 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Chọn văn bản rồi nhấn {0} — phần đã chọn được chuyển đổi (nếu đã bật và Ctrl+C hoạt động)."
     IDS_ABOUT_HELP_4        "Tạm dừng, cài đặt và thoát nằm ở biểu tượng trong khu vực thông báo."
     IDS_ABOUT_HELP_5        "Để đổi phím: Cài đặt → Phím nóng."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Chưa gõ hay chọn gì — nhấn {0}: bố cục sẽ chuyển."
     IDS_CAPTURE_HINT        "Nhấn Esc hoặc nhấp ra ngoài để hủy"
     IDS_TIP_ACTIVE          "đang hoạt động"
     IDS_TIP_PAUSED          "đã tạm dừng"

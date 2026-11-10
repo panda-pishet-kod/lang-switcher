@@ -104,7 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Zgjidhni tekstin dhe shtypni {0} — konvertohet pjesa e zgjedhur (nëse është e aktivizuar dhe Ctrl+C funksionon)."
     IDS_ABOUT_HELP_4        "Pezullimi, cilësimet dhe dalja gjenden te ikona në zonën e njoftimeve."
     IDS_ABOUT_HELP_5        "Për të ndryshuar tastin: Cilësimet → Tasti i shpejtë."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Nëse nuk keni shtypur as zgjedhur asgjë, shtypni {0}: paraqitja ndërrohet."
     IDS_CAPTURE_HINT        "Esc ose klikimi gjetkë anulon"
     IDS_TIP_ACTIVE          "aktiv"
     IDS_TIP_PAUSED          "pezulluar"

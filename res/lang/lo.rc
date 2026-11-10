@@ -104,7 +104,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ເລືອກຂໍ້ຄວາມແລ້ວກົດ {0} — ຂໍ້ຄວາມທີ່ເລືອກຈະຖືກແປງ (ເມື່ອເປີດໃຊ້ ແລະ Ctrl+C ໃຊ້ໄດ້)"
     IDS_ABOUT_HELP_4        "ການຢຸດຊົ່ວຄາວ ການຕັ້ງຄ່າ ແລະການອອກ ຢູ່ທີ່ໄອຄອນໃນພື້ນທີ່ແຈ້ງເຕືອນ"
     IDS_ABOUT_HELP_5        "ປ່ຽນປຸ່ມ: ການຕັ້ງຄ່າ → ປຸ່ມລັດ"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "ບໍ່ໄດ້ພິມ ຫຼື ເລືອກຫຍັງ — ກົດ {0} ແຜນຜັງຈະປ່ຽນໃຫ້"
     IDS_CAPTURE_HINT        "Esc ຫຼືຄລິກບ່ອນອື່ນເພື່ອຍົກເລີກ"
     IDS_TIP_ACTIVE          "ເຮັດວຽກຢູ່"
     IDS_TIP_PAUSED          "ຢຸດຊົ່ວຄາວ"

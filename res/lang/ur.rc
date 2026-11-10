@@ -107,7 +107,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "متن منتخب کریں اور {0} دبائیں — انتخاب تبدیل ہو جائے گا (اگر یہ فعال ہو اور Ctrl+C کام کرے)۔"
     IDS_ABOUT_HELP_4        "معطل کرنا، ترتیبات اور باہر نکلنا ٹرے آئیکن میں ہیں۔"
     IDS_ABOUT_HELP_5        "کلید بدلنے کے لیے: ترتیبات ← ہاٹ کی۔"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "کچھ ٹائپ یا منتخب نہیں کیا گیا — {0} دبائیں: لے آؤٹ بدل جائے گا۔"
     IDS_CAPTURE_HINT        "Esc یا کہیں اور کلک کرنے سے منسوخ ہو جاتا ہے"
     IDS_TIP_ACTIVE          "فعال"
     IDS_TIP_PAUSED          "معطل"

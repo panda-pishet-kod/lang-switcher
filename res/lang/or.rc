@@ -105,7 +105,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ପାଠ୍ୟ ଚୟନ କରି {0} ଦବାନ୍ତୁ — ଚୟନିତ ଅଂଶ ରୂପାନ୍ତରିତ ହେବ (ଏହା ଚାଲୁ ଥିଲେ ଓ Ctrl+C କାମ କଲେ)।"
     IDS_ABOUT_HELP_4        "ସ୍ଥଗିତ, ସେଟିଂସ୍ ଓ ପ୍ରସ୍ଥାନ — ଟ୍ରେ ଆଇକନରେ ଅଛି।"
     IDS_ABOUT_HELP_5        "କୀ ବଦଳାଇବାକୁ: ସେଟିଂସ୍ → ହଟକୀ।"
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "କିଛି ଟାଇପ୍ ବା ଚୟନ କରାଯାଇନାହିଁ — {0} ଦବାନ୍ତୁ: ଲେଆଉଟ ବଦଳିବ।"
     IDS_CAPTURE_HINT        "Esc ବା ଅନ୍ୟ କେଉଁଠି କ୍ଲିକ୍ କଲେ ବାତିଲ୍ ହୁଏ"
     IDS_TIP_ACTIVE          "ସକ୍ରିୟ"
     IDS_TIP_PAUSED          "ସ୍ଥଗିତ"

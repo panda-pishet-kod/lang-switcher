@@ -103,7 +103,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "Atlasiet tekstu un nospiediet {0} — tiks pārkodēts atlasītais teksts (ja tas ir ieslēgts un darbojas Ctrl+C)."
     IDS_ABOUT_HELP_4        "Apturēšana uz laiku, iestatījumi un iziešana — paziņojumu apgabala ikonā."
     IDS_ABOUT_HELP_5        "Lai nomainītu taustiņu: Iestatījumi → Īsinājumtaustiņš."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "Nekas nav ne uzrakstīts, ne atlasīts — nospiediet {0}: izkārtojums pārslēgsies."
     IDS_CAPTURE_HINT        "Esc vai klikšķis citur atceļ"
     IDS_TIP_ACTIVE          "darbojas"
     IDS_TIP_PAUSED          "darbība apturēta"

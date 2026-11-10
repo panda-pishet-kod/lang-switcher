@@ -108,7 +108,7 @@ BEGIN
     IDS_ABOUT_HELP_3        "ടെക്സ്റ്റ് തിരഞ്ഞെടുത്ത് {0} അമർത്തുക — അത് പരിവർത്തനം ചെയ്യും (ഓണായിരിക്കണം, Ctrl+C വേണം)."
     IDS_ABOUT_HELP_4        "ഐക്കൺ മെനുവിൽ: നിർത്തൽ, ക്രമീകരണങ്ങൾ, പുറത്തുകടക്കൽ."
     IDS_ABOUT_HELP_5        "കീ മാറ്റാൻ: ക്രമീകരണങ്ങൾ → ഹോട്ട്കീ."
-    IDS_ABOUT_HELP_6        "Nothing typed or selected — press {0} to switch the layout."
+    IDS_ABOUT_HELP_6        "ടൈപ്പിങ്ങും തിരഞ്ഞെടുപ്പും ഇല്ലേ? {0} അമർത്തുക — ലേഔട്ട് മാറും."
     IDS_CAPTURE_HINT        "Esc അല്ലെങ്കിൽ മറ്റെവിടെയെങ്കിലും ക്ലിക്ക് ചെയ്താൽ റദ്ദാകും"
     IDS_TIP_ACTIVE          "സജീവം"
     IDS_TIP_PAUSED          "താൽക്കാലികമായി നിർത്തി"
