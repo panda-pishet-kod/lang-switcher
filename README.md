@@ -29,7 +29,7 @@ the interface in 66 languages.
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.4.4**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
+**Status:** version **1.5.0**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
 What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
@@ -182,7 +182,17 @@ There is no other network activity. The details are in section 9 of the specific
 
 ## What's new
 
-New in 1.4.4: if the bare grave key is assigned as the language switcher in Windows, as is common in
+New in 1.5.0: with nothing typed and nothing selected, the hotkey switches the keyboard layout to the
+next one of the program's cycle (the About window says so in a sixth line of "How to use"); in a
+password field it only switches the layout, in an excluded program it stays silent. Password fields
+are recognised where 1.4.4 missed them: in WinForms programs, and in Edge, Chrome and Firefox after
+Tab. An excluded program started again while Lang Switcher runs is recognised as excluded even when
+Windows is slow to bring it forward. The name of the program and the download button open the pages of the site in nineteen
+languages (new: Hebrew, Greek, Azerbaijani, Bulgarian, Serbian in both scripts, German, French,
+Turkish, Portuguese, Dutch, Polish, Czech, Italian, Hungarian); Armenian and Uzbek open the Russian
+pages. The Bulgarian and Dutch examples of a wrong-layout word are corrected; the installer speaks
+Greek; Hebrew, Greek, Azerbaijani, Portuguese, Czech and Turkish wording is corrected. Version 1.4.4:
+if the bare grave key is assigned as the language switcher in Windows, as is common in
 Thailand, the program treats it as a switcher: the word typed after it converts correctly, the text
 around it stays intact, and a second press of the hotkey still brings the original back (it used to
 count as a typed character); in Ukrainian, Arabic, Persian and Thai the name of the program and the
