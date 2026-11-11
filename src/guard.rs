@@ -2928,6 +2928,10 @@ pub fn forward_focus_event() -> bool {
     // of the `WinEvent` times `watchdog::request_flush` is given everywhere else.
     let time = unsafe { GetMessageTime() } as u32;
 
+    // The re-check is told which window this move was in (решение 208.28) — the automaton of
+    // `watchdog::told_after` decides what that changes.
+    let _ = crate::watchdog::tell(crate::watchdog::Tell::Forwarded(foreground.0 as isize));
+
     // The body the `WinEvent` callback passes its own events on by (stage E114: one body).
     crate::watchdog::pass_on(time, crate::watchdog::Cause::FocusChange);
 

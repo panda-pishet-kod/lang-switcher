@@ -4652,6 +4652,197 @@ fn a_look_of_the_recheck_passes_on_only_a_change_it_was_not_told_of() {
     );
 }
 
+/// The inputs `tells` fed to [`watchdog::told_after`] one after another from a program that has been
+/// told of nothing yet — the steps the looks among them decided, in order.
+fn told_steps(tells: &[watchdog::Tell]) -> Vec<watchdog::RecheckStep> {
+    let mut state = watchdog::Told::default();
+    let mut steps = Vec::new();
+
+    for &tell in tells {
+        let (next, step) = watchdog::told_after(state, tell);
+        state = next;
+        steps.extend(step);
+    }
+
+    steps
+}
+
+/// ⭐ **Stage E114, решение 208.28, п. 1 of the consultant (`E114-consultant-recheck.md`, trace А).**
+/// The window the program was last told is in front is told by **every** road a change is passed
+/// on by — the gate's event, a look, and the focus events of UI Automation (FR-71а). A browser page
+/// raises no `WinEvent` when the user moves between its fields; the subscription passes those moves
+/// on, and the window they happen in is then the one the program has been told of. If that road
+/// does not say so, the window before the browser stays «told», and any foreign event the gate turns
+/// away later makes a look «discover» the browser the user is typing in: a window change in the
+/// middle of the word — the flush of FR-10 and the park of FR-70 take it away (209.37: the same
+/// erasure, measured on test 11.3).
+#[test]
+fn a_window_told_of_by_the_focus_events_of_ui_automation_is_not_passed_on_again_by_a_look() {
+    use watchdog::{FOREGROUND_RECHECK_TICKS, RecheckStep, Tell};
+
+    let notepad = 0x6_006a_isize;
+    let chrome = 0x5_0522_isize;
+
+    // Trace А: Блокнот passed the gate; the user went to Chrome and moved between its fields, which
+    // the subscription passed on; a foreign window change was turned away; the look sees Chrome.
+    let steps = told_steps(&[
+        Tell::Passed(notepad),
+        Tell::Forwarded(chrome),
+        Tell::TurnedAway,
+        Tell::Look {
+            foreground: chrome,
+            own: false,
+        },
+    ]);
+    assert_eq!(
+        steps,
+        [RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 1)],
+        "trace А: the window of the forwarded focus event was passed on again by a look"
+    );
+
+    // The control: the same trace without the forwarded move — Chrome came forward unseen, and the
+    // look passes it on.
+    let steps = told_steps(&[
+        Tell::Passed(notepad),
+        Tell::TurnedAway,
+        Tell::Look {
+            foreground: chrome,
+            own: false,
+        },
+    ]);
+    assert_eq!(steps, [RecheckStep::PassOn(FOREGROUND_RECHECK_TICKS - 1)]);
+}
+
+/// ⭐ **Stage E114, решение 208.28 — the wiring of [`watchdog::told_after`].** The automaton is right
+/// only if every road that passes a change on feeds it: the test above drives the automaton, this one
+/// checks that each road calls it — the gate's event (`Tell::Passed`, in `win_event_proc`), the look
+/// (`Tell::Look`, in `recheck_foreground`), the arming (`Tell::TurnedAway`) and the focus events of UI
+/// Automation (`Tell::Forwarded`, in `guard::forward_focus_event`, before the pass-on, in the order
+/// the gate's event keeps).
+#[test]
+fn every_road_that_passes_a_change_on_tells_the_recheck() {
+    let watchdog_source = source_of("watchdog.rs");
+    let guard_source = source_of("guard.rs");
+
+    for (road, function, call) in [
+        (
+            "the gate's event",
+            "unsafe extern \"system\" fn win_event_proc(",
+            "tell(Tell::Passed(root))",
+        ),
+        (
+            "a look",
+            "pub fn recheck_foreground() -> bool {",
+            "tell(Tell::Look {",
+        ),
+        (
+            "the arming",
+            "pub fn arm_foreground_recheck() {",
+            "tell(Tell::TurnedAway)",
+        ),
+    ] {
+        let body = body_of(&watchdog_source, function);
+        assert_eq!(
+            code_lines_with(body, call).len(),
+            1,
+            "{road}: `{call}` once in `{function}`"
+        );
+    }
+
+    let body = body_of(&guard_source, "pub fn forward_focus_event() -> bool {");
+    let told = code_lines_with(body, "Tell::Forwarded(");
+    let passed = code_lines_with(body, "watchdog::pass_on(");
+
+    assert_eq!(
+        told.len(),
+        1,
+        "the focus events of UI Automation: told once: {told:?}"
+    );
+    assert_eq!(passed.len(), 1, "control: and passed on once: {passed:?}");
+    assert!(
+        told[0].0 < passed[0].0,
+        "the focus events of UI Automation: told before the pass-on: {told:?} {passed:?}"
+    );
+}
+
+/// ⭐ **Stage E114, решение 208.28 — test 11.3 (`tests\switch.rs`), the trace of 209.37.** The
+/// `EVENT_SYSTEM_FOREGROUND` of the test's window was turned away by the gate in 20 runs of 20 —
+/// another window was still in front at the callback — and the window came forward without an event
+/// of its own. A look passed it on, and a pass-on is a window change: the flush of FR-10 up to the
+/// look and the park of FR-70, which take the buffer away. With a look every 250 ms the pass-on came
+/// 233–301 ms after the event, while the test was already typing: the word lost its first letters on
+/// the stand (`gривет`, 5 of 50 runs on the builds with the re-check) and all of them on the owner's
+/// machine (the hotkey found the buffer empty and only switched the layout).
+///
+/// What a silently arrived window needs is to be passed on — and its probe answered — before the
+/// first stroke typed into it. Modelled on the trace, for every moment the window can come forward
+/// within the looks: the first stroke 158 ms after the window is in front (`own_window::tap_shift`,
+/// 8 + 150 ms — the shortest gap of the scenario), the probe's verdict 31 ms after the pass-on (the
+/// longest of the trace), the looks on a window timer, which the system rounds up to its own tick of
+/// 15.625 ms.
+#[test]
+fn a_window_that_comes_forward_without_an_event_is_passed_on_before_the_first_stroke() {
+    use watchdog::{FOREGROUND_RECHECK_MS, FOREGROUND_RECHECK_TICKS, RecheckStep, Tell, Told};
+
+    const FIRST_STROKE_US: u64 = 158_000;
+    const VERDICT_US: u64 = 31_000;
+    const SYSTEM_TICK_US: u64 = 15_625;
+
+    let notepad = 0x6_006a_isize;
+    let bench = 0x6_02e2_isize;
+
+    let period_us =
+        (u64::from(FOREGROUND_RECHECK_MS) * 1000).div_ceil(SYSTEM_TICK_US) * SYSTEM_TICK_US;
+    let horizon_us = period_us * u64::from(FOREGROUND_RECHECK_TICKS);
+
+    let mut worst: Option<(u64, u64)> = None;
+
+    // The window comes forward `arrival` after the turned-away event, in steps of a millisecond, up
+    // to the last look — a window that comes later is not seen at all (two seconds and no more).
+    for arrival in (0..=horizon_us).step_by(1000) {
+        let (mut state, _) = watchdog::told_after(
+            Told {
+                last: notepad,
+                left: 0,
+            },
+            Tell::TurnedAway,
+        );
+
+        let mut passed_at = None;
+
+        for look in 1..=u64::from(FOREGROUND_RECHECK_TICKS) {
+            let at = look * period_us;
+            let foreground = if at >= arrival { bench } else { notepad };
+            let (next, step) = watchdog::told_after(
+                state,
+                Tell::Look {
+                    foreground,
+                    own: false,
+                },
+            );
+            state = next;
+
+            if matches!(step, Some(RecheckStep::PassOn(_))) {
+                passed_at = Some(at);
+                break;
+            }
+        }
+
+        let passed_at = passed_at.expect("a window in front within the looks is passed on");
+
+        if passed_at + VERDICT_US >= arrival + FIRST_STROKE_US {
+            worst = Some(worst.map_or((arrival, passed_at), |w| w.max((arrival, passed_at))));
+        }
+    }
+
+    assert_eq!(
+        worst, None,
+        "a window in front at (arrival, pass-on) µs after the turned-away event got its verdict \
+         after the first stroke typed into it: a look every {FOREGROUND_RECHECK_MS} ms \
+         ({period_us} µs on the system timer)"
+    );
+}
+
 /// The windows one re-check passes on, in order, when its looks see `looks` in front one after
 /// another — `recheck_step` driven the way `watchdog::recheck_foreground` drives it on the timer:
 /// the program told of `last`.
@@ -4682,7 +4873,9 @@ fn recheck_passes(last: isize, looks: &[isize]) -> Vec<isize> {
 /// excluded Блокнот behind a browser (209.34, case 1); the rule of `645ff71` (only the window of
 /// the turned-away event) kept it, but lost the new window of a browser, which is not the window
 /// of its own turned-away event (209.34: Chrome's password field after `Tab` converted 3 of 3,
-/// Firefox's text field not converted). Each case is a sequence of looks, one per 250 ms.
+/// Firefox's text field not converted). Each case is a sequence of looks, one per
+/// [`watchdog::FOREGROUND_RECHECK_MS`] (250 ms when the cases were measured, 25 since решение 208.28:
+/// the rule does not depend on the period, only on the order of what the looks see).
 #[test]
 fn the_recheck_passes_on_the_window_that_ends_up_in_front_in_all_three_cases() {
     let notepad = 0x6_006a_isize;
@@ -4725,9 +4918,8 @@ fn the_recheck_passes_on_the_window_that_ends_up_in_front_in_all_three_cases() {
     // Nothing in front the program was not told of: nothing passed on, in any case.
     assert_eq!(recheck_passes(notepad, &[notepad; 8]), []);
 
-    // Two seconds and no more: a window that comes forward after the eighth look is not seen.
-    let late = [
-        taskbar, taskbar, taskbar, taskbar, taskbar, taskbar, taskbar, taskbar, notepad,
-    ];
+    // Two seconds and no more: a window that comes forward after the last look is not seen.
+    let mut late = vec![taskbar; watchdog::FOREGROUND_RECHECK_TICKS as usize];
+    late.push(notepad);
     assert_eq!(recheck_passes(taskbar, &late), []);
 }

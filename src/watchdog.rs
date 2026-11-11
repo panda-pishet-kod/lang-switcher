@@ -2123,13 +2123,21 @@ pub const WM_APP_RECHECK_FOREGROUND: u32 = WM_APP + 23;
 pub const FOREGROUND_RECHECK_TIMER_ID: usize = 3;
 
 /// The period of the re-check, ms, and how many looks one turned-away event buys: two seconds in
-/// all. A person who has just come to a window types a word before pressing the hotkey, which
-/// takes longer than one period; the stand's `j-np-open` (a window started, 0.7 s, then brought
-/// to the front) falls inside the two seconds.
-pub const FOREGROUND_RECHECK_MS: u32 = 250;
+/// all — the stand's `j-np-open` (a window started, 0.7 s, then brought to the front) falls inside
+/// them.
+///
+/// ⭐ **Решение 208.28: a look every 25 ms, not every 250.** A look that passes a window on is a
+/// window change — the flush of FR-10 and the park of FR-70 take the buffer away — so it has to come
+/// before the user types into the window it passes on, not in the middle of the word. Test 11.3
+/// (209.37): the window came forward without an event, the look every 250 ms passed it on 233–301 ms
+/// after the turned-away event, and the word lost its first letters on the stand and all of them on
+/// the owner's machine. At 25 ms (31.25 on the system timer) the pass-on and its verdict come within
+/// about 60 ms of the window coming forward, the first stroke of the test 158 ms after it. The cost
+/// is 80 looks of two `user32` queries each, after a turned-away `EVENT_SYSTEM_FOREGROUND` only.
+pub const FOREGROUND_RECHECK_MS: u32 = 25;
 
 /// See [`FOREGROUND_RECHECK_MS`].
-pub const FOREGROUND_RECHECK_TICKS: u32 = 8;
+pub const FOREGROUND_RECHECK_TICKS: u32 = 80;
 
 /// The root window of the last flush event that passed the gate — the window the program was last
 /// told is in front. A value, compared and never dereferenced. Stage E114, решение 208.14.
@@ -2195,11 +2203,101 @@ pub fn recheck_step(left: u32, foreground: isize, last: isize, own: bool) -> Rec
     }
 }
 
+/// What the re-check knows — the state of [`told_after`]: the window the program was last told is
+/// in front ([`LAST_FOREGROUND`]) and the looks left ([`RECHECK_LEFT`]). Stage E114, решения 208.14
+/// and 208.28.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Told {
+    /// The window the program was last told is in front; 0 — none yet. A value, compared and never
+    /// dereferenced.
+    pub last: isize,
+    /// The looks the re-check has left; zero when none is running.
+    pub left: u32,
+}
+
+/// What reaches the re-check: the three roads a change of the window in front is passed on by, and
+/// the one by which it is missed. Stage E114, решение 208.28.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tell {
+    /// A flush event passed the gate of Р-60 ([`win_event_proc`]); the root of its window, which is
+    /// the window in front.
+    Passed(isize),
+    /// A focus event of UI Automation was passed on while this window was in front
+    /// (`guard::forward_focus_event`, FR-71а).
+    Forwarded(isize),
+    /// An `EVENT_SYSTEM_FOREGROUND` was turned away by the gate: the looks start over.
+    TurnedAway,
+    /// One look of the re-check: the window in front (0 — none), and whether it is this process's
+    /// own.
+    Look {
+        /// The window in front at the look.
+        foreground: isize,
+        /// Whether it belongs to this process.
+        own: bool,
+    },
+}
+
+/// The re-check as one automaton — the state after `tell`, and what a look decided (`None` for the
+/// three inputs that are not a look). A pure function: the one place that says which road tells the
+/// program which window is in front, so that the roads cannot drift apart.
+///
+/// ⭐ **Решение 208.28 (п. 1 of the consultant): all three roads tell.** The focus events of UI
+/// Automation used to pass a move on without saying which window it was in, so the window before a
+/// browser stayed «told» for the whole of a session in it, and a foreign window change turned away
+/// later made a look pass the browser on — in the middle of the user's word.
+pub fn told_after(state: Told, tell: Tell) -> (Told, Option<RecheckStep>) {
+    match tell {
+        Tell::Passed(root) | Tell::Forwarded(root) => (
+            Told {
+                last: root,
+                ..state
+            },
+            None,
+        ),
+        Tell::TurnedAway => (
+            Told {
+                left: FOREGROUND_RECHECK_TICKS,
+                ..state
+            },
+            None,
+        ),
+        Tell::Look { foreground, own } => {
+            let step = recheck_step(state.left, foreground, state.last, own);
+            let next = match step {
+                RecheckStep::PassOn(left) => Told {
+                    last: foreground,
+                    left,
+                },
+                RecheckStep::Again(left) => Told { left, ..state },
+                RecheckStep::Stop => Told { left: 0, ..state },
+            };
+            (next, Some(step))
+        }
+    }
+}
+
+/// Feeds `tell` to [`told_after`] over the two statics, and answers what a look decided. **The
+/// watcher thread only**: the `WinEvent` callback, the timer of the re-check and the focus events
+/// of UI Automation are all answered there, so the load and the store cannot interleave.
+pub(crate) fn tell(tell: Tell) -> Option<RecheckStep> {
+    let state = Told {
+        last: LAST_FOREGROUND.load(Ordering::Relaxed),
+        left: RECHECK_LEFT.load(Ordering::Relaxed),
+    };
+
+    let (next, step) = told_after(state, tell);
+
+    LAST_FOREGROUND.store(next.last, Ordering::Relaxed);
+    RECHECK_LEFT.store(next.left, Ordering::Relaxed);
+
+    step
+}
+
 /// Arms the re-check: [`FOREGROUND_RECHECK_TICKS`] looks. Called by `app::window_proc` on
 /// [`WM_APP_RECHECK_FOREGROUND`], which then sets the timer; a re-check already running starts
 /// over.
 pub fn arm_foreground_recheck() {
-    RECHECK_LEFT.store(FOREGROUND_RECHECK_TICKS, Ordering::Relaxed);
+    let _ = tell(Tell::TurnedAway);
 }
 
 /// One look of the re-check, on the tick of [`FOREGROUND_RECHECK_TIMER_ID`] — answers whether the
@@ -2208,7 +2306,7 @@ pub fn arm_foreground_recheck() {
 /// the probe of FR-72 and FR-84, the layout question of FR-21), timed at the tick.
 ///
 /// Two read-only window queries and one more for the owner of the window in front — the budget
-/// of the callback itself, four times a second for at most two seconds after a turned-away event.
+/// of the callback itself, forty times a second for at most two seconds after a turned-away event.
 pub fn recheck_foreground() -> bool {
     // SAFETY: no arguments, nothing of ours is touched; null when no window is in front.
     let foreground = unsafe { GetForegroundWindow() };
@@ -2222,17 +2320,13 @@ pub fn recheck_foreground() -> bool {
         pid == unsafe { GetCurrentProcessId() }
     };
 
-    let step = recheck_step(
-        RECHECK_LEFT.load(Ordering::Relaxed),
-        foreground.0 as isize,
-        LAST_FOREGROUND.load(Ordering::Relaxed),
+    let step = tell(Tell::Look {
+        foreground: foreground.0 as isize,
         own,
-    );
+    });
 
     match step {
-        RecheckStep::PassOn(left) => {
-            RECHECK_LEFT.store(left, Ordering::Relaxed);
-            LAST_FOREGROUND.store(foreground.0 as isize, Ordering::Relaxed);
+        Some(RecheckStep::PassOn(left)) => {
             FOREGROUND_RECHECKS.fetch_add(1, Ordering::Relaxed);
             // SAFETY: no arguments; the time of the `WM_TIMER` being handled, in the tick domain
             // of the `WinEvent` times.
@@ -2240,14 +2334,8 @@ pub fn recheck_foreground() -> bool {
             pass_on(time, Cause::WindowChange);
             left > 0
         }
-        RecheckStep::Again(left) => {
-            RECHECK_LEFT.store(left, Ordering::Relaxed);
-            true
-        }
-        RecheckStep::Stop => {
-            RECHECK_LEFT.store(0, Ordering::Relaxed);
-            false
-        }
+        Some(RecheckStep::Again(_)) => true,
+        Some(RecheckStep::Stop) | None => false,
     }
 }
 
@@ -2569,7 +2657,7 @@ unsafe extern "system" fn win_event_proc(
     };
 
     // The window the program is told of from here on — what the re-check compares with.
-    LAST_FOREGROUND.store(root, Ordering::Relaxed);
+    let _ = tell(Tell::Passed(root));
 
     if focus_repeated(event, window, object_id, child_id) {
         // **Task T-10-0e: the frontmost window's own churn re-announces the focus it
