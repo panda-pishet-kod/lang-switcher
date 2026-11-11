@@ -2084,6 +2084,15 @@ pub fn watch() -> WinResult<Watching> {
         *slot = hook;
     }
 
+    // ⭐ **Решение 208.28: the window in front when the watching starts has been told of.** The
+    // start-up probe of FR-70 (finding Н38) asks about it; leaving the re-check «told of nothing»
+    // made its first look pass that window on again — a flush and a second probe on this thread,
+    // during which the looks waited (209.38: about 150 ms for Блокнот on the stand), so a window
+    // that came forward meanwhile was passed on that much later, possibly in the middle of a word.
+    // SAFETY: no arguments; null when no window is in front, which tells nothing.
+    let foreground = unsafe { GetForegroundWindow() };
+    let _ = tell(Tell::Started(foreground.0 as isize));
+
     Ok(Watching { hooks })
 }
 
@@ -2225,6 +2234,9 @@ pub enum Tell {
     /// A focus event of UI Automation was passed on while this window was in front
     /// (`guard::forward_focus_event`, FR-71а).
     Forwarded(isize),
+    /// The subscription of [`watch`] started while this window was in front — the window the
+    /// start-up probe of FR-70 asks about (finding Н38), so the program has been told of it.
+    Started(isize),
     /// An `EVENT_SYSTEM_FOREGROUND` was turned away by the gate: the looks start over.
     TurnedAway,
     /// One look of the re-check: the window in front (0 — none), and whether it is this process's
@@ -2247,7 +2259,7 @@ pub enum Tell {
 /// later made a look pass the browser on — in the middle of the user's word.
 pub fn told_after(state: Told, tell: Tell) -> (Told, Option<RecheckStep>) {
     match tell {
-        Tell::Passed(root) | Tell::Forwarded(root) => (
+        Tell::Passed(root) | Tell::Forwarded(root) | Tell::Started(root) => (
             Told {
                 last: root,
                 ..state

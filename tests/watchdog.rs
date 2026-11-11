@@ -4713,12 +4713,46 @@ fn a_window_told_of_by_the_focus_events_of_ui_automation_is_not_passed_on_again_
     assert_eq!(steps, [RecheckStep::PassOn(FOREGROUND_RECHECK_TICKS - 1)]);
 }
 
+/// ⭐ **Stage E114, решение 208.28 — the window in front at the start (209.38).** On the stand the
+/// program of test 11.3 started with Блокнот in front, the event of the test's window was turned
+/// away, and the first look — told of nothing — passed Блокнот on: a flush and a probe of it on the
+/// watcher thread, about 150 ms during which no look ran. Told of the window it started with (the
+/// start-up probe asks about it), the looks pass on only the window that comes forward.
+#[test]
+fn the_window_in_front_at_the_start_is_not_passed_on_by_a_look() {
+    use watchdog::{FOREGROUND_RECHECK_TICKS, RecheckStep, Tell};
+
+    let notepad = 0x4_005e_isize;
+    let bench = 0x49_00ae_isize;
+    let look = |foreground| Tell::Look {
+        foreground,
+        own: false,
+    };
+
+    let steps = told_steps(&[
+        Tell::Started(notepad),
+        Tell::TurnedAway,
+        look(notepad),
+        look(bench),
+        look(bench),
+    ]);
+    assert_eq!(
+        steps,
+        [
+            RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 1),
+            RecheckStep::PassOn(FOREGROUND_RECHECK_TICKS - 2),
+            RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 3),
+        ]
+    );
+}
+
 /// ⭐ **Stage E114, решение 208.28 — the wiring of [`watchdog::told_after`].** The automaton is right
 /// only if every road that passes a change on feeds it: the test above drives the automaton, this one
 /// checks that each road calls it — the gate's event (`Tell::Passed`, in `win_event_proc`), the look
-/// (`Tell::Look`, in `recheck_foreground`), the arming (`Tell::TurnedAway`) and the focus events of UI
-/// Automation (`Tell::Forwarded`, in `guard::forward_focus_event`, before the pass-on, in the order
-/// the gate's event keeps).
+/// (`Tell::Look`, in `recheck_foreground`), the arming (`Tell::TurnedAway`), the start of the
+/// subscription (`Tell::Started`, in `watch` — the window the start-up probe of Н38 asks about,
+/// 209.38) and the focus events of UI Automation (`Tell::Forwarded`, in
+/// `guard::forward_focus_event`, before the pass-on, in the order the gate's event keeps).
 #[test]
 fn every_road_that_passes_a_change_on_tells_the_recheck() {
     let watchdog_source = source_of("watchdog.rs");
@@ -4739,6 +4773,11 @@ fn every_road_that_passes_a_change_on_tells_the_recheck() {
             "the arming",
             "pub fn arm_foreground_recheck() {",
             "tell(Tell::TurnedAway)",
+        ),
+        (
+            "the start of the subscription",
+            "pub fn watch() -> WinResult<Watching> {",
+            "tell(Tell::Started(",
         ),
     ] {
         let body = body_of(&watchdog_source, function);
