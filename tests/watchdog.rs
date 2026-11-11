@@ -4617,37 +4617,85 @@ fn a_look_of_the_recheck_passes_on_only_a_change_it_was_not_told_of() {
 
     // The case of the stand: told of the taskbar, Блокнот in front — pass it on.
     assert_eq!(
-        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, taskbar, false),
+        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, taskbar, notepad, false),
         RecheckStep::PassOn
     );
     assert_eq!(
-        recheck_step(1, notepad, taskbar, false),
+        recheck_step(1, notepad, taskbar, notepad, false),
         RecheckStep::PassOn
     );
 
     // Told of the window that is in front: nothing to pass on, look again until the looks run out.
     assert_eq!(
-        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, notepad, false),
+        recheck_step(FOREGROUND_RECHECK_TICKS, notepad, notepad, notepad, false),
         RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 1)
     );
-    assert_eq!(recheck_step(1, notepad, notepad, false), RecheckStep::Stop);
+    assert_eq!(
+        recheck_step(1, notepad, notepad, notepad, false),
+        RecheckStep::Stop
+    );
 
     // No window in front — the moment between two: not a change, look again.
-    assert_eq!(recheck_step(3, 0, taskbar, false), RecheckStep::Again(2));
+    assert_eq!(
+        recheck_step(3, 0, taskbar, notepad, false),
+        RecheckStep::Again(2)
+    );
 
     // A window of this very process (the tray menu, the settings): never a change — the events of
     // its own windows are kept away by `WINEVENT_SKIPOWNPROCESS` on purpose.
     assert_eq!(
-        recheck_step(3, notepad, taskbar, true),
+        recheck_step(3, notepad, taskbar, notepad, true),
         RecheckStep::Again(2)
     );
 
     // No look left, or none running: stop, whatever is in front.
-    assert_eq!(recheck_step(0, notepad, taskbar, false), RecheckStep::Stop);
+    assert_eq!(
+        recheck_step(0, notepad, taskbar, notepad, false),
+        RecheckStep::Stop
+    );
 
     // Two seconds in all, four looks a second.
     assert_eq!(
         u64::from(FOREGROUND_RECHECK_TICKS) * u64::from(watchdog::FOREGROUND_RECHECK_MS),
         2000
     );
+}
+
+/// ⭐ **Stage E114, решение 208.22 — the re-check waits for the window it was turned away for.** On
+/// the stand (209.34, `q114-y`, the trace of the build `lab-y`): Edge in front with its field
+/// focused, the program just restarted (told of nothing yet: `last` is 0), an excluded Блокнот
+/// started — its `EVENT_SYSTEM_FOREGROUND` came while Edge was still in front and was turned away;
+/// the first look saw Edge, took it for the change, passed it on and stopped, and the Блокнот that
+/// came forward a moment later was never asked about: the word in it was converted, 9 cycles of 10
+/// on the delivery 1.5.0. A look passes on the awaited window and nothing else.
+#[test]
+fn a_look_of_the_recheck_waits_for_the_window_it_was_turned_away_for() {
+    use watchdog::{FOREGROUND_RECHECK_TICKS, RecheckStep, recheck_step};
+
+    let notepad = 0x6_006a_isize;
+    let edge = 0x3_02be_isize;
+
+    // The case of the stand: Edge still in front, the program told of nothing — Edge is not the
+    // window awaited: no change to pass on, look again.
+    assert_eq!(
+        recheck_step(FOREGROUND_RECHECK_TICKS, edge, 0, notepad, false),
+        RecheckStep::Again(FOREGROUND_RECHECK_TICKS - 1)
+    );
+    assert_eq!(
+        recheck_step(5, edge, edge, notepad, false),
+        RecheckStep::Again(4)
+    );
+
+    // Блокнот comes forward: pass it on, whatever the program was told of before.
+    assert_eq!(
+        recheck_step(5, notepad, 0, notepad, false),
+        RecheckStep::PassOn
+    );
+    assert_eq!(
+        recheck_step(5, notepad, edge, notepad, false),
+        RecheckStep::PassOn
+    );
+
+    // The turned-away window could not be had (0): nothing is awaited, nothing is passed on.
+    assert_eq!(recheck_step(5, edge, 0, 0, false), RecheckStep::Again(4));
 }

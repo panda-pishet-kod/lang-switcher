@@ -2138,6 +2138,11 @@ static LAST_FOREGROUND: AtomicIsize = AtomicIsize::new(0);
 /// The looks the re-check has left; zero when none is running.
 static RECHECK_LEFT: AtomicU32 = AtomicU32::new(0);
 
+/// The root window of the `EVENT_SYSTEM_FOREGROUND` the gate turned away last — the window the
+/// re-check waits to see in front. A value, compared and never dereferenced; 0 when the root could
+/// not be had. Stage E114, решение 208.22.
+static RECHECK_AWAITED: AtomicIsize = AtomicIsize::new(0);
+
 /// How many times a re-check found a change of window the gate had turned away, and passed it on.
 static FOREGROUND_RECHECKS: AtomicU32 = AtomicU32::new(0);
 
@@ -2159,17 +2164,31 @@ pub enum RecheckStep {
 
 /// The decision of one look, as a pure function: `left` looks remain, `foreground` is the window
 /// in front now (0 — none, the moment between two windows), `last` the root of the last event
-/// that passed the gate, `own` whether the window in front belongs to this process.
+/// that passed the gate, `awaited` the root of the turned-away window change the re-check waits
+/// for, `own` whether the window in front belongs to this process.
 ///
 /// **This process's own windows are not a change** — `WINEVENT_SKIPOWNPROCESS` keeps their events
 /// away on purpose (the tray menu must not flush the word about to be converted), and a re-check
 /// must not bring that flush back by the side door.
-pub fn recheck_step(left: u32, foreground: isize, last: isize, own: bool) -> RecheckStep {
+///
+/// ⭐ **Решение 208.22: only the awaited window is a change.** The window in front that is merely
+/// not the last one the program was told of may be one that has been in front all along — on the
+/// stand, a browser in front when the program started, so that the program had been told of
+/// nothing — and taking it for the change spent the re-check on it: the look passed it on, stopped,
+/// and the window turned away came forward unseen. A look passes on the window it waits for, when
+/// it is in front and the program has not been told of it yet; every other window is looked past.
+pub fn recheck_step(
+    left: u32,
+    foreground: isize,
+    last: isize,
+    awaited: isize,
+    own: bool,
+) -> RecheckStep {
     if left == 0 {
         return RecheckStep::Stop;
     }
 
-    if foreground != 0 && foreground != last && !own {
+    if foreground != 0 && foreground == awaited && foreground != last && !own {
         return RecheckStep::PassOn;
     }
 
@@ -2210,6 +2229,7 @@ pub fn recheck_foreground() -> bool {
         RECHECK_LEFT.load(Ordering::Relaxed),
         foreground.0 as isize,
         LAST_FOREGROUND.load(Ordering::Relaxed),
+        RECHECK_AWAITED.load(Ordering::Relaxed),
         own,
     );
 
@@ -2546,6 +2566,16 @@ unsafe extern "system" fn win_event_proc(
         // again. Only `EVENT_SYSTEM_FOREGROUND` — the churn of focus events this gate exists for
         // arms nothing. A post to this very thread, the one call this callback is allowed.
         if event == EVENT_SYSTEM_FOREGROUND {
+            // ⭐ **Решение 208.22: the re-check waits for THIS window.** On the stand (209.34) the
+            // window in front at the first look was not the one turned away but the browser that
+            // had been in front all along; the look took it for the change, passed it on and
+            // stopped, and the Блокнот that came forward a moment later was never asked about. The
+            // root is remembered here, where the window is known — a read-only query by value, the
+            // one the gate has just made, paid only for a turned-away window change.
+            // SAFETY: `window` is the handle the system passed to this callback, read by value; a
+            // window already gone answers null, which is stored as 0 and awaits nothing.
+            let awaited = unsafe { GetAncestor(window, GA_ROOT) };
+            RECHECK_AWAITED.store(awaited.0 as isize, Ordering::Relaxed);
             let _ = crate::app::post_to_watcher_thread(WM_APP_RECHECK_FOREGROUND);
         }
 
