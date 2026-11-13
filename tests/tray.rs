@@ -6407,14 +6407,14 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     // thirty languages of group A) is `1.3.0.0`, `e109` (stage Э109: the twenty-two of
     // group B) is `1.4.0.0`, `e110` (stage E110: fixes — the level of the right `Ctrl`, chains of
     // dead keys, Блокнот) is `1.4.1.0`, `e111` (stage E111: fixes — quotation marks, Блокнот, the pair) is
-    // `1.4.2.0`, `e113` (stage E113: the bare grave key and the pages of the site in uk, ar, fa, th; `e112` did not go out) is `1.4.4.0`, `e114` (stage E114: the hotkey without a word switches the layout, the password field of WinForms and of the browsers, the pages of the site in nineteen languages, the Greek wizard) is `1.5.0.0`. `Cargo.toml` is the one source and
+    // `1.4.2.0`, `e113` (stage E113: the bare grave key and the pages of the site in uk, ar, fa, th; `e112` did not go out) is `1.4.4.0`, `e114` (stage E114: the hotkey without a word switches the layout, the password field of WinForms and of the browsers, the pages of the site in nineteen languages, the Greek wizard) is `1.5.0.0`, `e115` (stage E115: the request to switch the layout goes to the window with the focus, error O-1) is `1.5.1.0`. `Cargo.toml` is the one source and
     // `tools\verify-version.ps1` holds the ten places to it — this assertion is the reader of the
     // bytes `rc.exe` really produced, and the one the instrument cannot see: it is raised **by
     // hand**, and that is what makes it the honest red before a version bump.
     assert_eq!(
         version,
-        Some((1, 5, 0, 0)),
-        "app.rc must declare FILEVERSION 1,5,0,0 — version 1.5.0, the fourth field always 0 (решение 192.3)"
+        Some((1, 5, 1, 0)),
+        "app.rc must declare FILEVERSION 1,5,1,0 — version 1.5.1, the fourth field always 0 (решение 192.3)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process
