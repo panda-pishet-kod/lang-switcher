@@ -84,6 +84,10 @@ const IN_FRONT: Window = Window::from_raw(0x0001_1111);
 /// message — a notification, a taskbar click, an installer.
 const AFTER_THE_VERDICT: Window = Window::from_raw(0x0002_2222);
 
+/// **Error O-1.** The window with the keyboard focus inside [`IN_FRONT`] — the Edit of the Run
+/// dialog, whose frame eats the request of FR-50 (record 209.46).
+const FOCUSED: Window = Window::from_raw(0x0003_3333);
+
 /// Chinese Simplified, Microsoft Pinyin: `0xE0200804`.
 ///
 /// A **TSF/IME** profile, and the reason FR-35 exists — the top nibble `0xE` of the device
@@ -147,6 +151,12 @@ struct Fake {
     /// **Task Т-22-4.** Where the foreground goes the instant [`Machine::read`] has answered —
     /// the gap between the verdict and the message, staged.
     moves_to: Option<Window>,
+    /// **Error O-1.** The window with the keyboard focus that [`Machine::read`] reports inside the
+    /// window in front — [`Window::default`] is "none", FR-52's fallback.
+    focus: Window,
+    /// **Error O-1.** The frame eats the request: only a request posted to the focus window takes
+    /// effect — the Run dialog of Windows, measured (record 209.46).
+    frame_eats_the_request: bool,
 
     // ---- what the switch did ----
     posts: u32,
@@ -169,6 +179,8 @@ impl Fake {
             slice_ms: VERIFY_POLL_MS,
             window: IN_FRONT,
             moves_to: None,
+            focus: Window::default(),
+            frame_eats_the_request: false,
             posts: 0,
             reads: 0,
             waits: 0,
@@ -197,6 +209,14 @@ impl Fake {
         self.blind = true;
         self
     }
+
+    /// **Error O-1.** The window in front is a frame whose focus is `focus`, and the frame eats a
+    /// request posted to it: only one posted to `focus` takes effect (the Run dialog, 209.46).
+    fn frame_eats_the_request(mut self, focus: Window) -> Self {
+        self.focus = focus;
+        self.frame_eats_the_request = true;
+        self
+    }
 }
 
 impl Machine for Fake {
@@ -207,6 +227,7 @@ impl Machine for Fake {
             window: self.window,
             layout: self.layout,
             blind: self.blind,
+            focus: self.focus,
         };
 
         // **Task Т-22-4.** The foreground moves once the verdict has been taken — once, so that
@@ -224,7 +245,10 @@ impl Machine for Fake {
         self.targets.push(target);
         self.posted_to.push(window);
 
-        if self.method.switched {
+        // Error O-1: a frame that eats the request changes nothing; its focus window takes it.
+        let eaten = self.frame_eats_the_request && window != self.focus;
+
+        if self.method.switched && !eaten {
             self.layout = target;
         }
 
@@ -268,6 +292,7 @@ impl Machine for ZeroClock {
             window: IN_FRONT,
             layout: US,
             blind: false,
+            focus: Window::default(),
         }
     }
 
@@ -682,6 +707,7 @@ fn a_reading_that_goes_blind_during_the_wait_is_not_a_confirmation() {
                 window: IN_FRONT,
                 layout: if self.reads == 1 { US } else { RU },
                 blind: self.reads > 1,
+                focus: Window::default(),
             }
         }
 
@@ -1206,6 +1232,44 @@ fn the_request_of_fr50_goes_to_the_window_the_verdict_was_taken_of() {
         "Т-22-4: the blind branch of FR-52's addendum posts to the same window it was blind about"
     );
     assert_eq!(blind.waits, 0, "and still waits for nothing");
+}
+
+/// **Error O-1 (support, 2026-11-12; records 209.45–209.46).** The Run dialog of Windows: the word
+/// was corrected and the layout did not switch, every time, `switch.post_message` on every press.
+/// Measured on `Test_VM` without the program: a `WM_INPUTLANGCHANGEREQUEST` posted to the dialog
+/// frame (explorer, `#32770`) changed nothing 6 times out of 6; posted to the Edit with the focus —
+/// the same thread — it switched 3 times out of 3. The frame eats the request; the request has to go
+/// to the focus window FR-52 found, the one the verdict is read of.
+#[test]
+fn a_frame_that_eats_the_request_does_not_stop_the_switch_of_its_focus_window() {
+    let _guard = counters();
+
+    let mut fake = Fake::on(US)
+        .method(Report::WORKS)
+        .frame_eats_the_request(FOCUSED);
+
+    let outcome = switch::to_in(&mut fake, RU);
+
+    assert_eq!(
+        fake.posted_to,
+        vec![FOCUSED],
+        "O-1: the request of FR-50 must go to the focus window FR-52 found, not to the frame in front"
+    );
+    assert_eq!(
+        outcome,
+        Ok(Outcome::Switched),
+        "O-1: and the window must switch"
+    );
+
+    // Without a focus window (FR-52's fallback) the request goes to the window in front, as before.
+    let mut plain = Fake::on(US).method(Report::WORKS);
+
+    assert_eq!(switch::to_in(&mut plain, RU), Ok(Outcome::Switched));
+    assert_eq!(
+        plain.posted_to,
+        vec![IN_FRONT],
+        "no focus window: the window in front"
+    );
 }
 
 // ---------------------------------------------------------------------------------------

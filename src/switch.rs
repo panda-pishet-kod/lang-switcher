@@ -323,7 +323,7 @@ pub fn scope_from(read: windows::core::Result<bool>) -> Scope {
 // FR-52 — the layout of the foreground window
 // ---------------------------------------------------------------------------------------
 
-/// What [`focus_thread_of`] answered — **three outcomes, and not two**.
+/// What [`focus_of`] answered — **three outcomes, and not two**.
 ///
 /// FR-52 names three cases and gives two of them the *same* behaviour, which is exactly the shape
 /// an `Option` would flatten. They are kept apart because they are different facts about the
@@ -367,7 +367,13 @@ pub enum FocusThread {
 /// (NFR-05). ⚠ In particular the refusal is **counted and not reported**: `report_non_critical`
 /// formats a string and allocates, which [`scope`] may do because it is never in the callback and
 /// this must not.
-fn focus_thread_of(foreground_thread: u32) -> FocusThread {
+///
+/// ⭐ **Error O-1 (2026-11-13, records 209.45–209.46 of `DECISIONS.md`): the focus window itself is
+/// answered too** — it is the window the request of FR-50 is addressed to ([`Reading::addressee`]).
+/// It is [`Window::default`] in exactly the cases FR-52 falls back to the foreground thread
+/// ([`FocusThread::NoFocus`], [`FocusThread::Refused`]), so the request falls back to the foreground
+/// window in the same cases and for the same reasons. One more plain value on this frame.
+fn focus_of(foreground_thread: u32) -> (FocusThread, Window) {
     let mut info = GUITHREADINFO {
         cbSize: u32::try_from(size_of::<GUITHREADINFO>()).unwrap_or(0),
         ..Default::default()
@@ -383,13 +389,13 @@ fn focus_thread_of(foreground_thread: u32) -> FocusThread {
         // gone, or the counterfeit id a classic console window answers with — and FR-52 says in
         // as many words what to do about all three.
         GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
-        return FocusThread::Refused;
+        return (FocusThread::Refused, Window::default());
     }
 
     if info.hwndFocus.is_invalid() {
         // The thread answered and has no focus window. FR-52 calls this «hwndFocus пуст».
         FOCUS_WINDOW_ABSENT.fetch_add(1, Ordering::Relaxed);
-        return FocusThread::NoFocus;
+        return (FocusThread::NoFocus, Window::default());
     }
 
     // SAFETY: `info.hwndFocus` is the handle `GetGUIThreadInfo` has just written and was checked
@@ -404,10 +410,13 @@ fn focus_thread_of(foreground_thread: u32) -> FocusThread {
         // already has a rule for, and which is honest in the stronger sense too: the window whose
         // layout would have been the verdict no longer exists.
         GUI_THREAD_INFO_REFUSED.fetch_add(1, Ordering::Relaxed);
-        return FocusThread::Refused;
+        return (FocusThread::Refused, Window::default());
     }
 
-    FocusThread::Thread(thread)
+    (
+        FocusThread::Thread(thread),
+        Window::from_raw(info.hwndFocus.0 as usize),
+    )
 }
 
 /// **FR-52, the whole rule, as a function of its two inputs.**
@@ -492,6 +501,34 @@ pub struct Reading {
     ///
     /// Measured cause: a `ConsoleWindowClass` window, where this happens 120 times out of 120.
     pub blind: bool,
+    /// ⭐ **Error O-1 (2026-11-13, records 209.45–209.46).** The window with the keyboard focus that
+    /// FR-52 found inside [`Reading::window`] — the window whose thread [`Reading::layout`] was
+    /// read of — or [`Window::default`] when FR-52 fell back to the foreground thread. It is what
+    /// [`Reading::addressee`] answers when there is one.
+    pub focus: Window,
+}
+
+impl Reading {
+    /// **FR-50 after error O-1 — the window the request goes to: the focus window FR-52 found,
+    /// otherwise the foreground window** (FR-52's fallback cases, the blind classic console among
+    /// them).
+    ///
+    /// Measured on `Test_VM` without the program (record 209.46): in the Run dialog of Windows
+    /// (explorer, `#32770`) a `WM_INPUTLANGCHANGEREQUEST` posted to the dialog frame changed nothing,
+    /// 6 times out of 6 with `wParam` 0 and 1, while the same request posted to the Edit with the
+    /// focus — **the same thread** — switched 3 times out of 3, as did its parent `ComboBox` and
+    /// Windows' own `Alt+Shift`; in the WinForms form both the frame and the box switched 3 of 3.
+    /// The frame is free to eat the request (it is a message to a window, and a dialog procedure
+    /// answers it before `DefWindowProc` does); the focus window is the one the verdict is read of,
+    /// so the request and the verdict are now about one window.
+    #[must_use]
+    pub const fn addressee(&self) -> Window {
+        if self.focus.is_none() {
+            self.window
+        } else {
+            self.focus
+        }
+    }
 }
 
 /// **FR-52 with its addendum.** The keyboard layout of the window the user is typing into, and
@@ -564,14 +601,14 @@ pub fn read() -> Reading {
         return Reading::default();
     }
 
-    let focus = focus_thread_of(foreground_thread);
+    let (focus, focus_window) = focus_of(foreground_thread);
 
     // FR-52 sentence 1, with sentence 2 as the fallback. Both live in `reading_thread`.
     let thread = reading_thread(foreground_thread, focus);
 
     // SAFETY: takes a thread id by value, returns a layout handle by value, dereferences
     // nothing. `thread` is non-zero on every path into here: `foreground_thread` was checked
-    // above and `focus_thread_of` refuses a zero of its own. The handle is not dereferenced here
+    // above and `focus_of` refuses a zero of its own. The handle is not dereferenced here
     // either: `LayoutId` keeps the numeric value, which is what module `layouts` identifies a
     // layout by.
     let layout = unsafe { GetKeyboardLayout(thread) };
@@ -585,6 +622,8 @@ pub fn read() -> Reading {
         // FR-52's addendum, question 63: a refusal means no verdict is possible about this
         // window, whatever number the fallback produced.
         blind: focus == FocusThread::Refused,
+        // Error O-1: the focus window whose thread `layout` was read of, or none in the fallback.
+        focus: focus_window,
     }
 }
 
@@ -826,7 +865,10 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
     }
 
     // ---- the one method of FR-50 --------------------------------------------------------
-    if !machine.post_request(before.window, target) {
+    // ⭐ Error O-1: to the focus window FR-52 found — the window the verdict is read of — and to
+    // the window in front only when there is none (`Reading::addressee`). A frame may eat the
+    // request: the Run dialog of Windows does, 6 times out of 6 (record 209.46).
+    if !machine.post_request(before.addressee(), target) {
         // NFR-13: the return value is examined and its failure is counted. R-32: it is not, and
         // must never become, the thing the next line branches on.
         POST_REJECTED.fetch_add(1, Ordering::Relaxed);
