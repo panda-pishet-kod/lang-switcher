@@ -1131,6 +1131,59 @@ fn settled(machine: &mut impl Machine, target: LayoutId) -> bool {
 const VERIFY_TURNS: u32 = VERIFY_BUDGET_MS / VERIFY_POLL_MS + 1;
 
 // ---------------------------------------------------------------------------------------
+// The late verdict — stage E116, task T-116-3 (Q-208-20)
+// ---------------------------------------------------------------------------------------
+
+/// ⭐ **How long a switch [`settled`] did not see is still looked for — the late verdict of stage
+/// E116, task T-116-3 (Q-208-20; records 209.43, 209.48).** In milliseconds, from the press.
+///
+/// [`VERIFY_BUDGET_MS`] is what the input thread may spend **waiting**, and a window that takes
+/// the layout later than that is answered [`SwitchError::NotSwitched`] although it did switch: the
+/// packaged Notepad of Windows 11 counted `switch.post_message` 3 and 4 times in 10 presses that
+/// all switched (209.43), the Run dialog of Windows 10 once in 20 (209.48). On the press over
+/// nothing (FR-60, решение 208.5) that verdict is the tone, so a layout that changed knocked.
+///
+/// The verdict is not waited for longer — NFR-09 and the hook forbid it. It is **looked at again,
+/// later, without waiting**: a timer of the input window re-reads FR-52 every
+/// [`LATE_VERDICT_POLL_MS`], and the tone is the first answer [`late_verdict`] gives. Half a
+/// second: a knock that comes later than that is no longer heard as the answer to the press.
+pub const LATE_VERDICT_MS: u32 = 500;
+
+/// The step of the re-reading of [`LATE_VERDICT_MS`] — the period of the timer, in milliseconds.
+/// The timer of Windows rounds it up to its own step (≈ 15.6 ms, so ≈ 31 ms here); the number is a
+/// request, and [`late_verdict`] decides by the time really gone.
+pub const LATE_VERDICT_POLL_MS: u32 = 25;
+
+/// One answer of the late verdict — see [`late_verdict`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Late {
+    /// The window took the layout after all: the press switched, and sounds as a switch does.
+    Took,
+    /// [`LATE_VERDICT_MS`] has gone by and the layout is not the target: the knock of a refusal.
+    Refused,
+    /// Not yet: look again on the next tick.
+    Wait,
+}
+
+/// ⭐ **The late verdict — stage E116, task T-116-3.** A pure function of one re-reading of FR-52,
+/// the target and the time gone since the press, so the rule is a table a test walks.
+///
+/// The reading is judged as [`settled`] judges it: a blind reading is never the target. The target
+/// is checked before the time, so a layout that arrives on the very tick the half second runs out
+/// is still a switch.
+pub const fn late_verdict(reading: &Reading, target: LayoutId, waited_ms: u32) -> Late {
+    if !reading.blind && reading.layout.raw() == target.raw() {
+        return Late::Took;
+    }
+
+    if waited_ms >= LATE_VERDICT_MS {
+        Late::Refused
+    } else {
+        Late::Wait
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The method of FR-50 — PostMessage
 // ---------------------------------------------------------------------------------------
 

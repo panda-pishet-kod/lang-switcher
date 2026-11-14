@@ -1351,6 +1351,205 @@ fn a_window_of_the_programs_ui_thread_is_switched_by_that_thread_and_not_by_the_
 }
 
 // ---------------------------------------------------------------------------------------
+// The late verdict — stage E116, task T-116-3 (Q-208-20)
+// ---------------------------------------------------------------------------------------
+
+/// A window that takes the layout **later than the verification looks**: its thread reads the old
+/// layout for the first `old_reads` readings and the target after them — the packaged Notepad of
+/// Windows 11 and the Run dialog of Windows 10, which counted `switch.post_message` on presses that
+/// switched (records 209.43, 209.48).
+struct LateWindow {
+    layout: LayoutId,
+    target: Option<LayoutId>,
+    old_reads: u32,
+    reads: u32,
+}
+
+impl Machine for LateWindow {
+    fn read(&mut self) -> Reading {
+        self.reads += 1;
+
+        let layout = match self.target {
+            Some(target) if self.reads > self.old_reads => target,
+            _ => self.layout,
+        };
+
+        Reading {
+            window: Window::from_raw(0x1234),
+            layout,
+            blind: false,
+            focus: Window::from_raw(0x5678),
+            ours: false,
+        }
+    }
+
+    fn post_request(&mut self, _window: Window, target: LayoutId) -> bool {
+        self.target = Some(target);
+        true
+    }
+
+    fn activate_own(&mut self, _target: LayoutId) -> bool {
+        unreachable!("a foreign window is asked by the request")
+    }
+
+    fn wait(&mut self, ms: u32) -> u32 {
+        ms
+    }
+}
+
+/// ⭐ **Stage E116, task T-116-3 — a switch that arrives after the budget is not a refusal.** The
+/// verification of FR-52 answers what it saw inside [`VERIFY_BUDGET_MS`] — «not switched» — and the
+/// counter of that stays; what changes is the press over nothing: `inject::empty_switch_of` arms the
+/// late verdict instead of the knock, and the late verdict, re-reading the same window, finds the
+/// switch. Until 1.6.0 that press knocked (`Some(false)` → the refusal of FR-100) on a layout that
+/// had changed.
+#[test]
+fn a_switch_the_verification_did_not_see_in_time_is_found_by_the_late_verdict() {
+    let _guard = counters();
+
+    // One reading before the request and one per millisecond of the budget: the window turns on
+    // the reading after the last one the verification takes.
+    let mut window = LateWindow {
+        layout: US,
+        target: None,
+        old_reads: 1 + VERIFY_BUDGET_MS / VERIFY_POLL_MS,
+        reads: 0,
+    };
+
+    let outcome = switch::to_in(&mut window, RU);
+
+    assert_eq!(
+        outcome,
+        Err(SwitchError::NotSwitched),
+        "the verification is what it was"
+    );
+    assert_eq!(switch::failures().post_message, 1);
+
+    let mut armed = 0;
+
+    assert_eq!(
+        inject::empty_switch_of(outcome, || {
+            armed += 1;
+            true
+        }),
+        inject::EmptySwitch::Late,
+        "T-116-3: a verdict that may be late arms the late verdict, it does not knock"
+    );
+    assert_eq!(armed, 1);
+
+    let later = window.read();
+
+    assert_eq!(
+        switch::late_verdict(&later, RU, switch::LATE_VERDICT_POLL_MS),
+        switch::Late::Took,
+        "T-116-3: the late verdict finds the switch the verification missed"
+    );
+}
+
+/// ⭐ **Stage E116, task T-116-3 — which answers of FR-50 may wait and which knock at once.** Only
+/// `NotSwitched` is a verdict that may be late; it waits when the late verdict could be armed and
+/// knocks when it could not (a process with no input window — the tests — or a refused timer).
+/// Everything the stamp of FR-04 follows is the switch; every other refusal knocks, and the late
+/// verdict is not even asked for.
+#[test]
+fn only_a_verdict_that_may_be_late_waits_for_the_late_verdict() {
+    use inject::EmptySwitch;
+
+    for outcome in [
+        Ok(Outcome::Switched),
+        Ok(Outcome::AlreadyActive),
+        Ok(Outcome::Sent),
+    ] {
+        assert_eq!(
+            inject::empty_switch_of(outcome, || unreachable!(
+                "{outcome:?} needs no late verdict"
+            )),
+            EmptySwitch::Took,
+            "{outcome:?}"
+        );
+    }
+
+    for outcome in [
+        Err(SwitchError::NoTarget),
+        Err(SwitchError::ImeTarget),
+        Err(SwitchError::NoForeground),
+    ] {
+        assert_eq!(
+            inject::empty_switch_of(outcome, || unreachable!(
+                "{outcome:?} has nothing to wait for"
+            )),
+            EmptySwitch::Refused,
+            "{outcome:?}"
+        );
+    }
+
+    assert_eq!(
+        inject::empty_switch_of(Err(SwitchError::NotSwitched), || true),
+        EmptySwitch::Late
+    );
+    assert_eq!(
+        inject::empty_switch_of(Err(SwitchError::NotSwitched), || false),
+        EmptySwitch::Refused,
+        "a late verdict that could not be armed knocks at once, as before 1.6.0"
+    );
+}
+
+/// ⭐ **Stage E116, task T-116-3 — the late verdict, as a table.** The target seen — the switch, on
+/// any tick, the last one included; not seen — wait until [`switch::LATE_VERDICT_MS`], then the
+/// knock; a blind reading is never the target.
+#[test]
+fn the_late_verdict_waits_half_a_second_and_takes_the_target_whenever_it_comes() {
+    use switch::{LATE_VERDICT_MS, Late, late_verdict};
+
+    let at = |layout: LayoutId, blind: bool| Reading {
+        window: Window::from_raw(0x1234),
+        layout,
+        blind,
+        focus: Window::default(),
+        ours: false,
+    };
+
+    assert_eq!(
+        LATE_VERDICT_MS, 500,
+        "the half second the knock may come late by"
+    );
+
+    for waited in [0, 31, LATE_VERDICT_MS - 1, LATE_VERDICT_MS, u32::MAX] {
+        assert_eq!(
+            late_verdict(&at(RU, false), RU, waited),
+            Late::Took,
+            "{waited} ms"
+        );
+    }
+
+    for waited in [0, 31, LATE_VERDICT_MS - 1] {
+        assert_eq!(
+            late_verdict(&at(US, false), RU, waited),
+            Late::Wait,
+            "{waited} ms"
+        );
+        assert_eq!(
+            late_verdict(&at(RU, true), RU, waited),
+            Late::Wait,
+            "blind, {waited} ms"
+        );
+    }
+
+    for waited in [LATE_VERDICT_MS, LATE_VERDICT_MS + 31, u32::MAX] {
+        assert_eq!(
+            late_verdict(&at(US, false), RU, waited),
+            Late::Refused,
+            "{waited} ms"
+        );
+        assert_eq!(
+            late_verdict(&at(RU, true), RU, waited),
+            Late::Refused,
+            "blind, {waited} ms"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Point 18 — the counters are public
 // ---------------------------------------------------------------------------------------
 

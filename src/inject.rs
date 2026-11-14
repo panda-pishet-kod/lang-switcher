@@ -3523,7 +3523,12 @@ fn cycle_of_cache(cache: &layouts::LayoutCache) -> Option<layouts::Cycle> {
 /// The recorder is asked **wherever it is** (`app::with_recorder_wherever_it_is`): in a password
 /// field and while the verdict of FR-72 is on its way the buffer is parked, and its cache and stamp
 /// with it — and those are exactly the two places решение 208.5а sends here.
-pub fn switch_on_empty_press() -> Option<bool> {
+///
+/// ⭐ **Stage E116, task T-116-3 — a switch the verification did not see is looked for later.**
+/// `Some(EmptySwitch::Late)` when FR-52 did not show the target inside
+/// [`crate::switch::VERIFY_BUDGET_MS`] and the late verdict is armed: no tone now, the timer of the
+/// input window gives it ([`late_verdict_tick`]). See [`empty_switch_of`].
+pub fn switch_on_empty_press() -> Option<EmptySwitch> {
     let target = crate::app::with_recorder_wherever_it_is(|recorder| {
         let cycle = cycle_of_cache(recorder.cache()?)?;
 
@@ -3538,11 +3543,120 @@ pub fn switch_on_empty_press() -> Option<bool> {
         && window_class(foreground)
             .is_some_and(|class| class.eq_ignore_ascii_case(CLASSIC_CONSOLE_CLASS));
 
-    Some(if classic {
-        switch_classic_in(&mut crate::switch::System, target)
+    if classic {
+        return Some(if switch_classic_in(&mut crate::switch::System, target) {
+            EmptySwitch::Took
+        } else {
+            EmptySwitch::Refused
+        });
+    }
+
+    let outcome = crate::switch::to_in(&mut crate::switch::System, target);
+
+    if crate::switch::stamp_follows(outcome) {
+        crate::app::note_layout_switched(target);
+    }
+
+    Some(empty_switch_of(outcome, || arm_late_verdict(target)))
+}
+
+/// ⭐ **What a switch on the press over nothing answered — stage E116, task T-116-3.** See
+/// [`empty_switch_of`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmptySwitch {
+    /// The window took the layout (or was on it already, or is a console that is believed):
+    /// «чк-чк».
+    Took,
+    /// The switch was refused — no window in front, a target that cannot be switched to, a late
+    /// verdict that could not be armed: the knock.
+    Refused,
+    /// FR-52 did not show the target inside the budget, and the late verdict is armed: no tone
+    /// now — [`late_verdict_tick`] gives it.
+    Late,
+}
+
+/// ⭐ **The answer of a switch on the press over nothing, as a function of what FR-50 answered —
+/// stage E116, task T-116-3 (Q-208-20).** Pure but for `arm`, which is called **only** for
+/// [`crate::switch::SwitchError::NotSwitched`] — the one verdict that may be late — and answers
+/// whether the late verdict is armed (the timer of the input window is set).
+///
+/// Until 1.6.0 that verdict was the knock at once, and a window that took the layout a few
+/// milliseconds after [`crate::switch::VERIFY_BUDGET_MS`] knocked although it had switched
+/// (209.43, 209.48). Every other refusal stays the knock it was: there is nothing to wait for.
+pub fn empty_switch_of(
+    outcome: Result<crate::switch::Outcome, crate::switch::SwitchError>,
+    arm: impl FnOnce() -> bool,
+) -> EmptySwitch {
+    if crate::switch::stamp_follows(outcome) {
+        return EmptySwitch::Took;
+    }
+
+    if matches!(outcome, Err(crate::switch::SwitchError::NotSwitched)) && arm() {
+        EmptySwitch::Late
     } else {
-        switch_layout_in(&mut crate::switch::System, target)
-    })
+        EmptySwitch::Refused
+    }
+}
+
+thread_local! {
+    /// ⭐ **The late verdict waiting on the input thread — stage E116, task T-116-3:** the target of
+    /// the press and when the press switched. `None` when nothing waits.
+    static LATE: std::cell::Cell<Option<(LayoutId, Instant)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Arms the late verdict for `target`: remembers it and sets the timer of the input window
+/// ([`crate::app::set_late_verdict_timer`]). Answers whether the timer is set; without it nothing is
+/// remembered and the press knocks at once, as before 1.6.0.
+fn arm_late_verdict(target: LayoutId) -> bool {
+    if !crate::app::set_late_verdict_timer(true) {
+        return false;
+    }
+
+    LATE.with(|cell| cell.set(Some((target, Instant::now()))));
+
+    true
+}
+
+/// ⭐ **One tick of the late verdict — stage E116, task T-116-3**, on the timer of the input window.
+/// Re-reads FR-52 and answers by [`crate::switch::late_verdict`]: `Some(true)` — the window took the
+/// layout, and the stamp of FR-04 follows it now; `Some(false)` — the half second has gone by; `None`
+/// — look again on the next tick, or nothing waits. On `Some` nothing waits any more, and the caller
+/// stops the timer and sounds the answer.
+pub fn late_verdict_tick() -> Option<bool> {
+    let (target, since) = LATE.with(std::cell::Cell::get)?;
+    let waited = u32::try_from(since.elapsed().as_millis()).unwrap_or(u32::MAX);
+
+    match crate::switch::late_verdict(&crate::switch::read(), target, waited) {
+        crate::switch::Late::Wait => None,
+        late => Some(finish_late_verdict(
+            target,
+            late == crate::switch::Late::Took,
+        )),
+    }
+}
+
+/// ⭐ **The late verdict, answered now — stage E116, task T-116-3.** A new press while one waits:
+/// the waiting one is judged on one re-reading before the new press is acted on, so that each press
+/// keeps its one tone (decision 77) and the new one starts from the layout the window is really on.
+/// `None` when nothing waits.
+pub fn settle_late_verdict_now() -> Option<bool> {
+    let (target, _) = LATE.with(std::cell::Cell::get)?;
+    let reading = crate::switch::read();
+    let took = crate::switch::late_verdict(&reading, target, 0) == crate::switch::Late::Took;
+
+    Some(finish_late_verdict(target, took))
+}
+
+/// Ends the wait of the late verdict; on a switch the stamp of FR-04 follows the window, as
+/// [`switch_layout_in`] has it follow a switch the verification saw. Answers `took`.
+fn finish_late_verdict(target: LayoutId, took: bool) -> bool {
+    LATE.with(|cell| cell.set(None));
+
+    if took {
+        crate::app::note_layout_switched(target);
+    }
+
+    took
 }
 
 // ---------------------------------------------------------------------------------------

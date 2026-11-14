@@ -944,16 +944,23 @@ pub const fn press_act(
 ///
 /// ⭐ **Stage E114, task T-114-1 — the fork is [`press_act`], and a press over nothing switches.**
 /// `switch` is the switch itself — `inject::switch_on_empty_press` in the product — answering
-/// `Some(true)` when the window took the new layout, `Some(false)` when it did not, `None` when
-/// there was nothing to switch to. A switch that took sounds «чк-чк» ([`Press::Replaced`], решение
+/// `Some(EmptySwitch::Took)` when the window took the new layout, `Some(EmptySwitch::Refused)` when
+/// it did not, `None` when there was nothing to switch to. A switch that took sounds «чк-чк» ([`Press::Replaced`], решение
 /// 208.5), one the window refused knocks ([`Press::Refused`], as a window that refused does since
 /// task T-42-6), and no target is the idle click it always was. Each closure is called at most
 /// once, and only on its own arm: a switch never converts, a conversion never switches here.
+///
+/// ⭐ **Stage E116, task T-116-3 (Q-208-20) — a late switch is not a refusal.** A switch FR-52 did
+/// not see inside its budget answers [`crate::inject::EmptySwitch::Late`] and gets **no tone
+/// here**: the late verdict on the timer of the input window gives it — «чк-чк» if the window takes
+/// the layout within [`crate::switch::LATE_VERDICT_MS`], the knock if not ([`late_press`]).
 fn buffer_path_outcome(
     act: PressAct,
     replace: impl FnOnce() -> bool,
-    switch: impl FnOnce() -> Option<bool>,
+    switch: impl FnOnce() -> Option<crate::inject::EmptySwitch>,
 ) -> Option<Press> {
+    use crate::inject::EmptySwitch;
+
     match act {
         PressAct::Nothing => None,
         PressAct::Replace => Some(if replace() {
@@ -961,15 +968,75 @@ fn buffer_path_outcome(
         } else {
             Press::Idle
         }),
-        PressAct::Switch => Some(match switch() {
-            Some(true) => Press::Replaced,
-            Some(false) => Press::Refused,
-            None => Press::Idle,
-        }),
+        PressAct::Switch => match switch() {
+            Some(EmptySwitch::Took) => Some(Press::Replaced),
+            Some(EmptySwitch::Refused) => Some(Press::Refused),
+            Some(EmptySwitch::Late) => None,
+            None => Some(Press::Idle),
+        },
         // ⭐ Stage E116, task T-116-2 (решение 208.17): an excluded process is silent. See
         // `PressAct::Refuse` for how such a press still reaches this thread.
         PressAct::Refuse => None,
     }
+}
+
+/// ⭐ **The tone of a late verdict — stage E116, task T-116-3.** `took` is what
+/// [`crate::inject::late_verdict_tick`] or [`crate::inject::settle_late_verdict_now`] answered: the
+/// window took the layout — the switch, «чк-чк»; it did not within
+/// [`crate::switch::LATE_VERDICT_MS`] — the knock of a window that did not take the switch.
+pub const fn late_press(took: bool) -> Press {
+    if took {
+        Press::Replaced
+    } else {
+        Press::Refused
+    }
+}
+
+/// ⭐ **The timer of the late verdict — stage E116, task T-116-3.** On the input window; `1` is the
+/// liveness timer of FR-80 (`watchdog::LIVENESS_TIMER_ID`) and `2` its fault twin, on the same
+/// window.
+pub const LATE_VERDICT_TIMER_ID: usize = 4;
+
+/// Sets (`on`) or stops the timer of the late verdict at the input window — stage E116, task
+/// T-116-3. Answers whether the timer is set (or, for `false`, whether there was a window to stop
+/// it at).
+///
+/// ⚠ **Only the input thread may call it with `true`:** `SetTimer` takes a window of the calling
+/// thread, and the late verdict belongs to the thread that switched. A thread with no input window
+/// registered — a test process — answers `false`, and the press knocks at once, as before 1.6.0.
+pub(crate) fn set_late_verdict_timer(on: bool) -> bool {
+    let raw = WAKE_TARGETS[Role::Input.index()].load(Ordering::Acquire);
+
+    if raw == NO_WINDOW {
+        return false;
+    }
+
+    let hwnd = HWND(raw as *mut c_void);
+
+    if !on {
+        // SAFETY: the input window, registered in `WAKE_TARGETS` and taken out of it before it is
+        // destroyed; a timer already gone makes the call fail, which changes nothing.
+        let _ = unsafe { KillTimer(Some(hwnd), LATE_VERDICT_TIMER_ID) };
+
+        return true;
+    }
+
+    // SAFETY: the input window, as above, and this is its own thread (see the doc); the timer is
+    // replaced, not doubled, when it is set again; `None` asks for `WM_TIMER`.
+    let set = unsafe {
+        SetTimer(
+            Some(hwnd),
+            LATE_VERDICT_TIMER_ID,
+            crate::switch::LATE_VERDICT_POLL_MS,
+            None,
+        )
+    };
+
+    if set == 0 {
+        report_non_critical("SetTimer", &WinError::from_thread());
+    }
+
+    set != 0
 }
 
 /// ⭐ **The press the classic console refused is a refusal** — stage Э96, decision 160.8.
@@ -3715,6 +3782,32 @@ unsafe extern "system" fn window_proc(
                 crate::inject::send_menu_mask();
             }
 
+            // ⭐ **Stage E116, task T-116-3 — a late verdict still waiting is answered first.** The
+            // previous press switched and FR-52 had not shown it yet; it is judged now, on one
+            // re-reading, so it keeps its one tone and this press starts from the layout the window
+            // is really on (the stamp of FR-04 follows a switch that took). The input window only.
+            if (hotkey || handed_back)
+                && is_input_window(hwnd)
+                && let Some(took) = crate::inject::settle_late_verdict_now()
+            {
+                let _ = set_late_verdict_timer(false);
+                let _ = post_to(Role::Ui, sound_message_for(late_press(took)));
+            }
+
+            // ⭐ **Stage E116, task T-116-3 — the tick of the late verdict** (`LATE_VERDICT_TIMER_ID`,
+            // set by `inject::switch_on_empty_press` through `set_late_verdict_timer`). When it has an
+            // answer the timer stops and the tone the press was owed goes out, by the same road as
+            // every tone. SEC-05: a forged `WM_TIMER` re-reads a layout and, with nothing waiting,
+            // does nothing; the input window only.
+            if message == WM_TIMER
+                && wparam.0 == LATE_VERDICT_TIMER_ID
+                && is_input_window(hwnd)
+                && let Some(took) = crate::inject::late_verdict_tick()
+            {
+                let _ = set_late_verdict_timer(false);
+                let _ = post_to(Role::Ui, sound_message_for(late_press(took)));
+            }
+
             if (hotkey || handed_back) && !(hotkey && crate::selection::wants_selection_path()) {
                 // ⚠ **FR-100, task Т-21-5 — the answer is not made here.** This is the input
                 // thread, whose budget NFR-09 puts at thirty milliseconds for the whole of a
@@ -4959,6 +5052,20 @@ mod tests {
         }
     }
 
+    /// ⭐ **Stage E116, task T-116-3 — the late verdict sounds what it found.** The window took the
+    /// layout after all — the switch, «чк-чк»; it did not within half a second — the knock of a window
+    /// that did not take the switch. Never the idle click: the press did have a target.
+    #[test]
+    fn a_late_verdict_sounds_the_switch_or_the_knock() {
+        assert_eq!(late_press(true), Press::Replaced);
+        assert_eq!(late_press(false), Press::Refused);
+        assert_ne!(
+            LATE_VERDICT_TIMER_ID,
+            crate::watchdog::LIVENESS_TIMER_ID,
+            "the input window's timers are told apart by their numbers"
+        );
+    }
+
     /// **The hole of task Т-49-2, as the three booleans that decide it.**
     ///
     /// The user, 2026-09-09: «в поле пароля когда вводишь, нет никакого звукового сигнала».
@@ -5113,6 +5220,7 @@ mod tests {
     #[test]
     fn a_handed_back_press_is_answered_by_the_buffer_that_is_there_now() {
         use crate::guard::Field;
+        use crate::inject::EmptySwitch;
 
         // (handed back, buffered, empty, field, excluded, what the replacement answers, what the
         // switch answers) -> (replacement asked, switch asked, the tone).
@@ -5122,7 +5230,7 @@ mod tests {
                    field: Field,
                    excluded: bool,
                    replaced: bool,
-                   switched: Option<bool>| {
+                   switched: Option<EmptySwitch>| {
             let asked = std::cell::Cell::new(0);
             let switches = std::cell::Cell::new(0);
             let answer = buffer_path_outcome(
@@ -5151,7 +5259,7 @@ mod tests {
                     Field::Ordinary,
                     false,
                     true,
-                    Some(true)
+                    Some(EmptySwitch::Took)
                 ),
                 (0, 1, Some(Press::Replaced))
             );
@@ -5163,7 +5271,7 @@ mod tests {
                     Field::Ordinary,
                     false,
                     true,
-                    Some(false)
+                    Some(EmptySwitch::Refused)
                 ),
                 (0, 1, Some(Press::Refused))
             );
@@ -5171,15 +5279,45 @@ mod tests {
                 run(handed_back, true, true, Field::Ordinary, false, true, None),
                 (0, 1, Some(Press::Idle))
             );
+            // ⭐ Stage E116, task T-116-3: a switch FR-52 has not shown yet — no tone now; the late
+            // verdict on the timer of the input window gives it.
+            assert_eq!(
+                run(
+                    handed_back,
+                    true,
+                    true,
+                    Field::Ordinary,
+                    false,
+                    true,
+                    Some(EmptySwitch::Late)
+                ),
+                (0, 1, None)
+            );
         }
         // ⭐ Handed back over a buffer that filled meanwhile: nothing is asked, and silent.
         assert_eq!(
-            run(true, true, false, Field::Ordinary, false, true, Some(true)),
+            run(
+                true,
+                true,
+                false,
+                Field::Ordinary,
+                false,
+                true,
+                Some(EmptySwitch::Took)
+            ),
             (0, 0, None)
         );
         // A direct press over a non-empty buffer is the ordinary press of the typing buffer.
         assert_eq!(
-            run(false, true, false, Field::Ordinary, false, true, Some(true)),
+            run(
+                false,
+                true,
+                false,
+                Field::Ordinary,
+                false,
+                true,
+                Some(EmptySwitch::Took)
+            ),
             (1, 0, Some(Press::Replaced))
         );
         assert_eq!(
@@ -5190,14 +5328,22 @@ mod tests {
                 Field::Ordinary,
                 false,
                 false,
-                Some(true)
+                Some(EmptySwitch::Took)
             ),
             (1, 0, Some(Press::Idle))
         );
         // ⭐ A password field (208.5а) and a verdict on its way: the switch, never the replacement.
         for field in [Field::Password, Field::Pending] {
             assert_eq!(
-                run(false, false, true, field, false, true, Some(true)),
+                run(
+                    false,
+                    false,
+                    true,
+                    field,
+                    false,
+                    true,
+                    Some(EmptySwitch::Took)
+                ),
                 (0, 1, Some(Press::Replaced))
             );
         }
@@ -5210,13 +5356,21 @@ mod tests {
                 Field::Undetermined,
                 true,
                 true,
-                Some(true)
+                Some(EmptySwitch::Took)
             ),
             (0, 0, None)
         );
         // No buffer and nothing refused: nothing at all.
         assert_eq!(
-            run(true, false, true, Field::Ordinary, false, true, Some(true)),
+            run(
+                true,
+                false,
+                true,
+                Field::Ordinary,
+                false,
+                true,
+                Some(EmptySwitch::Took)
+            ),
             (0, 0, None)
         );
     }
@@ -5248,7 +5402,9 @@ mod tests {
                     buffer_path_outcome(
                         act,
                         || -> bool { unreachable!("an excluded process converts nothing") },
-                        || -> Option<bool> { unreachable!("an excluded process switches nothing") },
+                        || -> Option<crate::inject::EmptySwitch> {
+                            unreachable!("an excluded process switches nothing")
+                        },
                     ),
                     None,
                     "208.17: no tone in an excluded process — handed back {handed_back}, {field:?}"
