@@ -157,6 +157,10 @@ struct Fake {
     /// **Error O-1.** The frame eats the request: only a request posted to the focus window takes
     /// effect — the Run dialog of Windows, measured (record 209.46).
     frame_eats_the_request: bool,
+    /// **Error O-1, the wizard (209.54).** The window in front is a window of this program's UI
+    /// thread: [`Machine::read`] says so in [`Reading::ours`], and such a window takes the request
+    /// of FR-50 from nobody — only [`Machine::activate_own`] changes its layout (209.53).
+    ours: bool,
 
     // ---- what the switch did ----
     posts: u32,
@@ -166,6 +170,8 @@ struct Fake {
     targets: Vec<LayoutId>,
     /// **Task Т-22-4.** Every window a request was posted to, in order.
     posted_to: Vec<Window>,
+    /// **Error O-1, the wizard.** Every target handed to [`Machine::activate_own`], in order.
+    owned: Vec<LayoutId>,
 }
 
 impl Fake {
@@ -181,12 +187,14 @@ impl Fake {
             moves_to: None,
             focus: Window::default(),
             frame_eats_the_request: false,
+            ours: false,
             posts: 0,
             reads: 0,
             waits: 0,
             waited_ms: 0,
             targets: Vec::new(),
             posted_to: Vec::new(),
+            owned: Vec::new(),
         }
     }
 
@@ -217,6 +225,13 @@ impl Fake {
         self.frame_eats_the_request = true;
         self
     }
+
+    /// **Error O-1, the wizard (209.53).** The window in front belongs to this program's UI thread:
+    /// a request posted to it changes nothing, and the thread itself can switch.
+    fn ours(mut self) -> Self {
+        self.ours = true;
+        self
+    }
 }
 
 impl Machine for Fake {
@@ -228,6 +243,7 @@ impl Machine for Fake {
             layout: self.layout,
             blind: self.blind,
             focus: self.focus,
+            ours: self.ours,
         };
 
         // **Task Т-22-4.** The foreground moves once the verdict has been taken — once, so that
@@ -246,9 +262,22 @@ impl Machine for Fake {
         self.posted_to.push(window);
 
         // Error O-1: a frame that eats the request changes nothing; its focus window takes it.
-        let eaten = self.frame_eats_the_request && window != self.focus;
+        // Error O-1, the wizard (209.53): a window of the UI thread takes the request from nobody.
+        let eaten = (self.frame_eats_the_request && window != self.focus) || self.ours;
 
         if self.method.switched && !eaten {
+            self.layout = target;
+        }
+
+        self.method.returned
+    }
+
+    fn activate_own(&mut self, target: LayoutId) -> bool {
+        self.owned.push(target);
+
+        // The UI thread activates the layout for itself. The method's report is reused, so a
+        // machine on which the method lies lies here too, and the verdict still re-reads (R-32).
+        if self.method.switched {
             self.layout = target;
         }
 
@@ -293,10 +322,15 @@ impl Machine for ZeroClock {
             layout: US,
             blind: false,
             focus: Window::default(),
+            ours: false,
         }
     }
 
     fn post_request(&mut self, _window: Window, _target: LayoutId) -> bool {
+        true
+    }
+
+    fn activate_own(&mut self, _target: LayoutId) -> bool {
         true
     }
 
@@ -708,10 +742,15 @@ fn a_reading_that_goes_blind_during_the_wait_is_not_a_confirmation() {
                 layout: if self.reads == 1 { US } else { RU },
                 blind: self.reads > 1,
                 focus: Window::default(),
+                ours: false,
             }
         }
 
         fn post_request(&mut self, _window: Window, _target: LayoutId) -> bool {
+            true
+        }
+
+        fn activate_own(&mut self, _target: LayoutId) -> bool {
             true
         }
 
@@ -1272,6 +1311,45 @@ fn a_frame_that_eats_the_request_does_not_stop_the_switch_of_its_focus_window() 
     );
 }
 
+/// ⭐ **Error O-1, the wizard «Написать автору…» (support GHXQ92SM; records 209.52–209.54).** The
+/// program's own wizard did not switch, every time, on 1.5.0 and on 1.5.1 alike: 20 presses of 20,
+/// `switch.post_message` on each. Measured on `Test_VM10`: a window of the program's UI thread
+/// takes `WM_INPUTLANGCHANGEREQUEST` from nobody — posted to the focus window, the frame or the
+/// field, or sent — while Windows' own `Alt+Shift` switches the same thread. Such a window is given
+/// the layout by the UI thread itself ([`Machine::activate_own`]), and nothing is posted to it.
+#[test]
+fn a_window_of_the_programs_ui_thread_is_switched_by_that_thread_and_not_by_the_request() {
+    let _guard = counters();
+
+    let mut fake = Fake::on(US).method(Report::WORKS).ours();
+
+    let outcome = switch::to_in(&mut fake, RU);
+
+    assert_eq!(
+        outcome,
+        Ok(Outcome::Switched),
+        "O-1, the wizard: a window of the program's UI thread must switch"
+    );
+    assert_eq!(
+        fake.owned,
+        vec![RU],
+        "O-1, the wizard: the UI thread is handed the target the caller named, once"
+    );
+    assert!(
+        fake.posted_to.is_empty(),
+        "O-1, the wizard: nothing is posted to a window that takes the request from nobody"
+    );
+    assert_eq!(switch::failures().post_message, 0);
+
+    // The verdict is still the re-reading (R-32): a handover that answers success and changes
+    // nothing is a failure, counted as one.
+    let mut lies = Fake::on(US).method(Report::LIES).ours();
+
+    assert_eq!(switch::to_in(&mut lies, RU), Err(SwitchError::NotSwitched));
+    assert_eq!(lies.owned, vec![RU]);
+    assert_eq!(switch::failures().post_message, 1);
+}
+
 // ---------------------------------------------------------------------------------------
 // Point 18 — the counters are public
 // ---------------------------------------------------------------------------------------
@@ -1371,12 +1449,20 @@ fn nothing_that_could_carry_a_keystroke_reaches_the_counters_or_the_errors() {
 /// occurs in the code of `src\switch.rs` at all**. Prose is deliberately exempt — the module
 /// documentation names them to say why they are gone, and a history that cannot name what it
 /// buried is not a history.
+///
+/// ⭐ **One exception, narrowed by decision 208.40 (error O-1, the wizard).** A window of this
+/// program's own UI thread takes `WM_INPUTLANGCHANGEREQUEST` from nobody (209.53), so that thread
+/// changes its own layout: `ActivateKeyboardLayout` without `AttachThreadInput`, by the thread
+/// that owns the window, never by the input thread. The name may therefore stand in the code of
+/// exactly one function, `switch::activate_here`, and `activate_here(` may be called in exactly
+/// one place of all `src` — the branch of `app::window_proc` that answers `WM_APP_OWN_LAYOUT` at
+/// the UI window. A call from anywhere else — the input thread above all — fails this test.
 #[test]
 fn no_call_of_the_retired_methods_is_left_in_the_code_of_the_module() {
-    /// The five names methods 2 and 3 were built out of, plus the two COM calls TSF needed.
-    const RETIRED: [&str; 7] = [
+    /// The names methods 2 and 3 were built out of, plus the two COM calls TSF needed; the sixth,
+    /// `ActivateKeyboardLayout`, is checked apart below (208.40).
+    const RETIRED: [&str; 6] = [
         "AttachThreadInput",
-        "ActivateKeyboardLayout",
         "DetachThreadInput",
         "ITfInputProcessorProfileMgr",
         "ActivateProfile",
@@ -1384,23 +1470,53 @@ fn no_call_of_the_retired_methods_is_left_in_the_code_of_the_module() {
         "CoCreateInstance",
     ];
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("switch.rs");
-
-    let source = std::fs::read_to_string(&path).expect("src\\switch.rs is readable");
-
-    for name in RETIRED {
-        let hits: Vec<usize> = source
+    /// The lines of code of a source file, numbered from 1, with every comment line left out.
+    fn code(source: &str) -> Vec<(usize, &str)> {
+        source
             .lines()
             .enumerate()
-            .filter(|(_, line)| {
-                let line = line.trim_start();
+            .filter(|(_, line)| !line.trim_start().starts_with("//"))
+            .map(|(index, line)| (index + 1, line))
+            .collect()
+    }
 
-                !line.starts_with("//") && !line.starts_with("///") && !line.starts_with("//!")
-            })
+    /// The lines from the one that opens the function `opening` to the first `}` at the left
+    /// margin after it — the body of a free function of the module, both ends included.
+    fn body(source: &str, opening: &str) -> (usize, usize) {
+        let lines: Vec<&str> = source.lines().collect();
+        let starts: Vec<usize> = code(source)
+            .iter()
+            .filter(|(_, line)| line.contains(opening))
+            .map(|(number, _)| *number)
+            .collect();
+
+        assert_eq!(
+            starts.len(),
+            1,
+            "exactly one `{opening}` in the file: {starts:?}"
+        );
+
+        let start = starts[0];
+        let end = (start..=lines.len())
+            .find(|&number| lines[number - 1] == "}")
+            .unwrap_or_else(|| panic!("`{opening}` at line {start} is closed"));
+
+        (start, end)
+    }
+
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let read = |path: &Path| {
+        std::fs::read_to_string(path)
+            .unwrap_or_else(|_| panic!("{} is readable", path.display()))
+            .replace("\r\n", "\n")
+    };
+    let source = read(&src.join("switch.rs"));
+
+    for name in RETIRED {
+        let hits: Vec<usize> = code(&source)
+            .into_iter()
             .filter(|(_, line)| line.contains(name))
-            .map(|(index, _)| index + 1)
+            .map(|(number, _)| number)
             .collect();
 
         assert!(
@@ -1410,6 +1526,89 @@ fn no_call_of_the_retired_methods_is_left_in_the_code_of_the_module() {
              call them"
         );
     }
+
+    // 208.40, part 1: `ActivateKeyboardLayout` in the code of `activate_here` and nowhere else.
+    let (first, last) = body(&source, "fn activate_here(");
+    let (inside, outside): (Vec<usize>, Vec<usize>) = code(&source)
+        .into_iter()
+        .filter(|(_, line)| line.contains("ActivateKeyboardLayout"))
+        .map(|(number, _)| number)
+        .partition(|number| (first..=last).contains(number));
+
+    assert!(
+        outside.is_empty(),
+        "ActivateKeyboardLayout occurs in the code of src\\switch.rs outside `activate_here` \
+         (lines {first}..={last}) at lines {outside:?}; decision 208.40 allows it there only"
+    );
+    assert!(
+        !inside.is_empty(),
+        "`activate_here` no longer calls ActivateKeyboardLayout; the exception of 208.40 and \
+         this check have outlived their reason — narrow the check back to question 63"
+    );
+
+    // 208.40, part 2: `activate_here(` is called once in all `src`, by the branch of the window
+    // procedure that answers `WM_APP_OWN_LAYOUT` at the UI window — on the UI thread.
+    let mut files = vec![src.clone()];
+    let mut calls: Vec<(String, usize)> = Vec::new();
+
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(&path).expect("src is listable") {
+                files.push(entry.expect("an entry of src").path());
+            }
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            let text = read(&path);
+            let name = path
+                .strip_prefix(&src)
+                .expect("under src")
+                .display()
+                .to_string();
+
+            for (number, line) in code(&text) {
+                if line.contains("activate_here(") && !line.contains("fn activate_here(") {
+                    calls.push((name.clone(), number));
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        calls.len(),
+        1,
+        "`activate_here(` is called in {calls:?}; decision 208.40 allows one call, by the UI \
+         window's branch of `app::window_proc`"
+    );
+
+    let (file, line) = &calls[0];
+
+    assert_eq!(
+        file, "app.rs",
+        "the one call of `activate_here(` is in src\\{file}, line {line}; it belongs to \
+         `app::window_proc` (208.40)"
+    );
+
+    let app = read(&src.join("app.rs"));
+    let (first, last) = body(&app, "unsafe extern \"system\" fn window_proc(");
+
+    assert!(
+        (first..=last).contains(line),
+        "the call of `activate_here(` at line {line} of src\\app.rs is outside `window_proc` \
+         (lines {first}..={last}); 208.40 allows it in the window procedure of the UI thread only"
+    );
+
+    // The arm the call stands in: the nearest line of code above it that opens a block of the
+    // `match`. It must name the message and the guard that keeps it to the UI window (SEC-05).
+    let arm = code(&app)
+        .into_iter()
+        .rfind(|(number, text)| *number < *line && text.trim_end().ends_with("=> {"))
+        .map(|(_, text)| text.trim().to_owned())
+        .unwrap_or_default();
+
+    assert_eq!(
+        arm, "WM_APP_OWN_LAYOUT if is_ui_window(hwnd) => {",
+        "the call of `activate_here(` at line {line} of src\\app.rs stands in the arm `{arm}`; \
+         208.40 allows it only in the arm that answers WM_APP_OWN_LAYOUT at the UI window"
+    );
 }
 
 /// The handover of decision R-31 is gone, and the number it travelled on is **kept reserved**.
@@ -1928,6 +2127,10 @@ impl Machine for Timed {
 
     fn post_request(&mut self, window: Window, target: LayoutId) -> bool {
         self.inner.post_request(window, target)
+    }
+
+    fn activate_own(&mut self, target: LayoutId) -> bool {
+        self.inner.activate_own(target)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {

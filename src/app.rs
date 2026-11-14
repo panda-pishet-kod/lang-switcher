@@ -576,6 +576,17 @@ pub const WM_APP_SOUND_IDLE: u32 = WM_APP + 18;
 /// this is and which — `Field::Pending` — it deliberately is not.
 pub const WM_APP_SOUND_REFUSED: u32 = WM_APP + 20;
 
+/// ⭐ **Error O-1, the wizard (209.54).** Posted by the input thread to the UI thread's window when
+/// the window to switch belongs to the UI thread: `lParam` carries the number of the `HKL`, and the
+/// UI thread activates it for itself (`switch::activate_here`). Its windows — the wizard
+/// «Написать автору…» first — take `WM_INPUTLANGCHANGEREQUEST` from nobody (209.53).
+///
+/// `WM_APP + 24`, the first free number: `+ 21` is `letters::WM_APP_APPEAL`, `+ 22`
+/// `guard::WM_APP_FOCUS_EVENT`, `+ 23` `watchdog::WM_APP_RECHECK_FOREGROUND`. SEC-05: a forged one
+/// buys its sender a layout of this program's own windows and nothing else, and is answered only
+/// at the UI window.
+pub const WM_APP_OWN_LAYOUT: u32 = WM_APP + 24;
+
 /// The sound of a press that replaced text — FR-100, «чк-чк».
 ///
 /// # Why the sound is the program's own and not the system's
@@ -2497,6 +2508,38 @@ pub(crate) fn post_to_ui_thread(message: u32) -> bool {
     post_to(Role::Ui, message)
 }
 
+/// ⭐ **Error O-1, the wizard (209.54).** Posts [`WM_APP_OWN_LAYOUT`] with the number of an `HKL`
+/// to the UI thread's window — the input thread's half of `switch::activate_own`. Answers whether
+/// the message was queued; `false` when the UI thread has no window or `PostMessageW` refused,
+/// which is reported (NFR-13). It queues and returns, as everything on the input thread must.
+pub(crate) fn post_layout_to_ui_thread(layout: usize) -> bool {
+    let raw = WAKE_TARGETS[Role::Ui.index()].load(Ordering::Acquire);
+
+    if raw == NO_WINDOW {
+        return false;
+    }
+
+    // SAFETY: the handle is the UI thread's own window, registered in `WAKE_TARGETS` and taken
+    // out of it before the window is destroyed; a stale one is refused with `Err`, examined
+    // below. `PostMessageW` only queues; the `HKL` in `lparam` is a number, not a pointer of ours.
+    let posted = unsafe {
+        PostMessageW(
+            Some(HWND(raw as *mut c_void)),
+            WM_APP_OWN_LAYOUT,
+            WPARAM(0),
+            LPARAM(layout as isize),
+        )
+    };
+
+    match posted {
+        Ok(()) => true,
+        Err(error) => {
+            report_non_critical("PostMessageW", &error);
+            false
+        }
+    }
+}
+
 /// Whether `hwnd` is the watcher thread's own window.
 ///
 /// **Section 6.1 in one line.** The password probe of FR-71 may run on the watcher thread and on
@@ -3383,6 +3426,14 @@ unsafe extern "system" fn window_proc(
         // this one's message loop. The program leaves through `request_shutdown` and
         // through nothing else.
         WM_CLOSE => LRESULT(0),
+
+        // ⭐ Error O-1, the wizard (209.54): the layout for a window of this thread, handed over
+        // by the input thread (`switch::activate_own`). Answered only at the UI window (SEC-05).
+        WM_APP_OWN_LAYOUT if is_ui_window(hwnd) => {
+            crate::switch::activate_here(lparam.0 as usize);
+
+            LRESULT(0)
+        }
 
         // Tasks T-01-4 and T-03-1. Two modules get their look at the message next, because
         // between them they own values that cannot be written as a `match` arm here: one of

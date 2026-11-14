@@ -1222,6 +1222,8 @@ fn the_private_messages_of_this_process_are_all_distinct() {
         // window change (решение 208.14).
         guard::WM_APP_FOCUS_EVENT,
         watchdog::WM_APP_RECHECK_FOREGROUND,
+        // Stage E116 (1.6.0), error O-1: the layout handed to the UI thread for a window of its own.
+        lang_switcher::app::WM_APP_OWN_LAYOUT,
     ];
 
     for (index, message) in messages.iter().enumerate() {

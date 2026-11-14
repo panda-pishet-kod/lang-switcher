@@ -131,7 +131,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, HKL, KLF_SETFORPROCESS};
 use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW,
     SPI_GETTHREADLOCALINPUTSETTINGS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
@@ -506,6 +506,13 @@ pub struct Reading {
     /// read of — or [`Window::default`] when FR-52 fell back to the foreground thread. It is what
     /// [`Reading::addressee`] answers when there is one.
     pub focus: Window,
+    /// ⭐ **Error O-1, the wizard (2026-11-13, records 209.52–209.54).** Whether
+    /// [`Reading::addressee`] is a window of **this program's UI thread** — the wizard «Написать
+    /// автору…» and every other window of the program. Measured on `Test_VM10`: such a window takes a
+    /// `WM_INPUTLANGCHANGEREQUEST` from nobody — not posted to the focus window, the frame or the
+    /// field, not sent — while Windows' own `Alt+Shift` switches the same thread (209.53), so
+    /// [`to_in`] hands it [`Machine::activate_own`] instead of the request.
+    pub ours: bool,
 }
 
 impl Reading {
@@ -624,7 +631,32 @@ pub fn read() -> Reading {
         blind: focus == FocusThread::Refused,
         // Error O-1: the focus window whose thread `layout` was read of, or none in the fallback.
         focus: focus_window,
+        // Error O-1, the wizard: `thread` is the thread of `Reading::addressee` — the focus
+        // thread, or the foreground thread in the fallback — so this asks whether the request
+        // would go to a window of this program's UI thread.
+        ours: is_ui_thread(thread),
     }
+}
+
+/// ⭐ **Error O-1, the wizard (209.54).** Whether `thread` is the UI thread of this program — the
+/// thread of the wizard «Написать автору…», the settings and every other window of the program.
+///
+/// Not "any window of this process": a window a test process makes for itself takes the request
+/// like any foreign one (the behavioural tests of FR-50 switch it on every run), and such a
+/// process has no UI thread registered, so this answers `false` there.
+fn is_ui_thread(thread: u32) -> bool {
+    let raw = crate::app::ui_window_raw();
+
+    if raw == 0 || thread == 0 {
+        return false;
+    }
+
+    // SAFETY: takes a window handle by value and dereferences nothing; the handle is the UI
+    // thread's own window, registered by `app` and unregistered before it is destroyed. A stale
+    // handle is answered with thread id zero, which matches no thread.
+    let ui = unsafe { GetWindowThreadProcessId(HWND(raw as *mut c_void), None) };
+
+    ui == thread
 }
 
 /// **FR-52.** The keyboard layout of the window the user is typing into.
@@ -743,6 +775,14 @@ pub trait Machine {
     /// had to be the one receiving the message.
     fn post_request(&mut self, window: Window, target: LayoutId) -> bool;
 
+    /// ⭐ **FR-50 for a window of this very process — error O-1, the wizard (209.54).** Asks for
+    /// `target` without `WM_INPUTLANGCHANGEREQUEST`, which a window of this process does not take
+    /// (see [`Reading::ours`]).
+    ///
+    /// Answers whether the call was made, as [`post_request`](Machine::post_request) does, and for
+    /// the same reason it is never the verdict (decision R-32): [`to_in`] re-reads FR-52 after it.
+    fn activate_own(&mut self, target: LayoutId) -> bool;
+
     /// Waits up to `ms` milliseconds and answers **how long it really waited**.
     ///
     /// The answer is what bounds the wait in wall-clock time rather than in slices: `Sleep(1)`
@@ -765,6 +805,10 @@ impl Machine for System {
 
     fn post_request(&mut self, window: Window, target: LayoutId) -> bool {
         post_request(window, target)
+    }
+
+    fn activate_own(&mut self, target: LayoutId) -> bool {
+        activate_own(target)
     }
 
     fn wait(&mut self, ms: u32) -> u32 {
@@ -868,7 +912,16 @@ pub fn to_in(machine: &mut impl Machine, target: LayoutId) -> Result<Outcome, Sw
     // ⭐ Error O-1: to the focus window FR-52 found — the window the verdict is read of — and to
     // the window in front only when there is none (`Reading::addressee`). A frame may eat the
     // request: the Run dialog of Windows does, 6 times out of 6 (record 209.46).
-    if !machine.post_request(before.addressee(), target) {
+    //
+    // ⭐ Error O-1, the wizard (209.54): a window of this very process takes the request from
+    // nobody (209.53), so it is given the layout by this process itself (`Machine::activate_own`).
+    let asked = if before.ours {
+        machine.activate_own(target)
+    } else {
+        machine.post_request(before.addressee(), target)
+    };
+
+    if !asked {
         // NFR-13: the return value is examined and its failure is counted. R-32: it is not, and
         // must never become, the thing the next line branches on.
         POST_REJECTED.fetch_add(1, Ordering::Relaxed);
@@ -1144,6 +1197,45 @@ fn post_request(window: Window, target: LayoutId) -> bool {
     }
 }
 
+/// ⭐ **FR-50 for a window of this program's UI thread — error O-1, the wizard (209.54).** Posts
+/// `target` to the UI thread's own window; [`activate_here`] does the rest on that thread.
+///
+/// The window with the focus is the program's own — the wizard «Написать автору…» — and it takes
+/// `WM_INPUTLANGCHANGEREQUEST` from nobody (209.53). The thread that owns it can change its own
+/// layout, which Windows' `Alt+Shift` shows on the same thread, so the layout is handed to it.
+///
+/// ⚠ **Posted, not called here, for the reason FR-50 has one method:** this runs on the input
+/// thread, which holds the low-level hook, and `PostMessageW` queues and returns. Calling
+/// `ActivateKeyboardLayout` with `KLF_SETFORPROCESS` from here would reach every thread of the
+/// process, a UI thread that has stopped pumping included — the retired method 2 hung there
+/// 60 times out of 60 (Т-14-2). Answers whether the message was queued (NFR-13; never the verdict).
+fn activate_own(target: LayoutId) -> bool {
+    crate::app::post_layout_to_ui_thread(target.raw())
+}
+
+/// ⭐ **Error O-1, the wizard (209.54) — the far end of [`activate_own`], on the UI thread.**
+/// `ActivateKeyboardLayout(hkl, KLF_SETFORPROCESS)` by the thread that owns the window with the
+/// focus. `raw` is the number of an `HKL` taken from the message.
+///
+/// A number that names no loaded layout is refused by the call and reported; nothing else can
+/// come of a forged message (SEC-05): it changes the layout of this program's own windows and
+/// nothing outside them.
+pub(crate) fn activate_here(raw: usize) {
+    // SAFETY: takes a layout handle and flags by value and dereferences nothing; the `HKL` is a
+    // handle the OS owns, carried here as its number. A handle that names no loaded layout is
+    // refused with an error, which is examined below.
+    // 208.40: the one place of src\switch.rs where this name may stand in the code (the test of
+    // decision 63), so it is imported here and not at the top of the module.
+    use windows::Win32::UI::Input::KeyboardAndMouse::ActivateKeyboardLayout;
+
+    let activated = unsafe { ActivateKeyboardLayout(HKL(raw as *mut c_void), KLF_SETFORPROCESS) };
+
+    if let Err(error) = activated {
+        // NFR-13: examined and reported; the verdict is the input thread's re-reading (R-32).
+        crate::app::report_non_critical("ActivateKeyboardLayout", &error);
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Counters — SEC-04a, section 11.5, and module `diag`
 // ---------------------------------------------------------------------------------------
@@ -1181,7 +1273,9 @@ pub struct Failures {
     /// did not become the target inside [`VERIFY_BUDGET_MS`]. The same event as
     /// [`SwitchError::NotSwitched`].
     pub post_message: u32,
-    /// `PostMessageW` refused to queue the message (NFR-13). Distinct from
+    /// `PostMessageW` refused to queue the message (NFR-13) — the request of FR-50, or since error
+    /// O-1 (209.54) the hand-over of [`Machine::activate_own`] to this program's UI thread, which
+    /// is a `PostMessageW` as well. Distinct from
     /// [`Failures::post_message`] on purpose: this is the return value, that is the verdict, and
     /// decision R-32 is the statement that the two are different things.
     pub post_rejected: u32,
