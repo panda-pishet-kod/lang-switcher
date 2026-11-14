@@ -4843,3 +4843,160 @@ fn a_button_on_a_panel_says_so_by_the_same_question_a_label_does() {
         "the reading must refuse the body that asked nothing"
     );
 }
+
+// =========================================================================================
+// The mark of the first run — stage E116, task T-116-12, решение 208.59
+// =========================================================================================
+
+/// ⭐ **The automaton of the mark.** A fresh file is `due`; any HTTP answer to the marked read
+/// makes it `sent`; no answer leaves it `due`; a file without the key never sends it; and the read
+/// after `sent` carries no mark.
+#[test]
+fn the_mark_of_the_first_run_goes_out_once_with_the_first_answer() {
+    use letters::{FirstMark, first_mark_after, first_query};
+
+    let fresh = Some(FirstMark::Due);
+
+    assert!(
+        first_query(fresh),
+        "T-116-12: the read after a fresh file is marked"
+    );
+    assert_eq!(
+        first_mark_after(fresh, true),
+        Some(FirstMark::Sent),
+        "an answer of any status sends the mark"
+    );
+    assert_eq!(
+        first_mark_after(fresh, false),
+        fresh,
+        "no answer at all: the mark stays due and is asked again on the schedule of FR-102"
+    );
+    assert!(
+        !first_query(first_mark_after(fresh, true)),
+        "the read after the mark was sent carries none"
+    );
+    assert_eq!(
+        first_mark_after(Some(FirstMark::Sent), true),
+        Some(FirstMark::Sent)
+    );
+
+    for answered in [false, true] {
+        assert_eq!(
+            first_mark_after(None, answered),
+            None,
+            "a file without the key never becomes a first run"
+        );
+    }
+    assert!(!first_query(None) && !first_query(Some(FirstMark::Sent)));
+
+    for mark in [FirstMark::Due, FirstMark::Sent] {
+        assert_eq!(FirstMark::from_config_str(mark.as_config_str()), Some(mark));
+    }
+    assert_eq!(FirstMark::from_config_str("maybe"), None);
+}
+
+/// ⭐ **The mark is `?first=1` on the path of the feed, and nothing else.** Every address of the
+/// feed carries no query of its own, so the mark is the only one; a placeholder address is not
+/// read at all, marked or not — no socket in the battery, and no answer to count.
+#[test]
+fn the_mark_is_first_one_on_the_path_of_the_feed_and_nothing_else() {
+    for url in links::FEED_URLS {
+        assert!(
+            !url.contains('?'),
+            "the feed address carries no query: {url}"
+        );
+        assert_eq!(letters::feed::marked(url), format!("{url}?first=1"));
+    }
+
+    assert_eq!(
+        letters::feed::marked("https://panda-pishet-kod.dev/langswitcher/news.toml"),
+        "https://panda-pishet-kod.dev/langswitcher/news.toml?first=1"
+    );
+    assert_eq!(
+        letters::feed::read_from_marked(&["https://example.invalid/news.toml"], "ru", true),
+        (None, false),
+        "a placeholder is not asked, so nothing answered"
+    );
+}
+
+/// The body of a function **nested in a module** (indented by four): from its signature line to
+/// the first `    }` closing it — `body_of` stops at a brace in column 0, which inside `pub mod
+/// feed` would be the end of the module.
+fn nested_body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source
+        .find(signature)
+        .unwrap_or_else(|| panic!("src/letters.rs must contain \"{signature}\""));
+    let rest = &source[start..];
+    let end = rest
+        .find("\n    }\n")
+        .expect("a nested item ends at `    }`");
+
+    &rest[..end]
+}
+
+/// ⭐ **The wiring of the mark** — the roads the automaton above is fed by:
+/// * `tick` asks for the marked read by `first_query(stored.first_mark)`;
+/// * the feed thread reads through `feed::read_now_marked` and raises `FIRST_ANSWERED` only when
+///   the read was marked and answered;
+/// * `take_feed` writes the mark as sent **before** it asks the mailbox, which holds only a good
+///   document — a refused one is an answer all the same;
+/// * `read_over` says «answered» **before** it looks at the status — any status counts;
+/// * the updater never sends the mark: `update.rs` reads the feed through `feed::fetch`.
+#[test]
+fn the_mark_of_the_first_run_is_wired_from_the_tick_to_the_answer() {
+    let source = letters_source();
+
+    let tick = body_of(&source, "pub fn tick(");
+    assert_eq!(
+        code_lines(tick)
+            .filter(|line| line.contains("first_query(stored.first_mark)"))
+            .count(),
+        1,
+        "tick asks for the marked read by the mark of the file"
+    );
+
+    let start = body_of(&source, "pub fn start_feed_read(");
+    let lines: Vec<&str> = code_lines(start).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+    assert!(at("feed::read_now_marked(&language, first)").is_some());
+    assert!(
+        matches!((at("if first && answered"), at("FIRST_ANSWERED.store(true")), (Some(a), Some(b)) if a < b),
+        "the flag is raised only for a marked read that was answered:\n{start}"
+    );
+
+    let take = body_of(&source, "pub fn take_feed(");
+    let lines: Vec<&str> = code_lines(take).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+    assert!(
+        matches!(
+            (at("FIRST_ANSWERED.swap(false"), at("first_mark_after(state.first_mark, true)"), at("MAILBOX")),
+            (Some(a), Some(b), Some(c)) if a < b && b < c
+        ),
+        "take_feed writes the mark as sent before it asks the mailbox:\n{take}"
+    );
+
+    let read_over = nested_body_of(&source, "    fn read_over(");
+    let lines: Vec<&str> = code_lines(read_over).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+    assert!(
+        matches!(
+            (at("answered.set(true)"), at("status_of(request)")),
+            (Some(a), Some(b)) if a < b
+        ),
+        "an answer counts before its status is looked at"
+    );
+
+    let update = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("update.rs"),
+    )
+    .expect("src/update.rs is readable")
+    .replace("\r\n", "\n");
+    assert!(
+        !update.contains("read_now_marked")
+            && !update.contains("first=1")
+            && !update.contains("marked("),
+        "the updater never sends the mark"
+    );
+}

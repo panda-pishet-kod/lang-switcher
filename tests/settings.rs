@@ -433,13 +433,19 @@ fn missing_file_gives_the_default_configuration() {
     let (config, outcome) =
         settings::read_from(&path).expect("a missing file must not be an error");
 
-    assert_eq!(config, Config::for_a_first_run());
+    // ⭐ Stage E116, task T-116-12 (решение 208.59): and the mark of the first run — this run
+    // creates the file.
+    let mut first_run = Config::for_a_first_run();
+    first_run.letters.first_mark = Some(letters::FirstMark::Due);
+    assert_eq!(config, first_run);
 
     let mut everything_else = Config::default();
     everything_else.general.language = config.general.language;
+    everything_else.letters.first_mark = Some(letters::FirstMark::Due);
     assert_eq!(
         config, everything_else,
-        "`general.language` is the one field вопрос 95 may move"
+        "`general.language` is the one field вопрос 95 may move, and `letters.first_mark` the one \
+         T-116-12 writes"
     );
 
     assert_eq!(outcome, ReadOutcome::NoFile);
@@ -1380,6 +1386,76 @@ fn the_day_of_the_last_feed_attempt_is_written_only_once_there_is_one() {
     assert_eq!(
         read_back.letters.feed_last_try,
         letters::Date::from_ymd(2026, 9, 25)
+    );
+}
+
+/// ⭐ **Stage E116, task T-116-12 (решение 208.59) — the file this run creates carries the mark of
+/// the first run, and a file of an older build never does.**
+///
+/// * no file at all — the road of вопрос 95 — comes back `first_mark = due`, and the file written
+///   from it says so and is read back the same;
+/// * a file without the key (an update: the file of 1.5.1) has no mark — never sent;
+/// * a word this build does not know is no mark either, and the file is still read, not refused;
+/// * a file with no mark writes no line.
+#[test]
+fn only_the_file_this_run_creates_carries_the_mark_of_the_first_run() {
+    let dir = TestDir::new("letters_first_mark");
+    let path = dir.config();
+
+    let (fresh, outcome) = settings::read_from(&path).expect("no file is not an error");
+
+    assert_eq!(outcome, ReadOutcome::NoFile);
+    assert_eq!(
+        fresh.letters.first_mark,
+        Some(letters::FirstMark::Due),
+        "T-116-12: the run that creates the file is the first run"
+    );
+
+    settings::write_to(&path, &fresh).expect("writing the configuration must succeed");
+    let text = fs::read_to_string(&path).expect("the file must be readable as text");
+
+    assert!(
+        text.contains("first_mark = \"due\""),
+        "the mark is a word of the section:\n{text}"
+    );
+
+    let (read_back, outcome) = settings::read_from(&path).expect("reading it back must succeed");
+
+    assert_eq!(outcome, ReadOutcome::Current);
+    assert_eq!(read_back.letters.first_mark, Some(letters::FirstMark::Due));
+
+    // The file of an older build: everything but the new key.
+    let older = text
+        .replace("first_mark = \"due\"\r\n", "")
+        .replace("first_mark = \"due\"\n", "");
+    assert!(!older.contains("first_mark"));
+    fs::write(&path, &older).expect("the file of an older build is written");
+
+    let (updated, _) = settings::read_from(&path).expect("the file of an older build is read");
+
+    assert_eq!(
+        updated.letters.first_mark, None,
+        "T-116-12: a file without the key is never a first run"
+    );
+    assert!(!letters::first_query(updated.letters.first_mark));
+
+    // An unknown word: no mark, and the file is read rather than refused.
+    fs::write(
+        &path,
+        text.replace("first_mark = \"due\"", "first_mark = \"maybe\""),
+    )
+    .expect("the file is written");
+
+    let (odd, _) = settings::read_from(&path).expect("an unknown word is not damage");
+
+    assert_eq!(odd.letters.first_mark, None);
+
+    // No mark, no line.
+    settings::write_to(&path, &Config::default()).expect("writing the configuration must succeed");
+    assert!(
+        !fs::read_to_string(&path)
+            .expect("the file must be readable as text")
+            .contains("first_mark")
     );
 }
 
@@ -29167,9 +29243,11 @@ fn only_a_first_run_takes_the_language_of_the_system() {
         settings::system_language_for_a_first_run(),
         "a first run starts in the language of the system"
     );
+    let mut first_run = Config::for_a_first_run();
+    // Stage E116, task T-116-12: the mark of the first run is written on this road only.
+    first_run.letters.first_mark = Some(letters::FirstMark::Due);
     assert_eq!(
-        config,
-        Config::for_a_first_run(),
+        config, first_run,
         "and in nothing else — the rest of section 7 is untouched by вопрос 95"
     );
 
@@ -29177,6 +29255,7 @@ fn only_a_first_run_takes_the_language_of_the_system() {
     // so that a field added later cannot slip through unasserted.
     let mut as_before = Config::default();
     as_before.general.language = config.general.language;
+    as_before.letters.first_mark = Some(letters::FirstMark::Due);
     assert_eq!(config, as_before);
 
     // --- a file that exists: the rule is not consulted ------------------------------------

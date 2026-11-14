@@ -412,6 +412,64 @@ impl Thanks {
     }
 }
 
+/// ⭐ **The mark of the first run — stage E116, task T-116-12, решение 208.59** (`[letters]
+/// first_mark`): the one read of the feed after an installation carries `?first=1`, once.
+///
+/// * **written as [`FirstMark::Due`] only when this run creates the file** — no `config.toml` at
+///   all (`settings::read_from_via`, the road of вопрос 95). An update keeps the file, and a file
+///   without the key is a file of an older build: the mark is never sent for it;
+/// * **[`FirstMark::Sent`] after any HTTP answer to the marked request**, whatever its status — so
+///   the mark goes out at most once. No answer at all (no network, a host that is silent) leaves it
+///   due, and the read of FR-102 asks again on its own schedule;
+/// * the updater never sends it — it reads the feed by `feed::fetch`, unmarked.
+///
+/// No schema of its own, as `feed_last_try` and `update_noticed` before it: there is no
+/// `deny_unknown_fields`, and an older build reads past the key. A word this build does not know
+/// is no mark at all (`None`): never sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirstMark {
+    /// This run created the file; the next read of the feed carries `?first=1`.
+    Due,
+    /// The marked read was answered: the mark has gone out and never goes again.
+    Sent,
+}
+
+impl FirstMark {
+    /// The word of the file for this state.
+    pub fn as_config_str(self) -> &'static str {
+        match self {
+            Self::Due => "due",
+            Self::Sent => "sent",
+        }
+    }
+
+    /// The state a word of the file means; anything else is no mark, which is never sent.
+    pub fn from_config_str(text: &str) -> Option<Self> {
+        match text {
+            "due" => Some(Self::Due),
+            "sent" => Some(Self::Sent),
+            _ => None,
+        }
+    }
+}
+
+/// ⭐ **Whether the next read of the feed carries `?first=1`** — stage E116, task T-116-12: only
+/// while the mark is [`FirstMark::Due`]. No mark (a file of an older build, an unknown word) and a
+/// mark already sent answer `false`.
+pub const fn first_query(mark: Option<FirstMark>) -> bool {
+    matches!(mark, Some(FirstMark::Due))
+}
+
+/// ⭐ **The mark after a read of the feed** — stage E116, task T-116-12. `answered` is whether an
+/// HTTP answer came back to the marked request, of any status. A due mark answered is sent; every
+/// other mark stays what it was — a due one with no answer stays due, and no mark never becomes one.
+pub const fn first_mark_after(mark: Option<FirstMark>, answered: bool) -> Option<FirstMark> {
+    match (mark, answered) {
+        (Some(FirstMark::Due), true) => Some(FirstMark::Sent),
+        (other, _) => other,
+    }
+}
+
 /// One entry of the author's feed as the schedule sees it — FR-102.
 ///
 /// Stage А never builds one of these: the feed is stage Б, and until then [`FeedView::EMPTY`]
@@ -7260,6 +7318,12 @@ static MAILBOX: std::sync::Mutex<Option<feed::Feed>> = std::sync::Mutex::new(Non
 /// Whether a read is in flight. One at a time: a second thread would be a second request.
 static READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// ⭐ **The marked read was answered — stage E116, task T-116-12.** Set by the feed thread when the
+/// read carried `?first=1` and an HTTP answer came back, of any status; taken by [`take_feed`] on the
+/// UI thread, which writes the mark as sent. An atomic and not the mailbox: the mailbox holds only a
+/// good feed, and a refused document is an answer all the same (решение 208.59).
+static FIRST_ANSWERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// **Starts the one read of FR-102**, on a thread that lives exactly one request.
 ///
 /// SPEC section 6.1: a fourth thread, short-lived, doing no user interface, no input and no
@@ -7269,7 +7333,9 @@ static READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// Nothing at all happens when the feed is off (`[letters] feed = false`): no thread is
 /// started, so there is no timer, no socket and no name to resolve — which is what makes the
 /// switch of FR-102 a real switch and not a filter on the answer.
-pub fn start_feed_read(owner: HWND, language: String) {
+///
+/// ⭐ Stage E116, task T-116-12: `first` — the read carries `?first=1` ([`feed::read_now_marked`]).
+pub fn start_feed_read(owner: HWND, language: String, first: bool) {
     use std::sync::atomic::Ordering;
 
     if READING.swap(true, Ordering::AcqRel) {
@@ -7284,7 +7350,12 @@ pub fn start_feed_read(owner: HWND, language: String) {
     let started = std::thread::Builder::new()
         .name("langsw-feed".to_owned())
         .spawn(move || {
-            let answer = feed::read_now(&language);
+            let (answer, answered) = feed::read_now_marked(&language, first);
+
+            // Stage E116, task T-116-12: the mark goes out with the first answer, of any status.
+            if first && answered {
+                FIRST_ANSWERED.store(true, Ordering::Release);
+            }
 
             if let Ok(mut box_of) = MAILBOX.lock() {
                 *box_of = answer;
@@ -7321,6 +7392,12 @@ pub fn start_feed_read(owner: HWND, language: String) {
 /// news is published, the day of the read is written (**only** on a successful read — FR-102),
 /// what has fallen out of the feed is forgotten, and the dot on the icon is recomputed.
 pub fn take_feed() {
+    // ⭐ Stage E116, task T-116-12: the marked read was answered — the mark is sent, whether or not the
+    // document was good, and before the mailbox is asked (it holds only a good one).
+    if FIRST_ANSWERED.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        update_state(|state| state.first_mark = first_mark_after(state.first_mark, true));
+    }
+
     let Some(fresh) = MAILBOX.lock().ok().and_then(|mut box_of| box_of.take()) else {
         return;
     };
@@ -7406,7 +7483,11 @@ pub fn tick(owner: HWND) {
     // and the day is in the file, so a restart does not buy another attempt either.
     if feed_read_is_due(&stored, today) {
         update_state(|state| state.feed_last_try = Some(today));
-        start_feed_read(owner, settings::ui_language().tag().to_owned());
+        start_feed_read(
+            owner,
+            settings::ui_language().tag().to_owned(),
+            first_query(stored.first_mark),
+        );
     }
 
     // TZ E104 §0 п. 5, 21: the first tick after an update knocks with «Lang Switcher обновлён до
@@ -11831,6 +11912,21 @@ pub mod feed {
     /// from any thread, and the product calls it from a thread of its own that lives exactly
     /// one request (SPEC section 6.1).
     pub fn fetch(url: &str) -> Option<String> {
+        fetch_answering(url).0
+    }
+
+    /// [`fetch`], and whether an HTTP answer came back at all, of any status — stage E116, task
+    /// T-116-12: the mark of the first run is sent once an answer comes back (решение 208.59), and
+    /// stays due when none does (no network, a silent host).
+    pub fn fetch_answering(url: &str) -> (Option<String>, bool) {
+        let answered = std::cell::Cell::new(false);
+        let text = fetch_into(url, &answered);
+
+        (text, answered.get())
+    }
+
+    /// The body of [`fetch_answering`].
+    fn fetch_into(url: &str, answered: &std::cell::Cell<bool>) -> Option<String> {
         let target = target_of(url)?;
 
         // The line that makes «no request was made» measurable. It is written **before** the
@@ -11844,10 +11940,15 @@ pub mod feed {
 
         let mut body: Vec<u8> = Vec::new();
 
-        get(&target, RESPONSE_CAP as u64, &mut |chunk| {
-            body.extend_from_slice(chunk);
-            true
-        })?;
+        get_answering(
+            &target,
+            RESPONSE_CAP as u64,
+            &mut |chunk| {
+                body.extend_from_slice(chunk);
+                true
+            },
+            Some(answered),
+        )?;
 
         // The document is UTF-8 by construction — the author's own script writes it. Anything
         // else is not the author's file, and `from_utf8` saying so is the cheapest of the
@@ -11912,10 +12013,22 @@ pub mod feed {
     /// number of bytes there were. The one body under [`fetch`] (the feed, into memory) and the
     /// download of the updater (the installer, into a file as it is hashed — task T-104-5).
     ///
-    /// The request is the request of FR-102 and nothing more: no parameters, no headers of ours
+    /// The request is the request of FR-102 and nothing more: no parameters but what the address
+    /// carries (since 1.6.0 the one `?first=1` of the first run, [`marked`]), no headers of ours
     /// beyond the agent, no cookie. `None` for every refusal — the name, the connection, a
     /// status that is not 200, a body over `cap`, a `sink` that answered `false`.
     pub fn get(target: &Target, cap: u64, sink: &mut dyn FnMut(&[u8]) -> bool) -> Option<u64> {
+        get_answering(target, cap, sink, None)
+    }
+
+    /// [`get`], and `answered` set to `true` once an HTTP answer has come back, whatever its
+    /// status — stage E116, task T-116-12 (решение 208.59), for the mark of the first run.
+    fn get_answering(
+        target: &Target,
+        cap: u64,
+        sink: &mut dyn FnMut(&[u8]) -> bool,
+        answered: Option<&std::cell::Cell<bool>>,
+    ) -> Option<u64> {
         let call = Call {
             verb: "GET",
             headers: None,
@@ -11923,6 +12036,7 @@ pub mod feed {
             expect: 200,
             redirects: true,
             timeouts: READ_TIMEOUTS,
+            answered,
         };
 
         exchange(target, &call, Some((cap, sink)))
@@ -11951,6 +12065,7 @@ pub mod feed {
             expect: 201,
             redirects: false,
             timeouts,
+            answered: None,
         };
 
         exchange(target, &call, None).is_some()
@@ -11968,6 +12083,10 @@ pub mod feed {
         /// Whether WinHTTP may follow a redirection — the read as it always has, an appeal never.
         redirects: bool,
         timeouts: Timeouts,
+        /// ⭐ Stage E116, task T-116-12: set to `true` the moment an HTTP answer has come back,
+        /// whatever its status — the mark of the first run is sent then (решение 208.59). `None`
+        /// for every call that does not ask.
+        answered: Option<&'a std::cell::Cell<bool>>,
     }
 
     /// How the body of an answer is read: at most this many bytes, each piece handed to the sink —
@@ -12186,15 +12305,23 @@ pub mod feed {
                     &windows::core::Error::from_thread(),
                 );
                 None
-            } else if status_of(request) != request_of.call.expect {
-                // A status that is not the one expected — 200 for the read, 201 for an appeal — is
-                // a refusal like any other and is not journalled with its number: SEC-07, and the
-                // number is the host's business.
-                None
             } else {
-                match read {
-                    Some((cap, sink)) => drain(request, cap, sink),
-                    None => Some(0),
+                // ⭐ Stage E116, task T-116-12: an answer came back — of any status (решение
+                // 208.59: the mark of the first run is sent then, and goes no more).
+                if let Some(answered) = request_of.call.answered {
+                    answered.set(true);
+                }
+
+                if status_of(request) == request_of.call.expect {
+                    match read {
+                        Some((cap, sink)) => drain(request, cap, sink),
+                        None => Some(0),
+                    }
+                } else {
+                    // A status that is not the one expected — 200 for the read, 201 for an appeal —
+                    // is a refusal like any other and is not journalled with its number: SEC-07,
+                    // and the number is the host's business.
+                    None
                 }
             }
         };
@@ -12302,6 +12429,58 @@ pub mod feed {
         read_from(&super::links::FEED_URLS, language)
     }
 
+    /// ⭐ **[`read_now`] with the mark of the first run** — stage E116, task T-116-12, решение
+    /// 208.59. `first`: every address is asked with `?first=1` ([`marked`]). Answers the feed, as
+    /// [`read_now`] does, and whether **any** address gave an HTTP answer, of any status — the
+    /// moment the mark counts as sent. The program reads the feed through this function; the
+    /// updater does not, and never sends the mark.
+    pub fn read_now_marked(language: &str, first: bool) -> (Option<Feed>, bool) {
+        read_from_marked(&super::links::FEED_URLS, language, first)
+    }
+
+    /// ⭐ **The address of the feed with the mark of the first run** — stage E116, task T-116-12:
+    /// `?first=1` added to the path, and nothing else — no number, nothing of the machine. The
+    /// addresses of the feed carry no query of their own.
+    pub fn marked(url: &str) -> String {
+        format!("{url}?first=1")
+    }
+
+    /// [`read_from`] with the mark of the first run — stage E116, task T-116-12. See
+    /// [`read_now_marked`].
+    pub fn read_from_marked(urls: &[&str], language: &str, first: bool) -> (Option<Feed>, bool) {
+        let mut answered = false;
+
+        for &url in urls {
+            // A placeholder address is not read at all: `.invalid` never resolves, and asking
+            // costs a DNS timeout for nothing (полномочие П5).
+            if super::links::is_placeholder(url) {
+                continue;
+            }
+
+            let address = if first { marked(url) } else { url.to_owned() };
+            let (text, answer) = fetch_answering(&address);
+
+            answered |= answer;
+
+            let Some(text) = text else {
+                continue;
+            };
+
+            match read_document(&text, language, verify_signature) {
+                Ok(feed) => return (Some(feed), answered),
+                Err(refusal) => {
+                    // SEC-07: the name of what went wrong and not a word of the document.
+                    crate::diag::record(
+                        crate::diag::Operation::from_name(refusal.journal_name()),
+                        crate::diag::OsCode::NONE,
+                    );
+                }
+            }
+        }
+
+        (None, answered)
+    }
+
     /// **One read of the feed from these addresses**: every address in order, the first good
     /// answer winning.
     ///
@@ -12322,30 +12501,8 @@ pub mod feed {
     /// it a placeholder of its own — the battery stays without a socket, and the check it makes
     /// is the check the product makes. [`read_now`] is the only caller in the program.
     pub fn read_from(urls: &[&str], language: &str) -> Option<Feed> {
-        for &url in urls {
-            // A placeholder address is not read at all: `.invalid` never resolves, and asking
-            // costs a DNS timeout for nothing (полномочие П5).
-            if super::links::is_placeholder(url) {
-                continue;
-            }
-
-            let Some(text) = fetch(url) else {
-                continue;
-            };
-
-            match read_document(&text, language, verify_signature) {
-                Ok(feed) => return Some(feed),
-                Err(refusal) => {
-                    // SEC-07: the name of what went wrong and not a word of the document.
-                    crate::diag::record(
-                        crate::diag::Operation::from_name(refusal.journal_name()),
-                        crate::diag::OsCode::NONE,
-                    );
-                }
-            }
-        }
-
-        None
+        // Stage E116, task T-116-12: one body with the marked read, unmarked here.
+        read_from_marked(urls, language, false).0
     }
 
     /// Splits an `https://host/path` into its two halves — `None` for anything that is not one.

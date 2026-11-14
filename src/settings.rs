@@ -1794,6 +1794,22 @@ pub struct Letters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_noticed: Option<letters::Date>,
 
+    /// ⭐ **The mark of the first run — stage E116, task T-116-12, решение 208.59.** `due` only in
+    /// a file this run created ([`read_from_via`], no file at all); `sent` after any HTTP answer to
+    /// the read of the feed that carried `?first=1`. Absent — a file of an older build, an update —
+    /// means never. See [`letters::FirstMark`].
+    ///
+    /// ⚠ Not in the печать of section 7 and **no schema of its own**, as `feed_last_try` and
+    /// `update_noticed` before it: an older build reads past the key, and an unknown word is read
+    /// as no mark (never sent), not as damage.
+    #[serde(
+        default,
+        deserialize_with = "first_mark_from_toml",
+        serialize_with = "first_mark_to_toml",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub first_mark: Option<letters::FirstMark>,
+
     /// The identifiers of the news items that have been read — FR-101, and «Прочитано» is the
     /// only thing that ever puts one here.
     #[serde(default)]
@@ -1827,6 +1843,7 @@ impl Default for Letters {
             first_feed_letter: None,
             latest_known: String::new(),
             update_noticed: None,
+            first_mark: None,
             read_ids: Vec::new(),
             reminders: BTreeMap::new(),
             first_shown: BTreeMap::new(),
@@ -1922,6 +1939,32 @@ where
     S: serde::Serializer,
 {
     serializer.serialize_str(thanks.as_config_str())
+}
+
+/// Reads `letters.first_mark` (stage E116, task T-116-12): the word goes to the owner of the
+/// vocabulary, [`letters::FirstMark`]; a word it does not know is no mark — never sent — and not
+/// damage to the file.
+fn first_mark_from_toml<'de, D>(deserializer: D) -> Result<Option<letters::FirstMark>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    Ok(letters::FirstMark::from_config_str(&text))
+}
+
+/// Writes `letters.first_mark`: the owner's word, verbatim; no mark is not written at all
+/// (`skip_serializing_if`).
+fn first_mark_to_toml<S>(
+    mark: &Option<letters::FirstMark>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match mark {
+        Some(mark) => serializer.serialize_str(mark.as_config_str()),
+        None => serializer.serialize_none(),
+    }
 }
 
 /// The whole configuration file of section 7.
@@ -2856,7 +2899,15 @@ pub fn read_from_via(
         // the language of the configuration becomes the language of the user's Windows if this
         // build has it, and `en` if it has not.
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Ok((Config::for_a_first_run(), ReadOutcome::NoFile));
+            let mut config = Config::for_a_first_run();
+
+            // ⭐ Stage E116, task T-116-12 (решение 208.59): the mark of the first run is written
+            // here and nowhere else — this run creates the file. Every other road of
+            // `for_a_first_run` (a damaged file, a file of a newer schema, no `%APPDATA%`) has a
+            // file or no place for one, and is not a first run.
+            config.letters.first_mark = Some(letters::FirstMark::Due);
+
+            return Ok((config, ReadOutcome::NoFile));
         }
         // Решение 120.1: once more, at once — and whatever the second attempt answers is the
         // answer.

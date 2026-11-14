@@ -160,8 +160,11 @@ exactly the text you saw before sending; a way to contact you is optional.
 How it works, in detail:
 
 - **The news file** is `https://panda-pishet-kod.dev/langswitcher/news.toml` — one `GET` request
-  with no parameters; its header carries only the name and the version number of the program, for
-  example `LangSwitcher/1.6.0`, and nothing about the computer. If it does not come, the next try is not before tomorrow. Letters and news
+  with no parameters — but once: the first read after an installation (when the program creates its
+  settings file itself) adds `?first=1` to the address, with no number and nothing about the
+  computer, and stops after the site's first answer; an update sends no such mark. The header
+  carries only the name and the version number of the program, for example `LangSwitcher/1.6.0`.
+  If it does not come, the next try is not before tomorrow. Letters and news
   from it can be turned off in the settings file (`[letters] feed = false`), and, after the first
   letter of the feed but not earlier than 90 days after the first start, in the "From the author"
   window as well.
@@ -192,7 +195,8 @@ checked at the first key of a word. The installer started from a PowerShell 7 te
 full version again (1.5.1 then silently installed the base version, which does not work in windows of
 programs run as administrator). The name of the program and the download button open the pages of
 the site in Swedish and Slovak. The request for the news file now carries the version number of the
-program in its header, `LangSwitcher/1.6.0`, and still nothing about the computer.
+program in its header, `LangSwitcher/1.6.0`, and the first read after an installation adds `?first=1`
+to the address once; still nothing about the computer.
 Version 1.5.1: the request to switch the keyboard layout goes to the box with the keyboard focus, not
 to the frame of the window. In the Run dialog of Windows (Win+R) 1.5.0 corrected the word but left
 the layout as it was, on Windows 10 and Windows 11 alike; now the layout switches there too.
