@@ -405,30 +405,46 @@ fn a_refusal_takes_no_word_of_the_document_into_the_journal() {
 // The request — SEC-03, вопрос 101 п. 5
 // =========================================================================================
 
-/// **The user agent names the program and nothing about the machine.**
+/// **The user agent is the name and the version of the program, and nothing about the machine** —
+/// stage E116, task T-116-11, решение 208.58.
 ///
-/// The one field of the request the author could be tempted to put something in. A version
-/// there would tell the host how many people run which build, which is telemetry under another
-/// name — so this test fails on a **digit**, and the positive control is that it would: put
-/// `env!("CARGO_PKG_VERSION")` into `USER_AGENT` and the first assertion goes red.
+/// Until 1.6.0 the header carried the name alone and this test failed on a digit (вопрос 101 п. 5:
+/// a version would tell the host how many people run which build). The owner decided otherwise for
+/// 1.6.0 — «В 1.6.0», the updater «Да, тот же», SEC-03 «не трогать»: `LangSwitcher/X.Y.Z`, the three
+/// numbers of the package and nothing more — no Windows, no build, no language. The feed and the
+/// updater send it through the one `WinHttpOpen` of `letters::feed`.
 #[test]
-fn the_user_agent_names_the_program_and_nothing_about_the_machine() {
+fn the_user_agent_is_the_name_and_the_version_of_the_program_and_nothing_about_the_machine() {
     let agent = feed::USER_AGENT;
 
     println!("User-Agent: «{agent}»");
 
-    assert!(
-        !agent.chars().any(|letter| letter.is_ascii_digit()),
-        "a digit in the user agent is a version, and a version is telemetry: «{agent}»"
+    assert_eq!(
+        agent,
+        format!("LangSwitcher/{}", env!("CARGO_PKG_VERSION")),
+        "T-116-11 (208.58): the name and the version of this build"
+    );
+
+    let version = agent
+        .strip_prefix("LangSwitcher/")
+        .expect("the name comes first");
+    let numbers: Vec<&str> = version.split('.').collect();
+
+    assert_eq!(
+        numbers.len(),
+        3,
+        "three numbers, nothing after them: «{agent}»"
     );
     assert!(
-        !agent.contains(env!("CARGO_PKG_VERSION")),
-        "and the version of this build most of all"
+        numbers
+            .iter()
+            .all(|number| !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())),
+        "each of the three is a number: «{agent}»"
     );
-    assert!(agent.is_ascii() && !agent.is_empty());
+    assert!(agent.is_ascii() && !agent.contains(' '));
     assert!(
         !agent.to_lowercase().contains("windows") && !agent.to_lowercase().contains("mozilla"),
-        "and nothing about the system either"
+        "and nothing about the system"
     );
 }
 

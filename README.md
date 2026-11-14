@@ -160,7 +160,8 @@ exactly the text you saw before sending; a way to contact you is optional.
 How it works, in detail:
 
 - **The news file** is `https://panda-pishet-kod.dev/langswitcher/news.toml` — one `GET` request
-  with no parameters. If it does not come, the next try is not before tomorrow. Letters and news
+  with no parameters; its header carries only the name and the version number of the program, for
+  example `LangSwitcher/1.6.0`, and nothing about the computer. If it does not come, the next try is not before tomorrow. Letters and news
   from it can be turned off in the settings file (`[letters] feed = false`), and, after the first
   letter of the feed but not earlier than 90 days after the first start, in the "From the author"
   window as well.
@@ -190,7 +191,8 @@ program comes to the front. A window that came to the front without the program 
 checked at the first key of a word. The installer started from a PowerShell 7 terminal installs the
 full version again (1.5.1 then silently installed the base version, which does not work in windows of
 programs run as administrator). The name of the program and the download button open the pages of
-the site in Swedish and Slovak.
+the site in Swedish and Slovak. The request for the news file now carries the version number of the
+program in its header, `LangSwitcher/1.6.0`, and still nothing about the computer.
 Version 1.5.1: the request to switch the keyboard layout goes to the box with the keyboard focus, not
 to the frame of the window. In the Run dialog of Windows (Win+R) 1.5.0 corrected the word but left
 the layout as it was, on Windows 10 and Windows 11 alike; now the layout switches there too.

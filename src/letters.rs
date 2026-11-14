@@ -11760,16 +11760,21 @@ pub mod feed {
         }
     }
 
-    /// The name this program calls itself on the network — FR-102, and **it carries no
-    /// version**.
+    /// The name this program calls itself on the network — FR-102: **the name and the version of
+    /// the program, `LangSwitcher/X.Y.Z`, and nothing else** (stage E116, task T-116-11, решение
+    /// 208.58).
     ///
-    /// A user agent is the one field of the request the author could be tempted to put
-    /// something in, and вопрос 101 п. 5 says the request carries no information about the
-    /// machine at all. A version would tell the host how many people are running which build —
-    /// which is telemetry with a different name. The test
-    /// `the_user_agent_names_the_program_and_nothing_about_the_machine` fails if a digit ever
-    /// appears here.
-    pub const USER_AGENT: &str = "LangSwitcher";
+    /// Until 1.6.0 it was the name alone: вопрос 101 п. 5 kept the version out, because it tells
+    /// the host how many people run which build. The owner decided for 1.6.0 to send it — «В
+    /// 1.6.0», the updater «Да, тот же» — and to leave the promise of SEC-03 as it is: nothing about
+    /// the machine, no Windows, no build number, no language. The three numbers come from
+    /// `Cargo.toml` through `CARGO_PKG_VERSION`, the one source `tools\verify-version.ps1` holds the
+    /// version places to, so the header cannot drift from the file version; `concat!` makes it a
+    /// constant. The program and the updater are one package and send it through the one
+    /// `WinHttpOpen` below ([`get`] and [`fetch`]). The test
+    /// `the_user_agent_is_the_name_and_the_version_of_the_program_and_nothing_about_the_machine`
+    /// holds the form.
+    pub const USER_AGENT: &str = concat!("LangSwitcher/", env!("CARGO_PKG_VERSION"));
 
     /// How long the program waits for the name to resolve and the connection to open, in
     /// milliseconds — FR-102.
