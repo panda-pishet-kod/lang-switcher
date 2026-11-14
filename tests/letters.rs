@@ -1696,8 +1696,10 @@ fn every_language_opens_the_pages_of_the_site_on_its_own_side() {
 /// every address checked by the controller (200, the page's own `lang`). Both Serbian scripts read
 /// `/sr/` and are marked `sr` (the page is `lang="sr-Latn"`); Portuguese is marked `pt` (the page is
 /// `lang="pt-BR"`). Hungarian after them (208.1, the line of the controller of 2026-11-10: both
-/// addresses 200, `lang=hu`).
-const THE_OWN_PAGES: [(Language, &str); 19] = [
+/// addresses 200, `lang=hu`). ⭐ Stage E116, task T-116-6 (Q-208-13 п. 1): Swedish and Slovak — the
+/// line of the controller of the languages of the site of 2026-11-12, and all four addresses checked
+/// in Chrome on 2026-11-14 (200, `lang=sv` and `lang=sk`).
+const THE_OWN_PAGES: [(Language, &str); 21] = [
     (Language::Uk, "uk"),
     (Language::De, "de"),
     (Language::Fr, "fr"),
@@ -1717,6 +1719,8 @@ const THE_OWN_PAGES: [(Language, &str); 19] = [
     (Language::Bg, "bg"),
     (Language::Nl, "nl"),
     (Language::Hu, "hu"),
+    (Language::Sv, "sv"),
+    (Language::Sk, "sk"),
 ];
 
 /// ⭐ Stage E114, task T-114-3 (решение 208.6, 1а; Q-208-5): Armenian and Uzbek in the Latin script
@@ -1882,7 +1886,7 @@ fn all_sixty_six_languages_open_what_the_decisions_give_them() {
         )
     };
 
-    // Stage E114, task T-114-3: the rule of 1.4.2 is caught on the nineteen languages of their own
+    // Stage E114, task T-114-3: the rule of 1.4.2 is caught on the twenty-one languages of their own
     // pages and on hy and uz, whose pages moved to the Russian side — and on no other.
     let moved: Vec<Language> = Language::ALL
         .into_iter()
