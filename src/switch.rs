@@ -222,14 +222,17 @@ pub const WM_APP_SWITCH: u32 = WM_APP + 8;
 ///
 /// The setting is «Позволить выбрать метод ввода для каждого окна приложения» (Settings → Time
 /// & language → Typing → Advanced keyboard settings, "Let me use a different input method for
-/// each app window"), and it is **on by default**.
+/// each app window"), and it is **off by default** — on Windows 11 and on Windows 10 22H2 alike,
+/// read on both stands before anything touched it (records 209.43, 209.48; stage E116, task
+/// T-116-7). This documentation said «on by default» until 1.6.0, and so did SPEC FR-51.
 ///
 /// It is read through [`scope`], which asks the OS rather than the registry; the source is
 /// named in the report of task T-05-1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Scope {
-    /// The setting is **on**, which is the Windows default: the layout is a property of the
-    /// window, every window keeps its own, and switching one switches only that one.
+    /// The setting is **on**: the layout is a property of the window, every window keeps its own,
+    /// and switching one switches only that one. ⚠ Not the Windows default (see the type), though
+    /// it is what [`scope`] answers when the setting cannot be read and what `Default` gives.
     #[default]
     PerWindow,
     /// The setting is **off**: the input language is one value for the whole session and a
@@ -274,10 +277,12 @@ impl Scope {
 /// on the thread that renders the dump — the UI thread — and prints it as the row `switch.scope`
 /// beside `switch.scope_unreadable`.
 ///
-/// NFR-13: a failed call is not read as `FALSE`. The setting is on by default, the default is
-/// what the overwhelming majority of installations run, and answering [`Scope::PerWindow`] is
-/// therefore both the safer and the more likely answer; the failure is counted in
-/// [`Failures::scope_unreadable`] so that it is never silent.
+/// NFR-13: a failed call is not read as `FALSE`, and it is counted in
+/// [`Failures::scope_unreadable`] so that it is never silent. The answer on a failure stays
+/// [`Scope::PerWindow`], as before 1.6.0 — ⚠ but not for the reason this paragraph used to give:
+/// the setting is **off** by default (stage E116, task T-116-7, records 209.43 and 209.48), so the
+/// default answer is not the likelier one. It is only a report — nothing switches by it — and the
+/// row `switch.scope_unreadable` beside it says it was not read.
 pub fn scope() -> Scope {
     let mut thread_local = BOOL(0);
 
