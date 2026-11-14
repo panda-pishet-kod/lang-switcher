@@ -80,6 +80,21 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# --- the module path of Windows PowerShell 5.1 (stage E116, task T-116-5, question Q-208-21) -----
+# Setup is a child of whatever started it, and so is this script. Started from a PowerShell 7
+# terminal -- directly, or through cmd.exe -- it inherits PSModulePath with the module folders of
+# PowerShell 7 in front; Windows PowerShell 5.1 then finds Microsoft.PowerShell.Security of
+# PowerShell 7 first and cannot load it: step check failed with exit 11, and Setup installed the
+# BASE image in silence (decision 208.45). So the path is set back to the folders of Windows
+# PowerShell itself before anything asks for a module -- one line for every module this script
+# loads (Microsoft.PowerShell.Security: the signatures and the Cert: drive; PKI:
+# New-SelfSignedCertificate), and for any it may load one day; loading each module by its full
+# path would have to name each of them. The folders of the user are left out on purpose: this
+# script runs elevated for Setup and needs nothing but the modules of Windows.
+$inheritedModulePath = [string]$env:PSModulePath
+$env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';' + (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules')
+
 $LocalSubject = 'CN=Lang Switcher (local)'
 # The subject e91...e100 gave the local certificate, with the platform in the name: kept only for the
 # cleanup (decision 173.1). tests\installer_name.rs allows the old name on this line and on no other.
@@ -198,6 +213,9 @@ Say ('Windows PowerShell {0}, 64-bit process {1}, {2}' -f $PSVersionTable.PSVers
 Say ('Windows {0}, user {1}\{2}' -f [Environment]::OSVersion.Version, $env:USERDOMAIN, $env:USERNAME)
 Say ('full image {0}; program folder {1}; author certificate {2}' -f $FullImage, $AppDir, $AuthorThumbprint)
 if ($FailAt) { Say ('LANGSW_TRUST_FAIL_AT = ' + $FailAt + ' -- a failure will be forced at that step') }
+# The entries are counted, not printed: the inherited path names the user's folders.
+$inheritedEntries = @($inheritedModulePath.Split(';') | Where-Object { $_ }).Count
+Say ('PSModulePath: {0} inherited entries; set to {1}' -f $inheritedEntries, $env:PSModulePath)
 
 try {
     # --- /NOLOCALCERT ---------------------------------------------------------------------------
@@ -220,6 +238,10 @@ try {
     try {
         Enter-Step $step
         if (-not (Test-Path -LiteralPath $FullImage)) { throw ('the full image is missing: ' + $FullImage) }
+        # T-116-5: the module the signature cmdlets live in, named, so that the log says where it
+        # came from (it has to be $PSHOME\Modules) and a failure to load it is this step's.
+        $security = Import-Module Microsoft.PowerShell.Security -PassThru
+        Say ('module Microsoft.PowerShell.Security {0} from {1}' -f $security.Version, $security.ModuleBase)
         $sig = Get-AuthenticodeSignature -LiteralPath $FullImage
         $signer = ''
         if ($sig.SignerCertificate) { $signer = $sig.SignerCertificate.Thumbprint + ' ' + $sig.SignerCertificate.Subject }
