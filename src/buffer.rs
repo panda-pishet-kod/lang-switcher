@@ -1247,6 +1247,11 @@ pub type PhysicalProbe = fn() -> Physical;
 /// 11 two-sided without a live keyboard, exactly as `PhysicalProbe` did for defect D.
 pub type LayoutProbe = fn() -> LayoutId;
 
+/// What [`Recorder`] calls on the first stroke of every word — stage E116, task T-116-4. A bare
+/// function pointer for the reasons [`LayoutProbe`] is one: no allocation, no capture, nothing that
+/// could carry a stroke — it is called with nothing and answers nothing.
+pub type WordStartProbe = fn();
+
 /// How a caller tells [`Recorder`] what the machine's `CapsLock` really is — **task T-13-4**.
 ///
 /// A bare function pointer for the same three reasons [`PhysicalProbe`] and [`LayoutProbe`] are
@@ -1532,6 +1537,11 @@ pub struct Recorder {
     /// probe travels with the recorder across the FR-70 gate — the same arrangement `verify`
     /// already relies on.
     stamp: Option<LayoutProbe>,
+    /// ⭐ **Called on the first stroke of every word — stage E116, task T-116-4 (Q-208-12 п. 2).**
+    /// The product sets it to `watchdog::note_word_start`, which arms the re-check of the window in
+    /// front when the program has not been told of that window; a test sets what it wants to count.
+    /// `None` — nothing is called, as before 1.6.0. See [`Recorder::note_word_start_with`].
+    word_start: Option<WordStartProbe>,
     /// **When the user last edited what they are typing — FR-14**, task Т-48-2. `None` while
     /// nothing has been typed since the last flush.
     ///
@@ -1707,6 +1717,7 @@ impl Recorder {
             cycle: 0,
             verify: None,
             stamp: None,
+            word_start: None,
             last_edit: None,
             // FR-15, task T-52-4. A recorder built without a configuration behaves as section 7
             // describes the program, which is what every other default in this constructor does.
@@ -1754,6 +1765,14 @@ impl Recorder {
     /// layout of the foreground window is while the test feeds its synthetic strokes.
     pub fn stamp_layout_with(&mut self, probe: LayoutProbe) {
         self.stamp = Some(probe);
+    }
+
+    /// Gives this recorder what to call on the first stroke of every word — stage E116, task
+    /// T-116-4 (Q-208-12 п. 2, решение 208.26). Set by [`install`] on the product's path to
+    /// `watchdog::note_word_start`; it runs inside the hook's callback, so what it does is bounded
+    /// by NFR-01 to NFR-05 (see that function).
+    pub fn note_word_start_with(&mut self, probe: WordStartProbe) {
+        self.word_start = Some(probe);
     }
 
     /// A buffer sized by the `[buffer]` section of the configuration — FR-07.
@@ -2496,6 +2515,12 @@ impl Recorder {
         // out of every build that is not a `testing` one — the same terms `note_buffer_len` has
         // been called under from this file since task T-03-4.
         if self.ring.len() == 0 {
+            // ⭐ Stage E116, task T-116-4: the first stroke of a word asks whether the window in
+            // front is one the program has been told of (`watchdog::note_word_start`).
+            if let Some(probe) = self.word_start {
+                probe();
+            }
+
             self.restamp();
 
             // ---------------------------------------------------------------------------------
@@ -3237,6 +3262,7 @@ pub fn install(config: &settings::Buffer) {
     let mut recorder = Recorder::from_config(config);
     recorder.verify_held_with(crate::hook::physical_modifiers);
     recorder.stamp_layout_with(crate::switch::current);
+    recorder.note_word_start_with(crate::watchdog::note_word_start);
     install_recorder(recorder);
 }
 

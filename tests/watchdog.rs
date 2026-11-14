@@ -4748,6 +4748,123 @@ fn the_window_in_front_at_the_start_is_not_passed_on_by_a_look() {
     );
 }
 
+/// ⭐ **Stage E116, task T-116-4 (Q-208-12 п. 2, решение 208.26; trace Б of the consultant,
+/// `E114-consultant-recheck.md`).** Блокнот passed the gate; a foreign window change was turned
+/// away; the eighty looks of the two seconds saw Блокнот and nothing new. Then Edge comes forward
+/// with no event of its own — no look is left to see it, and until 1.6.0 nothing asked about it
+/// before `Tab`. The first stroke typed into it arms the looks, the first look passes it on, and the
+/// first stroke of the next word asks for nothing more.
+#[test]
+fn the_first_stroke_of_a_word_in_a_window_nobody_told_of_arms_the_looks() {
+    use watchdog::{
+        FOREGROUND_RECHECK_TICKS, RecheckStep, Tell, Told, stroke_arms_recheck, told_after,
+    };
+
+    let notepad = 0x6_006a_isize;
+    let edge = 0x7_0edd_isize;
+
+    let mut state = Told::default();
+
+    for tell in [Tell::Passed(notepad), Tell::TurnedAway] {
+        state = told_after(state, tell).0;
+    }
+
+    for _ in 0..FOREGROUND_RECHECK_TICKS {
+        let (next, step) = told_after(
+            state,
+            Tell::Look {
+                foreground: notepad,
+                own: false,
+            },
+        );
+        assert!(
+            matches!(step, Some(RecheckStep::Again(_) | RecheckStep::Stop)),
+            "Блокнот is the window the program was told of: {step:?}"
+        );
+        state = next;
+    }
+
+    assert_eq!(state.left, 0, "the two seconds are over");
+    assert_eq!(
+        told_after(
+            state,
+            Tell::Look {
+                foreground: edge,
+                own: false
+            }
+        )
+        .1,
+        Some(RecheckStep::Stop),
+        "the hole: no look is left for a window that comes forward later"
+    );
+
+    assert!(
+        stroke_arms_recheck(edge, state.last, false),
+        "T-116-4: the first stroke in a window the program was not told of arms the looks"
+    );
+
+    let (armed, _) = told_after(state, Tell::TurnedAway);
+    let (after, step) = told_after(
+        armed,
+        Tell::Look {
+            foreground: edge,
+            own: false,
+        },
+    );
+
+    assert_eq!(
+        step,
+        Some(RecheckStep::PassOn(FOREGROUND_RECHECK_TICKS - 1)),
+        "the first look passes Edge on"
+    );
+    assert_eq!(after.last, edge);
+    assert!(
+        !stroke_arms_recheck(edge, after.last, false),
+        "a window once told of: the next word asks for nothing"
+    );
+    assert!(
+        !stroke_arms_recheck(edge, notepad, true),
+        "this process's own window is not a change"
+    );
+    assert!(
+        !stroke_arms_recheck(0, notepad, false),
+        "no window in front is not a change"
+    );
+}
+
+/// ⭐ **Stage E116, task T-116-4 — the wiring of the first stroke.** The automaton above is right
+/// only if the product's recorder calls the probe and the probe asks the watcher: `buffer::install`
+/// gives the recorder `watchdog::note_word_start`, and that function decides by
+/// `stroke_arms_recheck` and posts `WM_APP_RECHECK_FOREGROUND` — the message whose arm sets the
+/// looks of a turned-away event (`app::window_proc`, watcher window).
+#[test]
+fn the_first_stroke_of_a_word_is_wired_to_the_looks() {
+    let buffer_source = source_of("buffer.rs");
+    let watchdog_source = source_of("watchdog.rs");
+
+    let install = body_of(
+        &buffer_source,
+        "pub fn install(config: &settings::Buffer) {",
+    );
+    assert_eq!(
+        code_lines_with(
+            install,
+            "note_word_start_with(crate::watchdog::note_word_start)"
+        )
+        .len(),
+        1,
+        "the product's recorder is given the probe"
+    );
+
+    let note = body_of(&watchdog_source, "pub fn note_word_start() {");
+    assert_eq!(code_lines_with(note, "stroke_arms_recheck(").len(), 1);
+    assert_eq!(
+        code_lines_with(note, "post_to_watcher_thread(WM_APP_RECHECK_FOREGROUND)").len(),
+        1,
+        "the probe asks the watcher for the looks"
+    );
+}
+
 /// ⭐ **Stage E114, решение 208.28 — the wiring of [`watchdog::told_after`].** The automaton is right
 /// only if every road that passes a change on feeds it: the test above drives the automaton, this one
 /// checks that each road calls it — the gate's event (`Tell::Passed`, in `win_event_proc`), the look

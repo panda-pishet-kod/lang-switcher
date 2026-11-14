@@ -2124,6 +2124,9 @@ impl Drop for Watching {
 /// 208.14. `WM_APP + 23`, the next free number. `app::window_proc` answers it on the watcher window
 /// by arming [`FOREGROUND_RECHECK_TIMER_ID`]; SEC-05: it carries nothing, and a forged one buys a
 /// few looks at the foreground that act only on a change the program has not been told of.
+///
+/// ⭐ **Since 1.6.0 (stage E116, task T-116-4) the input thread posts it too** — on the first stroke
+/// of a word typed into a window the program has not been told of ([`note_word_start`]).
 pub const WM_APP_RECHECK_FOREGROUND: u32 = WM_APP + 23;
 
 /// The timer of the watcher window that drives the re-check — stage E114, решение 208.14. The
@@ -2303,6 +2306,71 @@ pub(crate) fn tell(tell: Tell) -> Option<RecheckStep> {
     RECHECK_LEFT.store(next.left, Ordering::Relaxed);
 
     step
+}
+
+/// ⭐ **Stage E116, task T-116-4 (Q-208-12 п. 2, решение 208.26) — whether the first stroke of a word
+/// arms the re-check.** The window in front is one the program has not been told of: not none, not
+/// this process's own, not [`LAST_FOREGROUND`]. The rule of a look, word for word — it is
+/// [`recheck_step`] asked with one look left — so the two cannot drift apart.
+///
+/// The hole it closes: the looks of a turned-away event last two seconds, and a window that comes
+/// forward after them with no event of its own was not looked at again at all — until `Tab` (the
+/// trace `q114-w`: a browser opened behind Notepad and brought forward by the stand; for an excluded
+/// program a hole of FR-84, for a browser no probe of the field). The first stroke typed into it now
+/// arms the looks, and the first look passes the window on. The price: the strokes typed before that
+/// look belong to a window change and are flushed with it (FR-10) — one or two letters, once.
+pub fn stroke_arms_recheck(foreground: isize, last: isize, own: bool) -> bool {
+    matches!(
+        recheck_step(1, foreground, last, own),
+        RecheckStep::PassOn(_)
+    )
+}
+
+/// How many first strokes of a word armed the re-check — stage E116, task T-116-4. Public for the
+/// tests of the module.
+static WORD_START_RECHECKS: AtomicU32 = AtomicU32::new(0);
+
+/// The count of [`WORD_START_RECHECKS`].
+pub fn word_start_rechecks() -> u32 {
+    WORD_START_RECHECKS.load(Ordering::Relaxed)
+}
+
+/// ⭐ **Stage E116, task T-116-4 — the first stroke of a word, on the input thread.** Installed as
+/// the word-start probe of the recorder (`buffer::install`, `Recorder::note_word_start_with`) and
+/// called from the hook's callback on the first stroke of every word: when the window in front is
+/// one the program has not been told of ([`stroke_arms_recheck`]), the watcher thread is asked for
+/// the looks of a turned-away event ([`WM_APP_RECHECK_FOREGROUND`]), whose first look passes the
+/// window on — the flush of FR-10, the probe of FR-72 and FR-84, on the watcher thread as always.
+///
+/// NFR-01 to NFR-05: one `GetForegroundWindow` and one relaxed load on every first stroke; only on
+/// a window the program was not told of, one `GetWindowThreadProcessId` and one `PostMessageW`,
+/// which queues and returns. No allocation, no wait, no UI Automation here — the probe of the field
+/// stays the watcher's (section 6.1). [`LAST_FOREGROUND`] is the watcher's to write; a load from this
+/// thread may be a message late, and the worst it costs is one look that finds nothing new.
+pub fn note_word_start() {
+    // SAFETY: no arguments, nothing of ours is touched; null when no window is in front.
+    let foreground = unsafe { GetForegroundWindow() };
+    let window = foreground.0 as isize;
+    let last = LAST_FOREGROUND.load(Ordering::Relaxed);
+
+    // The cheap answer first: the window the program was told of, or none at all.
+    if window == 0 || window == last {
+        return;
+    }
+
+    let mut pid = 0u32;
+    // SAFETY: the handle is read by value and the one pointer is a local of this frame; a window
+    // that is gone answers 0 and leaves `pid` 0, which is not this process.
+    let _ = unsafe { GetWindowThreadProcessId(foreground, Some(&raw mut pid)) };
+    // SAFETY: no arguments.
+    let own = pid == unsafe { GetCurrentProcessId() };
+
+    if stroke_arms_recheck(window, last, own) {
+        WORD_START_RECHECKS.fetch_add(1, Ordering::Relaxed);
+        // The answer is dropped: a refused post costs this word its look, and the next first stroke
+        // asks again — the window is still not the one the program was told of.
+        let _ = crate::app::post_to_watcher_thread(WM_APP_RECHECK_FOREGROUND);
+    }
 }
 
 /// Arms the re-check: [`FOREGROUND_RECHECK_TICKS`] looks. Called by `app::window_proc` on

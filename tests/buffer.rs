@@ -3518,6 +3518,53 @@ fn counting_russian() -> LayoutId {
     RU
 }
 
+/// How many times [`counting_word_start`] has been called — stage E116, task T-116-4.
+static WORD_STARTS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// A word-start probe that counts its calls.
+fn counting_word_start() {
+    WORD_STARTS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// ⭐ **Stage E116, task T-116-4 (Q-208-12 п. 2) — the first stroke of every word, and only it,
+/// calls the word-start probe.** The product's probe asks whether the window in front is one the
+/// program has been told of (`watchdog::note_word_start`); it runs inside the hook's callback, so
+/// it must run once per word and not once per stroke (NFR-01), and on the first stroke of every
+/// word — the space and the letters after the first ask for nothing.
+#[test]
+fn the_word_start_probe_is_called_once_per_word_and_not_once_per_stroke() {
+    use core::sync::atomic::Ordering;
+
+    WORD_STARTS.store(0, Ordering::Relaxed);
+
+    let mut recorder = fresh();
+    recorder.note_word_start_with(counting_word_start);
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        WORD_STARTS.load(Ordering::Relaxed),
+        1,
+        "T-116-4: the first stroke of the word calls the probe"
+    );
+
+    for _ in 0..5 {
+        assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    }
+    assert_eq!(press(&mut recorder, VK_SPACE, SCAN_SPACE), Recorded::Stored);
+    assert_eq!(
+        WORD_STARTS.load(Ordering::Relaxed),
+        1,
+        "NFR-01: the rest of the word and the space do not call it again"
+    );
+
+    assert_eq!(press(&mut recorder, VK_A, SCAN_A), Recorded::Stored);
+    assert_eq!(
+        WORD_STARTS.load(Ordering::Relaxed),
+        2,
+        "the first stroke of the next word calls it again"
+    );
+}
+
 /// ⭐ **The detector of defect E** — a word typed while the stamp and the real layout disagree.
 ///
 /// # The premise, stated rather than hoped for
