@@ -29,7 +29,7 @@ the interface in 66 languages.
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.5.1**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
+**Status:** version **1.6.0**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
 What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
@@ -182,7 +182,16 @@ There is no other network activity. The details are in section 9 of the specific
 
 ## What's new
 
-New in 1.5.1: the request to switch the keyboard layout goes to the box with the keyboard focus, not
+New in 1.6.0: in the program's own "Write to the author..." wizard the layout switches with the focus
+on a button too (1.5.1 switched it only in the text box). A switch that a busy window takes a little
+late no longer sounds the knock of a refusal: the program looks again for half a second before it
+answers. In an excluded program the hotkey stays silent even when it is pressed the moment that
+program comes to the front. A window that came to the front without the program being told is
+checked at the first key of a word. The installer started from a PowerShell 7 terminal installs the
+full version again (1.5.1 then silently installed the base version, which does not work in windows of
+programs run as administrator). The name of the program and the download button open the pages of
+the site in Swedish and Slovak.
+Version 1.5.1: the request to switch the keyboard layout goes to the box with the keyboard focus, not
 to the frame of the window. In the Run dialog of Windows (Win+R) 1.5.0 corrected the word but left
 the layout as it was, on Windows 10 and Windows 11 alike; now the layout switches there too.
 Version 1.5.0: with nothing typed and nothing selected, the hotkey switches the keyboard layout to the
