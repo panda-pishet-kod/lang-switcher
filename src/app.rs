@@ -698,9 +698,12 @@ pub enum Press {
     /// to. **Not a refusal** — nothing was forbidden, there was simply nothing to do. ⚠ Until stage
     /// E114 an empty buffer was here too; a press over nothing switches the layout now.
     Idle,
-    /// **This program would not act here** — FR-84 (an excluded process), and, since task T-42-6,
-    /// a **window** that refused what the hand asked of it — since stage E114 also a switch of the
-    /// layout the window did not take.
+    /// **This program would not act here** — since task T-42-6, a **window** that refused what the
+    /// hand asked of it — since stage E114 also a switch of the layout the window did not take.
+    ///
+    /// ⚠ **FR-84 (an excluded process) was one of them until 1.6.0.** Решение 208.17: in an
+    /// excluded process the hotkey is silent and does nothing — [`PressAct::Refuse`] answers no
+    /// tone (stage E116, task T-116-2).
     ///
     /// ⚠ **FR-70 (a password field) was one of them until 1.5.0.** Решение 208.5а: a press there
     /// switches the layout and converts nothing, so it sounds the switch, not the knock.
@@ -842,7 +845,17 @@ pub enum PressAct {
     /// Switch the window in front to the next layout of the cycle — nothing typed and nothing
     /// selected (208.5), a password field (208.5а), a field whose verdict is on its way.
     Switch,
-    /// The knock of a refusal — a process the user excluded (FR-84).
+    /// A process the user excluded (FR-84): nothing, and **no tone** — решение 208.17, «в
+    /// исключённых программах — тишина» (stage E116, task T-116-2).
+    ///
+    /// The hook passes the key on untouched in an excluded process (task T-52-3), so a press
+    /// arrives here only when the hook's copy of the verdict — `hook::set_hotkey_yields`, which
+    /// [`apply_buffering_gate`] writes after each message of this thread — is still the one from
+    /// before the watcher published «excluded»: the excluded program has just come to the front
+    /// and the nudge `guard::WM_APP_FIELD` is still in the queue. A person seldom presses inside
+    /// that gap (208.17: 3 of 3 silent); a stand that presses right after bringing the window
+    /// forward did, and heard the knock until 1.6.0 (209.20). Kept apart from
+    /// [`PressAct::Nothing`] so the rule stays a row of the table a test walks.
     Refuse,
 }
 
@@ -857,7 +870,8 @@ pub enum PressAct {
 ///   took and found no selection in (`WM_APP_BUFFER_PATH`): «ничего не набрано и не выделено». Until
 ///   1.5.0 this press was the idle click and changed nothing (209.20);
 /// * **the buffer is parked** — FR-70 and FR-84 park it, and so does the interval of FR-71:
-///   * an excluded process (FR-84) — [`PressAct::Refuse`], the knock it was (208.6, 4а);
+///   * an excluded process (FR-84) — [`PressAct::Refuse`], and it is silent (решение 208.17;
+///     until 1.6.0 the knock, which 208.6 4а had asked for and 208.17 withdrew);
 ///   * a password field — [`PressAct::Switch`]: решение 208.5а, «переключает раскладку, но не
 ///     переводит набранный текст». Until 1.5.0 the knock;
 ///   * [`crate::guard::Field::Pending`] — [`PressAct::Switch`] too: the verdict is on its way, and
@@ -952,7 +966,9 @@ fn buffer_path_outcome(
             Some(false) => Press::Refused,
             None => Press::Idle,
         }),
-        PressAct::Refuse => Some(Press::Refused),
+        // ⭐ Stage E116, task T-116-2 (решение 208.17): an excluded process is silent. See
+        // `PressAct::Refuse` for how such a press still reaches this thread.
+        PressAct::Refuse => None,
     }
 }
 
@@ -3735,7 +3751,8 @@ unsafe extern "system" fn window_proc(
                 // ⭐ **Stage E114, task T-114-1 (решения 208.5 и 208.5а).** The fork is
                 // `press_act`: a word converts as before, a press over nothing switches the layout
                 // of the window in front, a password field switches and converts nothing, an
-                // excluded process knocks. The state of FR-70 and FR-84 is read in one word.
+                // excluded process stays silent (решение 208.17, stage E116). The state of FR-70
+                // and FR-84 is read in one word.
                 let (field, excluded) = crate::guard::state_now();
 
                 if is_input_window(hwnd)
@@ -5184,7 +5201,7 @@ mod tests {
                 (0, 1, Some(Press::Replaced))
             );
         }
-        // An excluded process: nothing is asked, and the knock speaks (FR-84, 208.6 4а).
+        // An excluded process: nothing is asked, and nothing sounds (FR-84, решение 208.17).
         assert_eq!(
             run(
                 false,
@@ -5195,7 +5212,7 @@ mod tests {
                 true,
                 Some(true)
             ),
-            (0, 0, Some(Press::Refused))
+            (0, 0, None)
         );
         // No buffer and nothing refused: nothing at all.
         assert_eq!(
@@ -5204,11 +5221,47 @@ mod tests {
         );
     }
 
+    /// ⭐ **Stage E116, task T-116-2 (Q-208-14, решение 208.17) — in an excluded process, silence.**
+    ///
+    /// The owner, on the live 1.4.4: Notepad in the exclusions, `ghbdtn` and the hotkey — 3 of 3
+    /// not converted, «звука нет вовсе»; 208.17: «в исключённых программах — тишина». The hook
+    /// passes the key on untouched there (FR-84, task T-52-3), so the press reaches this thread
+    /// only when the hook's copy of the verdict (`hook::set_hotkey_yields`, written by the gate
+    /// after the input thread's previous message) is a message behind the verdict the watcher has
+    /// already published. The stand caught exactly that and heard the knock (209.20); a press that
+    /// comes that way must be as silent as one the hook passed on.
+    #[test]
+    fn a_press_that_reaches_this_thread_in_an_excluded_process_is_silent() {
+        use crate::guard::Field;
+
+        for handed_back in [false, true] {
+            for field in [
+                Field::Pending,
+                Field::Password,
+                Field::Ordinary,
+                Field::Undetermined,
+            ] {
+                let act = press_act(handed_back, false, true, field, true);
+
+                assert_eq!(act, PressAct::Refuse, "{handed_back} {field:?}");
+                assert_eq!(
+                    buffer_path_outcome(
+                        act,
+                        || -> bool { unreachable!("an excluded process converts nothing") },
+                        || -> Option<bool> { unreachable!("an excluded process switches nothing") },
+                    ),
+                    None,
+                    "208.17: no tone in an excluded process — handed back {handed_back}, {field:?}"
+                );
+            }
+        }
+    }
+
     /// ⭐ **Stage E114, task T-114-1, решения 208.5 и 208.5а — the fork of a press, in full.** Every
     /// row of the table written out: the buffer here and holding a word — convert it, unless the
     /// press came back over a word typed after it (С13); the buffer here and empty — nothing typed,
     /// and a press on this path is one the selection path did not take or found nothing for — switch;
-    /// the buffer parked — an excluded process knocks (FR-84), a password field and a verdict on its
+    /// the buffer parked — an excluded process is refused in silence (FR-84, 208.17), a password field and a verdict on its
     /// way switch (208.5а: «переключает раскладку, но не переводит набранный текст»), anything else
     /// is a thread with no buffer and does nothing.
     #[test]
@@ -5233,7 +5286,7 @@ mod tests {
                 assert_eq!(
                     press_act(handed_back, false, true, field, true),
                     PressAct::Refuse,
-                    "an excluded process knocks — handed back {handed_back}, {field:?}"
+                    "an excluded process is refused (in silence, 208.17) — handed back {handed_back}, {field:?}"
                 );
             }
 
