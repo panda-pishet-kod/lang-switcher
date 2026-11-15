@@ -56,13 +56,15 @@ const FOLDERS: [&str; 6] = ["src", "tests", "tools", "installer", ".github", "re
 /// The files of the root this sweep insists on finding — a list that no longer matches the root
 /// is a list that has stopped describing what it reads. Every other file of the root is read as
 /// well; these are only the ones whose absence fails the test.
-const ROOT_FILES: [&str; 15] = [
+const ROOT_FILES: [&str; 16] = [
     ".gitattributes",
     ".gitignore",
     "app-dev.manifest",
     "app.manifest",
     "app.rc",
     "build.rs",
+    // Stage E117, task T-117-2: the log of versions moved here out of the README.
+    "CHANGELOG.md",
     "CLA.md",
     "Cargo.lock",
     "Cargo.toml",

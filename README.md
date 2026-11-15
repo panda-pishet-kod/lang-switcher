@@ -36,7 +36,7 @@ languages.
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
 **Status:** version **1.6.0**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
-What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md) and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
 
@@ -87,16 +87,23 @@ Windows 10 or Windows 11, 64-bit. No runtime to install, no account, no internet
 
 ## Interface languages and keyboard layouts
 
-**The interface** speaks 66 languages — 64 languages, Serbian and Uzbek in both of their scripts:
+**The interface** speaks 66 languages — 64 languages, Serbian and Uzbek in both of their scripts;
+Hebrew, Arabic, Urdu, Persian and Uyghur read right to left. The language list of the settings puts
+the language of Windows, English, the languages of your keyboard layouts and Russian on top, and the
+rest by name.
+
+<details>
+<summary>All 66 interface languages</summary>
+
 English, Russian, Ukrainian, German, French, Spanish, Portuguese, Italian, Polish, Czech, Turkish,
 Greek, Hebrew, Arabic, Hindi, Bengali, Urdu, Punjabi, Marathi, Telugu, Tamil, Persian, Gujarati,
 Thai, Kannada, Odia, Malayalam, Uzbek (Latin and Cyrillic), Nepali, Assamese, Azerbaijani, Khmer,
 Kazakh, Serbian (Cyrillic and Latin), Uyghur, Bulgarian, Armenian, Lao, Belarusian, Tatar, Georgian,
 Macedonian, Vietnamese, Dutch, Romanian, Hungarian, Swedish, Albanian, Danish, Finnish, Croatian,
 Slovak, Norwegian Bokmål, Lithuanian, Slovenian, Bosnian, Latvian, Estonian, Welsh, Maltese,
-Icelandic, Luxembourgish, Māori and Norwegian Nynorsk; Hebrew, Arabic, Urdu, Persian and Uyghur read right to left. The language list of
-the settings puts the language of Windows, English, the languages of your keyboard layouts and
-Russian on top, and the rest by name.
+Icelandic, Luxembourgish, Māori and Norwegian Nynorsk.
+
+</details>
 
 **Typing.** The program converts between any two Windows keyboard layouts installed on your
 computer, except layouts with an IME (Chinese, Japanese, Korean), where a character is built from
@@ -107,7 +114,8 @@ Armenian, Georgian, Thai, the Indian scripts and more) and Fula in ADLaM; then 1
 (Cherokee, Javanese, Inuktitut in syllabics and in Latin letters, and others). Azerbaijani, Serbian,
 Mongolian, Central Atlas Tamazight and Inuktitut are each counted with two scripts.
 
-The finer points:
+<details>
+<summary>The finer points</summary>
 
 - Letters a layout gives only with `AltGr`, dead keys (two in a row as well: BÉPO `´`, `´`, `o` is
   `ő`) and keys that print several characters at once (Arabic `لا`, Indian conjuncts) are
@@ -128,6 +136,8 @@ The finer points:
   layout without it does not take such a word, and the program sounds a refusal instead.
 - In selected text the program cannot see `CapsLock`, and a character the target layout does not
   have is carried over as it is.
+
+</details>
 
 **Where the letter statistics come from:** public-domain books of Project Gutenberg (English,
 French, Spanish, Russian) and the Leipzig Corpora Collection, Universität Leipzig, licensed CC BY
@@ -189,51 +199,6 @@ How it works, in detail:
   or to save it to a file.
 
 There is no other network activity. The details are in section 9 of the specification (in Russian).
-
-## What's new
-
-New in 1.6.0: in the program's own "Write to the author..." wizard the layout switches with the focus
-on a button too (1.5.1 switched it only in the text box). A switch that a busy window takes a little
-late no longer sounds the knock of a refusal: the program looks again for half a second before it
-answers. In an excluded program the hotkey stays silent even when it is pressed the moment that
-program comes to the front. A window that came to the front without the program being told is
-checked at the first key of a word. The installer started from a PowerShell 7 terminal installs the
-full version again (1.5.1 then silently installed the base version, which does not work in windows of
-programs run as administrator). The name of the program and the download button open the pages of
-the site in Swedish and Slovak. The request for the news file now carries the version number of the
-program in its header, `LangSwitcher/1.6.0`, and the first read after an installation adds `?first=1`
-to the address once; still nothing about the computer.
-Version 1.5.1: the request to switch the keyboard layout goes to the box with the keyboard focus, not
-to the frame of the window. In the Run dialog of Windows (Win+R) 1.5.0 corrected the word but left
-the layout as it was, on Windows 10 and Windows 11 alike; now the layout switches there too.
-Version 1.5.0: with nothing typed and nothing selected, the hotkey switches the keyboard layout to the
-next one of the program's cycle (the About window says so in a sixth line of "How to use"); in a
-password field it only switches the layout, in an excluded program it stays silent. Password fields
-are recognised where 1.4.4 missed them: in WinForms programs, and in Edge, Chrome and Firefox after
-Tab. An excluded program started again while Lang Switcher runs is recognised as excluded even when
-Windows is slow to bring it forward. The name of the program and the download button open the pages of the site in nineteen
-languages (new: Hebrew, Greek, Azerbaijani, Bulgarian, Serbian in both scripts, German, French,
-Turkish, Portuguese, Dutch, Polish, Czech, Italian, Hungarian); Armenian and Uzbek open the Russian
-pages. The Bulgarian and Dutch examples of a wrong-layout word are corrected; the installer speaks
-Greek; Hebrew, Greek, Azerbaijani, Portuguese, Czech and Turkish wording is corrected. Version 1.4.4:
-if the bare grave key is assigned as the language switcher in Windows, as is common in
-Thailand, the program treats it as a switcher: the word typed after it converts correctly, the text
-around it stays intact, and a second press of the hotkey still brings the original back (it used to
-count as a typed character); in Ukrainian, Arabic, Persian and Thai the name of the program and the
-download button open the pages of the site in that language; the numeral in the Arabic line under the
-news is corrected. Version 1.4.2: the interface quotes in the marks of its language (English, German, Czech, Polish,
-Turkish, Portuguese); in Notepad of Windows 11 the `backspace` method goes by the selection, like
-`auto`, and a typed word is selected by its position, so a Tamil word no longer takes the space
-before it or leaves a piece of itself behind; the pair of the configuration file accepts the identifier of a variant of a language
-(`0x00020422`), a layout that is not there is refused with a line in the journal, and the pair looks
-at the first 64 layouts of the session; the emergency chord `Ctrl+Alt+Shift+F12` no longer reaches
-the window under it. Version 1.4.1: a letter the target layout builds from two dead keys in a row is built the way
-Windows builds it (French BÉPO `´`, `´`, `o` is `ő`); a word typed on the level of the right `Ctrl`
-of Canadian Multilingual Standard converts into the same level of a layout that has it; in Notepad
-with Tamil 99 the replacement no longer lands after the word with nothing erased. Version 1.4.0
-added 22 interface languages, 1.3.0 another 30; 1.2.0 brought the **Send** button of the "Write to
-the author" wizard and the letter statistics of six more languages. Since 1.0.0 the program
-updates itself.
 
 ## Reporting a problem or an idea
 
