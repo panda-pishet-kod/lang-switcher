@@ -176,8 +176,8 @@ temporary files. In a password field the program keeps no record of your keys at
 keys typed into the window of a program run as administrator, or type into it. The `uiAccess` flag
 of the program's manifest lifts that wall for the keyboard hook and for the keys the program types,
 and only for them: it gives no administrator rights. Windows grants it only to a program in a
-protected folder such as `Program Files`, signed with a certificate the computer trusts. The secure desktop — the UAC prompt,
-`Ctrl+Alt+Del`, the sign-in screen — stays out of reach all the same.
+protected folder such as `Program Files`, signed with a certificate the computer trusts. The secure
+desktop — the UAC prompt, `Ctrl+Alt+Del`, the sign-in screen — stays out of reach all the same.
 
 **The full and the base version.** The installer puts the full version, with `uiAccess`, when the
 program can be trusted on your computer: by the author's signature, or by the certificate it makes
