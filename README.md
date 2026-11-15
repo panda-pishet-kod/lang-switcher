@@ -160,10 +160,34 @@ modifiers = ["Ctrl"]    # any of "Ctrl", "Alt", "Shift"; [] for the key alone
 trigger   = "press"     # press, or double_tap (with key = "Shift" only)
 ```
 
-## Privacy
+## Security and trust
+
+A program that sees every key you press has to earn trust. What it does and does not do, in short;
+the details, and how to report a vulnerability, are in [SECURITY.md](SECURITY.md).
 
 Your keystrokes are **never** written to disk — not to the log, not to the settings, not to
-temporary files.
+temporary files. In a password field the program keeps no record of your keys at all.
+
+**Why the program asks Windows for `uiAccess`.** Windows does not let an ordinary program see the
+keys typed into the window of a program run as administrator, or type into it. The `uiAccess` flag
+of the program's manifest lifts that wall for the keyboard hook and for the keys the program types,
+and only for them: it gives no administrator rights. Windows grants it only to a program in a
+protected folder such as `Program Files`, signed with a certificate the computer trusts. The secure desktop — the UAC prompt,
+`Ctrl+Alt+Del`, the sign-in screen — stays out of reach all the same.
+
+**The full and the base version.** The installer puts the full version, with `uiAccess`, when the
+program can be trusted on your computer: by the author's signature, or by the certificate it makes
+there (see [What the installer does with a certificate](#download-and-install)). Otherwise, or with
+`LangSwitcher-setup.exe /NOLOCALCERT`, it puts the base version: the same code without `uiAccess`,
+which works everywhere except in the windows of programs run as administrator.
+
+**The signature, honestly.** The program and the installer are signed with the author's own
+certificate, "Panda Koder", not one from a certificate authority, so the UAC prompt of the installer
+is yellow and names an unknown publisher. Updates are installed by the same installer, by itself,
+without a UAC prompt. The source of every release is in this repository under its tag (`e116` is
+1.6.0).
+
+**What goes over the network, and when.**
 
 Once a day Lang Switcher reads a short news file from the author's site; it sends nothing about your
 computer. When a new version comes out, the program downloads it from the same site by itself,
@@ -188,7 +212,9 @@ How it works, in detail:
   `LangSwitcherUpdate.exe`, a scheduled task "Lang Switcher Update" running as the system. It takes
   the installer only from the `/langswitcher/files/` folder of the same site; its size and SHA-256
   must match the ones signed in the news file, and its version must be newer than yours. If the new
-  version does not start, the previous one comes back.
+  version does not start, the previous one comes back. The updater reads the same news file at
+  most once a day whether letters and news are on or off — that is how it learns of a new version —
+  with the same header and never with the `?first=1` mark.
 - **A message from the wizard** is one `POST` request to
   `https://panda-pishet-kod.dev/langswitcher/feedback`, sent only when you press **Send** or
   **Retry**. It carries the text of the message as it stands in the window, the language of the

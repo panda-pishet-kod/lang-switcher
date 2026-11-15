@@ -56,7 +56,7 @@ const FOLDERS: [&str; 6] = ["src", "tests", "tools", "installer", ".github", "re
 /// The files of the root this sweep insists on finding — a list that no longer matches the root
 /// is a list that has stopped describing what it reads. Every other file of the root is read as
 /// well; these are only the ones whose absence fails the test.
-const ROOT_FILES: [&str; 16] = [
+const ROOT_FILES: [&str; 17] = [
     ".gitattributes",
     ".gitignore",
     "app-dev.manifest",
@@ -74,6 +74,8 @@ const ROOT_FILES: [&str; 16] = [
     "README.md",
     // Stage E107, task T-107-9: the Russian README beside the English one.
     "README.ru.md",
+    // Stage E117, task T-117-3: the security policy beside the README.
+    "SECURITY.md",
     "SPEC.md",
 ];
 
