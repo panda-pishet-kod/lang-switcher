@@ -7,11 +7,14 @@ and section 9 «Безопасность и приватность», in Russian
 
 ## Reporting a vulnerability
 
+- **GitHub's private report.** The repository's
+  [Security tab](https://github.com/panda-pishet-kod/lang-switcher/security) → **Report a
+  vulnerability**. Only the author sees the report.
 - **The program's own wizard.** Tray menu → "Write to the author…": describe the problem, check the
   text, press **Send**. The message goes to the author's site, not to a public page. If the site
   does not answer, the wizard offers to send the same text by email or to save it to a file.
-- **Please do not post the details of a vulnerability in a public issue.** If you cannot use the
-  wizard — the program does not start, for example — open an
+- **Please do not post the details of a vulnerability in a public issue.** If you can use neither
+  of the above, open an
   [issue](https://github.com/panda-pishet-kod/lang-switcher/issues) that says only that you have a
   security report, without the details.
 
