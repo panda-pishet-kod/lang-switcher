@@ -2,23 +2,29 @@
 
 # Lang Switcher
 
-[По-русски](README.ru.md) — переключатель раскладки клавиатуры, который исправляет слово, набранное не в той раскладке.
+<img src="docs/img/lang-switcher-demo.gif" width="800" alt="Lang Switcher in Notepad: руддщ, typed with the Russian layout on, becomes hello after one press of Pause/Break and the layout switches to English; then the same with the Hebrew layout">
 
 **Lang Switcher fixes text typed in the wrong keyboard layout.** You meant to type `hello`, but the
 Russian layout was on, so the screen shows `руддщ`. Press `Pause/Break`: the word becomes `hello`,
 and the window switches to the English layout. Press it again and you get the original back,
 exactly as you typed it. One key, no setup, nothing to learn.
 
-<table>
-  <tr>
-    <td align="center" valign="top"><img src="docs/img/en-notepad-before.png" width="400" alt="Lang Switcher, before: Notepad shows руддщ, the language indicator says РУС"><br>Typed with the wrong layout on</td>
-    <td align="center" valign="top"><img src="docs/img/en-notepad-after.png" width="400" alt="Lang Switcher, after one press of Pause: Notepad shows hello, the indicator says ENG"><br>After one press of <code>Pause</code></td>
-  </tr>
-</table>
+[По-русски](README.ru.md) — переключатель раскладки клавиатуры, который исправляет слово, набранное не в той раскладке.
 
-A keyboard layout switcher for Windows 10 and 11 that fixes what is already typed instead of guessing
-while you type: a small tray program, free and open source, licensed under `MIT OR Apache-2.0`, with
-the interface in 66 languages.
+**Download:** [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases/latest) of this repository · [the download page](https://panda-pishet-kod.dev/en/langswitcher/download/) of the site. Windows 10 and 11.
+
+**How it differs from auto-switchers.**
+
+- **It fixes, it does not guess.** The program does not decide for you which word is wrong and
+  changes nothing on its own: a word is converted only when you press the key, so a word that was
+  right is never "corrected".
+- **One key.** `Pause/Break` by default; another key, a combination or a double tap of `Shift` if
+  you prefer.
+- **The original comes back byte for byte.** A second press restores exactly what you typed: the
+  program keeps the keys you pressed, not the converted text.
+
+A small tray program, free and open source under `MIT OR Apache-2.0`, with the interface in 66
+languages.
 
 <table>
   <tr>
@@ -27,7 +33,7 @@ the interface in 66 languages.
   </tr>
 </table>
 
-[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Download](https://panda-pishet-kod.dev/en/langswitcher/download/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
+[Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
 **Status:** version **1.6.0**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
 What changed in each version is in [What's new](#whats-new) below and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
