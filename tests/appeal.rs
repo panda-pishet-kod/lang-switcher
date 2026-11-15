@@ -432,7 +432,13 @@ fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
 
 /// **The request is one `POST` with its length, its type and its agent, and the body is the body**
 /// — 199.7 and 199.9: `Content-Length` and never chunked (the site answers that with 411),
-/// `application/json; charset=utf-8`, `User-Agent: LangSwitcher` exactly (otherwise «Спам»).
+/// `application/json; charset=utf-8`, and the agent of the program, `feed::USER_AGENT`.
+///
+/// The agent is `LangSwitcher/X.Y.Z` since 1.6.0 (T-116-11, решение 208.58): the wizard sends it through
+/// the one `WinHttpOpen` of `letters::feed`, as the feed and the updater do. Until 1.6.0 it was
+/// `LangSwitcher` exactly, and this test compared with that literal. The server of the messages takes
+/// both since V-14.1 — `spam_flags` of `feedback/lsfeedback/intake.py` (line 210): the bare name or
+/// a name followed by `/`; any other agent is flagged «Спам».
 #[cfg(feature = "testing")]
 #[test]
 #[ignore = "opens a loopback socket"]
@@ -474,7 +480,11 @@ fn the_request_is_one_post_with_its_length_its_type_and_its_agent() {
         header(&request.head, "Content-Type"),
         Some("application/json; charset=utf-8")
     );
-    assert_eq!(header(&request.head, "User-Agent"), Some("LangSwitcher"));
+    assert_eq!(
+        header(&request.head, "User-Agent"),
+        Some(feed::USER_AGENT),
+        "the agent of the program, with its version (208.58)"
+    );
     assert_eq!(request.body, body.as_bytes(), "the body, byte for byte");
 }
 
