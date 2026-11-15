@@ -1,0 +1,59 @@
+# The build check of Lang Switcher (stage E117, task T-117-5).
+#
+# Formatting, clippy of both builds — the shipping one and the `testing` one, as the author's own
+# battery runs them — and `cargo test` without `--ignored`. The toolchain is pinned to the one the
+# author builds with. Read-only rights, no secrets, the one action pinned by the SHA of its commit.
+#
+# Many tests are tied to the author's machine — exactly two layouts, Russian and US, a Russian
+# Windows, its screen (README, "Building from source"). A clean `windows-latest` runner has one
+# layout and an English Windows, so the first run is the measurement of which tests need the
+# machine; what to do with them is decided from that list, not guessed before it.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: "1.97.1"
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain 1.97.1
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt,clippy
+          rustc --version
+          cargo --version
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy (shipping build)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo clippy (testing build)
+        run: cargo clippy --all-targets --features testing -- -D warnings
+
+      - name: cargo test
+        run: cargo test --no-fail-fast

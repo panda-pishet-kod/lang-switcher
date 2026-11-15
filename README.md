@@ -2,6 +2,10 @@
 
 # Lang Switcher
 
+[![CI](https://github.com/panda-pishet-kod/lang-switcher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/panda-pishet-kod/lang-switcher/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpanda-pishet-kod%2Flang-switcher%2Fmain%2FCargo.toml&query=%24.package.version&label=version)](https://github.com/panda-pishet-kod/lang-switcher/releases/latest)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license-and-authorship)
+
 <img src="docs/img/lang-switcher-demo.gif" width="800" alt="Lang Switcher in Notepad: руддщ, typed with the Russian layout on, becomes hello after one press of Pause/Break and the layout switches to English; then the same with the Hebrew layout">
 
 **Lang Switcher fixes text typed in the wrong keyboard layout.** You meant to type `hello`, but the
@@ -249,7 +253,9 @@ cargo test
 ```
 
 The tests are tied to the developer's machine (exactly two layouts, Russian and US) and are not
-expected to pass unchanged elsewhere; this is a decision of the project, not a defect. The release
+expected to pass unchanged elsewhere; this is a decision of the project, not a defect. Every push
+is checked by [GitHub Actions](.github/workflows/ci.yml): `cargo fmt --check`, clippy of both
+builds and `cargo test`. The release
 scripts, the installer and the signing are described in [README.ru.md](README.ru.md) and in the
 specification `SPEC.md`; like the other documents of the project, they are in Russian.
 
