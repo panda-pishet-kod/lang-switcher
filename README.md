@@ -255,7 +255,8 @@ cargo test
 The tests are tied to the developer's machine (exactly two layouts, Russian and US) and are not
 expected to pass unchanged elsewhere; this is a decision of the project, not a defect. Every push
 is checked by [GitHub Actions](.github/workflows/ci.yml): `cargo fmt --check`, clippy of both
-builds and `cargo test`. The release
+builds and `cargo test` without the 25 tests that need the author's machine (the list and the
+reasons are in the workflow). The release
 scripts, the installer and the signing are described in [README.ru.md](README.ru.md) and in the
 specification `SPEC.md`; like the other documents of the project, they are in Russian.
 

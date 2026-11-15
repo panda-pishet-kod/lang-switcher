@@ -4,10 +4,12 @@
 # battery runs them — and `cargo test` without `--ignored`. The toolchain is pinned to the one the
 # author builds with. Read-only rights, no secrets, the one action pinned by the SHA of its commit.
 #
-# Many tests are tied to the author's machine — exactly two layouts, Russian and US, a Russian
+# Some tests are tied to the author's machine — exactly two layouts, Russian and US, a Russian
 # Windows, its screen (README, "Building from source"). A clean `windows-latest` runner has one
-# layout and an English Windows, so the first run is the measurement of which tests need the
-# machine; what to do with them is decided from that list, not guessed before it.
+# layout and an English Windows. The first run on it (run 43746207243, 2026-11-15) measured which
+# ones: 25 of 1430 failed, every one for the machine and not for the code. The step `cargo test`
+# skips exactly those 25 by their full names, each group with its reason; every other test runs,
+# and a new test is not skipped unless it is added to the list.
 
 name: CI
 
@@ -55,5 +57,49 @@ jobs:
       - name: cargo clippy (testing build)
         run: cargo clippy --all-targets --features testing -- -D warnings
 
-      - name: cargo test
-        run: cargo test --no-fail-fast
+      - name: cargo test (without the 25 tests tied to the author's machine)
+        shell: pwsh
+        run: |
+          $skip = @(
+            # The Russian layout 0x04190419. The runner has the US layout alone, so the cache of
+            # layouts holds one map ("layout 0x04190419 is not in the cache").
+            # tests/convert.rs — all nine:
+            'ghbdtn_becomes_privet_on_the_live_cache'
+            'privet_becomes_ghbdtn_on_the_live_cache'
+            'converting_leaves_the_system_layout_list_untouched'
+            'a_full_ru_en_traversal_on_the_live_cache_converts_every_key_in_both_cases'
+            'the_fallback_table_converts_exactly_as_the_live_cache_does'
+            'the_keypad_slash_key_keeps_its_own_slot_in_both_layouts'
+            'the_main_block_slash_key_converts_to_a_russian_full_stop'
+            'the_russian_full_stop_converts_back_to_an_english_slash'
+            'the_same_physical_key_gives_at_in_us_and_a_quote_in_russian_on_the_live_cache'
+            # tests/layouts.rs — ten of 43:
+            'enumeration_contains_the_russian_and_us_layouts'
+            'enumeration_reports_exactly_two_layouts'
+            'one_physical_key_gives_at_in_us_and_a_quote_in_russian'
+            'shift_on_the_a_key_produces_capitals_in_both_layouts'
+            'the_a_key_unmodified_produces_cyrillic_ef_in_russian'
+            'the_cache_covers_both_layouts_and_neither_map_is_empty'
+            'the_keypad_decimal_key_gives_each_layout_its_own_separator'
+            'the_main_block_and_the_keypad_slash_keys_occupy_different_slots'
+            'the_reverse_index_carries_the_extended_flag'
+            'the_reverse_index_finds_the_key_that_produces_the_character'
+            # tests/selection.rs — two of 99:
+            'between_two_digits_the_separator_is_recoded_as_the_keypad_key_on_the_installed_layouts'
+            'away_from_two_digits_the_separator_keeps_the_answer_it_had'
+            # The language of Windows. A damaged or unreadable settings file falls back to the
+            # interface language of Windows; the tests compare it with the defaults, whose language
+            # is Russian, as the author's Windows is. The runner's Windows is English.
+            # tests/settings.rs — three of 375:
+            'error_from_a_damaged_file_never_quotes_its_content'
+            'invalid_enumerated_value_does_not_pass_silently'
+            'malformed_toml_does_not_bring_the_program_down'
+            # The screen settings. The test expects the system's own menu font to leave the smoothing
+            # to the machine, as on the author's screen; on the runner it is already ClearType.
+            # tests/tray.rs — one of 83:
+            'the_entries_are_drawn_in_the_face_this_program_names_for_itself'
+          )
+          $testArgs = @('test', '--no-fail-fast', '--', '--exact')
+          foreach ($name in $skip) { $testArgs += @('--skip', $name) }
+          cargo @testArgs
+          exit $LASTEXITCODE
