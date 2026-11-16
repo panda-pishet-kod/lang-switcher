@@ -10236,10 +10236,13 @@ fn all_our_drawing_goes_by_the_step() {
     // paint buffer: `PaintBuffer::for_rect` asks it of the DC of the message for the surface it
     // makes, so that a drawing asking it of the surface gets the window's step. Its use inside the
     // function itself is none — the body asks `dc_dpi`.
+    //
+    // Задача T-118-1: one place more — `settings::repaint_capture` asks the DPI of the drawing to
+    // know the very box of the hotkey field the background drew, and repaints only that.
     assert_eq!(
         calls,
-        28 + 1 + 1,
-        "the 28 places of П4, the definition and the buffer's carry"
+        28 + 1 + 1 + 1,
+        "the 28 places of П4, the definition, the buffer's carry and the box of T-118-1"
     );
 
     // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
@@ -10271,8 +10274,9 @@ fn all_our_drawing_goes_by_the_step() {
         .sum();
     assert_eq!(
         caught,
-        28 + 1,
-        "the text of e82 must be caught at all 28 places and at the buffer's carry"
+        28 + 1 + 1,
+        "the text of e82 must be caught at all 28 places, at the buffer's carry and at the box of \
+         T-118-1"
     );
 
     // ⚠ Контроль «мутант задачи»: one place of `letters.rs` put back.
@@ -26159,7 +26163,12 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
 
     // The pass draws it: the air the box was asked for, and the list branch keeps the air of
     // the mock-ups above its first row.
+    //
+    // ⚠ Задача T-118-1: арифметика коробки вынесена из прохода в `field_frame` без изменений —
+    // её второй читатель, `repaint_capture`, перерисовывает ровно эту рамку. Утверждение теста
+    // прежнее: проход рисует коробку этой арифметикой, и она одна.
     let pass = function_body(&source, "unsafe fn paint_background(");
+    let frame = function_body(&source, "fn field_frame(");
 
     for part in [
         // ⚠ Задача Т-45-2: имя и форма вызова сменились, арифметика — нет. Задача Т-46-5:
@@ -26167,8 +26176,17 @@ fn the_box_round_an_input_field_is_the_twelve_dialog_units_of_the_generator() {
         "widgets::field::air(field_box, rect.bottom - rect.top, border)",
         "widgets::field::frame(*rect, (top, bottom), border)",
         "(list_top, border)",
-        "FRAMED_LISTS.contains(control)",
+        "FRAMED_LISTS.contains(&control)",
+    ] {
+        assert!(
+            frame.contains(part),
+            "the box of a field must be counted with `{part}`"
+        );
+    }
+
+    for part in [
         "dialog_units(hwnd, 0, FIELD_BOX_DLU)",
+        "field_frame(*control, rect, field_box, (list_top, border))",
     ] {
         assert!(
             pass.contains(part),
