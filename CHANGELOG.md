@@ -6,7 +6,7 @@ page. Dates are the days the releases were published (UTC).
 
 ## 1.6.1 — 2026-11-16
 
-*The settings window no longer blinks, «Apply» is grey while nothing changed, and Ctrl+A and Tab work in the wizard.*
+*The settings window no longer blinks, «Apply» is grey without changes, and Ctrl+A and Tab work in the wizard.*
 
 - The settings window no longer blinks when you press «Set» next to the hotkey or «Cancel» to stop: only the frame of the
   key field and the button are redrawn, not the whole window. The same when a key is accepted, when the capture is cancelled
