@@ -4,6 +4,22 @@ Every published version of Lang Switcher, newest first. The full text of each re
 SHA-256, what was measured and what was not — is on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases)
 page. Dates are the days the releases were published (UTC).
 
+## 1.6.1 — 2026-11-16
+
+*The settings window no longer blinks, «Apply» is grey while nothing changed, and Ctrl+A and Tab work in the wizard.*
+
+- The settings window no longer blinks when you press «Set» next to the hotkey or «Cancel» to stop: only the frame of the
+  key field and the button are redrawn, not the whole window. The same when a key is accepted, when the capture is cancelled
+  by Esc or a click elsewhere, and when «Apply» is pressed in the middle of a capture — 1.6.0 then left the button saying
+  «Cancel».
+- «Apply» in the settings window is grey while the settings on the screen are the ones applied: the window opens with it
+  grey, any change lights it, putting the value back greys it again, and after the press the focus moves to «OK».
+- In the fields of the «Write to the author…» wizard Ctrl+A selects the whole text, in every field.
+- Tab and Shift+Tab move between the fields and buttons of the wizard also when it was opened from the settings window. In
+  1.6.0 they did not move there, and in the multi-line fields Tab typed a tab character.
+- What did not change: the default hotkey, the look of the windows, the interface languages, the settings and their file,
+  where to write to the author.
+
 ## 1.6.0 — 2026-11-15
 
 *The layout switches in the wizard on a button too, and the knock sounds only for a real refusal.*
