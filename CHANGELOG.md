@@ -14,7 +14,8 @@ page. Dates are the days the releases were published (UTC).
   «Cancel».
 - «Apply» in the settings window is grey while the settings on the screen are the ones applied: the window opens with it
   grey, any change lights it, putting the value back greys it again, and after the press the focus moves to «OK».
-- In the fields of the «Write to the author…» wizard Ctrl+A selects the whole text, in every field.
+- Ctrl+A selects the whole text in every field of the «Write to the author…» wizard and in the «Manually» field of the
+  exclusions in the settings window.
 - Tab and Shift+Tab move between the fields and buttons of the wizard also when it was opened from the settings window. In
   1.6.0 they did not move there, and in the multi-line fields Tab typed a tab character.
 - What did not change: the default hotkey, the look of the windows, the interface languages, the settings and their file,
