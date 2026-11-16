@@ -32240,3 +32240,388 @@ mod the_hotkey_frame_on_a_desktop_of_its_own {
         );
     }
 }
+
+// =========================================================================================
+// Задача T-118-2 — Q-208-23 п. 3, обращение SKHCQ3SA: «В текстовых полях Написать автору не
+// везде работает сочетание Ctrl+A, также не везде возможен переход по текстовым полям нажатием
+// Tab».
+// =========================================================================================
+
+/// **T-118-2 — the table of the fields of the wizard: every field is a tab stop of the right kind,
+/// and the tab order of every step is the order of the screen.**
+///
+/// Measured on the stand with 1.6.0 (`reports\ITOG-E118.md`): opened from the tray, Tab and
+/// Shift+Tab walk all seven fields in the order of the screen. The order and the styles were right;
+/// what failed was the loop the keys came through when the wizard was opened from the settings
+/// window, and the key Ctrl+A, which the field does not know (the sentries below). So this table
+/// has no red «before»: it is the guard that the order and the kinds stay what the stand saw. Read
+/// off the built template — the dialog manager walks the tab stops in template order.
+#[test]
+fn the_fields_of_the_wizard_are_tab_stops_in_the_order_of_the_screen() {
+    use lang_switcher::letters::Step;
+
+    const WS_TABSTOP: u32 = 0x0001_0000;
+    const ES_MULTILINE: u32 = 0x0004;
+    const ES_READONLY: u32 = 0x0800;
+    const ES_WANTRETURN: u32 = 0x1000;
+
+    let product = ProductImage::open();
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, letters::IDD_WIZARD));
+    let style = |id: u32| {
+        template
+            .styles
+            .iter()
+            .find(|(control, _)| *control == id)
+            .map(|(_, style)| *style)
+            .unwrap_or_else(|| panic!("IDD_WIZARD must hold control {id}"))
+    };
+
+    // The seven fields and whether each is the multi-line kind.
+    for (id, multi) in [
+        (1314, false),
+        (1326, false),
+        (1328, false),
+        (1334, true),
+        (1336, true),
+        (1346, true),
+        (1358, false),
+    ] {
+        let s = style(id);
+        println!("field {id}: style {s:#010x}");
+
+        assert!(s & WS_TABSTOP != 0, "field {id} must be a tab stop");
+        assert!(s & ES_READONLY == 0, "field {id} is typed into");
+        assert_eq!(
+            s & ES_MULTILINE != 0,
+            multi,
+            "field {id}: the kind the stand measured"
+        );
+        if multi {
+            assert!(
+                s & ES_WANTRETURN != 0,
+                "Enter is a new line in field {id}, and not «Далее»"
+            );
+        }
+    }
+
+    // Every step ends with the row of buttons, «Отмена», «Назад», «Далее».
+    let row = [1350_u32, 1351, 1352];
+
+    for (step, expected) in [
+        (Step::Where, &[1314_u32, 1315, 1317][..]),
+        (Step::Did, &[1322, 1326, 1328, 1330]),
+        (Step::Idea, &[1334, 1336]),
+        (Step::Preview, &[1346, 1358, 1347, 1348, 1356]),
+    ] {
+        let shown: Vec<u32> = letters::controls_of(step)
+            .iter()
+            .map(|control| *control as u32)
+            .chain(row)
+            .collect();
+        let stops: Vec<u32> = template
+            .styles
+            .iter()
+            .filter(|(id, style)| shown.contains(id) && style & WS_TABSTOP != 0)
+            .map(|(id, _)| *id)
+            .collect();
+        let want: Vec<u32> = expected.iter().copied().chain(row).collect();
+
+        println!("{step:?}: tab stops in template order {stops:?}");
+
+        assert_eq!(
+            stops, want,
+            "{step:?}: the tab order must be the order of the screen the stand measured"
+        );
+    }
+}
+
+/// **T-118-2 — the modal loop of the settings window hands the windows of the letters their
+/// keys.**
+///
+/// The wizard opened by «Написать автору…» of the settings window lives inside the modal loop of
+/// that window, which called `IsDialogMessageW` for the settings window only: Tab did not move in
+/// one field of the seven, and wrote a tab into the three multi-line ones (the stand, 1.6.0).
+/// `show_modal_dialog` now holds `letters::ModalLoopFilter` for the whole of the loop, and its
+/// procedure gives every message of the loop to the one body of the letters, `filter_message` —
+/// which takes Ctrl+A before the dialog manager does.
+///
+/// ⚠ Controls: a filter dropped on the spot (`let _ =`), a filter installed after the loop has
+/// begun, and a procedure that never calls the body are each caught.
+#[test]
+fn the_modal_loop_of_the_settings_window_hands_the_letters_their_keys() {
+    let settings_source = settings_module_source();
+    let letters_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("letters.rs"),
+    )
+    .expect("src\\letters.rs must be readable")
+    .replace("\r\n", "\n");
+
+    let modal = code_lines(function_body(
+        &settings_source,
+        "unsafe fn show_modal_dialog(",
+    ));
+    assert!(
+        holds_the_filter_for_the_loop(&modal),
+        "show_modal_dialog must hold the filter of the letters from its first line to its last:\n\
+         {modal}"
+    );
+
+    let filter = code_lines(function_body(
+        &letters_source,
+        "unsafe extern \"system\" fn modal_loop_filter_proc(",
+    ));
+    assert!(
+        filter.contains("code == MSGF_DIALOGBOX as i32")
+            && filter.contains("filter_message(message)")
+            && filter.contains("LRESULT(1)"),
+        "the procedure must give the messages of a dialog loop to `filter_message` and say \
+         «handled» for the ones it took:\n{filter}"
+    );
+
+    let body = code_lines(function_body(
+        &letters_source,
+        "pub unsafe fn filter_message(",
+    ));
+    let ctrl_a = body
+        .find("select_all_on_ctrl_a(&open, message)")
+        .expect("filter_message must take Ctrl+A");
+    let manager = body
+        .find("IsDialogMessageW")
+        .expect("filter_message must still hand the rest to the dialog manager");
+    assert!(
+        ctrl_a < manager,
+        "Ctrl+A is taken before the dialog manager, which does not know the key"
+    );
+
+    // A field is what says it understands `EM_SETSEL` — the dialog manager's own question — and
+    // not a class name: `class_name` in `letters.rs` is a link of the capture chain T-100-2 moved
+    // to `guard` (tests\guard.rs).
+    let select_all = code_lines(function_body(&letters_source, "fn select_all_on_ctrl_a("));
+    assert!(
+        select_all.contains("WM_GETDLGCODE")
+            && select_all.contains("code & DLGC_HASSETSEL as usize == 0")
+            && select_all.contains("held(VK_MENU) || held(VK_SHIFT)"),
+        "Ctrl+A is taken in a field that understands EM_SETSEL, and never with Alt (AltGr) or \
+         Shift:\n{select_all}"
+    );
+
+    // Controls.
+    let dropped = modal.replace("let _letters = ", "let _ = ");
+    assert!(
+        !holds_the_filter_for_the_loop(&dropped),
+        "the sweep does not see a filter dropped on the spot"
+    );
+    // The install moved to the end of the body: after every loop it was meant to serve.
+    let late = modal.replace(
+        "let _letters = crate::letters::ModalLoopFilter::install();",
+        "",
+    ) + "\nlet _letters = crate::letters::ModalLoopFilter::install();";
+    assert!(
+        !holds_the_filter_for_the_loop(&late),
+        "the sweep does not see a filter installed after a loop has begun"
+    );
+}
+
+/// Whether the body of `show_modal_dialog` binds the filter to a name before its first dialog
+/// loop — `let _ =` would drop it on the spot, and a filter installed later misses a loop.
+fn holds_the_filter_for_the_loop(body: &str) -> bool {
+    let Some(install) = body.find("let _letters = crate::letters::ModalLoopFilter::install();")
+    else {
+        return false;
+    };
+
+    body.find("DialogBox")
+        .is_some_and(|first_loop| install < first_loop)
+}
+
+/// **T-118-2 — the sentry of Ctrl+A: the key selects the whole text of a field of the wizard, by
+/// the road of the thread's own pump and by the road of a modal loop.**
+///
+/// The wizard is the product's own, opened hidden through `letters::testing::open_wizard_hidden`;
+/// the keys held are the keyboard state of this thread (`SetKeyboardState`, put back afterwards),
+/// which is what `GetKeyState` answers from. A single-line field and a multi-line one.
+///
+/// ⚠ Controls: AltGr (Ctrl+Alt — «ą» on the Polish layout), Ctrl+Shift+A and A alone select nothing;
+/// a field of a window that is not a letter is left alone; and the road of a modal loop without
+/// the filter — the 1.6.0 road — selects nothing, so the selection seen with it is the filter's.
+#[cfg(feature = "testing")]
+mod ctrl_a_in_the_fields_of_the_wizard {
+    use super::{HiddenWindow, ProductImage, with_product_strings};
+    use lang_switcher::letters;
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::Controls::{EM_GETSEL, EM_SETSEL};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyboardState, SetKeyboardState, VIRTUAL_KEY, VK_A, VK_CONTROL, VK_LCONTROL, VK_LSHIFT,
+        VK_MENU, VK_RCONTROL, VK_RMENU, VK_SHIFT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GetDlgItem, HMENU, IsDialogMessageW, MSG, SendMessageW,
+        SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_KEYDOWN, WS_CHILD,
+    };
+    use windows::core::{HSTRING, w};
+
+    const CTRL: &[VIRTUAL_KEY] = &[VK_CONTROL, VK_LCONTROL];
+    const ALTGR: &[VIRTUAL_KEY] = &[VK_CONTROL, VK_LCONTROL, VK_MENU, VK_RMENU];
+    const CTRL_SHIFT: &[VIRTUAL_KEY] = &[VK_CONTROL, VK_RCONTROL, VK_SHIFT, VK_LSHIFT];
+    const NOTHING: &[VIRTUAL_KEY] = &[];
+
+    fn selection(field: HWND) -> (usize, usize) {
+        // SAFETY: a live edit control of this thread; no pointer goes with the message.
+        let packed = unsafe { SendMessageW(field, EM_GETSEL, None, None) }.0 as usize;
+        (packed & 0xFFFF, (packed >> 16) & 0xFFFF)
+    }
+
+    /// The text, and the caret at its end with nothing selected.
+    fn put(field: HWND, text: &str) -> usize {
+        let length = text.encode_utf16().count();
+        // SAFETY: a live edit control of this thread; the text is copied by the call.
+        unsafe {
+            SetWindowTextW(field, &HSTRING::from(text)).expect("the field takes the text");
+            SendMessageW(
+                field,
+                EM_SETSEL,
+                Some(WPARAM(length)),
+                Some(LPARAM(length as isize)),
+            );
+        }
+        length
+    }
+
+    /// Runs `body` with exactly `held` down in the keyboard state of this thread.
+    fn with_keys<R>(held: &[VIRTUAL_KEY], body: impl FnOnce() -> R) -> R {
+        let mut saved = [0_u8; 256];
+        // SAFETY: a live local array of the documented size.
+        unsafe { GetKeyboardState(&mut saved) }.expect("the keyboard state of the thread");
+        let mut state = [0_u8; 256];
+        for key in held {
+            state[usize::from(key.0)] = 0x80;
+        }
+        // SAFETY: as above.
+        unsafe { SetKeyboardState(&state) }.expect("the keyboard state of the thread is set");
+        let answer = body();
+        // SAFETY: as above.
+        let _ = unsafe { SetKeyboardState(&saved) };
+        answer
+    }
+
+    fn ctrl_a(field: HWND) -> MSG {
+        MSG {
+            hwnd: field,
+            message: WM_KEYDOWN,
+            wParam: WPARAM(usize::from(VK_A.0)),
+            lParam: LPARAM(0x001E_0001),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ctrl_a_selects_the_whole_text_of_a_field_of_the_wizard() {
+        let _guard = with_product_strings();
+        let wizard = HiddenWindow::on_owner(|owner| {
+            letters::testing::open_wizard_hidden(owner, ProductImage::shared().module)
+        });
+
+        for (id, text) in [(1314, "alpha beta"), (1334, "alpha beta\r\ngamma delta")] {
+            // SAFETY: the wizard is live until the end of the test.
+            let field = unsafe { GetDlgItem(Some(wizard.window), id) }.expect("the field");
+
+            // The pump of the thread.
+            let length = put(field, text);
+            // SAFETY: a message of a window of this thread, read only.
+            let taken = with_keys(CTRL, || unsafe { letters::filter_message(&ctrl_a(field)) });
+            println!(
+                "{id}, the pump: taken {taken}, selection {:?}",
+                selection(field)
+            );
+            assert!(taken, "{id}: Ctrl+A is the filter's");
+            assert_eq!(
+                selection(field),
+                (0, length),
+                "SKHCQ3SA: Ctrl+A must select the whole text of field {id}"
+            );
+
+            for (what, keys) in [
+                ("AltGr", ALTGR),
+                ("Ctrl+Shift", CTRL_SHIFT),
+                ("A alone", NOTHING),
+            ] {
+                put(field, text);
+                // SAFETY: as above.
+                with_keys(keys, || unsafe { letters::filter_message(&ctrl_a(field)) });
+                assert_eq!(
+                    selection(field),
+                    (length, length),
+                    "{id}: {what} + A must not select the text"
+                );
+            }
+
+            // The road of a modal loop: the loop of another window asks the dialog manager, and
+            // the manager asks the filter first. Without the filter — the road of 1.6.0.
+            let other = wizard.owner;
+
+            put(field, text);
+            // SAFETY: as above; `other` is a live window of this thread.
+            let without = with_keys(CTRL, || {
+                unsafe { IsDialogMessageW(other, &ctrl_a(field)) }.as_bool()
+            });
+            println!(
+                "{id}, a modal loop without the filter: taken {without}, selection {:?}",
+                selection(field)
+            );
+            assert!(
+                !without && selection(field) == (length, length),
+                "the positive control: without the filter the loop of another window does not \
+                 reach the wizard"
+            );
+
+            put(field, text);
+            let filter = letters::ModalLoopFilter::install();
+            // SAFETY: as above.
+            let with = with_keys(CTRL, || {
+                unsafe { IsDialogMessageW(other, &ctrl_a(field)) }.as_bool()
+            });
+            drop(filter);
+            println!(
+                "{id}, a modal loop with the filter: taken {with}, selection {:?}",
+                selection(field)
+            );
+            assert!(
+                with && selection(field) == (0, length),
+                "T-118-2: inside a modal loop the filter must hand Ctrl+A to the wizard"
+            );
+        }
+
+        // A field of a window that is not a letter: the owner is a plain popup.
+        // SAFETY: a system class, a live parent of this thread; destroyed below.
+        let foreign = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("EDIT"),
+                None,
+                WINDOW_STYLE(WS_CHILD.0),
+                0,
+                0,
+                100,
+                20,
+                Some(wizard.owner),
+                Some(HMENU(std::ptr::without_provenance_mut(1314))),
+                None,
+                None,
+            )
+        }
+        .expect("an edit of a window that is not a letter");
+        let length = put(foreign, "alpha beta");
+        // SAFETY: as above.
+        let taken = with_keys(CTRL, || unsafe {
+            letters::filter_message(&ctrl_a(foreign))
+        });
+        assert!(
+            !taken && selection(foreign) == (length, length),
+            "a field of a window that is not a letter is left to its own window"
+        );
+        // SAFETY: made above on this thread.
+        let _ = unsafe { DestroyWindow(foreign) };
+    }
+}

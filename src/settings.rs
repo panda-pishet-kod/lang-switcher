@@ -5517,6 +5517,11 @@ unsafe fn show_modal_dialog(
     proc: DLGPROC,
     param: LPARAM,
 ) -> isize {
+    // ⭐ Задача T-118-2: пока этот цикл выбирает сообщения потока, окна писем — мастер «Написать
+    // автору…» с кнопки этого же окна — получают Tab, Enter и Esc через перехватчик, а не никак.
+    // Снимается на выходе из функции по любому из трёх путей ниже.
+    let _letters = crate::letters::ModalLoopFilter::install();
+
     let mirrored = ui_language().is_rtl();
 
     if let Some(mut copy) = compiled_template(instance, template) {
