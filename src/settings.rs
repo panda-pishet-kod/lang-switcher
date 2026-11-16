@@ -98,10 +98,11 @@ use windows::Win32::UI::Controls::{
     LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMCOUNT, LVM_GETITEMRECT, LVM_GETITEMSTATE,
     LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
-    LVM_SETTEXTCOLOR, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES, LVS_EX_FULLROWSELECT,
-    LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NM_SETFOCUS, NMCUSTOMDRAW_DRAW_STATE_FLAGS,
-    NMHDR, NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT,
-    ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX, ODT_STATIC, SetScrollInfo, WM_MOUSELEAVE,
+    LVM_SETTEXTCOLOR, LVN_ITEMCHANGED, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES,
+    LVS_EX_FULLROWSELECT, LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NM_SETFOCUS,
+    NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT,
+    ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
+    ODT_STATIC, SetScrollInfo, WM_MOUSELEAVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
@@ -6291,6 +6292,59 @@ pub mod testing {
 
         body()
     }
+
+    /// **The settings window, hidden and modeless** — the door of задача T-118-5.
+    ///
+    /// The product's own window: the template `IDD_SETTINGS` of `module`, the procedure
+    /// `dialog_proc`, the state built by `new_dialog_cell` — the body [`super::show_dialog`]
+    /// builds it with. Two differences, both of the door and not of the window: it is created by
+    /// [`super::show_modeless_dialog`] (the test drives it with messages of its own thread and has
+    /// no modal loop to sit in), and the template carries no `WS_VISIBLE`, so it is never shown.
+    /// `apply` is the test's own record of what «Применить» and «ОК» publish; it is leaked, as
+    /// the window needs it for its whole life and a test process is short.
+    pub fn open_settings_hidden(
+        owner: super::HWND,
+        module: windows::Win32::Foundation::HMODULE,
+        config: &super::Config,
+        apply: Box<dyn FnMut(&super::Config)>,
+    ) -> Option<HiddenSettings> {
+        super::ensure_list_view_class().ok()?;
+
+        let apply: &'static mut dyn FnMut(&super::Config) = Box::leak(apply);
+        let cell = Box::new(super::new_dialog_cell(config, apply, super::Opening::Fresh));
+
+        // SAFETY: `module` carries `IDD_SETTINGS`; `owner` is a live window of this thread; the
+        // parameter names the boxed state, which `HiddenSettings` keeps until after the window is
+        // destroyed in its `Drop`.
+        let window = unsafe {
+            super::show_modeless_dialog(
+                windows::Win32::Foundation::HINSTANCE(module.0),
+                super::IDD_SETTINGS,
+                owner,
+                Some(super::dialog_proc),
+                super::LPARAM(std::ptr::from_ref(&*cell) as isize),
+            )
+        }?;
+
+        Some(HiddenSettings { window, cell })
+    }
+
+    /// The window of [`open_settings_hidden`] and the state it reads; the window goes first.
+    pub struct HiddenSettings {
+        /// The settings window.
+        pub window: super::HWND,
+        cell: Box<super::DialogCell<'static>>,
+    }
+
+    impl Drop for HiddenSettings {
+        fn drop(&mut self) {
+            // SAFETY: the window of this value, on this thread, destroyed once; the state it reads
+            // is dropped only after this call, with `cell`.
+            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.window) };
+            super::DIALOG_WINDOW.with(|window| window.set(0));
+            let _ = &self.cell;
+        }
+    }
 }
 
 /// **The step of the font of the next window of `owner`, put into the copy of its template** —
@@ -7177,37 +7231,14 @@ pub enum DialogOutcome {
 /// what `DialogBoxParamW` itself answers when the window could not be created at all.
 const DIALOG_REOPEN: isize = 99;
 
-pub fn show_dialog(
-    owner: HWND,
-    instance: HINSTANCE,
+/// **The state of one settings window, before the window exists** — what [`show_dialog`] built on
+/// its own frame until задача T-118-5 moved it here, unchanged, so that the hidden window of
+/// `testing::open_settings_hidden` is built by the very same body and not by a copy of it.
+fn new_dialog_cell<'a>(
     config: &Config,
-    apply: &mut dyn FnMut(&Config),
+    apply: &'a mut dyn FnMut(&Config),
     opening: Opening,
-) -> windows::core::Result<DialogOutcome> {
-    // ⚠ One dialog at a time. A modal dialog runs a message loop that keeps dispatching to the
-    // *other* windows of this thread, so the tray icon can be clicked while this window is up
-    // and would otherwise open a second copy of it on top of the first — two windows editing
-    // two copies of one configuration, of which the last one applied would win. The guard is a
-    // thread-local because the dialog belongs to the UI thread and to no other (section 6.1).
-    //
-    // ⚠ The reopen loop of task Т-31-2 does **not** meet this guard: it calls this function
-    // again only after the previous call has returned, and the guard is given up by
-    // `DialogSession::drop` on the way out. Measured before the task was written — посылка П2,
-    // `scratchpad-Э31\посылки-п2.log`: two showings out of one call, and `with_tray` answering
-    // between them.
-    if dialog_is_open() {
-        return Ok(DialogOutcome::Closed);
-    }
-
-    // The list view of the cycle lives in `comctl32`, whose window classes are registered on
-    // demand. Without this the whole dialog fails to be created — one missing class takes the
-    // template with it — so the result is examined (NFR-13) before anything is shown.
-    ensure_list_view_class()?;
-
-    // Raised here and lowered however this function leaves, panic on the way through
-    // included — see [`DialogSession`].
-    let _open = DialogSession::open();
-
+) -> DialogCell<'a> {
     let session = layouts::enumerate().unwrap_or_default();
 
     // Task T-55-8: the list as it opens, kept beside the one the person edits, so that «ОК» can
@@ -7224,12 +7255,14 @@ pub fn show_dialog(
     // task T-11-9 (`WM_SETTINGCHANGE`), not here.
     let palette = theme::resolve(config.general.theme, theme::system_is_light());
 
-    let state = DialogCell {
+    DialogCell {
         // Task T-11-5b-2: every glyph element starts «снят» here; `fill_dialog` writes the
         // configuration in on `WM_INITDIALOG`, before the dialog is first painted.
         checks: GlyphChecks::new(),
         state: RefCell::new(DialogState {
             working: config.clone(),
+            // Задача T-118-5: replaced by the read of the window on `WM_INITDIALOG`.
+            applied: config.clone(),
             rows_at_open: rows.clone(),
             rows,
             cycle_at_open: config.layouts.cycle.clone(),
@@ -7265,7 +7298,41 @@ pub fn show_dialog(
             // Task T-100-3: nothing counts until «Выбрать окно программы» is pressed.
             exclusion_pick: None,
         }),
-    };
+    }
+}
+
+pub fn show_dialog(
+    owner: HWND,
+    instance: HINSTANCE,
+    config: &Config,
+    apply: &mut dyn FnMut(&Config),
+    opening: Opening,
+) -> windows::core::Result<DialogOutcome> {
+    // ⚠ One dialog at a time. A modal dialog runs a message loop that keeps dispatching to the
+    // *other* windows of this thread, so the tray icon can be clicked while this window is up
+    // and would otherwise open a second copy of it on top of the first — two windows editing
+    // two copies of one configuration, of which the last one applied would win. The guard is a
+    // thread-local because the dialog belongs to the UI thread and to no other (section 6.1).
+    //
+    // ⚠ The reopen loop of task Т-31-2 does **not** meet this guard: it calls this function
+    // again only after the previous call has returned, and the guard is given up by
+    // `DialogSession::drop` on the way out. Measured before the task was written — посылка П2,
+    // `scratchpad-Э31\посылки-п2.log`: two showings out of one call, and `with_tray` answering
+    // between them.
+    if dialog_is_open() {
+        return Ok(DialogOutcome::Closed);
+    }
+
+    // The list view of the cycle lives in `comctl32`, whose window classes are registered on
+    // demand. Without this the whole dialog fails to be created — one missing class takes the
+    // template with it — so the result is examined (NFR-13) before anything is shown.
+    ensure_list_view_class()?;
+
+    // Raised here and lowered however this function leaves, panic on the way through
+    // included — see [`DialogSession`].
+    let _open = DialogSession::open();
+
+    let state = new_dialog_cell(config, apply, opening);
 
     // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`. `owner` is a
     // live window of this thread. The parameter is a pointer to `state`, which lives on this
@@ -7756,6 +7823,15 @@ struct DialogState<'a> {
     /// The configuration being edited. Starts as a copy of the caller's and is never anything
     /// but a copy: nothing outside this dialog sees it until `apply` is called.
     working: Config,
+    /// **What the window applied last, as the window reads it** — задача T-118-5, слово владельца
+    /// 208.77 «А — серая без изменений».
+    ///
+    /// «Применить» is enabled exactly while [`on_screen`] differs from this value
+    /// ([`refresh_apply`]). Taken off the screen on `WM_INITDIALOG`, right after `fill_dialog` —
+    /// the read of the window and not the caller's value, so that a spelling the file had and the
+    /// window writes otherwise (a layout, a cycle) is not a difference nobody made — and again by
+    /// [`apply_now`] after every publication.
+    applied: Config,
     /// The layout list of FR-31, in display order.
     rows: Vec<LayoutRow>,
     /// The list as the dialog opened, before any tick or move — task T-55-8. «ОК» compares
@@ -7906,6 +7982,10 @@ unsafe extern "system" fn dialog_proc(
 
                     fill_dialog(hwnd, state);
 
+                    // Задача T-118-5: what is applied, as this window reads it — the base
+                    // «Применить» is compared against.
+                    state.applied = on_screen(hwnd, state);
+
                     // FR-92а, task T-11-5c: the panel map — which controls lie on one of
                     // the eight group panels — is geometry of the just-created windows,
                     // read here once and never again: rectangles do not move when the
@@ -7933,6 +8013,10 @@ unsafe extern "system" fn dialog_proc(
                 // state keeps, which is dropped only after this modal call returns.
                 unsafe { CaptionIcons::show_on(hwnd, frames) };
             }
+
+            // ⭐ Задача T-118-5: the window opens with «Применить» grey — nothing on it differs
+            // from what is applied yet.
+            set_apply_enabled(hwnd, false);
 
             // FR-92а, task T-11-5a: «ОК» lost `BS_DEFPUSHBUTTON` to owner drawing — a
             // button *type* occupies the low nibble the default style lived in — so the
@@ -8104,7 +8188,17 @@ unsafe extern "system" fn dialog_proc(
         WM_NOTIFY => {
             // SAFETY: the sender owns the struct `lparam` names for the length of the send,
             // and this procedure is inside that send.
-            unsafe { on_notify(hwnd, lparam) }
+            let answer = unsafe { on_notify(hwnd, lparam) };
+
+            // Задача T-118-5: a tick of the cycle went in or out — «Применить» follows. The
+            // header alone is read, as in `on_notify`.
+            //
+            // SAFETY: as above.
+            if unsafe { cycle_list_item_changed(hwnd, lparam) } {
+                refresh_apply(hwnd);
+            }
+
+            answer
         }
 
         // Task T-39-11, решение 122.5: the first timer of this window takes «Журнал сохранён» off
@@ -8130,6 +8224,9 @@ unsafe extern "system" fn dialog_proc(
                 exclusion_pick_tick(hwnd);
             }
 
+            // Задача T-118-5: «Выбрать окно программы» adds its program on a tick.
+            refresh_apply(hwnd);
+
             0
         }
 
@@ -8140,6 +8237,12 @@ unsafe extern "system" fn dialog_proc(
             // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value it
             // names is alive for the whole of this modal call.
             unsafe { on_command(hwnd, control, notification) };
+
+            // ⭐ Задача T-118-5: after **every** command, whatever it was — a box, a radio, a
+            // combo, the list of exclusions, the order of the cycle, «Применить» itself. One place
+            // and not one call per kind of edit: a road left out would be a road where the button
+            // lies (решение 208.77, «иначе какой-нибудь путь правки будет пропущен»).
+            refresh_apply(hwnd);
 
             0
         }
@@ -15360,10 +15463,107 @@ unsafe fn apply_now(hwnd: HWND) -> LanguageSwitch {
 
             let updated = state.working.clone();
             (state.apply)(&updated);
+
+            // Задача T-118-5: what is applied now is the base «Применить» is compared against —
+            // the caller of this function refreshes the button (`WM_COMMAND`).
+            state.applied = updated;
         })
     };
 
     language_switch(was, ui_language())
+}
+
+/// **What the window says the configuration is** — the very read «Применить» makes
+/// ([`read_dialog`]), without keeping it: the working copy is put back as it was. Задача T-118-5.
+///
+/// The hotkey is not on the window but in the working copy (a capture writes it there), so the
+/// copy this starts from carries it, and a captured key is a difference like any other.
+fn on_screen(hwnd: HWND, state: &mut DialogState<'_>) -> Config {
+    let kept = state.working.clone();
+
+    read_dialog(hwnd, state);
+
+    std::mem::replace(&mut state.working, kept)
+}
+
+/// **«Применить» доступна, пока экран расходится с применённым** — задача T-118-5, Q-208-23
+/// п. 2, обращение SKHCQ3SA: «кнопка Применить подсвечивается (остается активной) даже если в
+/// настройках программы не было сделано никаких изменений, что иной раз сбивает с толку». Слово
+/// владельца 208.77: «А — серая без изменений».
+///
+/// **Сравнение, а не флаг «что-то трогали»:** вся конфигурация на экране ([`on_screen`]) против
+/// применённой ([`DialogState::applied`]). Правка, после которой они расходятся, зажигает кнопку;
+/// значение, возвращённое рукой, гасит её снова — флаг этого не умел бы, и путь правки, забытый
+/// флагом, остался бы с врущей кнопкой.
+///
+/// Called by the procedure after every command, timer and change of a tick of the cycle, and by
+/// [`run_capture_step`] after a key — outside every borrow. A borrow already held (a notification
+/// sent while the window is being filled) is answered by doing nothing: the base is taken when
+/// the filling is over.
+fn refresh_apply(hwnd: HWND) {
+    // SAFETY: `hwnd` is the live dialog of `show_dialog`; the pointer behind it was stored on
+    // `WM_INITDIALOG` and names a value alive for the whole of the modal call.
+    let differs = unsafe { with_state(hwnd, |state| on_screen(hwnd, state) != state.applied) };
+
+    if let Some(differs) = differs {
+        set_apply_enabled(hwnd, differs);
+    }
+}
+
+/// Lights or greys «Применить» — задача T-118-5.
+///
+/// ⚠ **The focus first.** A disabled button cannot hold the focus, and `EnableWindow` of the
+/// focused one leaves the keyboard with nothing at all: after «Применить» pressed by the keyboard
+/// Tab and Enter would go nowhere. So when the button that is about to go grey has the focus, the
+/// focus moves to «ОК» first — the default button of the window (`DM_SETDEFID`).
+///
+/// The look of the grey button is the owner-drawn one every disabled push button of this window
+/// already has («Выше» and «Ниже» in the pair mode): `ODS_DISABLED` in `WM_DRAWITEM`.
+fn set_apply_enabled(hwnd: HWND, enabled: bool) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, IsWindowEnabled};
+
+    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
+    let Ok(apply) = (unsafe { GetDlgItem(Some(hwnd), IDC_APPLY) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `apply` is the live control just found; the calls read window fields.
+    if unsafe { IsWindowEnabled(apply) }.as_bool() == enabled {
+        return;
+    }
+
+    // SAFETY: as above; `GetFocus` answers the focus of this thread's queue.
+    if !enabled && unsafe { GetFocus() } == apply {
+        focus_control(hwnd, OK_COMMAND);
+    }
+
+    enable(hwnd, IDC_APPLY, enabled);
+}
+
+/// Whether a `WM_NOTIFY` is the layout list saying one of its rows changed — задача T-118-5, the
+/// tick of the cycle that «Применить» has to follow. SEC-05: the three header fields and nothing
+/// else, as [`on_notify`] reads them.
+///
+/// # Safety
+///
+/// Called from [`dialog_proc`] only, with the `lparam` of the message, inside its send.
+unsafe fn cycle_list_item_changed(hwnd: HWND, lparam: LPARAM) -> bool {
+    if lparam.0 == 0 {
+        return false;
+    }
+
+    // SAFETY: the sender owns the header for the length of the send; copied out as plain values.
+    let header = unsafe { &*(lparam.0 as *const NMHDR) };
+
+    if header.code != LVN_ITEMCHANGED
+        || header.idFrom != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX)
+    {
+        return false;
+    }
+
+    // SAFETY: `hwnd` is the live dialog; the call reads a window field.
+    unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() == Some(header.hwndFrom)
 }
 
 /// The window that stays open puts on what was just applied — the half of «Применить» that «ОК»
@@ -16752,6 +16952,10 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
     // Esc, щелчок мимо и уход фокуса кончают захват здесь.
     if ends {
         repaint_capture(dialog);
+
+        // Задача T-118-5: a key taken is an edit like any other — the keys of the capture come
+        // through the field's own procedure, past the refresh of `WM_COMMAND`.
+        refresh_apply(dialog);
     }
 }
 

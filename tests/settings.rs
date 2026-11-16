@@ -3039,8 +3039,17 @@ fn what_ok_calls_never_reaches_the_repaint_and_what_apply_calls_does() {
             found.is_some(),
             "⛔ C5: «ОК» must still apply — it no longer {what} (`{needle}`)"
         );
+        // ⚠ Задача T-118-5: the window is read a second time by `on_screen`, the comparison that
+        // lights and greys «Применить» — a read that publishes nothing and keeps nothing. It is
+        // set aside here, and the one body of applying is still one.
+        let comparison = function_body(product, "fn on_screen(");
+        assert!(
+            !comparison.contains("(state.apply)"),
+            "`on_screen` must only read the window, never publish"
+        );
+        let applying = product.replace(comparison, "");
         assert_eq!(
-            code_lines(product).matches(needle).count(),
+            code_lines(&applying).matches(needle).count(),
             1,
             "one body of applying: `{needle}` must be written once, for both buttons"
         );
@@ -32642,4 +32651,285 @@ mod ctrl_a_in_the_fields_of_the_wizard {
         // SAFETY: made above on this thread.
         let _ = unsafe { DestroyWindow(foreign) };
     }
+}
+
+// =========================================================================================
+// Задача T-118-5 — Q-208-23 п. 2, обращение SKHCQ3SA: «кнопка Применить подсвечивается
+// (остается активной) даже если в настройках программы не было сделано никаких изменений».
+// Слово владельца 208.77: «А — серая без изменений».
+// =========================================================================================
+
+/// **T-118-5 — «Применить» is grey while the window says what is applied, and lit while it says
+/// anything else.**
+///
+/// The product's own settings window, opened hidden and modeless through the door
+/// `settings::testing::open_settings_hidden` — the template, the procedure and the state of
+/// `show_dialog` — and driven by the messages a person's clicks become, sent on this thread:
+///
+/// 1. the window opens with the button grey — on `2c5c17c` it was lit, which is the complaint;
+/// 2. a box ticked — lit; ticked back — grey: the comparison of the whole configuration and not a
+///    flag «something was touched»;
+/// 3. the appearance combo moved and moved back — lit, grey;
+/// 4. a program added to the exclusions and removed — lit, grey;
+/// 5. a capture armed — still grey (nothing is decided yet); a key taken — lit;
+/// 6. «Применить» — the record of the test receives the key, and the button is grey again.
+#[cfg(feature = "testing")]
+#[test]
+fn apply_is_grey_while_the_window_says_what_is_applied() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{IsWindowEnabled, VK_F9};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CB_GETCOUNT, CB_GETCURSEL, CB_SETCURSEL, CBN_SELCHANGE, CreateWindowExW, DestroyWindow,
+        GetDlgItem, LB_GETCOUNT, LB_SETSEL, SendMessageW, SetDlgItemTextW, WM_COMMAND, WM_KEYDOWN,
+        WM_KEYUP, WS_EX_TOOLWINDOW, WS_POPUP,
+    };
+    use windows::core::{PCWSTR, w};
+
+    const IDC_THEME: i32 = 1003;
+    const IDC_SOUND: i32 = 1004;
+    const IDC_HOTKEY: i32 = 1010;
+    const IDC_HOTKEY_CAPTURE: i32 = 1012;
+    const IDC_EXCLUSIONS: i32 = 1050;
+    const IDC_EXCLUSION_NAME: i32 = 1051;
+    const IDC_EXCLUSION_ADD: i32 = 1052;
+    const IDC_EXCLUSION_REMOVE: i32 = 1053;
+    const IDC_APPLY: i32 = 1080;
+    const BN_CLICKED: u32 = 0;
+
+    let _guard = with_product_strings();
+
+    // SAFETY: a system class, no parent, no pointer of ours; destroyed at the end.
+    let owner = unsafe {
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            w!("STATIC"),
+            PCWSTR::null(),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("a hidden owner");
+
+    let applied: Rc<RefCell<Vec<settings::Config>>> = Rc::default();
+    let record = Rc::clone(&applied);
+    let window = settings::testing::open_settings_hidden(
+        owner,
+        ProductImage::shared().module,
+        &settings::Config::default(),
+        Box::new(move |config| record.borrow_mut().push(config.clone())),
+    )
+    .expect("the settings window opens out of the product's template");
+    let dialog = window.window;
+
+    let control = |id: i32| -> HWND {
+        // SAFETY: the window is live until the end of the test.
+        unsafe { GetDlgItem(Some(dialog), id) }.unwrap_or_else(|_| panic!("control {id}"))
+    };
+    let lit = || {
+        // SAFETY: as above.
+        unsafe { IsWindowEnabled(control(IDC_APPLY)) }.as_bool()
+    };
+    let command = |id: i32, notification: u32| {
+        // SAFETY: a message of this thread to a live window; the handle is a plain value.
+        unsafe {
+            SendMessageW(
+                dialog,
+                WM_COMMAND,
+                Some(WPARAM((notification as usize) << 16 | id as usize)),
+                Some(LPARAM(control(id).0 as isize)),
+            );
+        }
+    };
+    let mut seen = Vec::new();
+    let mut step = |what: &str, expected: bool| {
+        let now = lit();
+        seen.push(format!("{what}: {}", if now { "lit" } else { "grey" }));
+        assert_eq!(
+            now,
+            expected,
+            "SKHCQ3SA, 208.77 — {what}: «Применить» must be {}",
+            if expected { "lit" } else { "grey" }
+        );
+    };
+
+    // 1.
+    step("the window opened", false);
+
+    // 2.
+    command(IDC_SOUND, BN_CLICKED);
+    step("the sound box ticked", true);
+    command(IDC_SOUND, BN_CLICKED);
+    step("the sound box ticked back", false);
+
+    // 3.
+    let theme = control(IDC_THEME);
+    // SAFETY: a combo of this thread; plain numbers.
+    let (was, count) = unsafe {
+        (
+            SendMessageW(theme, CB_GETCURSEL, None, None).0 as usize,
+            SendMessageW(theme, CB_GETCOUNT, None, None).0 as usize,
+        )
+    };
+    assert!(count >= 2, "the appearance combo has a choice");
+    for index in [(was + 1) % count, was] {
+        // SAFETY: as above.
+        unsafe { SendMessageW(theme, CB_SETCURSEL, Some(WPARAM(index)), None) };
+        command(IDC_THEME, CBN_SELCHANGE);
+        step(
+            if index == was {
+                "the appearance put back"
+            } else {
+                "the appearance moved"
+            },
+            index != was,
+        );
+    }
+
+    // 4.
+    // SAFETY: a field of this thread; the text is copied by the call.
+    unsafe { SetDlgItemTextW(dialog, IDC_EXCLUSION_NAME, w!("game.exe")) }
+        .expect("the field takes the name");
+    command(IDC_EXCLUSION_ADD, BN_CLICKED);
+    step("a program added to the exclusions", true);
+    let list = control(IDC_EXCLUSIONS);
+    // SAFETY: a list of this thread; plain numbers.
+    let rows = unsafe { SendMessageW(list, LB_GETCOUNT, None, None) }.0 as usize;
+    assert!(rows >= 1, "the program is in the list");
+    // SAFETY: as above.
+    unsafe {
+        SendMessageW(
+            list,
+            LB_SETSEL,
+            Some(WPARAM(1)),
+            Some(LPARAM(rows as isize - 1)),
+        )
+    };
+    command(IDC_EXCLUSION_REMOVE, BN_CLICKED);
+    step("the program removed again", false);
+
+    // 5.
+    command(IDC_HOTKEY_CAPTURE, BN_CLICKED);
+    step("a capture armed", false);
+    let field = control(IDC_HOTKEY);
+    // SAFETY: the field of this thread; the virtual code is the whole of what the capture reads.
+    unsafe {
+        SendMessageW(
+            field,
+            WM_KEYDOWN,
+            Some(WPARAM(usize::from(VK_F9.0))),
+            Some(LPARAM(1)),
+        );
+        SendMessageW(
+            field,
+            WM_KEYUP,
+            Some(WPARAM(usize::from(VK_F9.0))),
+            Some(LPARAM(0xC000_0001_u32 as isize)),
+        );
+    }
+    step("F9 taken by the capture", true);
+
+    // 6.
+    command(IDC_APPLY, BN_CLICKED);
+    step("«Применить» pressed", false);
+
+    println!("{seen:#?}");
+    let published = applied.borrow();
+    assert_eq!(published.len(), 1, "«Применить» published once");
+    assert_eq!(
+        published[0].hotkey.key, "F9",
+        "and what it published is the key the capture took"
+    );
+
+    drop(published);
+    drop(window);
+    // SAFETY: made above on this thread.
+    let _ = unsafe { DestroyWindow(owner) };
+}
+
+/// **T-118-5 — every road of an edit reaches the comparison**, read off `src\settings.rs`.
+///
+/// The test above drives four roads on a live window; the rest are pinned here, because a road
+/// that does not end in `refresh_apply` is a road where «Применить» lies: the tick of the cycle
+/// (`LVN_ITEMCHANGED`, whose refusals sound on the machine that runs the test), the program taken
+/// by «Выбрать окно программы» (a timer), and the base taken on opening and after «Применить».
+///
+/// ⚠ Control: a procedure without the refresh after its commands is caught.
+#[test]
+fn every_road_of_an_edit_reaches_the_comparison_of_apply() {
+    let source = settings_module_source();
+    let procedure = code_lines(function_body(
+        &source,
+        "unsafe extern \"system\" fn dialog_proc(",
+    ));
+
+    let arm = |name: &str| -> String {
+        let at = procedure
+            .find(&format!("        {name} => {{"))
+            .unwrap_or_else(|| panic!("dialog_proc must handle {name}"));
+        let rest = &procedure[at..];
+        let end = rest[1..]
+            .find("\n        WM_")
+            .map_or(rest.len(), |next| next + 1);
+        rest[..end].to_owned()
+    };
+
+    for name in ["WM_COMMAND", "WM_TIMER"] {
+        assert!(
+            arm(name).contains("refresh_apply(hwnd);"),
+            "T-118-5: the arm {name} must end in the comparison of «Применить»:\n{}",
+            arm(name)
+        );
+    }
+    assert!(
+        arm("WM_NOTIFY").contains("cycle_list_item_changed(hwnd, lparam)")
+            && arm("WM_NOTIFY").contains("refresh_apply(hwnd);"),
+        "a tick of the cycle must reach the comparison"
+    );
+
+    let init = arm("WM_INITDIALOG");
+    assert!(
+        init.contains("state.applied = on_screen(hwnd, state);")
+            && init.contains("set_apply_enabled(hwnd, false);"),
+        "the window opens with the base taken off the screen and the button grey"
+    );
+
+    let capture = code_lines(function_body(&source, "unsafe fn run_capture_step("));
+    assert!(
+        capture.contains("refresh_apply(dialog);"),
+        "a key taken by the capture comes past WM_COMMAND and must reach the comparison itself"
+    );
+
+    let apply = code_lines(function_body(&source, "unsafe fn apply_now("));
+    assert!(
+        apply.contains("state.applied = updated;"),
+        "what «Применить» published is the new base"
+    );
+
+    let set = code_lines(function_body(&source, "fn set_apply_enabled("));
+    let focus = set
+        .find("focus_control(hwnd, OK_COMMAND)")
+        .expect("the focus leaves a button going grey for «ОК»");
+    let disable = set
+        .find("enable(hwnd, IDC_APPLY, enabled)")
+        .expect("the button is enabled and disabled here");
+    assert!(
+        focus < disable,
+        "the focus moves before the button goes grey — a disabled window cannot hand it on"
+    );
+
+    // Control.
+    let without = arm("WM_COMMAND").replace("refresh_apply(hwnd);", "");
+    assert!(
+        !without.contains("refresh_apply("),
+        "the sweep does not see an arm without the refresh"
+    );
 }
