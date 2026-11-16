@@ -32411,9 +32411,11 @@ fn the_modal_loop_of_the_settings_window_hands_the_letters_their_keys() {
         &letters_source,
         "pub unsafe fn filter_message(",
     ));
+    // ⚠ Задача T-118-6: the body is the common one of `widgets::keys` — the settings window reaches
+    // it through the filter of its modal loop, and no window keeps a copy.
     let ctrl_a = body
-        .find("select_all_on_ctrl_a(&open, message)")
-        .expect("filter_message must take Ctrl+A");
+        .find("widgets::keys::select_all_on_ctrl_a(message)")
+        .expect("filter_message must take Ctrl+A through the common body");
     let manager = body
         .find("IsDialogMessageW")
         .expect("filter_message must still hand the rest to the dialog manager");
@@ -32422,16 +32424,31 @@ fn the_modal_loop_of_the_settings_window_hands_the_letters_their_keys() {
         "Ctrl+A is taken before the dialog manager, which does not know the key"
     );
 
+    for (file, source) in [
+        ("letters.rs", &letters_source),
+        ("settings.rs", &settings_source),
+    ] {
+        assert!(
+            !code_lines(source).contains("fn select_all_on_ctrl_a("),
+            "src\\{file} must not keep a copy of the body of Ctrl+A (T-118-6: one body)"
+        );
+    }
+
     // A field is what says it understands `EM_SETSEL` — the dialog manager's own question — and
     // not a class name: `class_name` in `letters.rs` is a link of the capture chain T-100-2 moved
-    // to `guard` (tests\guard.rs).
-    let select_all = code_lines(function_body(&letters_source, "fn select_all_on_ctrl_a("));
+    // to `guard` (tests\guard.rs). And a window of this thread only — the program's own.
+    let widgets_source = widgets_module_source();
+    let select_all = code_lines(function_body(
+        &widgets_source,
+        "    pub fn select_all_on_ctrl_a(",
+    ));
     assert!(
         select_all.contains("WM_GETDLGCODE")
             && select_all.contains("code & DLGC_HASSETSEL as usize == 0")
-            && select_all.contains("held(VK_MENU) || held(VK_SHIFT)"),
-        "Ctrl+A is taken in a field that understands EM_SETSEL, and never with Alt (AltGr) or \
-         Shift:\n{select_all}"
+            && select_all.contains("held(VK_MENU) || held(VK_SHIFT)")
+            && select_all.contains("thread != unsafe { GetCurrentThreadId() }"),
+        "Ctrl+A is taken in a field of this thread that understands EM_SETSEL, and never with Alt \
+         (AltGr) or Shift:\n{select_all}"
     );
 
     // Controls.
@@ -32471,8 +32488,12 @@ fn holds_the_filter_for_the_loop(body: &str) -> bool {
 /// which is what `GetKeyState` answers from. A single-line field and a multi-line one.
 ///
 /// ⚠ Controls: AltGr (Ctrl+Alt — «ą» on the Polish layout), Ctrl+Shift+A and A alone select nothing;
-/// a field of a window that is not a letter is left alone; and the road of a modal loop without
+/// a field of another thread and a list box of this one are left alone (since T-118-6 the body is
+/// common to every window of the program — `widgets::keys`); and the road of a modal loop without
 /// the filter — the 1.6.0 road — selects nothing, so the selection seen with it is the filter's.
+///
+/// **T-118-6 (208.80)** — the second test of the module: «Вручную» of the settings window, by the
+/// road of that window's modal loop, and the controls of that window that are not fields.
 #[cfg(feature = "testing")]
 mod ctrl_a_in_the_fields_of_the_wizard {
     use super::{HiddenWindow, ProductImage, with_product_strings};
@@ -32620,36 +32641,229 @@ mod ctrl_a_in_the_fields_of_the_wizard {
             );
         }
 
-        // A field of a window that is not a letter: the owner is a plain popup.
+        // ⚠ Задача T-118-6: the body is common to every window of the program — a field of *this
+        // thread* is taken whoever its window is. The two things it must leave alone:
+        //
+        // 1. a field of **another thread** — a window that is not the program's;
+        let (made, handed) = std::sync::mpsc::channel::<isize>();
+        let (done, finish) = std::sync::mpsc::channel::<()>();
+        let other = std::thread::spawn(move || {
+            // SAFETY: a system class, no parent; destroyed on this thread before it ends.
+            let edit = unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("EDIT"),
+                    w!("alpha beta"),
+                    WINDOW_STYLE(0),
+                    0,
+                    0,
+                    100,
+                    20,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+            .expect("an edit of another thread");
+            let _ = made.send(edit.0 as isize);
+            // ⚠ The thread pumps while it waits, so that its field **answers** a send — a field of a
+            // thread that does not pump answers nothing, and the control would then pass for that
+            // reason and not for the rule of the thread (the first take of the break Q2 of T-118-6).
+            let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+            while finish.try_recv().is_err() {
+                // SAFETY: the ordinary pump of this thread, over its own messages.
+                unsafe {
+                    while windows::Win32::UI::WindowsAndMessaging::PeekMessageW(
+                        &mut msg,
+                        None,
+                        0,
+                        0,
+                        windows::Win32::UI::WindowsAndMessaging::PM_REMOVE,
+                    )
+                    .as_bool()
+                    {
+                        windows::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            // SAFETY: made above on this thread.
+            let _ = unsafe { DestroyWindow(edit) };
+        });
+        let foreign = HWND(handed.recv().expect("the other thread made its field") as *mut _);
+        let taken = with_keys(CTRL, || {
+            lang_switcher::widgets::keys::select_all_on_ctrl_a(&ctrl_a(foreign))
+        });
+        let _ = done.send(());
+        other.join().expect("the other thread ends");
+        assert!(
+            !taken,
+            "a field of another thread is not the program's and is left to its own window"
+        );
+
+        // 2. a window of this thread that is **not a field** — a list box answers no
+        //    `DLGC_HASSETSEL`.
         // SAFETY: a system class, a live parent of this thread; destroyed below.
-        let foreign = unsafe {
+        let list = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE(0),
-                w!("EDIT"),
+                w!("LISTBOX"),
                 None,
                 WINDOW_STYLE(WS_CHILD.0),
                 0,
                 0,
                 100,
-                20,
+                60,
                 Some(wizard.owner),
-                Some(HMENU(std::ptr::without_provenance_mut(1314))),
+                Some(HMENU(std::ptr::without_provenance_mut(1050))),
                 None,
                 None,
             )
         }
-        .expect("an edit of a window that is not a letter");
-        let length = put(foreign, "alpha beta");
-        // SAFETY: as above.
-        let taken = with_keys(CTRL, || unsafe {
-            letters::filter_message(&ctrl_a(foreign))
+        .expect("a list box of this thread");
+        let taken = with_keys(CTRL, || {
+            lang_switcher::widgets::keys::select_all_on_ctrl_a(&ctrl_a(list))
         });
-        assert!(
-            !taken && selection(foreign) == (length, length),
-            "a field of a window that is not a letter is left to its own window"
-        );
+        assert!(!taken, "a list box is not a field: Ctrl+A stays its own");
         // SAFETY: made above on this thread.
-        let _ = unsafe { DestroyWindow(foreign) };
+        let _ = unsafe { DestroyWindow(list) };
+    }
+
+    /// **T-118-6 (208.80) — Ctrl+A in «Вручную», the field of an exclusion of the settings window**,
+    /// by the road the modal loop of that window takes: its `IsDialogMessageW` with the filter of
+    /// `show_modal_dialog` in place. The window is the product's own, opened hidden through the door
+    /// `settings::testing::open_settings_hidden`.
+    ///
+    /// On `f5cb41e` it is red — «Вручную» is the classic `EDIT` of `user32`, which does not know the key,
+    /// and the filter of T-118-2 took it only in the windows of the letters.
+    #[test]
+    fn ctrl_a_selects_the_whole_text_of_the_field_of_an_exclusion() {
+        use lang_switcher::settings;
+        use windows::Win32::UI::WindowsAndMessaging::{WS_EX_TOOLWINDOW, WS_POPUP};
+        use windows::core::PCWSTR;
+
+        const IDC_EXCLUSION_NAME: i32 = 1051;
+
+        let _guard = with_product_strings();
+
+        // SAFETY: a system class, no parent, no pointer of ours; destroyed at the end.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden owner");
+        let window = settings::testing::open_settings_hidden(
+            owner,
+            ProductImage::shared().module,
+            &settings::Config::default(),
+            Box::new(|_| {}),
+        )
+        .expect("the settings window opens out of the product's template");
+        let dialog = window.window;
+        // SAFETY: the window is live until the end of the test.
+        let field = unsafe { GetDlgItem(Some(dialog), IDC_EXCLUSION_NAME) }.expect("«Вручную»");
+
+        let length = put(field, "game.exe");
+        let filter = letters::ModalLoopFilter::install();
+        // SAFETY: a message of a window of this thread, read only — the call the modal loop makes.
+        let taken = with_keys(CTRL, || {
+            unsafe { IsDialogMessageW(dialog, &ctrl_a(field)) }.as_bool()
+        });
+        let selected = selection(field);
+
+        for (what, keys) in [
+            ("AltGr", ALTGR),
+            ("Ctrl+Shift", CTRL_SHIFT),
+            ("A alone", NOTHING),
+        ] {
+            put(field, "game.exe");
+            // SAFETY: as above.
+            let _ = with_keys(keys, || unsafe { IsDialogMessageW(dialog, &ctrl_a(field)) });
+            assert_eq!(
+                selection(field),
+                (length, length),
+                "«Вручную»: {what} + A must not select the text"
+            );
+        }
+        drop(filter);
+
+        println!(
+            "«Вручную», the modal loop with the filter: taken {taken}, selection {selected:?}"
+        );
+        assert_eq!(
+            selected,
+            (0, length),
+            "208.80: Ctrl+A must select the whole text of «Вручную» in the settings window"
+        );
+
+        // Only a field of input: the other controls of the window keep the key — the list of
+        // exclusions, the list of the cycle, a combo, and the hotkey field, which answers
+        // `DLGC_STATIC` at rest and `DLGC_WANTALLKEYS` in a capture (Ctrl+A is then a press the
+        // capture judges, as before).
+        const IDC_THEME: i32 = 1003;
+        const IDC_HOTKEY: i32 = 1010;
+        const IDC_HOTKEY_CAPTURE: i32 = 1012;
+        const IDC_CYCLE_LIST: i32 = 1024;
+        const IDC_EXCLUSIONS: i32 = 1050;
+
+        let declined = |id: i32| {
+            // SAFETY: as above.
+            let control = unsafe { GetDlgItem(Some(dialog), id) }.expect("the control");
+            !with_keys(CTRL, || {
+                lang_switcher::widgets::keys::select_all_on_ctrl_a(&ctrl_a(control))
+            })
+        };
+        for (what, id) in [
+            ("the list of exclusions", IDC_EXCLUSIONS),
+            ("the list of the cycle", IDC_CYCLE_LIST),
+            ("the appearance combo", IDC_THEME),
+            ("the hotkey field at rest", IDC_HOTKEY),
+        ] {
+            assert!(
+                declined(id),
+                "{what} is not a field of input: Ctrl+A stays its own"
+            );
+        }
+
+        let arm = || {
+            // SAFETY: a message of this thread to its live window; the handle is a plain value.
+            unsafe {
+                SendMessageW(
+                    dialog,
+                    windows::Win32::UI::WindowsAndMessaging::WM_COMMAND,
+                    Some(WPARAM(IDC_HOTKEY_CAPTURE as usize)),
+                    Some(LPARAM(
+                        GetDlgItem(Some(dialog), IDC_HOTKEY_CAPTURE)
+                            .expect("the button")
+                            .0 as isize,
+                    )),
+                );
+            }
+        };
+        arm();
+        let in_capture = declined(IDC_HOTKEY);
+        arm();
+        assert!(
+            in_capture,
+            "the hotkey field in a capture: Ctrl+A is the capture's press, not a select-all"
+        );
+
+        drop(window);
+        // SAFETY: made above on this thread.
+        let _ = unsafe { DestroyWindow(owner) };
     }
 }
 

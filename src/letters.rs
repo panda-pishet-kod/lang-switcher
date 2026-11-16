@@ -3166,8 +3166,9 @@ fn window_of(kind: Kind) -> Option<HWND> {
 pub unsafe fn filter_message(message: &MSG) -> bool {
     let open: Vec<HWND> = OPEN.with_borrow(|open| open.iter().map(|(_, hwnd)| *hwnd).collect());
 
-    // Задача T-118-2: Ctrl+A — до менеджера диалога, который этой клавиши не знает.
-    if select_all_on_ctrl_a(&open, message) {
+    // Задача T-118-2: Ctrl+A — до менеджера диалога, который этой клавиши не знает. С задачи T-118-6
+    // тело общее — `widgets::keys`: его же зовёт перехватчик модального цикла для окна настроек.
+    if widgets::keys::select_all_on_ctrl_a(message) {
         return true;
     }
 
@@ -3178,110 +3179,6 @@ pub unsafe fn filter_message(message: &MSG) -> bool {
             .as_bool()
     })
 }
-
-/// **Ctrl+A в поле окна писем выделяет весь текст** — задача T-118-2, Q-208-23 п. 3, обращение
-/// SKHCQ3SA: «В текстовых полях Написать автору не везде работает сочетание Ctrl+A».
-///
-/// ⛔ **Поле `EDIT` этой программы Ctrl+A не знает вовсе — ни однострочное, ни многострочное.**
-/// Программа не берёт `comctl32` шестой версии (в манифесте его нет), и поле — классическое
-/// `EDIT` из `user32`. Замер на стенде с 1.6.0: Ctrl+A не выделил ничего ни в одном из семи полей
-/// мастера (`reports\ITOG-E118.md`). Менеджер диалога этой клавиши тоже не знает, поэтому она
-/// берётся здесь, **до** `IsDialogMessageW`, в общем теле фильтра окон писем.
-///
-/// Только `WM_KEYDOWN` клавиши A при зажатом Ctrl — и **без Alt и без Shift**: Ctrl+Alt — это
-/// AltGr, на польской раскладке AltGr+A печатает «ą», и такой набор должен дойти до поля как есть.
-/// Только поле окна этого модуля, и только такое, которое само говорит, что понимает `EM_SETSEL`:
-/// `DLGC_HASSETSEL` в ответе на `WM_GETDLGCODE` — тем же вопросом поле узнаёт менеджер диалога
-/// (замер на стенде: все семь полей мастера отвечают `0x89` или `0x8D`). Имя класса не читается:
-/// `class_name` в этом модуле — звено цепочки захвата, которую задача T-100-2 увела в `guard`.
-/// Нажатие съедается целиком: `WM_CHAR` с кодом 1, который из него сделал бы `TranslateMessage`,
-/// полю не нужен.
-///
-/// `EM_SETSEL(0, −1)` уходит полю этого же потока через `SendMessageTimeoutW` — FR-72 п. 17
-/// запрещает голый `SendMessage` во всём `src\`.
-fn select_all_on_ctrl_a(open: &[HWND], message: &MSG) -> bool {
-    use windows::Win32::UI::Controls::EM_SETSEL;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyState, VK_A, VK_CONTROL, VK_MENU, VK_SHIFT,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        DLGC_HASSETSEL, IsChild, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETDLGCODE, WM_KEYDOWN,
-    };
-
-    if message.message != WM_KEYDOWN || message.wParam.0 != usize::from(VK_A.0) {
-        return false;
-    }
-
-    // SAFETY: `GetKeyState` takes a virtual-key code and reads the key state of this thread's
-    // queue as of the message being handled; no memory of ours is touched.
-    let held = |key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe {
-        GetKeyState(i32::from(key.0)) < 0
-    };
-
-    if !held(VK_CONTROL) || held(VK_MENU) || held(VK_SHIFT) {
-        return false;
-    }
-
-    let field = message.hwnd;
-
-    // SAFETY: `window` is a live window of this module and `field` a handle out of the message;
-    // the call compares the two and answers false for anything that is not its child.
-    let ours = open
-        .iter()
-        .any(|window| unsafe { IsChild(*window, field) }.as_bool());
-
-    if !ours {
-        return false;
-    }
-
-    let mut code = 0_usize;
-
-    // NFR-13: a refused send is «not a field» — the key then goes on to the dialog manager, as it
-    // always did.
-    //
-    // SAFETY: `field` is a live control of a window of this module, on this thread; the message
-    // carries no pointer, and `code` is a live local the call writes the answer into.
-    let answered = unsafe {
-        SendMessageTimeoutW(
-            field,
-            WM_GETDLGCODE,
-            WPARAM(0),
-            LPARAM(0),
-            SMTO_ABORTIFHUNG,
-            SELECT_ALL_TIMEOUT_MS,
-            Some(&mut code),
-        )
-    }
-    .0 != 0;
-
-    if !answered || code & DLGC_HASSETSEL as usize == 0 {
-        return false;
-    }
-
-    // NFR-13: examined in words and dropped — the field is a window of this thread, the send is a
-    // direct call of its procedure, and a refusal leaves the selection as it was, which is all the
-    // key ever did before this task.
-    //
-    // SAFETY: `field` is a live control of a window of this module; the message carries two plain
-    // numbers and no pointer.
-    let _ = unsafe {
-        SendMessageTimeoutW(
-            field,
-            EM_SETSEL,
-            WPARAM(0),
-            LPARAM(-1),
-            SMTO_ABORTIFHUNG,
-            SELECT_ALL_TIMEOUT_MS,
-            None,
-        )
-    };
-
-    true
-}
-
-/// How long [`select_all_on_ctrl_a`] waits for the field — a window of this very thread, so the
-/// call is direct and the number is only the bound FR-72 asks of every send.
-const SELECT_ALL_TIMEOUT_MS: u32 = 50;
 
 thread_local! {
     /// Whether [`modal_loop_filter_proc`] is already running on this thread — задача T-118-2.
@@ -3311,12 +3208,15 @@ thread_local! {
 /// перехватчик отдаёт его общему телу [`filter_message`]: сообщение окна писем там и
 /// обрабатывается, а цикл окна настроек его пропускает. Сообщения самого окна настроек
 /// `filter_message` не берёт — `IsDialogMessageW` окна писем отвечает «не моё» на всё, что не
-/// его, — и они идут дальше, как шли. Механизм тот же, что у меню трея (`WH_CALLWNDPROC` на
+/// его, — и они идут дальше, как шли. **Кроме Ctrl+A в поле ввода — задача T-118-6** (слово
+/// владельца 208.80): первым делом `filter_message` зовёт общее тело `widgets::keys`, и оно берёт
+/// Ctrl+A в поле любого окна этого потока — так поле «Вручную» окна настроек выделяет весь текст
+/// тем же телом, что поля мастера. Механизм тот же, что у меню трея (`WH_CALLWNDPROC` на
 /// время меню, задача T-12-9): поточный, с `Drop`, который снимает его на любом пути.
 ///
 /// `None` внутри — система перехватчик не дала (NFR-13); тогда мастер, открытый из окна настроек,
-/// ведёт себя как в 1.6.0. Журналу нечего записать: в закрытом словаре `diag` строки для этого
-/// вызова нет.
+/// и поле «Вручную» ведут себя как в 1.6.0. Журналу нечего записать: в закрытом словаре `diag`
+/// строки для этого вызова нет.
 pub struct ModalLoopFilter(Option<windows::Win32::UI::WindowsAndMessaging::HHOOK>);
 
 impl ModalLoopFilter {
