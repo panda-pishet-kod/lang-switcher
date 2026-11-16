@@ -31758,3 +31758,485 @@ fn several_exclusions_are_marked_by_clicks_and_removed_at_once() {
         );
     }
 }
+
+// =========================================================================================
+// Задача T-118-1 — Q-208-23 п. 1, обращение SKHCQ3SA: «При нажатии кнопки Задать весь интерфейс
+// приложения мигает, словно оно делает перерисовку».
+// =========================================================================================
+
+/// **T-118-1 — путь захвата перерисовывает рамку своего поля и свою кнопку, а не окно целиком.**
+///
+/// До T-118-1 `toggle_capture` («Задать» и «Отмена») и `run_capture_step` (принятая клавиша, Esc,
+/// щелчок мимо, уход фокуса) кончались `widgets::repaint::whole`: стирание всего окна и всех его
+/// детей ради одной рамки, которую рисует фон окна. Окно настроек без `WS_CLIPCHILDREN`, и до
+/// своего `WM_DRAWITEM` каждый элемент один кадр отсутствовал — замер на стенде с 1.6.0 в
+/// `reports\ITOG-E118.md`. А `apply_now`, обрывающий захват на «Применить», не перерисовывал
+/// ничего: кнопка оставалась «Отмена», рамка — цвета захвата.
+///
+/// Read off `src\settings.rs`, as the other sweeps of the capture: the dialog is modal and no
+/// test raises it. The mechanics of the repaint itself are the sentry below, on a desktop of its
+/// own.
+///
+/// ⚠ Controls: the body of 1.6.0 — the same function with `whole` — is caught, and so is a body
+/// that repaints nothing at all.
+#[test]
+fn the_capture_repaints_the_frame_of_its_field_and_not_the_whole_window() {
+    let source = settings_module_source();
+
+    let path = [
+        ("toggle_capture", "unsafe fn toggle_capture("),
+        ("run_capture_step", "unsafe fn run_capture_step("),
+        ("apply_now", "unsafe fn apply_now("),
+    ];
+
+    for (name, signature) in path {
+        let body = code_lines(function_body(&source, signature));
+        println!("{name}: {} lines of code", body.lines().count());
+
+        assert!(
+            repaints_the_frame_only(&body),
+            "T-118-1: `{name}` ends or begins a capture and must repaint the frame of the hotkey \
+             field through `repaint_capture`, never the whole window:\n{body}"
+        );
+    }
+
+    // The three functions that change the session repaint nothing themselves — they run inside
+    // the borrow of the state, and the frame is repainted after it by their callers.
+    for signature in [
+        "fn arm_capture(",
+        "fn cancel_capture(",
+        "fn accept_capture(",
+    ] {
+        let body = code_lines(function_body(&source, signature));
+
+        assert!(
+            !body.contains("repaint::whole("),
+            "`{signature}` must not repaint the whole window:\n{body}"
+        );
+    }
+
+    // The frame is repainted out of the very arithmetic the background paints it with: one
+    // `field_frame`, two readers — and the button, whose `SetDlgItemTextW` moves no pixel, through
+    // the door without the erase.
+    let repaint = code_lines(function_body(&source, "pub fn repaint_capture("));
+    assert!(
+        repaint.contains("field_frame(IDC_HOTKEY, &field, field_box, list_frame_air(dpi))")
+            && repaint.contains("widgets::repaint::ring(hwnd, &frame, &field);"),
+        "the repaint must take the box from `field_frame` and mark only the ring:\n{repaint}"
+    );
+    assert!(
+        repaint.contains("widgets::repaint::control_no_erase(hwnd, IDC_HOTKEY_CAPTURE);"),
+        "the repaint must show the new label of the button — measured on 1.6.0, the label stays \
+         «Отмена» when nothing repaints the button:\n{repaint}"
+    );
+
+    let paint = code_lines(function_body(&source, "unsafe fn paint_background("));
+    assert!(
+        paint.contains("field_frame(*control, rect, field_box, (list_top, border))")
+            && !paint.contains("widgets::field::frame("),
+        "the background must draw the box through `field_frame` and not keep a copy of it"
+    );
+
+    // Controls.
+    let toggle = code_lines(function_body(&source, "unsafe fn toggle_capture("));
+    let of_160 = toggle.replace("repaint_capture(hwnd);", "widgets::repaint::whole(hwnd);");
+    assert_ne!(
+        of_160, toggle,
+        "the control must change the body it is made of"
+    );
+    assert!(
+        !repaints_the_frame_only(&of_160),
+        "the sweep does not see the body of 1.6.0 — it cannot fail"
+    );
+
+    let without = toggle.replace("repaint_capture(hwnd);", "");
+    assert!(
+        !repaints_the_frame_only(&without),
+        "the sweep does not see a body that repaints nothing"
+    );
+}
+
+/// Whether a body repaints the hotkey frame and does not repaint the whole window.
+fn repaints_the_frame_only(body: &str) -> bool {
+    body.contains("repaint_capture(") && !body.contains("repaint::whole(")
+}
+
+/// **T-118-1 — the four bands of `widgets::repaint::ring` cover the frame and nothing of the
+/// field**, pixel by pixel, at the thicknesses the settings window draws at.
+///
+/// A band reaching into the field would make the background picture paint over a child that is
+/// not told to repaint (the settings window has no `WS_CLIPCHILDREN`); a pixel of the frame left
+/// out would keep the old colour of the frame after a capture.
+#[test]
+fn the_bands_of_a_ring_cover_the_frame_and_nothing_of_the_field() {
+    use lang_switcher::widgets::repaint::ring_bands;
+    use windows::Win32::Foundation::RECT;
+
+    let rect = |left, top, right, bottom| RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+
+    let cases = [
+        // 100 %: one pixel at the sides, the 12-unit box round an 8-unit field.
+        (rect(55, 196, 211, 222), rect(56, 201, 210, 217)),
+        // 200 %: two pixels at the sides.
+        (rect(110, 392, 422, 444), rect(112, 402, 420, 434)),
+        // `MapDialogRect` refused (NFR-13): one thickness all round.
+        (rect(5, 5, 15, 15), rect(6, 6, 14, 14)),
+        // Nothing round the field at all: four empty bands.
+        (rect(5, 5, 15, 15), rect(5, 5, 15, 15)),
+    ];
+
+    for (outer, inner) in cases {
+        let bands = ring_bands(&outer, &inner);
+        let mut wrong = 0;
+
+        for y in outer.top - 3..outer.bottom + 3 {
+            for x in outer.left - 3..outer.right + 3 {
+                let inside = |r: &RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+                let covered = bands.iter().filter(|band| inside(band)).count();
+                let frame = inside(&outer) && !inside(&inner);
+
+                if covered != usize::from(frame) {
+                    wrong += 1;
+                }
+            }
+        }
+
+        println!(
+            "outer {:?} inner {:?}: {wrong} pixels covered wrongly",
+            (outer.left, outer.top, outer.right, outer.bottom),
+            (inner.left, inner.top, inner.right, inner.bottom)
+        );
+
+        assert_eq!(
+            wrong, 0,
+            "every pixel of the frame exactly once, none of the field and none outside"
+        );
+    }
+}
+
+/// **T-118-1 — the sentry of the mechanics: the frame is repainted and no child is erased.**
+///
+/// A window of the test's own stands in for the dialog **on a desktop of its own**
+/// (`CreateDesktopW` + `SetThreadDesktop`, the road of Э85 and of the sentry of T-92-1: nothing
+/// reaches the screen of the person at the machine): a popup with the hotkey field `IDC_HOTKEY`,
+/// the button beside it and the note under it. A hook of the thread counts the `WM_ERASEBKGND` of
+/// each and asks the DC of the popup's own erase whether the frame and the field are in its clip
+/// (`PtVisible`); the pump counts the `WM_PAINT` of each child.
+///
+/// `settings::repaint_capture` must erase no child, paint the button and only the button, and give
+/// the popup an erase whose clip holds the frame and not the field. The positive control —
+/// `widgets::repaint::whole`, the call of 1.6.0 — must erase every child, so the zero is the
+/// counter's answer and not its blindness.
+#[cfg(feature = "testing")]
+mod the_hotkey_frame_on_a_desktop_of_its_own {
+    use lang_switcher::settings;
+    use lang_switcher::widgets;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{HDC, PtVisible};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CWPSTRUCT, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, HMENU, MSG,
+        PM_REMOVE, PeekMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+        WH_CALLWNDPROC, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ERASEBKGND, WM_PAINT, WS_CHILD, WS_POPUP,
+        WS_VISIBLE,
+    };
+    use windows::core::{PCWSTR, w};
+
+    #[link(name = "user32", kind = "raw-dylib")]
+    unsafe extern "system" {
+        fn CreateDesktopW(
+            name: *const u16,
+            device: *const u16,
+            devmode: *const core::ffi::c_void,
+            flags: u32,
+            access: u32,
+            attributes: *const core::ffi::c_void,
+        ) -> isize;
+        fn SetThreadDesktop(desktop: isize) -> i32;
+        fn CloseDesktop(desktop: isize) -> i32;
+    }
+
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    /// `IDC_HOTKEY`, `IDC_HOTKEY_NOTE` and `IDC_HOTKEY_CAPTURE` of `app.rc`.
+    const IDC_HOTKEY: i32 = 1010;
+    const IDC_HOTKEY_NOTE: i32 = 1011;
+    const IDC_HOTKEY_CAPTURE: i32 = 1012;
+    /// The field, in the client coordinates of the popup: x, y, width, height.
+    const FIELD: (i32, i32, i32, i32) = (60, 40, 200, 16);
+
+    static POPUP: AtomicIsize = AtomicIsize::new(0);
+    static CHILDREN: [AtomicIsize; 3] = [const { AtomicIsize::new(0) }; 3];
+    static CHILD_ERASES: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+    static CHILD_PAINTS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+    static POPUP_ERASES: AtomicU32 = AtomicU32::new(0);
+    /// For every erase of the popup: (a pixel of the frame is in the clip, the centre of the
+    /// field is in the clip).
+    static CLIPS: Mutex<Vec<(bool, bool)>> = Mutex::new(Vec::new());
+
+    unsafe extern "system" fn count(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            // SAFETY: the documented payload of the hook, read only.
+            let m = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
+
+            if m.message == WM_ERASEBKGND {
+                let hwnd = m.hwnd.0 as isize;
+
+                if hwnd == POPUP.load(Ordering::SeqCst) {
+                    POPUP_ERASES.fetch_add(1, Ordering::SeqCst);
+
+                    let dc = HDC(m.wParam.0 as *mut core::ffi::c_void);
+                    let (x, y, w, h) = FIELD;
+                    // SAFETY: the DC of the erase, alive for the length of the send; read only.
+                    let (frame, field) = unsafe {
+                        (
+                            PtVisible(dc, x - 1, y + h / 2).as_bool(),
+                            PtVisible(dc, x + w / 2, y + h / 2).as_bool(),
+                        )
+                    };
+
+                    if let Ok(mut clips) = CLIPS.lock() {
+                        clips.push((frame, field));
+                    }
+                }
+
+                for (child, erases) in CHILDREN.iter().zip(&CHILD_ERASES) {
+                    if hwnd != 0 && hwnd == child.load(Ordering::SeqCst) {
+                        erases.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+        }
+
+        // SAFETY: forwards the call unchanged.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
+    }
+
+    /// Serves every message of this thread that is waiting, the paints included.
+    fn pump() {
+        let mut msg = MSG::default();
+
+        // SAFETY: the ordinary pump of this thread, over its own messages.
+        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            // `WM_PAINT` is taken from the queue and dispatched, not sent, so the hook of sent
+            // messages does not see it: counted here.
+            if msg.message == WM_PAINT {
+                for (child, paints) in CHILDREN.iter().zip(&CHILD_PAINTS) {
+                    if msg.hwnd.0 as isize == child.load(Ordering::SeqCst) {
+                        paints.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            // SAFETY: the live message just taken.
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    fn reset() {
+        POPUP_ERASES.store(0, Ordering::SeqCst);
+        for counter in CHILD_ERASES.iter().chain(&CHILD_PAINTS) {
+            counter.store(0, Ordering::SeqCst);
+        }
+        if let Ok(mut clips) = CLIPS.lock() {
+            clips.clear();
+        }
+    }
+
+    /// What one repaint did: the erases of the popup, the erases and the paints of each child (the
+    /// field, the button, the note), and the clips of the popup's erases.
+    type Seen = (u32, [u32; 3], [u32; 3], Vec<(bool, bool)>);
+
+    fn seen() -> Seen {
+        (
+            POPUP_ERASES.load(Ordering::SeqCst),
+            [0, 1, 2].map(|i| CHILD_ERASES[i].load(Ordering::SeqCst)),
+            [0, 1, 2].map(|i| CHILD_PAINTS[i].load(Ordering::SeqCst)),
+            CLIPS.lock().map(|clips| clips.clone()).unwrap_or_default(),
+        )
+    }
+
+    fn child(
+        parent: HWND,
+        class: PCWSTR,
+        id: i32,
+        rect: (i32, i32, i32, i32),
+    ) -> Result<HWND, String> {
+        // SAFETY: a system class, a live parent of this thread, no creation data.
+        unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("Pause"),
+                WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0),
+                rect.0,
+                rect.1,
+                rect.2,
+                rect.3,
+                Some(parent),
+                Some(HMENU(std::ptr::without_provenance_mut(id as usize))),
+                None,
+                None,
+            )
+        }
+        .map_err(|e| format!("a child {id}: {e}"))
+    }
+
+    /// The frame through `repaint_capture`, then the control through `repaint::whole`.
+    fn measure() -> Result<(Seen, Seen), String> {
+        let name: Vec<u16> = format!("LangSwT1181Sentry{}\0", std::process::id())
+            .encode_utf16()
+            .collect();
+
+        // SAFETY: plain values and a NUL-terminated name alive for the call.
+        let desktop = unsafe {
+            CreateDesktopW(
+                name.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                GENERIC_ALL,
+                std::ptr::null(),
+            )
+        };
+
+        if desktop == 0 {
+            return Err(
+                "CreateDesktopW refused — the sentry does not open its window on the screen of \
+                 the person at the machine"
+                    .to_owned(),
+            );
+        }
+
+        // SAFETY: this fresh thread owns no window and no hook yet.
+        if unsafe { SetThreadDesktop(desktop) } == 0 {
+            return Err("SetThreadDesktop refused".to_owned());
+        }
+
+        // SAFETY: a hook of this thread, removed below on every path that follows.
+        let hook =
+            unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(count), None, GetCurrentThreadId()) }
+                .map_err(|e| format!("the hook of the thread: {e}"))?;
+
+        // SAFETY: a system class, no parent; destroyed below with its children.
+        let popup = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("STATIC"),
+                PCWSTR::null(),
+                WINDOW_STYLE(WS_POPUP.0 | WS_VISIBLE.0),
+                0,
+                0,
+                400,
+                200,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+
+        let outcome = (|| {
+            let popup = popup.clone().map_err(|e| format!("the popup: {e}"))?;
+            POPUP.store(popup.0 as isize, Ordering::SeqCst);
+
+            let (x, y, w, h) = FIELD;
+            let children = [
+                child(popup, w!("EDIT"), IDC_HOTKEY, FIELD)?,
+                child(
+                    popup,
+                    w!("BUTTON"),
+                    IDC_HOTKEY_CAPTURE,
+                    (x + w + 8, y - 4, 70, h + 8),
+                )?,
+                child(popup, w!("STATIC"), IDC_HOTKEY_NOTE, (x, y + h + 10, w, h))?,
+            ];
+
+            for (slot, window) in CHILDREN.iter().zip(children) {
+                slot.store(window.0 as isize, Ordering::SeqCst);
+            }
+
+            // The first paint of a fresh window erases everything once — the window being shown.
+            pump();
+
+            reset();
+            settings::repaint_capture(popup);
+            pump();
+            let frame = seen();
+
+            reset();
+            widgets::repaint::whole(popup);
+            pump();
+            let whole = seen();
+
+            Ok::<_, String>((frame, whole))
+        })();
+
+        // SAFETY: made above on this thread, each released once.
+        unsafe {
+            if let Ok(popup) = popup {
+                let _ = DestroyWindow(popup);
+            }
+            let _ = UnhookWindowsHookEx(hook);
+            CloseDesktop(desktop);
+        }
+
+        POPUP.store(0, Ordering::SeqCst);
+        for slot in &CHILDREN {
+            slot.store(0, Ordering::SeqCst);
+        }
+
+        outcome
+    }
+
+    #[test]
+    fn the_frame_of_the_hotkey_field_is_repainted_without_erasing_a_single_child() {
+        let ((popup, erases, paints, clips), (whole_popup, whole_erases, whole_paints, _)) =
+            std::thread::spawn(measure)
+                .join()
+                .expect("the measuring thread must not panic")
+                .unwrap_or_else(|why| panic!("{why}"));
+
+        println!(
+            "repaint_capture: the popup erased {popup} times, clips (frame, field) {clips:?}; the \
+             field, the button and the note erased {erases:?}, painted {paints:?}; \
+             repaint::whole: the popup {whole_popup}, the children erased {whole_erases:?}, \
+             painted {whole_paints:?}"
+        );
+
+        assert!(
+            whole_erases.iter().all(|count| *count >= 1),
+            "the positive control: `repaint::whole` — the call of 1.6.0 — erases every child, \
+             {whole_erases:?}; the counter cannot see the erase of a child otherwise"
+        );
+        assert_eq!(
+            erases,
+            [0, 0, 0],
+            "SKHCQ3SA: the repaint of the capture must not erase a single child — each erase is a \
+             frame in which that element is missing"
+        );
+        assert!(
+            paints[0] == 0 && paints[1] >= 1 && paints[2] == 0,
+            "the button and only the button is repainted — its label is not shown by \
+             `SetDlgItemTextW`, the field and the note repaint themselves: {paints:?}"
+        );
+        assert!(
+            popup >= 1 && !clips.is_empty(),
+            "the frame is drawn by the background of the window, so the window must erase itself \
+             in the ring ({popup} erases)"
+        );
+        assert!(
+            clips.iter().all(|(frame, field)| *frame && !*field),
+            "every erase of the window must hold the frame and not the field: {clips:?}"
+        );
+    }
+}

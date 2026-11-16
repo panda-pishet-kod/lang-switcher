@@ -765,7 +765,7 @@ pub mod field {
 ///
 /// Перенесено из `settings.rs` задачей Т-45-2, тела не менялись.
 pub mod repaint {
-    use super::{HWND, WinError};
+    use super::{HWND, RECT, WinError};
     use windows::Win32::Graphics::Gdi::{
         InvalidateRect, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
     };
@@ -794,6 +794,9 @@ pub mod repaint {
     ///
     /// ⚠ Дверь отдельная, а не флаг у общей: окно настроек ходит прежней дорогой и остаётся при
     /// своём поведении до пикселя и до кадра (решение 107.2).
+    ///
+    /// С задачи T-118-1 через эту дверь окно настроек перерисовывает и кнопку «Задать»/«Отмена»
+    /// захвата клавиши: его owner-draw кнопки грунтуют свой прямоугольник сами с задачи T-12-6.
     pub fn control_no_erase(hwnd: HWND, control: i32) {
         invalidate(hwnd, control, false);
     }
@@ -815,6 +818,69 @@ pub mod repaint {
         let _ = unsafe { InvalidateRect(Some(window), None, erase) };
     }
 
+    /// **Собственный фон окна в полосе между двумя прямоугольниками — и ни одного ребёнка.**
+    /// Задача T-118-1, Q-208-23 п. 1 (обращение SKHCQ3SA: «весь интерфейс приложения мигает»).
+    ///
+    /// Для рамки, которую рисует **фон окна**, а не контрол: рамка поля горячей клавиши окна
+    /// настроек меняет цвет на время захвата (решение 82.6), и ради неё до T-118-1 окно
+    /// перерисовывалось целиком ([`whole`]) — стирание всех детей, кадр, в котором их нет.
+    ///
+    /// `outer` — коробка рамки, `inner` — прямоугольник контрола внутри неё, оба в клиентских
+    /// координатах `hwnd`. Помечаются четыре полосы [`ring_bands`] — над контролом, под ним, слева
+    /// и справа — **со стиранием**: фон этого окна рисует его `WM_ERASEBKGND`, и стирание здесь и
+    /// есть рисование. Промежуточного кадра оно не даёт там, где фон — готовая картинка, которую
+    /// обработчик собирает вне экрана и кладёт на экран одним `BitBlt` (`settings::BackgroundCache`).
+    /// Сам контрол в полосы не входит, поэтому окно без `WS_CLIPCHILDREN` не закрашивает его
+    /// картинкой фона, и его собственная перерисовка остаётся его делом.
+    ///
+    /// ⚠ Дверь отдельная, как [`control_no_erase`]: [`whole`] остаётся дорогой смены палитры и
+    /// языка, где меняется всё окно.
+    pub fn ring(hwnd: HWND, outer: &RECT, inner: &RECT) {
+        for band in ring_bands(outer, inner) {
+            // NFR-13: examined in words and deliberately dropped, as in `invalidate` — the call
+            // refuses only for a window that is not alive, and an empty band marks nothing.
+            //
+            // SAFETY: `hwnd` is the live window of the caller; `band` is a live local the call
+            // reads and does not keep.
+            let _ = unsafe { InvalidateRect(Some(hwnd), Some(std::ptr::from_ref(&band)), true) };
+        }
+    }
+
+    /// Четыре полосы кольца между `outer` и `inner` — над, под, слева, справа. Вместе они
+    /// покрывают `outer` без `inner`, без наложений и без единого пикселя `inner`: верх и низ
+    /// во всю ширину `outer`, бока — только по высоте `inner`. Полоса, для которой места нет,
+    /// выходит пустой (`left >= right` или `top >= bottom`), и `InvalidateRect` её не помечает.
+    ///
+    /// Pure and public: the test checks the cover pixel by pixel. Задача T-118-1.
+    pub fn ring_bands(outer: &RECT, inner: &RECT) -> [RECT; 4] {
+        [
+            RECT {
+                left: outer.left,
+                top: outer.top,
+                right: outer.right,
+                bottom: inner.top,
+            },
+            RECT {
+                left: outer.left,
+                top: inner.bottom,
+                right: outer.right,
+                bottom: outer.bottom,
+            },
+            RECT {
+                left: outer.left,
+                top: inner.top,
+                right: inner.left,
+                bottom: inner.bottom,
+            },
+            RECT {
+                left: inner.right,
+                top: inner.top,
+                right: outer.right,
+                bottom: inner.bottom,
+            },
+        ]
+    }
+
     /// Repaints every control of one contiguous identifier range — the radio ranges of task
     /// T-11-5b, the same runs `check_radio` walks in the store.
     ///
@@ -827,11 +893,13 @@ pub mod repaint {
 
     /// Repaints a window of this program and every child in it, background included.
     ///
-    /// Two occasions, one body. **A palette change** — `refresh_palette` for the settings dialog
-    /// and `refresh_about_palette` for the about window (task T-13-17) — and, since task Т-23-5,
-    /// **arming or ending a capture**: the frame of the hotkey field is drawn by the window's own
-    /// background and changes colour with the capture, and that background is a cached picture
-    /// which has to be painted again for the change to be seen.
+    /// **A palette change** — `refresh_palette` for the settings dialog and `refresh_about_palette`
+    /// for the about window (task T-13-17) — and the other changes of the whole window (a new
+    /// language, a new step of the wizard).
+    ///
+    /// ⛔ **Не захват клавиши — задача T-118-1.** С задачи Т-23-5 сюда ходили начало и конец
+    /// захвата: рамка поля горячей клавиши нарисована фоном окна и меняет цвет вместе с захватом.
+    /// Ради одной рамки моргало всё окно (обращение SKHCQ3SA); теперь рамку перерисовывает [`ring`].
     ///
     /// ⚠ **Это дорогая дорога, и она остаётся дорогой смены палитры и смены шага** — не дорогой
     /// щелчка по элементу. Щелчок перерисовывает затронутое (решение 107.5): именно

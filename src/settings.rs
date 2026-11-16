@@ -12127,13 +12127,10 @@ unsafe fn paint_background(
         // этого окна стала равна заказанным 12 единицам диалога — на этой машине 26 px вместо
         // 25 (замер `scratchpad-Э46\красное-коробки-e45.log`). Это **единственная намеренная
         // перемена пикселей окна настроек** за этап Э46.
-        let (top, bottom) = if FRAMED_LISTS.contains(control) {
-            (list_top, border)
-        } else {
-            widgets::field::air(field_box, rect.bottom - rect.top, border)
-        };
-
-        let frame = widgets::field::frame(*rect, (top, bottom), border);
+        //
+        // Задача T-118-1: арифметика коробки вынесена в [`field_frame`] — её же спрашивает
+        // [`repaint_capture`], чтобы перерисовать ровно ту рамку, которая здесь нарисована.
+        let frame = field_frame(*control, rect, field_box, (list_top, border));
 
         paint_rounded(
             dc,
@@ -12151,6 +12148,105 @@ unsafe fn paint_background(
             dpi,
         );
     }
+}
+
+/// **Коробка одного поля или списка — так, как её рисует фон окна** вокруг контрола: воздух
+/// [`list_frame_air`] над списком, центрированные [`FIELD_BOX_DLU`] вокруг поля.
+///
+/// Задача T-118-1 вынесла эту арифметику из [`paint_background`], ничего в ней не меняя, ради
+/// второго читателя — [`repaint_capture`]: перерисовывать надо ровно ту фигуру, которая
+/// нарисована, а копия этих строк рядом — это и есть то, как рамка и её перерисовка однажды
+/// разъедутся (§6.2).
+///
+/// `rect` — прямоугольник контрола в клиентских координатах окна, `field_box` — высота коробки
+/// поля в пикселях (`None` — отказ `MapDialogRect`, NFR-13), `list_top` и `border` — ответ
+/// [`list_frame_air`] на DPI рисования.
+fn field_frame(
+    control: i32,
+    rect: &RECT,
+    field_box: Option<i32>,
+    (list_top, border): (i32, i32),
+) -> RECT {
+    let (top, bottom) = if FRAMED_LISTS.contains(&control) {
+        (list_top, border)
+    } else {
+        widgets::field::air(field_box, rect.bottom - rect.top, border)
+    };
+
+    widgets::field::frame(*rect, (top, bottom), border)
+}
+
+/// **Перерисовывает то, что меняют начало и конец захвата и что само не перерисуется: рамку поля
+/// горячей клавиши и кнопку «Задать»/«Отмена» — и больше ничего.** Задача T-118-1, Q-208-23 п. 1,
+/// обращение SKHCQ3SA: «При нажатии кнопки Задать весь интерфейс приложения мигает, словно оно
+/// делает перерисовку».
+///
+/// # Почему мигало
+///
+/// Рамка поля нарисована **фоном окна** (решение 82.6: на время захвата она `box_border`), а фон —
+/// готовая картинка [`BackgroundCache`], ключ которой знает цвет этой рамки. До T-118-1 каждый
+/// конец захвата и его начало звали [`widgets::repaint::whole`]: стирание всего окна и **всех**
+/// сорока с лишним детей. Окно настроек без `WS_CLIPCHILDREN`, поэтому картинка фона ложится
+/// поверх каждого ребёнка, а owner-draw кнопка на своём `WM_ERASEBKGND` ещё и заливается кистью
+/// окна (находка Т-45-3) — до своего `WM_DRAWITEM` каждый элемент окна один кадр отсутствует. Ради
+/// одной рамки в один пиксель перерисовывалось всё окно — та же болезнь, что карточки мастера (Э45)
+/// и выключатель ленты (Э70-Б-2). Замер на стенде с 1.6.0 — в `reports\ITOG-E118.md`.
+///
+/// # Что теперь — две вещи, и обе нужны
+///
+/// 1. **Рамка:** полоса между коробкой поля ([`field_frame`] — та же арифметика, что у
+///    [`paint_background`]) и прямоугольником самого поля, [`widgets::repaint::ring`]. Ни один
+///    ребёнок не задет. Картинку фона по-прежнему собирает [`on_erase_background`] — её ключ уже
+///    видит новый цвет рамки, — и собирает вне экрана, а на экран кладёт готовые пиксели одним
+///    `BitBlt`: промежуточного кадра в полосе нет.
+/// 2. **Кнопка:** ⛔ `SetDlgItemTextW` на owner-draw кнопке меняет хранимый текст и **ни одного
+///    пикселя** — ровно как на `SS_OWNERDRAW` статике (находка Т-23-5, см. [`set_note`]). Надпись
+///    «Задать»/«Отмена» до T-118-1 показывала полная перерисовка, и ничего больше: замер на 1.6.0 —
+///    после «Применить» посреди захвата, где полной перерисовки не было, кнопка так и осталась
+///    «Отмена», а рамка — цвета захвата. Перерисовка — дверью Т-45-3, **без стирания**: кнопка
+///    окна настроек грунтует весь свой прямоугольник сама (задача T-12-6).
+///
+/// Текст поля перерисовывает сам `EDIT` на `WM_SETTEXT`, строку под полем — [`set_note`], как и
+/// до этой задачи.
+///
+/// NFR-13: когда прямоугольника поля нет (обход детей его не дал), окно перерисовывается целиком,
+/// как до T-118-1, — моргнёт, но покажет верную рамку и надпись.
+///
+/// ⚠ Звать **вне** заёма состояния: [`theme::drawing_dpi`] спрашивает шрифт окна посылкой
+/// `WM_GETFONT`.
+///
+/// Public for `tests\settings.rs`, whose sentry stands a window of its own in for the dialog on a
+/// desktop of its own and counts the erases and the paints of the children.
+pub fn repaint_capture(hwnd: HWND) {
+    let field = child_rects_in_client(hwnd)
+        .into_iter()
+        .find_map(|(control, rect)| (control == IDC_HOTKEY).then_some(rect));
+
+    let Some(field) = field else {
+        widgets::repaint::whole(hwnd);
+        return;
+    };
+
+    // Задача T-83-4: DPI рисования этого окна — с шагом его шрифта, тот же, что получит
+    // `paint_background` из DC своего `WM_ERASEBKGND`.
+    //
+    // SAFETY: `hwnd` is the live dialog; the DC is released right after the one question.
+    let dpi = unsafe {
+        let dc = GetDC(Some(hwnd));
+        let dpi = drawing_dpi(dc);
+
+        if !dc.is_invalid() {
+            ReleaseDC(Some(hwnd), dc);
+        }
+
+        dpi
+    };
+
+    let field_box = dialog_units(hwnd, 0, FIELD_BOX_DLU).map(|(_, height)| height);
+    let frame = field_frame(IDC_HOTKEY, &field, field_box, list_frame_air(dpi));
+
+    widgets::repaint::ring(hwnd, &frame, &field);
+    widgets::repaint::control_no_erase(hwnd, IDC_HOTKEY_CAPTURE);
 }
 
 // =========================================================================================
@@ -15225,7 +15321,22 @@ unsafe fn apply_now(hwnd: HWND) -> LanguageSwitch {
     // its own idea of that flag back over it.
     //
     // SAFETY: see the caller.
-    unsafe { with_state(hwnd, |state| cancel_capture(hwnd, state)) };
+    let cancelled = unsafe {
+        with_state(hwnd, |state| {
+            let armed = state.capture.is_some();
+            cancel_capture(hwnd, state);
+            armed
+        })
+    }
+    .unwrap_or(false);
+
+    // ⭐ Задача T-118-1: захват, оборванный «Применить», — тоже конец захвата, и рамка с кнопкой
+    // обязаны вернуться к покою. До неё здесь не перерисовывалось ничего: замер на 1.6.0 — после
+    // «Применить» посреди захвата кнопка оставалась «Отмена», а рамка — цвета захвата. Outside the
+    // borrow: see `repaint_capture`.
+    if cancelled {
+        repaint_capture(hwnd);
+    }
 
     // Task Т-31-2: the locale this window was **built** in, read before the publication below
     // moves it. `ui_language()` and not a field of the state, because it is the atomic the
@@ -16373,7 +16484,11 @@ unsafe fn toggle_capture(hwnd: HWND) {
     // cached picture: arming changes the colour that picture is painted with, so the picture
     // has to be built again. Both directions — the frame goes to `box_border` on arming and
     // back to `field_border` on cancelling.
-    widgets::repaint::whole(hwnd);
+    //
+    // ⭐ Задача T-118-1 (Q-208-23 п. 1, SKHCQ3SA): перерисовывается **только рамка** — до неё здесь
+    // стояла перерисовка всего окна со всеми детьми, и окно моргало целиком на каждом «Задать» и
+    // «Стоп». Outside the borrow, as the `SetFocus` above: see `repaint_capture`.
+    repaint_capture(hwnd);
 }
 
 /// Arms a capture: the conversion path stops, the field shows the invitation, the note shows
@@ -16628,8 +16743,10 @@ unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
         })
     };
 
+    // Задача T-118-1: только рамка поля, а не всё окно — см. `toggle_capture`. Принятая клавиша,
+    // Esc, щелчок мимо и уход фокуса кончают захват здесь.
     if ends {
-        widgets::repaint::whole(dialog);
+        repaint_capture(dialog);
     }
 }
 
