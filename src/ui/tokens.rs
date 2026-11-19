@@ -739,3 +739,68 @@ pub mod shape {
     /// ◆ The corner mark of a choice field: its width; it is half as high.
     pub const CHEVRON: Em = Em(0.6);
 }
+
+/// ◆ The one movement of the shell (TZ-UI-SHELL: «Движение»): a window in the corner appears from
+/// the side of the screen it stands at — the mock-up's `nw-in` (letters.html: `.34s
+/// cubic-bezier(.2, .9, .3, 1)`, `translateX(28px)`). Without movement when Windows has its
+/// animation off. Kept apart: not a row of the passport tables.
+pub mod motion {
+    use super::Pt;
+
+    /// ◆ How long the window comes in, ms.
+    pub const APPEAR_MS: u32 = 340;
+    /// ◆ How far it comes from.
+    pub const APPEAR_SLIDE: Pt = Pt(28.0);
+    /// One step of the movement, ms.
+    pub const FRAME_MS: u32 = 16;
+    /// ◆ The window in the corner keeps this far from the edges of the work area (the mock-up:
+    /// `right: 12px`, `bottom: 60px` over a taskbar of 48).
+    pub const POPUP_MARGIN: Pt = Pt(12.0);
+    /// ◆ The curve of the movement.
+    pub const EASE: Bezier = Bezier {
+        x1: 0.2,
+        y1: 0.9,
+        x2: 0.3,
+        y2: 1.0,
+    };
+
+    /// A cubic Bézier curve from (0, 0) to (1, 1), as CSS writes it.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Bezier {
+        pub x1: f32,
+        pub y1: f32,
+        pub x2: f32,
+        pub y2: f32,
+    }
+
+    impl Bezier {
+        /// The progress of the curve at the share of time `time` (0…1).
+        pub fn at(self, time: f32) -> f32 {
+            let time = time.clamp(0.0, 1.0);
+            let point = |t: f32, a: f32, b: f32| {
+                let u = 1.0 - t;
+                3.0 * u * u * t * a + 3.0 * u * t * t * b + t * t * t
+            };
+            // The parameter whose x is `time`, by halving: the curve's x only grows.
+            let (mut low, mut high) = (0.0_f32, 1.0_f32);
+            for _ in 0..24 {
+                let middle = (low + high) / 2.0;
+                if point(middle, self.x1, self.x2) < time {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            point((low + high) / 2.0, self.y1, self.y2)
+        }
+    }
+
+    /// The share of [`APPEAR_SLIDE`] still to go `elapsed_ms` after the window appeared: 1 at the
+    /// start, 0 from [`APPEAR_MS`]; 0 at once when `moves` is false (Windows' animation off).
+    pub fn remaining(elapsed_ms: u32, moves: bool) -> f32 {
+        if !moves || elapsed_ms >= APPEAR_MS {
+            return 0.0;
+        }
+        1.0 - EASE.at(elapsed_ms as f32 / APPEAR_MS as f32)
+    }
+}

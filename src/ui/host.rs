@@ -30,6 +30,13 @@
 //! * **Live:** a change of the theme of Windows or of the content's own setting, of the scale
 //!   (`WM_DPICHANGED`, the rectangle the system offers) and of the language lays out and draws
 //!   again in the same window.
+//! * **A popup** ([`open_popup`], T-120-14): no caption and no button on the task bar, above the
+//!   windows, the roundness (Windows 11) and the shadow of the system; it stands in the corner of
+//!   the work area nearest the icons of the taskbar — measured: the program's icon the caller gives
+//!   (`Shell_NotifyIconGetRect`), else the end of the taskbar (`SHAppBarMessage`) the interface of
+//!   Windows reads to ([`corner`]) — and comes in from its side in 0,34 s, or stands at once when
+//!   Windows' animation is off. It takes no focus, a click neither; Esc closes it when the keys
+//!   reach it.
 //! * No movement in the large windows.
 //!
 //! FR-72: the host sends no message to another window at all.
@@ -41,20 +48,27 @@ use crate::ui::canvas::{Canvas, POINT_DPI, Rect};
 use crate::ui::elements::{self, Look, State, hit_area, input_fill};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
-use crate::ui::layout::{Layout, ListView, Part, client_size, window_size};
+use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_size};
 use crate::ui::scene::{ButtonKind, Event, Window};
 use crate::ui::text::{Direction, Style, Text};
+use crate::ui::tokens::motion;
 use crate::ui::tokens::{
-    Color, FIELD_PAD, LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, Theme, WINDOW_MAX, WINDOW_MIN,
+    CORNER_WIDTH, Color, FIELD_PAD, LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, Theme, WINDOW_MAX,
+    WINDOW_MIN,
 };
 use ::windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use ::windows::Win32::Globalization::{
+    GetLocaleInfoEx, GetUserDefaultUILanguage, LCIDToLocaleName, LOCALE_IREADINGLAYOUT,
+    LOCALE_RETURN_NUMBER,
+};
 use ::windows::Win32::Graphics::Dwm::{
-    DWMWA_CAPTION_COLOR, DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR, DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use ::windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetDC, GetDeviceCaps, GetMonitorInfoW, HDC, InvalidateRect, LOGPIXELSY,
-    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, ReleaseDC,
-    ScreenToClient,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, PAINTSTRUCT,
+    ReleaseDC, ScreenToClient,
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use ::windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -63,20 +77,28 @@ use ::windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP,
 };
+use ::windows::Win32::UI::Shell::{
+    ABE_LEFT, ABE_RIGHT, ABM_GETTASKBARPOS, APPBARDATA, SHAppBarMessage,
+};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, EN_CHANGE,
-    EN_KILLFOCUS, EN_SETFOCUS, GWLP_USERDATA, GetClientRect, GetCursorPos, GetWindowLongPtrW,
-    GetWindowRect, HTCLIENT, IDC_ARROW, IDC_HAND, LoadCursorW, MINMAXINFO, PostMessageW,
-    RegisterClassExW, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, WHEEL_DELTA, WM_CLOSE, WM_COMMAND, WM_CTLCOLOREDIT,
-    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
-    WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WNDCLASSEXW, WS_CAPTION,
-    WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
+    CREATESTRUCTW, CS_DBLCLKS, CS_DROPSHADOW, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    EN_CHANGE, EN_KILLFOCUS, EN_SETFOCUS, GWLP_USERDATA, GetClientRect, GetCursorPos,
+    GetWindowLongPtrW, GetWindowRect, HTCLIENT, HWND_TOPMOST, IDC_ARROW, IDC_HAND, KillTimer,
+    LoadCursorW, MA_NOACTIVATE, MINMAXINFO, PostMessageW, RegisterClassExW,
+    SPI_GETCLIENTAREAANIMATION, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE,
+    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursor, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, WHEEL_DELTA, WM_CLOSE, WM_COMMAND,
+    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE,
+    WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
+    WS_THICKFRAME,
 };
 use ::windows::core::{BOOL, HSTRING, PCWSTR, Result as WinResult, w};
 use std::cell::RefCell;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 /// What the window keeps: its host, borrowed by one message at a time. A message that arrives while
 /// another is being handled (a size sent by `SetWindowPos`, a box the content opens) is answered
@@ -139,6 +161,141 @@ trait Handler {
         lparam: LPARAM,
     ) -> Option<LRESULT>;
     fn probe(&self) -> Probe;
+    /// Sizes and places the window just made: an ordinary one on the monitor under the mouse, a
+    /// popup in its corner.
+    fn settle(&mut self, hwnd: HWND);
+    /// Starts the popup's coming in, or puts it in its place at once when `moves` is false.
+    fn appear(&mut self, hwnd: HWND, moves: bool);
+}
+
+/// What a popup keeps: where it stands and how it comes in.
+struct Popup {
+    /// The rectangle of the program's icon, when the caller measured it.
+    anchor: Option<RECT>,
+    /// Where the window stands once it has come in, screen pixels.
+    at: (i32, i32),
+    /// Its corner is on the right of the work area: it comes from the right.
+    from_right: bool,
+    /// When it began to come in; none once it stands.
+    since: Option<Instant>,
+}
+
+/// The one timer of a window of the shell: the steps of a popup coming in.
+const APPEAR_TIMER: usize = 1;
+
+/// Where a popup stands, its left-top in screen pixels: in the corner of the work area `work`
+/// nearest the notification area `anchor` (the program's icon, or the end of the taskbar where the
+/// icons are), `margin` from the edges — by Windows, not «the lower right corner» (passport §7).
+pub fn corner(anchor: RECT, work: RECT, size: (i32, i32), margin: i32) -> (i32, i32) {
+    let (w, h) = size;
+    let right = anchor.left + anchor.right >= work.left + work.right;
+    let bottom = anchor.top + anchor.bottom >= work.top + work.bottom;
+    let x = if right {
+        work.right - margin - w
+    } else {
+        work.left + margin
+    };
+    let y = if bottom {
+        work.bottom - margin - h
+    } else {
+        work.top + margin
+    };
+    (
+        x.clamp(work.left, (work.right - w).max(work.left)),
+        y.clamp(work.top, (work.bottom - h).max(work.top)),
+    )
+}
+
+/// Whether Windows moves what it shows («Показывать анимацию в Windows»).
+fn animation_on() -> bool {
+    let mut on = BOOL::from(true);
+    // SAFETY: the out parameter is a local of the size the action writes.
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut on).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS::default(),
+        )
+    };
+    read.is_err() || on.as_bool()
+}
+
+/// Whether the interface of Windows reads right to left: its icons then stand at the left end of a
+/// taskbar along the bottom or the top.
+fn windows_reads_right_to_left() -> bool {
+    // SAFETY: reads the language of the interface of the person.
+    let language = u32::from(unsafe { GetUserDefaultUILanguage() });
+    // SAFETY: asks the length first, then fills a local of that length.
+    let length = unsafe { LCIDToLocaleName(language, None, 0) };
+    let mut name = vec![0_u16; usize::try_from(length).unwrap_or(0)];
+    // SAFETY: as above.
+    if unsafe { LCIDToLocaleName(language, Some(&mut name), 0) } == 0 {
+        return false;
+    }
+    // `LOCALE_RETURN_NUMBER`: the answer is a number in the first two places.
+    let mut layout = [0_u16; 2];
+    // SAFETY: the name is the terminated string just read; the answer goes into a local.
+    let read = unsafe {
+        GetLocaleInfoEx(
+            PCWSTR(name.as_ptr()),
+            LOCALE_IREADINGLAYOUT | LOCALE_RETURN_NUMBER,
+            Some(&mut layout),
+        )
+    };
+    read != 0 && layout[0] == 1
+}
+
+/// The notification area when the caller did not measure the icon: the end of the taskbar where
+/// the icons stand (`SHAppBarMessage`), or — no taskbar — the end of the bottom of the work area
+/// under the mouse.
+fn notification_area() -> RECT {
+    let at_start = windows_reads_right_to_left();
+    let mut bar = APPBARDATA {
+        cbSize: size_of::<APPBARDATA>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the structure is a local whose size it carries.
+    if unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut bar) } != 0 {
+        let rc = bar.rc;
+        return match bar.uEdge {
+            // A taskbar on a side: the icons at its bottom.
+            ABE_LEFT | ABE_RIGHT => RECT {
+                top: rc.bottom,
+                ..rc
+            },
+            _ if at_start => RECT {
+                right: rc.left,
+                ..rc
+            },
+            _ => RECT {
+                left: rc.right,
+                ..rc
+            },
+        };
+    }
+    let mut cursor = POINT::default();
+    // SAFETY: the out parameter is a local.
+    let _ = unsafe { GetCursorPos(&mut cursor) };
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the monitor nearest the mouse; the out parameter is a local.
+    let _ = unsafe {
+        GetMonitorInfoW(
+            MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST),
+            &mut info,
+        )
+    };
+    let work = info.rcWork;
+    let x = if at_start { work.left } else { work.right };
+    RECT {
+        left: x,
+        top: work.bottom,
+        right: x,
+        bottom: work.bottom,
+    }
 }
 
 struct Host<C: Content> {
@@ -165,19 +322,31 @@ struct Host<C: Content> {
     fields: Fields<C::Id>,
     /// What the wheel turned short of a whole notch.
     wheel: i32,
+    /// The window is a popup: no caption, in the corner, not taking the focus.
+    popup: Option<Popup>,
 }
 
-/// The class of every window of the shell.
-fn class() -> PCWSTR {
-    static ATOM: OnceLock<u16> = OnceLock::new();
-    let name = w!("LangSwitcher.Shell");
+/// The class of the windows of the shell: the ordinary one, or the popup's, which carries the
+/// shadow of the system (on Windows 10 the only one there is).
+fn class(popup: bool) -> PCWSTR {
+    static ORDINARY: OnceLock<u16> = OnceLock::new();
+    static POPUP: OnceLock<u16> = OnceLock::new();
+    let (atom, name, style) = if popup {
+        (
+            &POPUP,
+            w!("LangSwitcher.Shell.Popup"),
+            CS_DBLCLKS | CS_DROPSHADOW,
+        )
+    } else {
+        (&ORDINARY, w!("LangSwitcher.Shell"), CS_DBLCLKS)
+    };
 
-    ATOM.get_or_init(|| {
+    atom.get_or_init(|| {
         // SAFETY: the module of this process; the class is registered once, its name a static.
         let instance = unsafe { GetModuleHandleW(None) }.unwrap_or_default();
         let class = WNDCLASSEXW {
             cbSize: size_of::<WNDCLASSEXW>() as u32,
-            style: CS_DBLCLKS,
+            style,
             lpfnWndProc: Some(procedure),
             hInstance: instance.into(),
             // SAFETY: a system cursor.
@@ -207,24 +376,72 @@ pub fn open<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<
 /// Makes the window of `content` and places it, without showing it: the tests send it messages
 /// with nothing on the screen.
 pub fn create<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<HWND> {
+    make(content, owner, None)
+}
+
+/// Opens `content` as a popup of the shell (T-120-14): no caption and no button on the task bar,
+/// above the windows, without taking the focus, in the corner of the work area nearest the icons of
+/// the taskbar; it comes in from its side in 0,34 s, or stands at once when Windows' animation is
+/// off. `anchor` — the rectangle of the program's icon (`Shell_NotifyIconGetRect`), when the caller
+/// has it; else the end of the taskbar where the icons are.
+pub fn open_popup<C: Content + 'static>(content: C, anchor: Option<RECT>) -> WinResult<HWND> {
+    let hwnd = create_popup(content, anchor)?;
+    if let Some(mut host) = slot_of(hwnd).and_then(|slot| slot.try_borrow_mut().ok()) {
+        host.appear(hwnd, animation_on());
+    }
+    cloak(hwnd, true);
+    // SAFETY: a live window of this thread; shown without taking the focus.
+    let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+    paint_now(hwnd);
+    cloak(hwnd, false);
+    Ok(hwnd)
+}
+
+/// Makes the popup of `content` and places it in its corner, without showing it.
+pub fn create_popup<C: Content + 'static>(content: C, anchor: Option<RECT>) -> WinResult<HWND> {
+    let popup = Popup {
+        anchor,
+        at: (0, 0),
+        from_right: true,
+        since: None,
+    };
+    make(content, None, Some(popup))
+}
+
+fn make<C: Content + 'static>(
+    content: C,
+    owner: Option<HWND>,
+    popup: Option<Popup>,
+) -> WinResult<HWND> {
     let title = HSTRING::from(content.title());
-    let slot: Box<Slot> = Box::new(RefCell::new(Box::new(Host::new(content))));
+    let is_popup = popup.is_some();
+    let mut host = Host::new(content);
+    host.popup = popup;
+    let slot: Box<Slot> = Box::new(RefCell::new(Box::new(host)));
     let raw = Box::into_raw(slot);
 
-    // SAFETY: the class is registered; `raw` reaches `WM_NCCREATE`, which keeps it in the window,
-    // and `WM_NCDESTROY` frees it. On a refusal no message carried it and it is freed here.
-    let made = unsafe {
-        CreateWindowExW(
+    // The fields of Windows are children: the frame of the canvas goes round them.
+    let (extended, style) = if is_popup {
+        (WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WS_POPUP | WS_CLIPCHILDREN)
+    } else {
+        (
             WS_EX_APPWINDOW,
-            class(),
-            &title,
-            // The fields of Windows are children: the frame of the canvas goes round them.
             WS_OVERLAPPED
                 | WS_CAPTION
                 | WS_SYSMENU
                 | WS_MINIMIZEBOX
                 | WS_THICKFRAME
                 | WS_CLIPCHILDREN,
+        )
+    };
+    // SAFETY: the class is registered; `raw` reaches `WM_NCCREATE`, which keeps it in the window,
+    // and `WM_NCDESTROY` frees it. On a refusal no message carried it and it is freed here.
+    let made = unsafe {
+        CreateWindowExW(
+            extended,
+            class(is_popup),
+            &title,
+            style,
             0,
             0,
             0,
@@ -237,7 +454,22 @@ pub fn create<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResul
     };
     match made {
         Ok(hwnd) => {
-            place(hwnd);
+            if is_popup {
+                // The roundness of the system (Windows 11); Windows 10 refuses the attribute.
+                let round = DWMWCP_ROUND;
+                // SAFETY: a documented attribute of DWM with a value of its size, a local.
+                let _ = unsafe {
+                    DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        (&raw const round).cast(),
+                        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+                    )
+                };
+            }
+            if let Some(mut host) = slot_of(hwnd).and_then(|slot| slot.try_borrow_mut().ok()) {
+                host.settle(hwnd);
+            }
             Ok(hwnd)
         }
         Err(error) => {
@@ -421,6 +653,104 @@ impl<C: Content> Host<C> {
             pictures: Some(Box::new(crate::ui::art::Art::new())),
             fields: Fields::default(),
             wheel: 0,
+            popup: None,
+        }
+    }
+
+    /// The popup's size in points: the width of the window in the corner, the height its content
+    /// takes (laid out twice: the type size follows the height).
+    fn popup_size(&self) -> (f32, f32) {
+        let w = CORNER_WIDTH.0;
+        let mut h = WINDOW_MIN.h.0;
+        if let Some(text) = self.text.as_ref() {
+            for _ in 0..2 {
+                let size = client_size(w, h);
+                let k = fit::k_for(&self.locale, size.class);
+                let layout = lay_out(&self.window, size, k, self.rtl, text);
+                h = (h + layout.shortfall.h).max(1.0);
+            }
+        }
+        (w, h)
+    }
+
+    /// Sizes the popup to its content and puts it in its corner — moved by what it still has to
+    /// come in.
+    fn place_popup(&mut self, hwnd: HWND) {
+        let (w, h) = self.popup_size();
+        let scale = self.scale;
+        let px = |points: f32| (points * scale).round() as i32;
+        let Some(popup) = self.popup.as_mut() else {
+            return;
+        };
+        let anchor = popup.anchor.unwrap_or_else(notification_area);
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: the monitor of the anchor; the out parameter is a local.
+        let _ = unsafe {
+            GetMonitorInfoW(
+                MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST),
+                &mut info,
+            )
+        };
+        let work = info.rcWork;
+        let size = (px(w), px(h));
+        popup.at = corner(anchor, work, size, px(motion::POPUP_MARGIN.0));
+        popup.from_right = popup.at.0 * 2 + size.0 >= work.left + work.right;
+        let left = popup
+            .since
+            .map_or(0.0, |since| motion::remaining(elapsed_ms(since), true));
+        let x = popup.at.0 + slide_px(left, scale, popup.from_right);
+        // SAFETY: a live window of this thread; plain values.
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                x,
+                popup.at.1,
+                size.0,
+                size.1,
+                SWP_NOACTIVATE,
+            )
+        };
+        self.layout = None;
+        // The size the move sends was answered by Windows (the host is borrowed): the canvas takes
+        // the new client area here.
+        let mut client = RECT::default();
+        // SAFETY: the out parameter is a local.
+        let _ = unsafe { GetClientRect(hwnd, &mut client) };
+        if let Some(canvas) = self.canvas.as_mut() {
+            canvas.resize(client.right.max(1) as u32, client.bottom.max(1) as u32);
+        }
+    }
+
+    /// One step of the popup coming in; the timer stops when it stands.
+    fn step_in(&mut self, hwnd: HWND) {
+        let scale = self.scale;
+        let Some(popup) = self.popup.as_mut() else {
+            return;
+        };
+        let left = popup
+            .since
+            .map_or(0.0, |since| motion::remaining(elapsed_ms(since), true));
+        let x = popup.at.0 + slide_px(left, scale, popup.from_right);
+        // SAFETY: a live window of this thread; plain values.
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                x,
+                popup.at.1,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+        if left <= 0.0 {
+            popup.since = None;
+            // SAFETY: the window's own timer.
+            let _ = unsafe { KillTimer(Some(hwnd), APPEAR_TIMER) };
         }
     }
 
@@ -793,6 +1123,10 @@ impl<C: Content> Host<C> {
         }
         self.rebuild();
         self.read_theme(hwnd);
+        if self.popup.is_some() {
+            // What the popup shows may take another height.
+            self.place_popup(hwnd);
+        }
         invalidate(hwnd);
         true
     }
@@ -918,6 +1252,17 @@ impl<C: Content> Host<C> {
     }
 }
 
+/// The milliseconds since `since`.
+fn elapsed_ms(since: Instant) -> u32 {
+    u32::try_from(since.elapsed().as_millis()).unwrap_or(u32::MAX)
+}
+
+/// The share `left` of the slide of a popup in pixels, towards the side it comes from.
+fn slide_px(left: f32, scale: f32, from_right: bool) -> i32 {
+    let px = (motion::APPEAR_SLIDE.0 * scale * left).round() as i32;
+    if from_right { px } else { -px }
+}
+
 fn invalidate(hwnd: HWND) {
     // SAFETY: a live window; the whole client area, without erasing.
     let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
@@ -947,6 +1292,13 @@ impl<C: Content> Handler for Host<C> {
                 None
             }
             WM_ERASEBKGND => Some(LRESULT(1)),
+            WM_TIMER if wparam.0 == APPEAR_TIMER => {
+                self.step_in(hwnd);
+                Some(LRESULT(0))
+            }
+            // A click answers in a popup without taking the focus from the window the person types
+            // in (FR-101, as the window in the corner of E119).
+            WM_MOUSEACTIVATE if self.popup.is_some() => Some(LRESULT(MA_NOACTIVATE as isize)),
             WM_PAINT => {
                 let mut paint = PAINTSTRUCT::default();
                 // SAFETY: a live window; the structure is a local, ended below.
@@ -966,7 +1318,7 @@ impl<C: Content> Handler for Host<C> {
                 invalidate(hwnd);
                 Some(LRESULT(0))
             }
-            WM_GETMINMAXINFO => {
+            WM_GETMINMAXINFO if self.popup.is_none() => {
                 // SAFETY: for this message `lparam` is the system's `MINMAXINFO`, writable.
                 let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
                 let (frame_w, frame_h) = frame_of(hwnd);
@@ -987,6 +1339,12 @@ impl<C: Content> Handler for Host<C> {
                     canvas.set_scale(self.scale);
                 }
                 self.layout = None;
+                if self.popup.is_some() {
+                    // A popup keeps its corner: sized again, not where the system offers.
+                    self.place_popup(hwnd);
+                    invalidate(hwnd);
+                    return Some(LRESULT(0));
+                }
                 // SAFETY: for this message `lparam` is the rectangle the system offers.
                 let offer = unsafe { *(lparam.0 as *const RECT) };
                 // SAFETY: a live window of this thread; plain values.
@@ -1155,6 +1513,27 @@ impl<C: Content> Handler for Host<C> {
             }
             _ => None,
         }
+    }
+
+    fn settle(&mut self, hwnd: HWND) {
+        if self.popup.is_some() {
+            self.place_popup(hwnd);
+        } else {
+            place(hwnd);
+        }
+    }
+
+    fn appear(&mut self, hwnd: HWND, moves: bool) {
+        let Some(popup) = self.popup.as_mut() else {
+            return;
+        };
+        if !moves {
+            return;
+        }
+        popup.since = Some(Instant::now());
+        self.step_in(hwnd);
+        // SAFETY: the window's own timer, stopped by `step_in` when the window stands.
+        let _ = unsafe { SetTimer(Some(hwnd), APPEAR_TIMER, motion::FRAME_MS, None) };
     }
 
     fn probe(&self) -> Probe {
