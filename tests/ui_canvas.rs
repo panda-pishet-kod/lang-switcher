@@ -396,3 +396,46 @@ fn the_ring_around_a_picture_is_the_background_six_points_wide() {
         );
     }
 }
+
+/// The picture of the panda through `art.rs`: not the ground of the stand-in, twice as large at
+/// 200 % and as sharp as a picture drawn afresh there — the same `Art` drew it at 100 % first.
+#[test]
+fn a_picture_at_two_hundred_percent_is_twice_as_large_and_as_sharp_as_a_fresh_one() {
+    use lang_switcher::ui::art::Art;
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    // `Art` keeps each finished picture with the render target that made it, past the canvas in
+    // memory: COM must outlive both, or the release of WIC's objects after the canvas left COM
+    // reads freed memory. A window's target is not WIC's; this is a property of the canvases
+    // in memory, the tests' own.
+    // SAFETY: the apartment of this test's thread, entered for the whole test.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+
+    let theme = Theme::Light;
+    let ground = Color::Accent.get(Theme::Dark);
+    let draw = |art: &mut Art, scale: f32| {
+        let mut canvas = Canvas::in_memory(100.0, 100.0, scale, Mode::Direct2D).expect("a canvas");
+        canvas.frame_with(Some(art), |painter| {
+            painter.clear(Color::Bg.get(theme));
+            painter.picture("about", 50.0, 50.0, 40.0);
+        });
+        canvas.image().expect("pixels")
+    };
+
+    let mut art = Art::new();
+    let one = draw(&mut art, 1.0);
+    let two = draw(&mut art, 2.0);
+    let fresh = draw(&mut Art::new(), 2.0);
+
+    assert!(
+        one.pixels()
+            .iter()
+            .any(|pixel| *pixel != ground && *pixel != Color::Bg.get(theme)),
+        "the picture, not the stand-in"
+    );
+    assert_eq!((two.width, two.height), (one.width * 2, one.height * 2));
+    assert!(
+        two == fresh,
+        "at 200 % the picture is drawn for 200 %, not stretched from 100 %"
+    );
+}

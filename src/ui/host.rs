@@ -140,7 +140,7 @@ struct Host<C: Content> {
     tracking: bool,
     frames: u32,
     background: Option<Rgb>,
-    /// What draws the pictures of the panda; none until `art.rs` is in (T-120-8).
+    /// What draws the pictures of the panda: `art.rs`, its pictures kept at their size and scale.
     pictures: Option<Box<dyn crate::ui::canvas::Pictures>>,
 }
 
@@ -389,7 +389,7 @@ impl<C: Content> Host<C> {
             tracking: false,
             frames: 0,
             background: None,
-            pictures: None,
+            pictures: Some(Box::new(crate::ui::art::Art::new())),
         }
     }
 

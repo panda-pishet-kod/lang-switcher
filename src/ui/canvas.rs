@@ -766,6 +766,19 @@ pub trait Pictures {
     ) -> WinResult<()>;
 }
 
+/// The pictures of `resrt`, kept finished by `art.rs` at their size and scale.
+impl Pictures for crate::ui::art::Art {
+    fn draw(
+        &mut self,
+        target: &ID2D1RenderTarget,
+        name: &str,
+        centre: (f32, f32),
+        radius: f32,
+    ) -> WinResult<()> {
+        crate::ui::art::Art::draw(self, target, name, centre, radius)
+    }
+}
+
 /// What a frame draws with. Lengths are points at 100 %; colours come from the style table.
 pub struct Painter<'a, 'o> {
     scale: f32,
