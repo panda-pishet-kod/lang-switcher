@@ -2247,7 +2247,7 @@ fn position_15_switched_off() -> Vec<Row> {
     );
     row.actual = SELECTION_SWITCHED_OFF.to_owned();
     row.note = "FR-65 — первые ворота wants_selection_path: продукт не посылает Ctrl+C, пока \
-                снята галка «Конвертировать выделенный текст»; включите её в настройках и \
+                снята галка «Исправлять выделенный текст»; включите её в настройках и \
                 повторите прогон"
         .to_owned();
     vec![row]

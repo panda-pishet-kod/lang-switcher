@@ -935,7 +935,7 @@ fn only_the_read_button_makes_a_news_item_read() {
     letters::after_shown(&mut state, Letter::News(12), arrived, "0.39.0");
     assert!(
         letters::has_unread_news(&state, feed),
-        "«Позже» left it unread"
+        "«Напомнить позже» left it unread"
     );
 
     letters::mark_read(&mut state, 12);
@@ -2620,10 +2620,10 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
         "«Открыть страницу поддержки» and «Открыть канал» are live once their addresses are real \
          (П7, П8; решение 139.2)"
     );
-    assert!(thanks.left.is_some(), "«Напомнить через неделю» is offered");
+    assert!(thanks.left.is_some(), "«Напомнить позже» is offered");
     assert!(
         !thanks.foot.is_empty(),
-        "and the letter says it is shown once"
+        "and the letter says it comes once and can be put off once, for a week"
     );
 
     // FR-101: the snooze is offered once. The second showing has no button in its place.
@@ -2693,7 +2693,7 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     );
     assert!(
         !plan.foot.is_empty(),
-        "the line under it says what «Позже» promises — FR-101, word for word from the mock-up"
+        "the line under it says what «Напомнить позже» promises — FR-101, word for word from the mock-up"
     );
 
     // **Task T-41-1, finding С52 — the road an empty address already took.** A news entry whose
