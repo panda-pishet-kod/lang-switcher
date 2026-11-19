@@ -6411,10 +6411,12 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     // `tools\verify-version.ps1` holds the ten places to it — this assertion is the reader of the
     // bytes `rc.exe` really produced, and the one the instrument cannot see: it is raised **by
     // hand**, and that is what makes it the honest red before a version bump.
+    // Stage E119 (the flag of the layout, the window «Обновлено») is `1.8.0.0` on the branch
+    // `release/1.8.0`: 1.7.0 does not go out on its own (решения 208.143, 208.144).
     assert_eq!(
         version,
-        Some((1, 6, 1, 0)),
-        "app.rc must declare FILEVERSION 1,6,1,0 — version 1.6.1, the fourth field always 0 (решение 192.3)"
+        Some((1, 8, 0, 0)),
+        "app.rc must declare FILEVERSION 1,8,0,0 — version 1.8.0, the fourth field always 0 (решение 192.3)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process
