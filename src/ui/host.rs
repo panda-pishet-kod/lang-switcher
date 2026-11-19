@@ -108,6 +108,8 @@ pub struct Probe {
     /// The background of the last frame.
     pub background: Option<Rgb>,
     pub scale: f32,
+    /// The factor of the type size the window is laid out at.
+    pub k: Option<f32>,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -454,7 +456,10 @@ impl<C: Content> Host<C> {
             client.right as f32 / self.scale,
             client.bottom as f32 / self.scale,
         );
-        self.layout = Some(fit::emergency(&self.window, size, 1.0, self.rtl, text));
+        // k comes from the table of the language and class (T-120-11); the road of last resort
+        // lowers it further only for content that still does not fit here.
+        let k = fit::k_for(&self.locale, size.class);
+        self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
     }
 
     fn state_of(&self, index: usize, id: Option<C::Id>) -> State {
@@ -886,6 +891,7 @@ impl<C: Content> Handler for Host<C> {
             frames: self.frames,
             background: self.background,
             scale: self.scale,
+            k: self.layout.as_ref().map(|layout| layout.k),
         }
     }
 }

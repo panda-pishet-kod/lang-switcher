@@ -8,7 +8,7 @@
 //! Knows nothing of Direct2D.
 
 use crate::diag;
-use crate::ui::layout::{Layout, WindowSize, lay_out};
+use crate::ui::layout::{Class, Layout, WindowSize, lay_out};
 use crate::ui::scene::Window;
 use crate::ui::text::Measure;
 use crate::ui::tokens::{TYPE_FLOOR, window_b};
@@ -59,3 +59,568 @@ pub fn emergency<I: Copy>(
     );
     best
 }
+
+/// The factor k of one language for the three classes of window (passport §2: narrow 620 × 500,
+/// ordinary 900 × 540, large 1280 × 690 — each the tightest window of its layout).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct K {
+    pub narrow: f32,
+    pub ordinary: f32,
+    pub large: f32,
+}
+
+impl K {
+    /// The factor of `class`.
+    pub fn of(self, class: Class) -> f32 {
+        match class {
+            Class::Narrow => self.narrow,
+            Class::Ordinary => self.ordinary,
+            Class::Large => self.large,
+        }
+    }
+}
+
+/// The factor of the language tagged `tag` in a window of `class`, from [`TABLE`]: no window picks
+/// its own while it runs (T-120-11). A language the table lacks takes 1, and the road of last resort
+/// ([`emergency`]) remains.
+pub fn k_for(tag: &str, class: Class) -> f32 {
+    TABLE
+        .iter()
+        .find(|(known, _)| *known == tag)
+        .map_or(1.0, |(_, k)| k.of(class))
+}
+
+// ⟦ The table of k — printed by `tests\ui_fit.rs` (LANGSW_UI_FIT_WRITE): the smallest factor every
+// window of the shell needs in the language and class, with both main faces, so that its content
+// still fits at a type 3 % larger. Not edited by hand; the guard of the table checks it. ⟧
+pub const TABLE: &[(&str, K)] = &[
+    (
+        "ru",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "en",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "uk",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "de",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "fr",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "es",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "pt",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "it",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "pl",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "cs",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "tr",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "el",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "he",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ar",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "hi",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "bn",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ur",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "pa",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "mr",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "te",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ta",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "fa",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "gu",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "th",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "kn",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "or",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ml",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "uz",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "uz-Cyrl",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ne",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "as",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "az",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "km",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "kk",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sr",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sr-Latn",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ug",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "bg",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "hy",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "lo",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "be",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "tt",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ka",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "mk",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "vi",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "nl",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "ro",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "hu",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sv",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sq",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "da",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "fi",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "hr",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sk",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "nb",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "lt",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "sl",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "bs",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "lv",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "et",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "cy",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "mt",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "is",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "lb",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "mi",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+    (
+        "nn",
+        K {
+            narrow: 1.0,
+            ordinary: 1.0,
+            large: 1.0,
+        },
+    ),
+];
+// ⟦ End of the table. ⟧

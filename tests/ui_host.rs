@@ -263,6 +263,30 @@ fn arrows_move_the_segment_and_the_section() {
 
 /// A change of the palette draws a frame of the new background in the same window.
 #[test]
+fn the_window_is_laid_out_at_the_factor_of_the_table() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::client_size;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    let open = Open::new();
+    let mut client = RECT::default();
+    // SAFETY: the out parameter is a local.
+    unsafe { GetClientRect(open.hwnd, &mut client) }.expect("the client area");
+    let probe = host::probe(open.hwnd).expect("a live host");
+    let size = client_size(
+        client.right as f32 / probe.scale,
+        client.bottom as f32 / probe.scale,
+    );
+
+    assert_eq!(
+        probe.k,
+        Some(fit::k_for("en-US", size.class)),
+        "k from fit::TABLE, class {:?}",
+        size.class
+    );
+}
+
+#[test]
 fn a_change_of_theme_draws_the_new_background_in_the_same_window() {
     let open = Open::new();
     let before = host::probe(open.hwnd).expect("a live host");

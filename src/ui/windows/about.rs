@@ -196,3 +196,13 @@ pub fn probe_main() -> std::process::ExitCode {
     }
     std::process::ExitCode::SUCCESS
 }
+
+/// Every state the window shows — one — for the instrument of fitting.
+pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
+    let about = About {
+        language,
+        key: "Pause".to_owned(),
+        theme: ThemeSetting::Light,
+    };
+    vec![("about".to_owned(), about.describe())]
+}

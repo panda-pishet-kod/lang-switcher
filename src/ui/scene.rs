@@ -177,6 +177,205 @@ pub struct Brand {
     pub address: String,
 }
 
+impl<I> Node<I> {
+    /// The same node with every identifier passed through `f` — for the instrument of fitting,
+    /// which goes over the windows of every type at once.
+    pub fn map<J>(self, f: &impl Fn(I) -> J) -> Node<J> {
+        let all = |nodes: Vec<Node<I>>| nodes.into_iter().map(|node| node.map(f)).collect();
+        let one = |node: Box<Node<I>>| Box::new(node.map(f));
+        match self {
+            Node::Column(nodes) => Node::Column(all(nodes)),
+            Node::Rows(nodes) => Node::Rows(all(nodes)),
+            Node::Row(nodes) => Node::Row(all(nodes)),
+            Node::Pair(a, b) => Node::Pair(one(a), one(b)),
+            Node::Triple(a, b, c) => Node::Triple(one(a), one(b), one(c)),
+            Node::Fill(node) => Node::Fill(one(node)),
+            Node::Surface(kind, node) => Node::Surface(kind, one(node)),
+            Node::Steps(current, steps) => Node::Steps(current, all(steps)),
+            Node::Header {
+                eyebrow,
+                title,
+                subtitle,
+            } => Node::Header {
+                eyebrow,
+                title,
+                subtitle,
+            },
+            Node::Text(role, text) => Node::Text(role, text),
+            Node::Line(role, text) => Node::Line(role, text),
+            Node::Button {
+                id,
+                label,
+                kind,
+                browser,
+            } => Node::Button {
+                id: f(id),
+                label,
+                kind,
+                browser,
+            },
+            Node::Buttons(nodes) => Node::Buttons(all(nodes)),
+            Node::Action {
+                title,
+                text,
+                buttons,
+            } => Node::Action {
+                title,
+                text,
+                buttons: all(buttons),
+            },
+            Node::Toggle {
+                id,
+                label,
+                hint,
+                on,
+            } => Node::Toggle {
+                id: f(id),
+                label,
+                hint,
+                on,
+            },
+            Node::Check { id, label, on } => Node::Check {
+                id: f(id),
+                label,
+                on,
+            },
+            Node::Radio { id, label, on } => Node::Radio {
+                id: f(id),
+                label,
+                on,
+            },
+            Node::ChoiceCard {
+                id,
+                title,
+                text,
+                selected,
+            } => Node::ChoiceCard {
+                id: f(id),
+                title,
+                text,
+                selected,
+            },
+            Node::Segments {
+                id,
+                label,
+                options,
+                selected,
+            } => Node::Segments {
+                id: f(id),
+                label,
+                options,
+                selected,
+            },
+            Node::Choice { id, label, value } => Node::Choice {
+                id: f(id),
+                label,
+                value,
+            },
+            Node::Sections { id, items, current } => Node::Sections {
+                id: f(id),
+                items,
+                current,
+            },
+            Node::Numbered(items) => Node::Numbered(items),
+            Node::Link { id, text } => Node::Link { id: f(id), text },
+            Node::Divider => Node::Divider,
+        }
+    }
+
+    /// Every string the node shows, with the role it is set in, to read or to change — for the
+    /// instrument of fitting (the string that does not fit, the stand-in for a missing one).
+    pub fn texts_mut(&mut self, f: &mut impl FnMut(Role, &mut String)) {
+        match self {
+            Node::Column(nodes)
+            | Node::Rows(nodes)
+            | Node::Row(nodes)
+            | Node::Steps(_, nodes)
+            | Node::Buttons(nodes) => {
+                nodes.iter_mut().for_each(|node| node.texts_mut(f));
+            }
+            Node::Pair(a, b) => {
+                a.texts_mut(f);
+                b.texts_mut(f);
+            }
+            Node::Triple(a, b, c) => {
+                a.texts_mut(f);
+                b.texts_mut(f);
+                c.texts_mut(f);
+            }
+            Node::Fill(node) | Node::Surface(_, node) => node.texts_mut(f),
+            Node::Header {
+                eyebrow,
+                title,
+                subtitle,
+            } => {
+                if let Some(eyebrow) = eyebrow {
+                    f(Role::Eyebrow, eyebrow);
+                }
+                f(Role::Title, title);
+                if let Some(subtitle) = subtitle {
+                    f(Role::Small, subtitle);
+                }
+            }
+            Node::Text(role, text) | Node::Line(role, text) => f(*role, text),
+            Node::Button { label, .. } => f(Role::Button, label),
+            Node::Action {
+                title,
+                text,
+                buttons,
+            } => {
+                f(Role::Strong, title);
+                f(Role::Body, text);
+                buttons.iter_mut().for_each(|node| node.texts_mut(f));
+            }
+            Node::Toggle { label, hint, .. } => {
+                f(Role::Body, label);
+                if let Some(hint) = hint {
+                    f(Role::Small, hint);
+                }
+            }
+            Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
+            Node::ChoiceCard { title, text, .. } => {
+                f(Role::Strong, title);
+                f(Role::Small, text);
+            }
+            Node::Segments { label, options, .. } => {
+                f(Role::Body, label);
+                options.iter_mut().for_each(|option| f(Role::Body, option));
+            }
+            Node::Choice { label, value, .. } => {
+                f(Role::Body, label);
+                f(Role::Body, value);
+            }
+            Node::Sections { items, .. } | Node::Numbered(items) => {
+                items.iter_mut().for_each(|item| f(Role::Body, item));
+            }
+            Node::Link { text, .. } => f(Role::Link, text),
+            Node::Divider => {}
+        }
+    }
+}
+
+impl<I> Window<I> {
+    /// The same window with every identifier passed through `f`.
+    pub fn map<J>(self, f: &impl Fn(I) -> J) -> Window<J> {
+        Window {
+            kind: self.kind,
+            art: self.art,
+            brand: self.brand,
+            body: self.body.map(f),
+            buttons: self.buttons.into_iter().map(|node| node.map(f)).collect(),
+            disabled: self.disabled.into_iter().map(f).collect(),
+        }
+    }
+
+    /// Every string the window shows, with its role: the body, then the row of buttons.
+    pub fn texts_mut(&mut self, f: &mut impl FnMut(Role, &mut String)) {
+        self.body.texts_mut(f);
+        self.buttons.iter_mut().for_each(|node| node.texts_mut(f));
+    }
+}
+
 /// What the shell answers about a window's elements.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event<I> {
