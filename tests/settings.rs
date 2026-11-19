@@ -18446,7 +18446,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// eight words and its balloon, and the balloon «обновлён до X» with its two — 242 − 11.
 ///
 /// ⚠ **232 since task T-119-2** — FR-90б: the check box of the flag of the layout — 231 + 1.
-const FR_94_STRINGS: [(u16, &str, &str); 232] = [
+///
+/// ⚠ **245 since stage E120, tasks T-120-21 and T-120-22** — решение 208.169, С10 and С12:
+/// «Состояние» for a person (3280…3288) and «Нашли ошибку в переводе?» (3289…3292) — 232 + 13.
+const FR_94_STRINGS: [(u16, &str, &str); 245] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18462,6 +18465,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         settings::IDS_LANGUAGE_LABEL,
         "Язык интерфейса:",
         "Interface language:",
+    ),
+    // Task T-120-22 (решение 208.169, С12): the button under the language.
+    (
+        settings::IDS_TRANSLATION_REPORT,
+        "Нашли ошибку в переводе?",
+        "Found a mistake in the translation?",
     ),
     // 3004 — «вступит в силу после перезапуска» / «takes effect after a restart» — снята
     // задачей Т-31-3 из всех четырнадцати таблиц: решение 99.4, язык действует сразу.
@@ -18647,6 +18656,40 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (settings::IDS_AUTOSTART_PRESENT, "есть, {0}", "yes, {0}"),
     (settings::IDS_AUTOSTART_ABSENT, "нет", "no"),
+    // Task T-120-21 (решение 208.169, С10): «Состояние» for a person, 3280…3288.
+    (settings::IDS_STATUS_WORKING, "Работает", "Working"),
+    (
+        settings::IDS_STATUS_SUSPENDED,
+        "Приостановлена",
+        "Suspended",
+    ),
+    (
+        settings::IDS_STATUS_RESTART,
+        "Нужен перезапуск",
+        "Restart needed",
+    ),
+    (settings::IDS_STATUS_FIXES, "Исправляет: {0}", "Fixes: {0}"),
+    (
+        settings::IDS_STATUS_FIXES_NONE,
+        "Раскладки не выбраны",
+        "No layouts chosen",
+    ),
+    (settings::IDS_STATUS_HOTKEY, "Клавиша: {0}", "Key: {0}"),
+    (
+        settings::IDS_STATUS_AUTOSTART_ON,
+        "Запуск при входе в систему: включён",
+        "Start when I sign in: on",
+    ),
+    (
+        settings::IDS_STATUS_AUTOSTART_OFF,
+        "Запуск при входе в систему: выключен",
+        "Start when I sign in: off",
+    ),
+    (
+        settings::IDS_STATUS_DETAILS,
+        "Подробности для автора",
+        "Details for the author",
+    ),
     (
         settings::IDS_LAYOUT_NOTE,
         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново.",
@@ -19249,6 +19292,22 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         settings::IDS_WIZARD_IDEA_HELPS,
         "Чем это поможет?",
         "How would it help?",
+    ),
+    // Task T-120-22 (решение 208.169, С12): the appeal about the translation, 3290…3292.
+    (
+        settings::IDS_WIZARD_TRANSLATION_NOW,
+        "Что написано сейчас?",
+        "What does it say now?",
+    ),
+    (
+        settings::IDS_WIZARD_TRANSLATION_RIGHT,
+        "Как правильно?",
+        "What should it say?",
+    ),
+    (
+        settings::IDS_WIZARD_TRANSLATION_LINE,
+        "Ошибка в переводе: {0}",
+        "Translation mistake: {0}",
     ),
     (
         settings::IDS_WIZARD_ATTACH_TITLE,
@@ -27068,8 +27127,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        232,
-        "two hundred and THIRTY-TWO identifiers in use since task T-119-2 (FR-90б): the check box \
+        245,
+        "two hundred and FORTY-FIVE identifiers in use since stage E120, tasks T-120-21 and \
+         T-120-22 (решение 208.169): «Состояние» for a person, nine (3280…3288), and «Нашли \
+         ошибку в переводе?», four (3289…3292). Two hundred and thirty-two since task T-119-2 \
+         (FR-90б): the check box \
          of the flag of the layout (3264). Two hundred and thirty-one since stage E119, task T-119-8 (решение \
          208.94 п. 4): the letter «Что нового» and the balloon «обновлён до X» left with eleven \
          strings. Two hundred and forty-two since stage E114, task T-114-2 (решение \

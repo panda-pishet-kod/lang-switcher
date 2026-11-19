@@ -3639,6 +3639,9 @@ pub const IDS_GROUP_GENERAL: u16 = 3001;
 pub const IDS_AUTOSTART: u16 = 3002;
 /// The label of the language combo box.
 pub const IDS_LANGUAGE_LABEL: u16 = 3003;
+/// «Нашли ошибку в переводе?» — the quiet button under the language, task T-120-22 (решение
+/// 208.169, С12); it opens the wizard on the page of the idea. Block 3280…3295 (`app.rc`).
+pub const IDS_TRANSLATION_REPORT: u16 = 3289;
 // ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was `IDS_LANGUAGE_RESTART`,
 // «вступит в силу после перезапуска». Решения 83 и 83а.2 chose that sentence and вопрос 99 took
 // its subject away: the language now takes effect at once (task Т-31-1). The number stays a hole
@@ -3736,6 +3739,25 @@ pub const IDS_STATE_AUTOSTART: u16 = 3049;
 pub const IDS_AUTOSTART_PRESENT: u16 = 3050;
 /// It is not.
 pub const IDS_AUTOSTART_ABSENT: u16 = 3051;
+/// «Работает» — the first line of «Состояние» for a person, task T-120-21 (решение 208.169, С10).
+/// The lines above (`IDS_STATE_*`) stay unchanged under [`IDS_STATUS_DETAILS`]. Block 3280…3295.
+pub const IDS_STATUS_WORKING: u16 = 3280;
+/// «Приостановлена» — the word of the menu «Приостановить» and of the tooltip.
+pub const IDS_STATUS_SUSPENDED: u16 = 3281;
+/// «Нужен перезапуск» — as the menu says it, «Возобновить — нужен перезапуск».
+pub const IDS_STATUS_RESTART: u16 = 3282;
+/// «Исправляет: {0}» — {0} the layouts, source → target, with the arrow of the cycle.
+pub const IDS_STATUS_FIXES: u16 = 3283;
+/// «Раскладки не выбраны» — the second line when there is no pair.
+pub const IDS_STATUS_FIXES_NONE: u16 = 3284;
+/// «Клавиша: {0}» — the hotkey, named as in the settings.
+pub const IDS_STATUS_HOTKEY: u16 = 3285;
+/// «Запуск при входе в систему: включён».
+pub const IDS_STATUS_AUTOSTART_ON: u16 = 3286;
+/// «Запуск при входе в систему: выключен».
+pub const IDS_STATUS_AUTOSTART_OFF: u16 = 3287;
+/// «Подробности для автора» — the quiet button that opens the lines of the developer.
+pub const IDS_STATUS_DETAILS: u16 = 3288;
 /// The note about a layout named in the file that this session does not have.
 pub const IDS_LAYOUT_NOTE: u16 = 3052;
 /// The word «источник» inside that note.
@@ -4239,6 +4261,13 @@ pub const IDS_WIZARD_IDEA_NOTE: u16 = 3189;
 pub const IDS_WIZARD_IDEA_WHAT: u16 = 3190;
 /// «Чем это поможет?».
 pub const IDS_WIZARD_IDEA_HELPS: u16 = 3191;
+/// «Что написано сейчас?» — the first field of the page of the idea for an appeal about the
+/// translation, task T-120-22 (решение 208.169, С12). Block 3280…3295.
+pub const IDS_WIZARD_TRANSLATION_NOW: u16 = 3290;
+/// «Как правильно?» — the second field.
+pub const IDS_WIZARD_TRANSLATION_RIGHT: u16 = 3291;
+/// «Ошибка в переводе: {0}» — the first line of such an appeal; {0} the tag of the language.
+pub const IDS_WIZARD_TRANSLATION_LINE: u16 = 3292;
 
 /// Step 4: «Что приложить?».
 pub const IDS_WIZARD_ATTACH_TITLE: u16 = 3192;
@@ -4348,11 +4377,16 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and thirty-two since task T-119-2** — FR-90б: the check box of the flag of the
 /// layout, [`IDS_TRAY_FLAG`] (3264).
-pub const INTERFACE_STRINGS: [u16; 232] = [
+///
+/// ⚠ **Two hundred and forty-five since stage E120, tasks T-120-21 and T-120-22** — решение
+/// 208.169, С10 and С12: «Состояние» for a person, nine (3280…3288), and «Нашли ошибку в
+/// переводе?», four (3289…3292). 232 + 13.
+pub const INTERFACE_STRINGS: [u16; 245] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
     IDS_LANGUAGE_LABEL,
+    IDS_TRANSLATION_REPORT,
     IDS_GROUP_HOTKEY,
     IDS_HOTKEY_LABEL,
     IDS_HOTKEY_SET,
@@ -4406,6 +4440,15 @@ pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_STATE_AUTOSTART,
     IDS_AUTOSTART_PRESENT,
     IDS_AUTOSTART_ABSENT,
+    IDS_STATUS_WORKING,
+    IDS_STATUS_SUSPENDED,
+    IDS_STATUS_RESTART,
+    IDS_STATUS_FIXES,
+    IDS_STATUS_FIXES_NONE,
+    IDS_STATUS_HOTKEY,
+    IDS_STATUS_AUTOSTART_ON,
+    IDS_STATUS_AUTOSTART_OFF,
+    IDS_STATUS_DETAILS,
     IDS_LAYOUT_NOTE,
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,
@@ -4538,6 +4581,9 @@ pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_WIZARD_IDEA_NOTE,
     IDS_WIZARD_IDEA_WHAT,
     IDS_WIZARD_IDEA_HELPS,
+    IDS_WIZARD_TRANSLATION_NOW,
+    IDS_WIZARD_TRANSLATION_RIGHT,
+    IDS_WIZARD_TRANSLATION_LINE,
     IDS_WIZARD_ATTACH_TITLE,
     IDS_WIZARD_ATTACH_NOTE,
     IDS_WIZARD_ATTACH_MACHINE,

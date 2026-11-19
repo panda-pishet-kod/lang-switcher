@@ -1633,6 +1633,23 @@ END
 #define IDS_ABOUT_HELP_6        3263
 // Stage E119, task T-119-2: the check box of the flag of the layout, the first of the block 3264..3279.
 #define IDS_TRAY_FLAG           3264
+// Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
+// (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
+// button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two
+// fields of the wizard and the first line of the appeal.
+#define IDS_STATUS_WORKING      3280
+#define IDS_STATUS_SUSPENDED    3281
+#define IDS_STATUS_RESTART      3282
+#define IDS_STATUS_FIXES        3283
+#define IDS_STATUS_FIXES_NONE   3284
+#define IDS_STATUS_HOTKEY       3285
+#define IDS_STATUS_AUTOSTART_ON 3286
+#define IDS_STATUS_AUTOSTART_OFF 3287
+#define IDS_STATUS_DETAILS      3288
+#define IDS_TRANSLATION_REPORT  3289
+#define IDS_WIZARD_TRANSLATION_NOW 3290
+#define IDS_WIZARD_TRANSLATION_RIGHT 3291
+#define IDS_WIZARD_TRANSLATION_LINE 3292
 
 // ---------------------------------------------------------------------------------------
 // FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.

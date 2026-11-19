@@ -18,6 +18,11 @@
 //! dictionary, `l10n\GLOSSARY-E120.md` in the control folder is its brief. Every exception is a
 //! line of a list below, with its reason, and every refusal names the file, the key and the word.
 //! Red «до»: on `6d128bf` (`release/1.8.0` of 2026-11-19) all three tests.
+//!
+//! Task T-120-21, part A, adds the fourth: the block «Состояние» speaks to a person — whether the
+//! program works, what it fixes, by which key, whether it starts with Windows — and the words of the
+//! developer stay under «Подробности для автора». Red «до»: on `e073fe4` the keys of the block are
+//! not there.
 
 #[path = "support/resource_script.rs"]
 mod resource_script;
@@ -228,6 +233,100 @@ fn remind_me_later_is_one_word_and_the_foot_of_the_news_quotes_it() {
         if !foot.contains(&quoted) {
             refused.push(format!(
                 "{tag}.rc: IDS_NEWS_FOOT не цитирует кнопку {quoted}: {foot}"
+            ));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} отказов:\n{}",
+        refused.len(),
+        refused.join("\n")
+    );
+}
+
+/// The strings of the block «Состояние» a person sees before «Подробности для автора» — task
+/// T-120-21, part A (решение 208.169, С10): the state of the program in three words, what it fixes,
+/// the key, the start with Windows, and the button that opens the rest. The lines of the developer —
+/// `IDS_STATE_*`, `IDS_AUTOSTART_PRESENT`, `IDS_AUTOSTART_ABSENT` — stay unchanged under that button.
+const STATUS_BLOCK: [&str; 9] = [
+    "IDS_STATUS_WORKING",
+    "IDS_STATUS_SUSPENDED",
+    "IDS_STATUS_RESTART",
+    "IDS_STATUS_FIXES",
+    "IDS_STATUS_FIXES_NONE",
+    "IDS_STATUS_HOTKEY",
+    "IDS_STATUS_AUTOSTART_ON",
+    "IDS_STATUS_AUTOSTART_OFF",
+    "IDS_STATUS_DETAILS",
+];
+
+/// The three states of the program — one first line each, as the menu of the icon names them.
+const STATUS_STATES: [&str; 3] = [
+    "IDS_STATUS_WORKING",
+    "IDS_STATUS_SUSPENDED",
+    "IDS_STATUS_RESTART",
+];
+
+/// The words of the developer the block does not say, in lower case: the registry and its path,
+/// the published exclusions, the hook, the failures, the journal — what the lines under
+/// «Подробности для автора» are made of. A backslash is a path.
+const DEVELOPER_WORDS: [(&str, &[&str]); 2] = [
+    (
+        "ru",
+        &[
+            "реестр",
+            "hkcu",
+            "опубликован",
+            "перехват",
+            "отказ",
+            "журнал",
+            "\\",
+        ],
+    ),
+    (
+        "en",
+        &[
+            "registry",
+            "hkcu",
+            "published",
+            "hook",
+            "failure",
+            "journal",
+            "\\",
+        ],
+    ),
+];
+
+#[test]
+fn the_status_block_speaks_to_a_person_before_the_details() {
+    let mut refused = Vec::new();
+    for (tag, words) in DEVELOPER_WORDS {
+        let strings = strings_of(tag);
+        for id in STATUS_BLOCK {
+            let Some(text) = strings.get(id) else {
+                refused.push(format!(
+                    "{tag}.rc: {id} — ключа нет: строки блока «Состояние»"
+                ));
+                continue;
+            };
+            let lower = text.to_lowercase();
+            for word in words.iter().filter(|word| lower.contains(*word)) {
+                refused.push(format!(
+                    "{tag}.rc: {id} — «{word}»: до «Подробностей для автора» блок говорит \
+                     словами человека — {text}"
+                ));
+            }
+        }
+        let firsts: Vec<&str> = STATUS_STATES
+            .iter()
+            .filter_map(|id| strings.get(*id).map(String::as_str))
+            .collect();
+        let mut distinct = firsts.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        if distinct.len() != firsts.len() {
+            refused.push(format!(
+                "{tag}.rc: три состояния программы — три разные первые строки: {firsts:?}"
             ));
         }
     }
