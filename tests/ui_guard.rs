@@ -454,8 +454,18 @@ fn is_drawing_name(word: &str) -> bool {
     ["ID2D1", "D2D1", "IDWrite", "DWrite", "DWRITE"]
         .iter()
         .any(|prefix| word.starts_with(prefix))
-        || word == "Direct2D"
-        || word == "DirectWrite"
+}
+
+/// Whether the token at `index` is the module `Direct2D` or `DirectWrite` of the `windows` crate —
+/// `Graphics::Direct2D` — and not a word of the shell that happens to be spelt so (the mode
+/// `canvas::Mode::Direct2D`).
+fn is_drawing_module(tokens: &[Token], index: usize) -> bool {
+    let named = matches!(&tokens[index].tok, Tok::Ident(word) if word == "Direct2D" || word == "DirectWrite");
+    named
+        && index >= 3
+        && is_punct(tokens.get(index - 1), ':')
+        && is_punct(tokens.get(index - 2), ':')
+        && is_ident(tokens.get(index - 3), "Graphics")
 }
 
 /// The names of Direct2D and DirectWrite outside the drawing files — rule 3.
@@ -466,8 +476,11 @@ fn drawing_names_in(file: &str, tokens: &[Token]) -> Vec<String> {
 
     tokens
         .iter()
-        .filter_map(|token| match &token.tok {
-            Tok::Ident(word) if is_drawing_name(word) => Some(at(file, token, word)),
+        .enumerate()
+        .filter_map(|(index, token)| match &token.tok {
+            Tok::Ident(word) if is_drawing_name(word) || is_drawing_module(tokens, index) => {
+                Some(at(file, token, word))
+            }
             _ => None,
         })
         .collect()
@@ -693,4 +706,16 @@ fn win32_calls_with_zero_arguments_are_not_colours() {
     let call =
         lex("SetWindowPos(hwnd, None, 0, 0, 0, 0, flags); GetMessageW(&mut msg, None, 0, 0);");
     assert!(colours_in("host.rs", &call).is_empty());
+}
+
+/// Rule 3 takes the modules of the `windows` crate by their path, `Graphics::Direct2D`, and not a
+/// word of the shell spelt the same — the mode `canvas::Mode::Direct2D`.
+#[test]
+fn rule_3_tells_the_module_from_a_word_of_the_shell() {
+    let source =
+        lex("use windows::Win32::Graphics::DirectWrite::Common;\nlet mode = Mode::Direct2D;");
+    assert_eq!(
+        drawing_names_in("layout.rs", &source),
+        [r"src\ui\layout.rs:1: DirectWrite"]
+    );
 }

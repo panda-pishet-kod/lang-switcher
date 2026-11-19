@@ -445,6 +445,7 @@ impl Text {
             shown,
             family,
             style,
+            baseline,
             direction: self.direction,
             align,
             wrap,
@@ -532,6 +533,7 @@ pub struct Laid {
     shown: String,
     family: String,
     style: Style,
+    baseline: f32,
     direction: Direction,
     align: Align,
     wrap: Wrap,
@@ -626,6 +628,11 @@ impl Laid {
 
     pub fn wrap(&self) -> Wrap {
         self.wrap
+    }
+
+    /// The baseline of the first line, in points from the top of the layout.
+    pub fn baseline(&self) -> f32 {
+        self.baseline
     }
 
     /// The width the text was laid out in.

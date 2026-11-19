@@ -8,6 +8,7 @@
 //! name is reached as `::windows`.
 
 pub mod art;
+pub mod bench;
 pub mod canvas;
 pub mod elements;
 pub mod fit;

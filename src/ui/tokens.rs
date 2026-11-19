@@ -694,6 +694,8 @@ pub const CURRENT_STRIPE: Pt = Pt(3.0);
 pub const FOCUS_RING: Pt = Pt(2.0);
 /// ◆ Рамка клавиатуры — зазор.
 pub const FOCUS_GAP: Pt = Pt(2.0);
+/// Ссылка — подчёркивание ниже базовой линии.
+pub const LINK_UNDERLINE: Pt = Pt(2.0);
 
 // §5. Состояния
 
@@ -701,3 +703,21 @@ pub const FOCUS_GAP: Pt = Pt(2.0);
 pub const HOVER_MIX: Share = Share(0.12);
 /// ◆ Главная кнопка нажата — доля `bg` в `button`.
 pub const PRESSED_MIX: Share = Share(0.20);
+
+/// ◆ The shapes of elements the passport draws in words and not in numbers — approved from the
+/// element bench (T-120-6). Kept apart from the sections above: they are not rows of the passport
+/// tables, and `tools\export-tokens.ps1` does not print them.
+pub mod shape {
+    use super::{Color, Em, Share};
+
+    /// ◆ The steps of a fill: as it is, under the mouse, pressed (§5: «на ступень темнее», «ещё на
+    /// ступень»). An element with no fill of its own starts before the first step. A fill that starts
+    /// on `surface2` (a cell of a segmented switch) goes on to `line2`.
+    pub const FILL_STEPS: [Color; 4] = [Color::Surface, Color::Surface2, Color::Line, Color::Line2];
+    /// ◆ The tick of a check box: three points as shares of its side, left to right.
+    pub const CHECK_TICK: [(f32, f32); 3] = [(0.24, 0.52), (0.43, 0.7), (0.76, 0.32)];
+    /// ◆ The dot of a radio button, as a share of its side.
+    pub const RADIO_DOT: Share = Share(0.5);
+    /// ◆ The corner mark of a choice field: its width; it is half as high.
+    pub const CHEVRON: Em = Em(0.6);
+}

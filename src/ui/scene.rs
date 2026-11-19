@@ -111,6 +111,15 @@ pub enum Node<I> {
     },
     /// A check box before its label; the whole line is pressed.
     Check { id: I, label: String, on: bool },
+    /// A radio button before its label; the whole line is pressed.
+    Radio { id: I, label: String, on: bool },
+    /// A choice card: a radio button, a title and a line under it; the whole card is pressed.
+    ChoiceCard {
+        id: I,
+        title: String,
+        text: String,
+        selected: bool,
+    },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
     /// beside the label, and becomes a choice field when it does not fit even there.
     Segments {

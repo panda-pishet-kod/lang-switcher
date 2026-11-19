@@ -24,7 +24,7 @@ use crate::ui::scene::{Art, ButtonKind, Node, Surface, Window, WindowKind};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
-    BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK,
+    BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em, FIELD_PAD, HEADER_SUBTITLE_GAP,
     HEADER_TITLE_GAP, LINE, NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART,
     PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
@@ -85,6 +85,14 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
     }
 }
 
+/// The state a status line reports (passport §6: the dot `accent`, `ink3` or `warn`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    Working,
+    Idle,
+    Restart,
+}
+
 /// What a placed rectangle shows. The elements draw each kind one way (T-120-6).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Part {
@@ -135,6 +143,38 @@ pub enum Part {
     Divider,
     /// Where a press counts for the element: the whole line of a switch or a check box.
     Hit,
+    /// A radio button.
+    Radio {
+        on: bool,
+    },
+    /// The body of a choice card: the whole card is pressed.
+    Card {
+        selected: bool,
+    },
+    /// The wrapper of a text field of Windows.
+    Input,
+    /// The frame of a list.
+    List,
+    /// A row of a list.
+    ListRow {
+        selected: bool,
+    },
+    /// One bar of the progress of a wizard.
+    Progress {
+        done: bool,
+    },
+    /// A key: its name in a frame.
+    Key {
+        label: String,
+    },
+    /// The dot of a status line.
+    Dot(Status),
+    /// The label «new».
+    Badge {
+        text: String,
+    },
+    /// A row of the tray menu.
+    MenuRow,
 }
 
 impl Part {
@@ -156,6 +196,16 @@ impl Part {
             Part::Link { .. } => "link",
             Part::Divider => "divider",
             Part::Hit => "hit area",
+            Part::Radio { .. } => "radio button",
+            Part::Card { .. } => "choice card",
+            Part::Input => "text field",
+            Part::List => "list",
+            Part::ListRow { .. } => "list row",
+            Part::Progress { .. } => "wizard progress",
+            Part::Key { .. } => "key",
+            Part::Dot(_) => "status dot",
+            Part::Badge { .. } => "badge",
+            Part::MenuRow => "menu row",
         }
     }
 }
@@ -481,6 +531,26 @@ impl<I: Copy> Placer<'_, I> {
                     w,
                 )
             }
+            Node::Radio { id, label, on } => {
+                let side = CHECK.at(self.b);
+                self.control(
+                    *id,
+                    label,
+                    None,
+                    Part::Radio { on: *on },
+                    (side, side),
+                    true,
+                    x,
+                    y,
+                    w,
+                )
+            }
+            Node::ChoiceCard {
+                id,
+                title,
+                text,
+                selected,
+            } => self.choice_card(*id, title, text, *selected, x, y, w),
             Node::Segments {
                 id,
                 label,
@@ -918,6 +988,36 @@ impl<I: Copy> Placer<'_, I> {
         self.choice(id, label, &value, x, y, w)
     }
 
+    /// A choice card: the card is pressed as a whole; the radio button before the title and its line.
+    #[allow(clippy::too_many_arguments)]
+    fn choice_card(
+        &mut self,
+        id: I,
+        title: &str,
+        text: &str,
+        selected: bool,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let (v, h) = (self.em(CHOICE_PAD.v), self.em(CHOICE_PAD.h));
+        let card = self.push(Part::Card { selected }, Rect::new(x, y, w, 0.0), Some(id));
+        let side = CHECK.at(self.b);
+        let gap = self.em(CONTROL_GAP);
+        let first = self.style(Role::Strong).line_height();
+        let (tx, tw) = (x + h + side + gap, w - h * 2.0 - side - gap);
+        let mut inner = self.text(Role::Strong, title, tx, y + v, tw, Wrap::Words);
+        inner += self.text(Role::Small, text, tx, y + v + inner, tw, Wrap::Words);
+        self.push(
+            Part::Radio { on: selected },
+            Rect::new(x + h, y + v + (first - side) / 2.0, side, side),
+            None,
+        );
+        let height = inner + v * 2.0;
+        self.out[card].rect.h = height;
+        height
+    }
+
     fn track(&mut self, id: I, options: &[String], selected: usize, at: Rect) {
         self.push(Part::Track, at, Some(id));
         let cell = at.w / options.len().max(1) as f32;
@@ -1015,4 +1115,28 @@ impl<I: Copy> Placer<'_, I> {
             top + item_h - y
         }
     }
+}
+
+/// One node placed alone at the left top corner of `width` points, for the element bench and the
+/// tests of the elements: its parts and its height.
+pub fn place_node<I: Copy>(
+    node: &Node<I>,
+    width: f32,
+    b: f32,
+    class: Class,
+    measure: &dyn Measure,
+) -> (Vec<Placed<I>>, f32) {
+    let mut place = Placer {
+        b,
+        h: WINDOW_MIN.h.0,
+        class,
+        kind: WindowKind::Ordinary,
+        art: None,
+        tight: false,
+        measure,
+        out: Vec::new(),
+        over: 0.0,
+    };
+    let height = place.node(node, 0.0, 0.0, width, None);
+    (place.out, height)
 }

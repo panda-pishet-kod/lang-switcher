@@ -1337,3 +1337,82 @@ mod gdi {
         let _ = unsafe { RestoreDC(dc, level) };
     }
 }
+
+/// The bench of elements writes its sheets as pictures (T-120-6); a build without `testing` has no
+/// way to write a file from a canvas.
+#[cfg(feature = "testing")]
+impl Canvas {
+    /// The pixels of a canvas in memory, after its last frame, as a PNG file at `path`.
+    pub fn save_png(&self, path: &std::path::Path) -> WinResult<()> {
+        use ::windows::Win32::Foundation::GENERIC_WRITE;
+        use ::windows::Win32::Graphics::Imaging::{
+            GUID_ContainerFormatPng, WICBitmapEncoderNoCache,
+        };
+        use ::windows::core::HSTRING;
+
+        let Surface::Direct2D {
+            place: Place::Memory { bitmap, .. },
+            ..
+        } = &self.surface
+        else {
+            return Err(::windows::core::Error::empty());
+        };
+
+        // SAFETY: COM is entered by this canvas (`ComEntered`); every out parameter is a local and
+        // every interface lives across the calls that use it.
+        unsafe {
+            let wic: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let stream = wic.CreateStream()?;
+            stream.InitializeFromFilename(&HSTRING::from(path.as_os_str()), GENERIC_WRITE.0)?;
+            let encoder = wic.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
+            encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
+            let frame = new_frame(&encoder)?;
+            frame.WriteSource(bitmap, std::ptr::null())?;
+            frame.Commit()?;
+            encoder.Commit()
+        }
+    }
+}
+
+/// A new frame of `encoder`, made and initialised with no options.
+///
+/// ⚠ `IWICBitmapEncoder::CreateNewFrame` and `IWICBitmapFrameEncode::Initialize` take an
+/// `IPropertyBag2`, and the `windows` crate shows them only under `Win32_System_Com_StructuredStorage`
+/// — a feature the closed list of this program does not have (решение 208.169). Both methods are
+/// documented (wincodec.h) and so is their place in the table of methods: `CreateNewFrame` follows
+/// `SetPreview`, `Initialize` follows the three methods of `IUnknown`. They are taken from there,
+/// beside the slots the crate does name. Testing only: the bench of elements.
+#[cfg(feature = "testing")]
+unsafe fn new_frame(
+    encoder: &::windows::Win32::Graphics::Imaging::IWICBitmapEncoder,
+) -> WinResult<::windows::Win32::Graphics::Imaging::IWICBitmapFrameEncode> {
+    use ::windows::Win32::Graphics::Imaging::IWICBitmapFrameEncode;
+    use ::windows::core::{IUnknown, IUnknown_Vtbl};
+
+    type CreateNewFrame =
+        unsafe extern "system" fn(*mut c_void, *mut *mut c_void, *mut *mut c_void) -> HRESULT;
+    type Initialize = unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT;
+
+    // SAFETY: the table is the live encoder's; the slot after `SetPreview` is `CreateNewFrame`.
+    let create: CreateNewFrame = unsafe {
+        let after = (&encoder.vtable().SetPreview as *const _ as *const usize).add(1);
+        std::mem::transmute::<usize, CreateNewFrame>(*after)
+    };
+    let (mut frame, mut options) = (std::ptr::null_mut(), std::ptr::null_mut());
+    // SAFETY: both out parameters are locals; on success each holds an owned reference.
+    unsafe { create(encoder.as_raw(), &mut frame, &mut options) }.ok()?;
+    // SAFETY: owned references from the call above, released when these values drop.
+    let frame = unsafe { IWICBitmapFrameEncode::from_raw(frame) };
+    let _options = (!options.is_null()).then(|| unsafe { IUnknown::from_raw(options) });
+
+    // SAFETY: the table is the live frame's; the first slot after `IUnknown`'s is `Initialize`.
+    let initialize: Initialize = unsafe {
+        let base = &frame.vtable().base__ as *const IUnknown_Vtbl as *const usize;
+        let after = base.add(size_of::<IUnknown_Vtbl>() / size_of::<usize>());
+        std::mem::transmute::<usize, Initialize>(*after)
+    };
+    // SAFETY: no options — documented as allowed.
+    unsafe { initialize(frame.as_raw(), std::ptr::null_mut()) }.ok()?;
+    Ok(frame)
+}
