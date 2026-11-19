@@ -485,6 +485,48 @@ fn the_list_closes_on_the_hide_or_destruction_of_its_window_only() {
     );
 }
 
+/// **Windows 11 closes the list without hiding its window** (stand T-119-4, 2026-11-20, 26300): at
+/// every close — `Enter` after the arrows, a click on a row, `Esc` — `Shell_InputSwitchTopLevelWindow`
+/// gets a focus event and nothing else, while the overlay the shell puts behind the list,
+/// `Shell_InputSwitchDismissOverlay`, is hidden and destroyed (4 closes of 4, `evmon` logs). The
+/// choice by the mouse was caught by the release of the button; the choice by the arrows and
+/// `Enter` by nothing — the flag kept the old layout 12 times of 12. The overlay's hide is the
+/// sign of the list closing there; its birth and its showing are not.
+#[test]
+fn the_list_closes_on_windows_11_by_its_overlay() {
+    use flags::{LIST_OVERLAY_CLASS, closes_the_list};
+
+    const CREATE: u32 = 0x8000;
+    const DESTROY: u32 = 0x8001;
+    const SHOW: u32 = 0x8002;
+    const HIDE: u32 = 0x8003;
+
+    assert_eq!(LIST_OVERLAY_CLASS, "Shell_InputSwitchDismissOverlay");
+    assert!(closes_the_list(HIDE, 0, 0, LIST_OVERLAY_CLASS));
+    assert!(closes_the_list(DESTROY, 0, 0, LIST_OVERLAY_CLASS));
+    assert!(
+        !closes_the_list(SHOW, 0, 0, LIST_OVERLAY_CLASS),
+        "the list opening"
+    );
+    assert!(
+        !closes_the_list(CREATE, 0, 0, LIST_OVERLAY_CLASS),
+        "the list opening"
+    );
+    assert!(
+        !closes_the_list(HIDE, -4, 0, LIST_OVERLAY_CLASS),
+        "a part of it, not the window"
+    );
+    assert!(
+        !closes_the_list(
+            HIDE,
+            0,
+            0,
+            "Windows.UI.Composition.DesktopWindowContentBridge"
+        ),
+        "a window of XAML — every flyout of explorer has one"
+    );
+}
+
 /// **The guard of «флаг выключен — нового кода нет в работе», on the source:** every post of the
 /// flag's messages from the watcher, the Raw Input and the hook stands behind `flags::is_on()` in
 /// the very condition that guards it.

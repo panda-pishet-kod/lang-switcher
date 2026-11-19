@@ -1817,21 +1817,32 @@ pub fn ends_a_switch_by_keys(vk: u16, alt: bool, ctrl: bool, shift: bool, win: b
 /// main path on Windows 10 and keeps the release of the mouse (решение 208.142).
 pub const LIST_WINDOW_CLASS: &str = "Shell_InputSwitchTopLevelWindow";
 
+/// The class of the overlay the shell of Windows 11 puts behind the list of layouts, to close it by
+/// a click elsewhere — `Shell_InputSwitchDismissOverlay` of the process `explorer`. Windows 11 (26300)
+/// closes the list without hiding [`LIST_WINDOW_CLASS`]: at every close — `Enter`, a click on a
+/// row, `Esc` — it is this overlay that is hidden and destroyed (stand T-119-4, 4 of 4). Undocumented
+/// as the other; a Windows that renames it loses the choice by the arrows and `Enter` on 11 and keeps
+/// the release of the mouse.
+pub const LIST_OVERLAY_CLASS: &str = "Shell_InputSwitchDismissOverlay";
+
 /// Whether a `WinEvent` says the list of layouts closed — `EVENT_OBJECT_HIDE` or
 /// `EVENT_OBJECT_DESTROY` of the window itself (`OBJID_WINDOW`, `CHILDID_SELF`) of
-/// [`LIST_WINDOW_CLASS`]. Not `EVENT_OBJECT_CLOAKED`: the window is born cloaked too (PROBE Э119-П3),
-/// and the hide follows the choice by 8–10 ms, which the 60 ms of [`REREAD_MS`] covers. Pure.
+/// [`LIST_WINDOW_CLASS`] (Windows 10) or of its overlay [`LIST_OVERLAY_CLASS`] (Windows 11, which
+/// never hides the list's own window). Not `EVENT_OBJECT_CLOAKED`: the window is born cloaked too
+/// (PROBE Э119-П3), and the hide follows the choice by 8–10 ms on 10 and by ≈ 100–130 ms on 11, which
+/// the 60 and 300 ms of [`REREAD_MS`] cover. Pure.
 pub fn closes_the_list(event: u32, object_id: i32, child_id: i32, class: &str) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE};
 
     (event == EVENT_OBJECT_HIDE || event == EVENT_OBJECT_DESTROY)
         && object_id == 0
         && child_id == 0
-        && class == LIST_WINDOW_CLASS
+        && (class == LIST_WINDOW_CLASS || class == LIST_OVERLAY_CLASS)
 }
 
-/// The subscription to the list of layouts closing — Windows 10's main path of решение 208.142,
-/// set **only while the flag is on**, out of context, for the process `explorer` alone, events
+/// The subscription to the list of layouts closing — Windows 10's main path of решение 208.142, and
+/// on Windows 11 the one path that sees a choice by the arrows and `Enter` (through the overlay,
+/// [`LIST_OVERLAY_CLASS`]) — set **only while the flag is on**, out of context, for the process `explorer` alone, events
 /// `EVENT_OBJECT_DESTROY`…`EVENT_OBJECT_HIDE`. Removed when this value is dropped. Installed by the
 /// UI thread, so the callback runs there and posts [`WM_APP_FLAG_LATER`] to its own window.
 ///
