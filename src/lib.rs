@@ -16,6 +16,7 @@ pub mod app;
 pub mod buffer;
 pub mod convert;
 pub mod diag;
+pub mod flags;
 pub mod guard;
 pub mod hook;
 pub mod inject;

@@ -240,6 +240,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Faqja e autorit nuk u përgjigj. Kontrolloni lidhjen dhe shtypni «Provo sërish» ose dërgojeni me email: kopjoni tekstin dhe adresën."
     IDS_WIZARD_SENT_TITLE   "Mesazhi u dërgua"
     IDS_WIZARD_SENT_TEXT    "Faleminderit që e dërguat mesazhin! Jam i gëzuar që merrni pjesë në jetën e projektit dhe do ta lexoj gjithçka në kohën time të lirë."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x1C, 0x01

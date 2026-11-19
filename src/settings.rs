@@ -1366,6 +1366,15 @@ pub struct General {
         deserialize_with = "theme_from_toml"
     )]
     pub theme: ThemeSetting,
+    /// The flag of the layout on the tray icon — task T-119-2, решения 208.88, 208.89, the check
+    /// box «Флаг раскладки в трее» of FR-92. Default `false`, and **off means 1.6.1 to the
+    /// letter**: no flag, no new subscription, hook or thread (the guard is in `tests\tray.rs`).
+    ///
+    /// ⚠ `schema_version` does not move for it — the reasoning of `idle_timeout_s` in section 7:
+    /// there is no `deny_unknown_fields` here, so an older build reads the file past the key, and
+    /// its save drops it, which is the default and a build that has no flag anyway.
+    #[serde(default)]
+    pub tray_flag: bool,
 }
 
 impl Default for General {
@@ -1375,6 +1384,7 @@ impl Default for General {
             autostart: true,
             language: Language::Ru,
             theme: ThemeSetting::System,
+            tray_flag: false,
         }
     }
 }
@@ -3788,6 +3798,9 @@ pub const IDS_ABOUT_HELP_5: u16 = 3071;
 /// ⚠ Not 3072: that is the menu's, and the block 3056 the help opened is full. 3263 is the last
 /// free number of the block 3248..3263 the wizard opened (`app.rc`).
 pub const IDS_ABOUT_HELP_6: u16 = 3263;
+/// «Флаг раскладки в трее» — the check box of FR-90б in «Общие», task T-119-2 (решения 208.88,
+/// 208.89). The first of the block 3264…3279.
+pub const IDS_TRAY_FLAG: u16 = 3264;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4332,7 +4345,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and thirty-one since stage E119, task T-119-8** — решение 208.94 п. 4: the letter
 /// «Что нового» left with its eight words and its balloon (3102…3109, 3212), and the balloon
 /// «обновлён до X» with its two (3249, 3250) — eleven holes that are not walked. 242 − 11.
-pub const INTERFACE_STRINGS: [u16; 231] = [
+///
+/// ⚠ **Two hundred and thirty-two since task T-119-2** — FR-90б: the check box of the flag of the
+/// layout, [`IDS_TRAY_FLAG`] (3264).
+pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4575,6 +4591,7 @@ pub const INTERFACE_STRINGS: [u16; 231] = [
     IDS_WIZARD_FAILED_NOTE,
     IDS_WIZARD_SENT_TITLE,
     IDS_WIZARD_SENT_TEXT,
+    IDS_TRAY_FLAG,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -6599,6 +6616,8 @@ const IDC_LAYOUT_NOTE: i32 = 1027;
 // takes a new number, for the reason `app.rc` writes down at the same place: a number that
 // changed meaning would make an installed build and a new one disagree about a `WM_COMMAND`.
 const IDC_SELECTION_ENABLED: i32 = 1040;
+/// FR-90б, task T-119-2: «Флаг раскладки в трее», a row of «Общие» under the selection switch.
+const IDC_TRAY_FLAG: i32 = 1005;
 const IDC_EXCLUSIONS: i32 = 1050;
 const IDC_EXCLUSION_NAME: i32 = 1051;
 const IDC_EXCLUSION_ADD: i32 = 1052;
@@ -6795,6 +6814,8 @@ pub const LOCALISED_CONTROLS: &[(i32, u16)] = &[
     // A row of «Общие» since task Т-23-2, решение 82.2 — the group «Выделение» it used to
     // belong to is gone, and the table follows the window.
     (IDC_SELECTION_ENABLED, IDS_SELECTION_ENABLED),
+    // FR-90б, task T-119-2.
+    (IDC_TRAY_FLAG, IDS_TRAY_FLAG),
     (IDC_GROUP_HOTKEY, IDS_GROUP_HOTKEY),
     (IDC_HOTKEY_LABEL, IDS_HOTKEY_LABEL),
     (IDC_HOTKEY_CAPTURE, IDS_HOTKEY_SET),
@@ -7685,10 +7706,11 @@ fn post_system_theme(hwnd: HWND) {
 ///
 /// Public for the same reason the colour tables are: `tests\settings.rs` exercises the
 /// store over these very identifiers, without a live window.
-pub const GLYPH_CHECK_CONTROLS: [i32; 6] = [
+pub const GLYPH_CHECK_CONTROLS: [i32; 7] = [
     IDC_AUTOSTART,
     IDC_SOUND,
     IDC_SELECTION_ENABLED,
+    IDC_TRAY_FLAG,
     IDC_MODE_PAIR,
     IDC_MODE_CYCLE,
     IDC_LOG_ENABLED,
@@ -7718,7 +7740,7 @@ pub const GLYPH_CHECK_CONTROLS: [i32; 6] = [
 /// `None`, and [`is_checked`] turns that into «снят».
 pub struct GlyphChecks {
     /// The pairs, in template order. The identifier column never changes after [`Self::new`].
-    entries: [(i32, Cell<bool>); 6],
+    entries: [(i32, Cell<bool>); 7],
 }
 
 impl GlyphChecks {
@@ -8672,7 +8694,7 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
 /// off the window — the layout mode is the one radio run the dialog has left.
 fn glyph_kind(control: i32) -> Option<GlyphKind> {
     match control {
-        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED => {
+        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_TRAY_FLAG | IDC_LOG_ENABLED => {
             Some(GlyphKind::CheckBox)
         }
         IDC_MODE_PAIR | IDC_MODE_CYCLE => Some(GlyphKind::RadioButton),
@@ -14762,6 +14784,8 @@ fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
     // timings that stood beside it are in `config.toml` and on no control (решение 81).
     set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
+    // FR-90б, task T-119-2.
+    set_check(hwnd, IDC_TRAY_FLAG, state.working.general.tray_flag);
     // FR-94, task Т-28-2, решение 93 and вопрос 97: each language named in its own language.
     // ⭐ Stage E108, решение 202.7: the rows are `state.languages` — the group on top, the line,
     // the rest by name — worked out once per opening; `read_dialog` reads the language back out of
@@ -15093,6 +15117,8 @@ fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
     state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
     // FR-61, FR-65 — a row of «Общие» since task Т-23-2.
     state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
+    // FR-90б, task T-119-2.
+    state.working.general.tray_flag = is_checked(hwnd, IDC_TRAY_FLAG);
     // Stage E108, решение 202.7: the item index is a position in `state.languages`, the vector
     // `fill_dialog` filled the combo from. `CB_ERR` is −1 and every other stray answer is out of
     // range, and both leave the language as it was — the same way the appearance combo beside
@@ -15185,7 +15211,7 @@ fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
     // замер Т-46-1 на 44 щелчках настоящей дорогой дал 0 несработавших и 0 сдвинутых соседок
     // и до переноса, и после.
     match control {
-        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_LOG_ENABLED
+        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_TRAY_FLAG | IDC_LOG_ENABLED
             if answer(Kind::Check, notification) == Answer::Toggle =>
         {
             set_check(hwnd, control, !is_checked(hwnd, control));

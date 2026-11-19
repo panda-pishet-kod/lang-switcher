@@ -246,6 +246,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Autori sait ei vastanud. Kontrollige ühendust ja vajutage nuppu „Proovi uuesti“ või saatke e-kirjaga: kopeerige tekst ja aadress."
     IDS_WIZARD_SENT_TITLE   "Pöördumine saadetud"
     IDS_WIZARD_SENT_TEXT    "Aitäh pöördumise saatmise eest! Mul on hea meel, et osalete projekti elus, ja loen kõik kindlasti vabal ajal läbi."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x25, 0x01

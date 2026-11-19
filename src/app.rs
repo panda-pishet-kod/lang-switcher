@@ -1108,6 +1108,11 @@ pub fn answer_press<B: Beeper>(beeper: &mut B, press: Press, enabled: bool) {
 /// which task T-36-4 turned from a description into a gate, [`is_ui_window`].
 fn sound_press(press: Press) {
     answer_press(&mut SystemBeeper, press, sound_enabled());
+
+    // FR-90б, task T-119-2: every press of the program's own is told to this thread here, the
+    // switch already done (FR-50 re-reads before it reports), so the flag follows it at once.
+    // Nothing with the flag off.
+    crate::tray::refresh_flag();
 }
 
 /// The dull knock of FR-100 for a **window** that refused what the hand asked — task T-42-6,

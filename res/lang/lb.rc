@@ -241,6 +241,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "De Site vum Auteur huet net geäntwert. Kontrolléiert Är Verbindung an dréckt op „Widderhuelen“, oder schéckt et per E-Mail: kopéiert den Text an d'Adress."
     IDS_WIZARD_SENT_TITLE   "Noriicht geschéckt"
     IDS_WIZARD_SENT_TEXT    "Merci, datt Dir d'Noriicht geschéckt hutt! Ech si frou, datt Dir um Liewe vum Projet deelhëlt, an ech wäert alles a menger Fräizäit liesen."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x6E, 0x01

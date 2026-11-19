@@ -243,6 +243,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "האתר של המפתח לא ענה. בדקו את החיבור ולחצו «ניסיון חוזר», או שלחו במייל: העתיקו את הטקסט ואת הכתובת."
     IDS_WIZARD_SENT_TITLE   "הפנייה נשלחה"
     IDS_WIZARD_SENT_TEXT    "תודה ששלחתם את הפנייה! אני שמח על המעורבות שלכם בחיי הפרויקט, ובוודאי אקרא הכול בזמני הפנוי."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x0D, 0x01

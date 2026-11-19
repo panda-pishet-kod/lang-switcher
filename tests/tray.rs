@@ -6784,3 +6784,100 @@ fn is_grayed(menu: HMENU, position: u32) -> bool {
 fn is_disabled(menu: HMENU, position: u32) -> bool {
     flags_at(menu, position).0 & MF_DISABLED.0 != 0
 }
+// =========================================================================================
+// FR-90б — the flag of the layout, task T-119-2
+// =========================================================================================
+
+/// **Task T-119-2, FR-90б — the flag is the icon only while the check box is on, and with it off
+/// the program is 1.6.1.** With `general.tray_flag` off (the default) a reading of the layout
+/// leaves nothing behind and the record carries the icon of FR-90; on, the record carries the
+/// flag of the layout handed in and follows the next one; off again, the very icon of FR-90 is
+/// back and the flag is gone from memory.
+///
+/// Red before (on `46673be`): the tray has no flag at all — `flag_on`, `show_flag_of` and
+/// `flag_layout` do not exist.
+#[test]
+fn the_flag_is_the_icon_only_while_the_check_box_is_on() {
+    use lang_switcher::layouts::LayoutId;
+
+    let window = TestWindow::new();
+    let product = ProductImage::open();
+    let mut tray = Tray::install_at(window.handle, product.instance(), None)
+        .expect("the tray must install: the icons are in the product binary's resources");
+
+    let english = LayoutId::from_raw(0x0409_0409);
+    let russian = LayoutId::from_raw(0x0419_0419);
+
+    assert!(!tray.flag_on(), "off by default — section 7");
+    let plain = tray.shown_icon();
+
+    tray.show_flag_of(Some(english));
+    assert_eq!(
+        tray.flag_layout(),
+        None,
+        "with the flag off nothing of it exists"
+    );
+    assert_eq!(
+        tray.shown_icon(),
+        plain,
+        "and the icon is the icon of FR-90"
+    );
+
+    let mut on = tray.config().clone();
+    on.general.tray_flag = true;
+    tray.replace_config(on);
+    tray.show_flag_of(Some(english));
+
+    assert_eq!(
+        tray.flag_layout(),
+        Some(english),
+        "the flag shows the layout handed in"
+    );
+    assert_ne!(tray.shown_icon(), plain, "and the record carries the flag");
+
+    tray.show_flag_of(Some(russian));
+    assert_eq!(
+        tray.flag_layout(),
+        Some(russian),
+        "and follows the next one"
+    );
+
+    tray.show_flag_of(None);
+    assert_eq!(
+        tray.flag_layout(),
+        Some(russian),
+        "a blind reading keeps the layout last known"
+    );
+
+    let mut off = tray.config().clone();
+    off.general.tray_flag = false;
+    tray.replace_config(off);
+
+    assert_eq!(
+        tray.flag_layout(),
+        None,
+        "off again: the flag is gone from memory"
+    );
+    assert_eq!(tray.shown_icon(), plain, "and the icon of FR-90 is back");
+}
+
+/// **Task T-119-2 — the tooltip of the flag names the layout first and the program under it.**
+#[test]
+fn the_tooltip_of_the_flag_names_the_layout_and_then_the_program() {
+    use lang_switcher::layouts::LayoutId;
+
+    let _guard = product_strings(Language::Ru);
+    let tip = tray::flag_tip(LayoutId::from_raw(0x0409_0409), true);
+    let (first, second) = tip.split_once('\n').expect("two lines");
+
+    println!("{tip:?}");
+    assert!(
+        first.contains("English"),
+        "the language of the layout in its own words: {first}"
+    );
+    assert_eq!(
+        second,
+        tray::icon_tip(true),
+        "and the tooltip of FR-90 under it"
+    );
+}

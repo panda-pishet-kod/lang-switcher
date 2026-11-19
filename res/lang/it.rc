@@ -247,6 +247,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Il sito dell'autore non ha risposto. Controlla la connessione e premi «Riprova», oppure invialo per e-mail: copia il testo e l'indirizzo."
     IDS_WIZARD_SENT_TITLE   "Messaggio inviato"
     IDS_WIZARD_SENT_TEXT    "Grazie per aver inviato il messaggio! Sono contento che partecipi alla vita del progetto, e leggerò sicuramente tutto nel mio tempo libero."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x10, 0x01

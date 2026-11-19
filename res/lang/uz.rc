@@ -242,6 +242,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Muallif sayti javob bermadi. Aloqani tekshiring va «Takrorlash» tugmasini bosing yoki xat bilan yuboring: matn va manzilni nusxalang."
     IDS_WIZARD_SENT_TITLE   "Murojaat yuborildi"
     IDS_WIZARD_SENT_TEXT    "Murojaat yuborganingiz uchun rahmat! Loyiha hayotida ishtirok etayotganingizdan xursandman va hammasini boʻsh vaqtimda albatta oʻqib chiqaman."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x43, 0x01

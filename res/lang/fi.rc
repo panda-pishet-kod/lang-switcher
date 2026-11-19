@@ -245,6 +245,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Tekijän sivusto ei vastannut. Tarkista yhteytesi ja paina painiketta ”Yritä uudelleen” tai lähetä viesti sähköpostilla: kopioi teksti ja osoite."
     IDS_WIZARD_SENT_TITLE   "Yhteydenotto lähetetty"
     IDS_WIZARD_SENT_TEXT    "Kiitos yhteydenotosta! Olen iloinen, että osallistut projektin elämään, ja luen kaiken varmasti vapaa-ajallani."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x0B, 0x01

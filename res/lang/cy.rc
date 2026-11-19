@@ -241,6 +241,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Ni atebodd gwefan yr awdur. Gwiriwch eich cysylltiad a gwasgwch “Ceisio eto”, neu anfonwch drwy e-bost: copïwch y testun a'r cyfeiriad."
     IDS_WIZARD_SENT_TITLE   "Anfonwyd y neges"
     IDS_WIZARD_SENT_TEXT    "Diolch am anfon y neges! Rwy'n falch eich bod yn cymryd rhan ym mywyd y prosiect, a byddaf yn darllen y cyfan yn fy amser rhydd."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x52, 0x01

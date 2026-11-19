@@ -3788,6 +3788,7 @@ use lang_switcher::settings::{GLYPH_CHECK_CONTROLS, GlyphChecks};
 const GLYPH_AUTOSTART: i32 = 1001;
 const GLYPH_SOUND: i32 = 1004;
 const GLYPH_SELECTION_ENABLED: i32 = 1040;
+const GLYPH_TRAY_FLAG: i32 = 1005;
 const GLYPH_MODE_PAIR: i32 = 1020;
 const GLYPH_MODE_CYCLE: i32 = 1021;
 const GLYPH_LOG_ENABLED: i32 = 1060;
@@ -3800,12 +3801,14 @@ fn the_store_lists_the_six_template_identifiers_and_starts_all_unchecked() {
             GLYPH_AUTOSTART,
             GLYPH_SOUND,
             GLYPH_SELECTION_ENABLED,
+            GLYPH_TRAY_FLAG,
             GLYPH_MODE_PAIR,
             GLYPH_MODE_CYCLE,
             GLYPH_LOG_ENABLED,
         ]
         .as_slice(),
-        "the storage side must list the same six controls the template carries"
+        "the storage side must list the same seven controls the template carries (six until the flag
+         of T-119-2)"
     );
 
     let checks = GlyphChecks::new();
@@ -5019,7 +5022,7 @@ const FR_92_SECTIONS: [&str; 6] = [
 ///
 /// The captions of the sections above are in here too, in their place: this is the whole of
 /// what a person reads on that window, and it is what a wrong code page would destroy.
-const TEMPLATE_TEXT: [&str; 34] = [
+const TEMPLATE_TEXT: [&str; 35] = [
     "Общие",
     "Запускать при входе в систему",
     "Язык интерфейса:",
@@ -5034,6 +5037,8 @@ const TEMPLATE_TEXT: [&str; 34] = [
     // now. Its group of one was dissolved when the two spin fields beside it left the
     // dialog, and it moved here to its sister check boxes.
     "Конвертировать выделенный текст",
+    // Task T-119-2, FR-90б: the flag of the layout, the last row of «Общие» now.
+    "Флаг раскладки в трее",
     "Горячая клавиша",
     "Клавиша:",
     // Task T-08-2 replaced «Пока меняется только в файле настроек.» with the button that arms
@@ -5409,8 +5414,10 @@ fn the_window_carries_the_geometry_chosen_at_the_control_point() {
     // the row still stands at 354 — and the width is still the 430 he froze.
     assert_eq!(
         template.size,
-        (430, 380),
-        "the window of решения 83, 87, 117.5 и 142.5 is 430 × 380 dialog units"
+        // ⚠ 380 → **394 by task T-119-2** (FR-90б): the row of the flag in «Общие»; everything under
+        // it moved down by the fourteen units, the right column keeps level by a taller list.
+        (430, 394),
+        "the window of решения 83, 87, 117.5, 142.5 и T-119-2 is 430 × 394 dialog units"
     );
 
     let bottom = |panel: u32| -> i32 {
@@ -5531,10 +5538,11 @@ fn the_six_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
     // ⚠ Six since task Т-23-2: the three method radios of «Замена» left the window. And
     // 1004 — the sound switch of FR-100 — is here for the first time: task Т-21-5 added the
     // control and left this list at eight, so nothing checked its button type at all.
-    const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 6] = [
+    const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 7] = [
         (1001, "Запускать при входе в систему", false),
         (1004, "Звуковой отклик", false),
         (1040, "Конвертировать выделенный текст", false),
+        (1005, "Флаг раскладки в трее", false),
         (1020, "Пара", true),
         (1021, "Несколько раскладок", false),
         (1060, "Вести журнал", false),
@@ -5984,8 +5992,9 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // moved but the row's own width and right edge.
     assert_eq!(
         template.size,
-        (430, 380),
-        "the settings dialog has to be 430 x 380 dialog units — решения 83 п. 3, 87 п. 3, 117.5 \
+        // ⚠ 380 → **394 by task T-119-2**, see the sister test.
+        (430, 394),
+        "the settings dialog has to be 430 x 394 dialog units — решения 83 п. 3, 87 п. 3, 117.5 \
          и 142.5"
     );
 
@@ -6004,16 +6013,17 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // stand eleven units lower (343 → 354), as does the bottom of the window (364 → 375).**
     // Nothing else moved: «Диагностика» keeps its 200 × 74, the width its 430.
     const MOVED: [(u32, &str, i32, i32, i32, i32); 9] = [
-        (1106, "Диагностика: панель", 223, 215, 200, 74),
-        (1108, "Состояние: панель", 7, 293, 416, 55),
-        (1070, "Состояние: перехватчик", 14, 305, 402, 9),
-        (1071, "Состояние: раскладки", 14, 316, 402, 9),
-        (1072, "Состояние: автозапуск", 14, 327, 402, 9),
+        // ⚠ Every y below is fourteen units larger since task T-119-2 (the row of the flag in «Общие»).
+        (1106, "Диагностика: панель", 223, 229, 200, 74),
+        (1108, "Состояние: панель", 7, 307, 416, 55),
+        (1070, "Состояние: перехватчик", 14, 319, 402, 9),
+        (1071, "Состояние: раскладки", 14, 330, 402, 9),
+        (1072, "Состояние: автозапуск", 14, 341, 402, 9),
         (
             1073,
             "Состояние: действующая пара — T-34-6",
             14,
-            338,
+            352,
             402,
             9,
         ),
@@ -6025,9 +6035,9 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
         // ⛔ `y` остался **354**: нижний отступ этого ряда — 7, и пяти единиц до 12 в замороженной
         // высоте 375 нет. Замер и три способа их взять — в `app.rc` рядом с кнопками и в решении
         // 142.4; вопрос 142.5 задан владельцу. Ширина и высота окна не тронуты.
-        (1, "ОК", 245, 354, 46, 14),
-        (2, "Отмена", 295, 354, 56, 14),
-        (1080, "Применить", 355, 354, 63, 14),
+        (1, "ОК", 245, 368, 46, 14),
+        (2, "Отмена", 295, 368, 56, 14),
+        (1080, "Применить", 355, 368, 63, 14),
     ];
 
     for (id, what, x, y, cx, cy) in MOVED {
@@ -6046,11 +6056,12 @@ fn the_window_carries_the_sixteen_units_the_appearance_row_took() {
     // task Т-23-2 — and by nothing else: the panel is the same 74 units it always was, and the
     // four rows inside it keep their own steps. Asserted as absolute numbers rather than as a
     // delta, because a delta would pass for a block that had been re-cut and shifted back.
+    // ⚠ Fourteen units lower since task T-119-2, with the panel.
     for (id, what, bottom) in [
-        (1060u32, "Вести журнал", 237i32),
-        (1061, "Открыть папку журнала", 239),
-        (1107, "Папка журнала:", 252),
-        (1062, "путь к папке журнала", 268),
+        (1060u32, "Вести журнал", 251i32),
+        (1061, "Открыть папку журнала", 253),
+        (1107, "Папка журнала:", 266),
+        (1062, "путь к папке журнала", 282),
     ] {
         let (_, _, _, measured) = template.rect_of(id);
 
@@ -12667,10 +12678,11 @@ fn the_save_journal_button_stands_in_the_slot_of_decision_117_5() {
     // window did not grow for it.
     let save = bounds(1064).expect("the dialog must carry «Сохранить журнал» (1064)");
     println!("«Сохранить журнал» (1064): {save:?}");
-    assert_eq!(save, (322, 270, 94, 14), "the slot of решения 117.5 и 117б");
+    // ⚠ y 270 → **284 by task T-119-2**: «Диагностика» moved down with the right column.
+    assert_eq!(save, (322, 284, 94, 14), "the slot of решения 117.5 и 117б");
 
     let (ax, ay, acx, _) = bounds(1063).expect("the dialog must carry «Написать автору» (1063)");
-    assert_eq!(ay, 270, "the two buttons share a row");
+    assert_eq!(ay, 284, "the two buttons share a row");
     assert_eq!(
         acx, 88,
         "«Написать автору» gave up 22 units to its neighbour — решение 117б"
@@ -18432,7 +18444,9 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **231 since stage E119, task T-119-8** — решение 208.94 п. 4: the letter «Что нового» with its
 /// eight words and its balloon, and the balloon «обновлён до X» with its two — 242 − 11.
-const FR_94_STRINGS: [(u16, &str, &str); 231] = [
+///
+/// ⚠ **232 since task T-119-2** — FR-90б: the check box of the flag of the layout — 231 + 1.
+const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -19451,6 +19465,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 231] = [
          всё прочитаю в свободное время.",
         "Thank you for sending the appeal! I am glad you take part in the life of the project, \
          and I will read it all in my free time.",
+    ),
+    // Task T-119-2, FR-90б: the check box of the flag of the layout.
+    (
+        settings::IDS_TRAY_FLAG,
+        "Флаг раскладки в трее",
+        "Layout flag in the tray",
     ),
 ];
 
@@ -26216,7 +26236,8 @@ fn nothing_overlaps_the_appearance_row_and_the_hint_is_gone() {
 
     assert_eq!(
         (panel_top, panel_bottom),
-        (7, 101),
+        // ⚠ 101 → **115 by task T-119-2** (FR-90б): the check box of the flag is one more row.
+        (7, 115),
         "«Общие» is 7..101 dialog units — В-1, the sound row of FR-100 and the selection row \
          of решение 82.2"
     );
@@ -26313,7 +26334,9 @@ fn the_exclusion_list_and_its_button_wear_their_frames_on_one_row() {
     // it is still there.
     assert_eq!(
         (list_top, list_bottom),
-        (20, 126),
+        // ⚠ 126 → **140 by task T-119-2**: «Общие» grew a row and the right column keeps level by a
+        // taller list — 120 units, 10.9 rows.
+        (20, 140),
         "«Исключения» stands at the top of the right column and its list is 106 units — \
          решение 83 п. 1, and the two ways under it, 172.4"
     );
@@ -27041,8 +27064,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        231,
-        "two hundred and THIRTY-ONE identifiers in use since stage E119, task T-119-8 (решение \
+        232,
+        "two hundred and THIRTY-TWO identifiers in use since task T-119-2 (FR-90б): the check box \
+         of the flag of the layout (3264). Two hundred and thirty-one since stage E119, task T-119-8 (решение \
          208.94 п. 4): the letter «Что нового» and the balloon «обновлён до X» left with eleven \
          strings. Two hundred and forty-two since stage E114, task T-114-2 (решение \
          208.5, 6а): the sixth row of the help, 3263. Two hundred and forty-one since stage \
@@ -30918,8 +30942,9 @@ fn the_exclusions_hold_both_ways_inside_their_group() {
     // What was there keeps its size — §0 п. 1.
     assert_eq!(
         group,
-        (223, 7, 423, 211),
-        "the group is 223, 7, 200, 204, as in e99"
+        // ⚠ 204 → **218 by task T-119-2**: the list is fourteen units taller, the ways under it moved.
+        (223, 7, 423, 225),
+        "the group is 223, 7, 200, 218 since T-119-2 (204 in e99)"
     );
     assert_eq!(size(remove), (60, 14), "«Удалить» keeps its size");
     assert_eq!(size(field), (120, 8), "the field keeps its size");
@@ -30989,19 +31014,20 @@ fn the_exclusions_hold_both_ways_inside_their_group() {
         "C3: the list holds {rows:.1} rows, fewer than eight"
     );
 
-    // The places of 172.22 — the canon the owner accepts by eye.
+    // The places of 172.22 — the canon the owner accepts by eye; ⚠ fourteen units lower since task
+    // T-119-2: the list above them grew by the row «Общие» gained (the flag of FR-90б).
     assert_eq!(
         auto,
-        (230, 130, 416, 139),
-        "«Автоматически» — 230, 130, 186, 9"
+        (230, 144, 416, 153),
+        "«Автоматически» — 230, 144, 186, 9"
     );
-    assert_eq!(pick, (230, 141, 416, 155), "the button — 230, 141, 186, 14");
+    assert_eq!(pick, (230, 155, 416, 169), "the button — 230, 155, 186, 14");
     assert_eq!(
         note,
-        (230, 156, 416, 173),
-        "the line under the button — 230, 156, 186, 17: two lines, for a long process name"
+        (230, 170, 416, 187),
+        "the line under the button — 230, 170, 186, 17: two lines, for a long process name"
     );
-    assert_eq!(manual, (230, 174, 416, 183), "«Вручную» — 230, 174, 186, 9");
+    assert_eq!(manual, (230, 188, 416, 197), "«Вручную» — 230, 188, 186, 9");
 }
 
 /// **Task T-100-3 (2) — the rule of «Выбрать окно программы», as a pure function.**

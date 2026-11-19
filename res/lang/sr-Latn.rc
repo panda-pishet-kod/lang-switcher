@@ -242,6 +242,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Sajt autora nije odgovorio. Proverite vezu i pritisnite „Ponovi“ ili pošaljite e-porukom: kopirajte tekst i adresu."
     IDS_WIZARD_SENT_TITLE   "Poruka je poslata"
     IDS_WIZARD_SENT_TEXT    "Hvala što ste poslali poruku! Drago mi je što učestvujete u životu projekta, a sve ću pročitati u slobodno vreme."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x1A, 0x09

@@ -168,6 +168,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 
+use crate::layouts::LayoutId;
 use crate::settings::{self, Config, Quarantined, SavePolicy};
 use crate::{APP_NAME, app, diag, theme};
 
@@ -669,6 +670,19 @@ pub struct Tray {
     /// Whether [`Tray::shut_down`] has already run. The cleanup of FR-83 is reached from two
     /// directions and has to do its work exactly once.
     finished: bool,
+    /// The flag of FR-90б while `general.tray_flag` is on — task T-119-2. `None` with the flag
+    /// off: nothing of the flag exists then.
+    flag: Option<FlagState>,
+}
+
+/// What the flag of FR-90б shows and the icon drawn for it — task T-119-2.
+struct FlagState {
+    /// The layout the flag stands for.
+    layout: LayoutId,
+    /// The face and the look the icon below was drawn for.
+    drawn: Option<(crate::flags::Face, crate::flags::Look)>,
+    /// The icon itself, destroyed with this value.
+    icon: Option<Icon>,
 }
 
 impl Tray {
@@ -795,11 +809,126 @@ impl Tray {
             delete_calls: 0,
             announce_calls: 0,
             finished: false,
+            flag: None,
         };
 
         tray.add_icon();
 
+        // FR-90б: a flag that was on when the program stopped is the icon from the start.
+        if tray.flag_on() {
+            tray.refresh_flag();
+        }
+
         Ok(tray)
+    }
+
+    /// Whether the icon is the flag of the layout — `general.tray_flag`, FR-90б, task T-119-2.
+    pub fn flag_on(&self) -> bool {
+        self.config.general.tray_flag
+    }
+
+    /// The layout the flag shows, while it is on — for `tests\tray.rs` and the tooltip.
+    pub fn flag_layout(&self) -> Option<LayoutId> {
+        self.flag.as_ref().map(|flag| flag.layout)
+    }
+
+    /// The handle the record carries now: the flag while it is on and drawn, the icon of FR-90
+    /// otherwise — for `tests\tray.rs`.
+    pub fn shown_icon(&self) -> HICON {
+        self.flag_icon().unwrap_or_else(|| self.state_icon())
+    }
+
+    /// Re-reads the layout of the window the person types into (FR-52) and, if the flag shows
+    /// another one, hands the shell the new flag — FR-90б. With the flag off: drops whatever the
+    /// flag held and does nothing else, which is the guard of «флаг выключен — нового кода нет».
+    ///
+    /// A reading that cannot see (a classic console, FR-52's `blind`) or sees no window keeps the
+    /// layout last known: the flag does not go blank between two windows.
+    pub fn refresh_flag(&mut self) {
+        let reading = crate::switch::read();
+        let layout = (!reading.blind && reading.layout.raw() != 0).then_some(reading.layout);
+
+        self.show_flag_of(layout);
+    }
+
+    /// [`Tray::refresh_flag`] with the reading handed in — the seam `tests\tray.rs` drives.
+    pub fn show_flag_of(&mut self, layout: Option<LayoutId>) {
+        if !self.flag_on() {
+            if self.flag.take().is_some() {
+                self.refresh_icon();
+            }
+            return;
+        }
+
+        let known = layout.or_else(|| self.flag_layout());
+
+        let Some(layout) = known else {
+            return;
+        };
+
+        if self.flag_layout() == Some(layout)
+            && self.flag.as_ref().is_some_and(|flag| flag.icon.is_some())
+        {
+            return;
+        }
+
+        match self.flag.as_mut() {
+            Some(flag) => flag.layout = layout,
+            None => {
+                self.flag = Some(FlagState {
+                    layout,
+                    drawn: None,
+                    icon: None,
+                });
+            }
+        }
+
+        self.refresh_icon();
+    }
+
+    /// The flag icon of the moment, drawn anew only when what it shows changed — the layout's
+    /// face, the size, the pause, the dot, the taskbar. `None` with the flag off or refused by
+    /// the system (NFR-13: the record then carries the icon of FR-90).
+    fn prepare_flag(&mut self) {
+        if !self.flag_on() {
+            self.flag = None;
+            return;
+        }
+
+        let look = crate::flags::Look {
+            size: u32::try_from(self.icon_size.0).unwrap_or(16),
+            paused: !self.enabled(),
+            unread: self.has_unread(),
+            dark_bar: !self.taskbar_is_light,
+        };
+
+        let Some(flag) = self.flag.as_mut() else {
+            return;
+        };
+
+        let face = crate::flags::face_of(flag.layout);
+        let wanted = (face, look);
+
+        if flag.drawn.as_ref() == Some(&wanted) && flag.icon.is_some() {
+            return;
+        }
+
+        flag.icon = crate::flags::icon(&wanted.0, look).map(|handle| Icon { handle });
+
+        if flag.icon.is_none() {
+            app::report_non_critical("CreateIconIndirect(flag)", &WinError::from_thread());
+        }
+
+        flag.drawn = Some(wanted);
+    }
+
+    /// The handle of the drawn flag, if the flag is on and drawn.
+    fn flag_icon(&self) -> Option<HICON> {
+        if !self.flag_on() {
+            return None;
+        }
+
+        self.flag.as_ref()?.icon.as_ref().map(|icon| icon.handle)
     }
 
     /// Whether correction is armed — `general.enabled`, the state of FR-90.
@@ -1238,6 +1367,11 @@ impl Tray {
     /// [`Tray::save_config`].
     pub fn replace_config(&mut self, config: Config) {
         self.config = config;
+        // FR-90б, task T-119-2: the check box of the flag acts at once — a flag put on reads the
+        // layout now, a flag taken off gives the icon of FR-90 back in the same update.
+        if self.flag_on() {
+            self.refresh_flag();
+        }
         self.refresh_icon();
         self.save_config();
     }
@@ -1404,13 +1538,18 @@ impl Tray {
             // fill in `szTip` and never show it.
             uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP,
             uCallbackMessage: WM_APP_TRAY,
-            hIcon: self.state_icon(),
+            hIcon: self.shown_icon(),
             ..Default::default()
         };
 
         // Task T-41-8: the tooltip goes through the same writer as the two balloon fields. It
         // used to have a copy of its own, and a copy is where the two would have drifted apart.
-        write_field(&mut data.szTip, &icon_tip(self.enabled()));
+        // FR-90б, task T-119-2: with the flag on, the name of the layout comes first.
+        let tip = match self.flag.as_ref().filter(|_| self.flag_on()) {
+            Some(flag) => flag_tip(flag.layout, self.enabled()),
+            None => icon_tip(self.enabled()),
+        };
+        write_field(&mut data.szTip, &tip);
 
         data
     }
@@ -1423,6 +1562,7 @@ impl Tray {
     /// program that cannot start before the desktop does.
     fn add_icon(&mut self) {
         self.add_calls += 1;
+        self.prepare_flag();
 
         let data = self.notify_data();
 
@@ -1547,6 +1687,7 @@ impl Tray {
             return;
         }
 
+        self.prepare_flag();
         let data = self.notify_data();
 
         self.modify_calls += 1;
@@ -4944,6 +5085,35 @@ pub fn icon_tip(enabled: bool) -> String {
     });
 
     settings::format_text(settings::IDS_TIP_FORMAT, &[APP_NAME, &state])
+}
+
+/// The tooltip while the icon is the flag — FR-90б, task T-119-2: the name of the layout first
+/// (the name the lists of the settings window give it — the language in its own words, вопрос 92,
+/// and the identifier of решение 82.1 behind it when two layouts of the session share the name,
+/// which is how two layouts of one country, one flag, are told apart), then [`icon_tip`] on the
+/// line below.
+pub fn flag_tip(layout: LayoutId, enabled: bool) -> String {
+    let session = crate::layouts::enumerate().unwrap_or_default();
+    let name = match session.iter().position(|one| *one == layout) {
+        Some(at) => settings::layout_labels(&session, &session).swap_remove(at),
+        None => settings::layout_labels(&[layout], &session)
+            .pop()
+            .unwrap_or_default(),
+    };
+
+    format!("{name}\n{}", icon_tip(enabled))
+}
+
+/// Re-reads the layout for the flag — FR-90б, task T-119-2. Called on the UI thread after a press
+/// of the program's own (the sound of FR-100 is told of every press, so the flag follows the same
+/// message) and, with the subscriptions of T-119-4, after the layout may have moved. Nothing at
+/// all with the flag off.
+pub fn refresh_flag() {
+    with_tray(|tray| {
+        if tray.flag_on() {
+            tray.refresh_flag();
+        }
+    });
 }
 
 /// Copies `text` into one of the fixed fields of the notification area, always NUL-terminated

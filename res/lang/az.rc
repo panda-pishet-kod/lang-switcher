@@ -243,6 +243,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Müəllifin saytı cavab vermədi. Bağlantını yoxlayın və «Təkrar et» düyməsini basın, ya da məktubla göndərin: mətni və ünvanı kopyalayın."
     IDS_WIZARD_SENT_TITLE   "Müraciət göndərildi"
     IDS_WIZARD_SENT_TEXT    "Müraciət göndərdiyiniz üçün təşəkkür edirəm! Layihənin həyatında iştirak etməyinizə şadam və hamısını boş vaxtımda mütləq oxuyacağam."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x2C, 0x01

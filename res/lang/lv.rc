@@ -239,6 +239,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Autora vietne neatbildēja. Pārbaudiet savienojumu un nospiediet «Atkārtot» vai nosūtiet pa e-pastu: nokopējiet tekstu un adresi."
     IDS_WIZARD_SENT_TITLE   "Ziņojums nosūtīts"
     IDS_WIZARD_SENT_TEXT    "Paldies, ka nosūtījāt ziņojumu! Priecājos par jūsu līdzdalību projekta dzīvē un noteikti visu izlasīšu brīvajā laikā."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x26, 0x01

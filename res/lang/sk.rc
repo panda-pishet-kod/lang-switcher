@@ -239,6 +239,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Stránka autora neodpovedala. Skontrolujte pripojenie a stlačte „Skúsiť znova“ alebo odošlite e-mailom: skopírujte text a adresu."
     IDS_WIZARD_SENT_TITLE   "Správa odoslaná"
     IDS_WIZARD_SENT_TEXT    "Ďakujem, že ste odoslali správu! Teší ma, že sa zapájate do života projektu, a všetko si prečítam vo voľnom čase."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x1B, 0x01

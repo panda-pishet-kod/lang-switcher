@@ -245,6 +245,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "A szerző webhelye nem válaszolt. Ellenőrizze a kapcsolatot, és nyomja meg az „Újra” gombot, vagy küldje el e-mailben: másolja ki a szöveget és a címet."
     IDS_WIZARD_SENT_TITLE   "A bejelentés elküldve"
     IDS_WIZARD_SENT_TEXT    "Köszönöm, hogy elküldte a bejelentést! Örülök, hogy részt vesz a projekt életében, és szabadidőmben mindent elolvasok."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x0E, 0x01

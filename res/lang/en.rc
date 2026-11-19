@@ -241,6 +241,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "The author's site did not answer. Check your connection and press “Retry”, or send it by email: copy the text and the address."
     IDS_WIZARD_SENT_TITLE   "Appeal sent"
     IDS_WIZARD_SENT_TEXT    "Thank you for sending the appeal! I am glad you take part in the life of the project, and I will read it all in my free time."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x09, 0x01

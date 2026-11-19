@@ -10,6 +10,10 @@ page. Dates are the days the releases were published (UTC).
   «Updated» — comes in 1.8.0 together with the new look of the letters.
 - After an update the balloon «Lang Switcher has been updated to X» no longer appears; the window «Updated» takes its place
   after an important release.
+- The tray icon can be the flag of the current keyboard layout: the tick «Layout flag in the tray» in «General» of the
+  settings window, off by default. The flag is the country Windows names for the layout's language; a country without a flag
+  gets a plate with the letters of the language; pause greys the flag, an unread letter puts its dot on it. With the tick
+  off the program is what it was.
 
 ## 1.6.1 — 2026-11-16
 

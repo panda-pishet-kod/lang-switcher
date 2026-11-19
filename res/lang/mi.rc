@@ -239,6 +239,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Kāore te pae tukutuku a te kaituhi i whakautu. Tirohia tō hononga, ā, pēhia “Whakamātau anō”, tukuna rānei ki te īmēra: tāruatia te tuhinga me te wāhitau."
     IDS_WIZARD_SENT_TITLE   "Kua tukuna te karere"
     IDS_WIZARD_SENT_TEXT    "Ngā mihi mō te tuku i te karere! E koa ana ahau kei te whai wāhi koe ki te oranga o te kaupapa, ā, ka pānui ahau i te katoa i taku wā wātea."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x81, 0x01

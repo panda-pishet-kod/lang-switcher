@@ -245,6 +245,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Die Website des Autors hat nicht geantwortet. Prüfen Sie die Verbindung und klicken Sie auf „Wiederholen“, oder senden Sie die Meldung per E-Mail: Kopieren Sie Text und Adresse."
     IDS_WIZARD_SENT_TITLE   "Meldung gesendet"
     IDS_WIZARD_SENT_TEXT    "Danke, dass Sie die Meldung geschickt haben! Ich freue mich, dass Sie sich am Leben des Projekts beteiligen, und lese bestimmt alles in meiner freien Zeit."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x07, 0x01

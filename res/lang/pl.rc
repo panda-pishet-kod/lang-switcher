@@ -247,6 +247,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Strona autora nie odpowiedziała. Sprawdź połączenie i kliknij „Ponów” albo wyślij zgłoszenie e-mailem: skopiuj tekst i adres."
     IDS_WIZARD_SENT_TITLE   "Zgłoszenie wysłane"
     IDS_WIZARD_SENT_TEXT    "Dziękuję za wysłanie zgłoszenia! Cieszę się z twojej aktywności w życiu projektu i na pewno wszystko przeczytam w wolnej chwili."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x15, 0x01

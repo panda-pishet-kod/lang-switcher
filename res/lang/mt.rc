@@ -241,6 +241,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Is-sit tal-awtur ma weġibx. Iċċekkja l-konnessjoni u agħfas “Erġa' pprova” jew ibgħatu bl-email: ikkopja t-test u l-indirizz."
     IDS_WIZARD_SENT_TITLE   "Messaġġ mibgħut"
     IDS_WIZARD_SENT_TEXT    "Grazzi talli bgħatt il-messaġġ! Kuntent li tieħu sehem fil-ħajja tal-proġett, u se naqra kollox fil-ħin ħieles tiegħi."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x3A, 0x01

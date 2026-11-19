@@ -239,6 +239,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Utvecklarens webbplats svarade inte. Kontrollera anslutningen och tryck på ”Försök igen”, eller skicka e-post: kopiera texten och adressen."
     IDS_WIZARD_SENT_TITLE   "Ärendet har skickats"
     IDS_WIZARD_SENT_TEXT    "Tack för att du skickade ärendet! Jag är glad att du deltar i projektets liv, och jag läser allt på min fritid."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x1D, 0x01

@@ -243,6 +243,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Utviklerens nettsted svarte ikke. Sjekk tilkoblingen og trykk «Prøv igjen», eller send det som e-post: kopier teksten og adressen."
     IDS_WIZARD_SENT_TITLE   "Henvendelsen er sendt"
     IDS_WIZARD_SENT_TEXT    "Takk for at du sendte henvendelsen! Jeg er glad for at du tar del i prosjektet, og jeg skal lese alt når jeg har fritid."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x14, 0x01

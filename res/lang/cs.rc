@@ -243,6 +243,7 @@ BEGIN
     IDS_WIZARD_FAILED_NOTE  "Web autora neodpověděl. Zkontrolujte připojení a stiskněte „Zkusit znovu“, nebo pošlete hlášení e-mailem: zkopírujte text a adresu."
     IDS_WIZARD_SENT_TITLE   "Hlášení odesláno"
     IDS_WIZARD_SENT_TEXT    "Děkuji, že jste hlášení odeslali! Těší mě vaše aktivita v životě projektu a všechno si určitě přečtu ve volném čase."
+    IDS_TRAY_FLAG           "Layout flag in the tray"
 END
 
 LANGUAGE 0x05, 0x01
