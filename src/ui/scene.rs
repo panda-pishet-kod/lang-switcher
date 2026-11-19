@@ -38,11 +38,20 @@ pub enum Surface {
     Note,
 }
 
-/// The picture of a window. The pictures themselves are T-120-8's.
+/// The picture of a window: a drawing of `res\art`, drawn by `art.rs` (T-120-12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Art {
     /// The panda of «О программе».
     About,
+}
+
+impl Art {
+    /// The name of the drawing in `res\art`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Art::About => "about",
+        }
+    }
 }
 
 /// What kind of window: it decides the narrow look and the gap above the row of buttons.

@@ -526,7 +526,17 @@ impl Canvas {
     /// Draws one whole frame with `draw` and shows it; answers the mode it was drawn in. A target
     /// lost on the way is made again and the frame drawn again; a target refused twice in a row
     /// turns the canvas to the plain look, and the frame is drawn in it.
-    pub fn frame(&mut self, mut draw: impl FnMut(&mut Painter)) -> Mode {
+    pub fn frame(&mut self, draw: impl FnMut(&mut Painter)) -> Mode {
+        self.frame_with(None, draw)
+    }
+
+    /// [`Canvas::frame`] with the pictures of the panda drawn by `pictures` (`art::Art`); without
+    /// them a picture is its ground alone.
+    pub fn frame_with(
+        &mut self,
+        mut pictures: Option<&mut (dyn Pictures + '_)>,
+        mut draw: impl FnMut(&mut Painter),
+    ) -> Mode {
         // Two refusals and one loss are the most a frame can meet before it is drawn somehow.
         for _ in 0..4 {
             if let Surface::Gdi { window, buffer } = &mut self.surface {
@@ -541,7 +551,7 @@ impl Canvas {
                 return Mode::Gdi;
             }
 
-            match self.draw_direct2d(&mut draw) {
+            match self.draw_direct2d(&mut draw, pictures.as_deref_mut()) {
                 Ok(()) => {
                     self.refusals = 0;
                     return Mode::Direct2D;
@@ -572,7 +582,11 @@ impl Canvas {
     }
 
     /// One frame by Direct2D, the target made first when there is none.
-    fn draw_direct2d(&mut self, draw: &mut impl FnMut(&mut Painter)) -> WinResult<()> {
+    fn draw_direct2d<'o>(
+        &mut self,
+        draw: &mut impl FnMut(&mut Painter),
+        pictures: Option<&mut (dyn Pictures + 'o)>,
+    ) -> WinResult<()> {
         let (scale, width, height) = (self.scale, self.width, self.height);
         let Surface::Direct2D {
             factory,
@@ -593,6 +607,7 @@ impl Canvas {
         let mut painter = Painter {
             scale,
             clips: Vec::new(),
+            pictures,
             kind: Kind::Direct2D {
                 target: &target.render,
                 brush: &target.brush,
@@ -738,14 +753,28 @@ enum Kind<'a> {
     },
 }
 
+/// What draws the pictures of the panda into their circles: `art::Art` (T-120-12), which keeps each
+/// picture finished at its size and scale and makes it again only when they change.
+pub trait Pictures {
+    /// The picture `name` into the circle of `radius` points centred on `centre`, on `target`.
+    fn draw(
+        &mut self,
+        target: &ID2D1RenderTarget,
+        name: &str,
+        centre: (f32, f32),
+        radius: f32,
+    ) -> WinResult<()>;
+}
+
 /// What a frame draws with. Lengths are points at 100 %; colours come from the style table.
-pub struct Painter<'a> {
+pub struct Painter<'a, 'o> {
     scale: f32,
     clips: Vec<Clip>,
+    pictures: Option<&'a mut (dyn Pictures + 'o)>,
     kind: Kind<'a>,
 }
 
-impl Painter<'_> {
+impl Painter<'_, '_> {
     /// How this frame is drawn.
     pub fn mode(&self) -> Mode {
         match self.kind {
@@ -866,6 +895,27 @@ impl Painter<'_> {
                 };
             }
             Kind::Gdi { dc } => gdi::text(dc, self.scale, laid, x, y, value),
+        }
+    }
+
+    /// The picture `name` in the circle of `radius` centred on `x`, `y`. Without pictures (before
+    /// `art.rs` is in, a picture it does not have, the plain look) — the ground of the pictures
+    /// alone: a work stand-in, not the look.
+    pub fn picture(&mut self, name: &str, x: f32, y: f32, radius: f32) {
+        let drawn = match (&self.kind, self.pictures.as_deref_mut()) {
+            (Kind::Direct2D { target, .. }, Some(pictures)) => {
+                pictures.draw(target, name, (x, y), radius).is_ok()
+            }
+            _ => false,
+        };
+        if !drawn {
+            // The ground every picture of the panda is drawn on (res\art).
+            self.fill_circle(
+                x,
+                y,
+                radius,
+                crate::ui::tokens::Color::Accent.get(crate::ui::tokens::Theme::Dark),
+            );
         }
     }
 
@@ -1113,6 +1163,7 @@ mod gdi {
         let mut painter = Painter {
             scale,
             clips: Vec::new(),
+            pictures: None,
             kind: super::Kind::Gdi { dc: buffer.dc },
         };
         draw(&mut painter);

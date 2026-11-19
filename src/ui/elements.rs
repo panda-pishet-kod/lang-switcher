@@ -174,12 +174,11 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             };
             painter.fill_rect(Rect::new(edge, rect.y, line, rect.h), 0.0, c(Color::Line));
         }
-        Part::Art(_) => {
-            // The picture itself is drawn into this circle by `art.rs` (T-120-8); here, the ring of
-            // `bg` around it and the ground under it.
+        Part::Art(art) => {
+            // The ring of `bg` around the picture (§3), the picture inside it.
             let (x, y, radius) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0, rect.w / 2.0);
             painter.fill_circle(x, y, radius, c(Color::Bg));
-            painter.fill_circle(x, y, radius - ART_RING.0, c(Color::Surface));
+            painter.picture(art.name(), x, y, radius - ART_RING.0);
         }
         Part::Surface(kind) => {
             let (fill, frame) = match kind {

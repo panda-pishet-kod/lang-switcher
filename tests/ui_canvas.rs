@@ -352,3 +352,47 @@ fn the_plain_look_draws_text_where_direct2d_does_and_start_is_the_right_edge_in_
         );
     }
 }
+
+/// The ring around a picture of the panda is `bg` and 6 points wide: 6 pixels at 100 %, 12 at
+/// 200 % (passport §3).
+#[test]
+fn the_ring_around_a_picture_is_the_background_six_points_wide() {
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::layout::Part;
+    use lang_switcher::ui::scene::Art;
+
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let theme = Theme::Light;
+    let look = Look {
+        theme,
+        rtl: false,
+        b: 14.0,
+        h: 512.0,
+        text: &text,
+    };
+    let bg = Color::Bg.get(theme);
+
+    for scale in [1.0_f32, 2.0] {
+        let mut canvas = Canvas::in_memory(100.0, 100.0, scale, Mode::Direct2D).expect("a canvas");
+        canvas.frame(|painter| {
+            painter.clear(Color::Surface2.get(theme));
+            elements::draw(
+                painter,
+                &look,
+                &Part::Art(Art::About),
+                Rect::new(10.0, 10.0, 80.0, 80.0),
+                State::NORMAL,
+            );
+        });
+        let image = canvas.image().expect("pixels");
+        let (row, start) = ((50.0 * scale) as u32, (10.0 * scale) as u32);
+        let ring = (start..start + (20.0 * scale) as u32)
+            .filter(|x| image.at(*x, row) == bg)
+            .count() as f32;
+
+        assert!(
+            (ring - 6.0 * scale).abs() <= 1.0,
+            "the ring at {scale}: {ring} pixels of bg"
+        );
+    }
+}

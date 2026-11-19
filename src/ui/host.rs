@@ -140,6 +140,8 @@ struct Host<C: Content> {
     tracking: bool,
     frames: u32,
     background: Option<Rgb>,
+    /// What draws the pictures of the panda; none until `art.rs` is in (T-120-8).
+    pictures: Option<Box<dyn crate::ui::canvas::Pictures>>,
 }
 
 /// The class of every window of the shell.
@@ -387,6 +389,7 @@ impl<C: Content> Host<C> {
             tracking: false,
             frames: 0,
             background: None,
+            pictures: None,
         }
     }
 
@@ -487,6 +490,7 @@ impl<C: Content> Host<C> {
                 .collect(),
             None => Vec::new(),
         };
+        let pictures = self.pictures.as_deref_mut();
         let (Some(canvas), Some(layout), Some(text)) = (
             self.canvas.as_mut(),
             self.layout.as_ref(),
@@ -501,7 +505,7 @@ impl<C: Content> Host<C> {
             h: layout.size.h,
             text,
         };
-        canvas.frame(|painter| {
+        canvas.frame_with(pictures, |painter| {
             painter.clear(background);
             for (item, state) in layout.items.iter().zip(&states) {
                 elements::draw(painter, &look, &item.part, item.rect, *state);
