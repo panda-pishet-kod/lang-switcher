@@ -7497,6 +7497,13 @@ pub fn about_is_open() -> bool {
     ABOUT_WINDOW.with(Cell::get) != 0
 }
 
+/// The window of this thread a second start of the program brings forward — FR-82 since 1.8.0,
+/// task T-119-14: the settings dialog of FR-92 if it is up, else the «О программе» window (which
+/// keeps the settings from opening, `tray::dialog_locks_command`), else `None`.
+pub fn open_window() -> Option<HWND> {
+    live_window(&DIALOG_WINDOW).or_else(|| live_window(&ABOUT_WINDOW))
+}
+
 /// The open «О программе» window of this thread, for as long as this value lives — FR-92а,
 /// task T-13-17.
 ///

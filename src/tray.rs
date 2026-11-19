@@ -5442,6 +5442,23 @@ pub fn refresh_flag() {
     });
 }
 
+/// FR-82 since 1.8.0 — task T-119-14, решение 208.148: the program was started a second time in
+/// this session. The settings window comes up — through the door of the menu,
+/// [`dispatch_command`] — or, when it (or the «О программе» window that locks it) is already up,
+/// that window comes forward. On the UI thread, outside every borrow: the dialog is modal.
+pub fn show_settings_for_a_second_start() {
+    if let Some(open) = settings::open_window() {
+        // SAFETY: a live window of this thread by value; the second start gave this process the
+        // right to the foreground (`AllowSetForegroundWindow`), and a refusal leaves it where it is.
+        let _ = unsafe { SetForegroundWindow(open) };
+        return;
+    }
+
+    if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+        dispatch_command(hwnd, CMD_SETTINGS);
+    }
+}
+
 /// Copies `text` into one of the fixed fields of the notification area, always NUL-terminated
 /// and **never cut through a surrogate pair** — tasks Т-32-4 and T-41-8.
 ///

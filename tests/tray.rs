@@ -6970,3 +6970,42 @@ fn a_click_on_the_flag_opens_the_list_and_the_right_click_the_menu() {
     off.general.tray_flag = false;
     tray.replace_config(off);
 }
+
+/// **FR-82 since 1.8.0 — task T-119-14, решение 208.148: a second start asks the running copy to
+/// open its settings, and tells the person «уже работает» only when the request did not reach it.**
+/// A bench that silences the notification (a debug copy beside the person's own program) asks for
+/// nothing at all: the person's program must not get a settings window from a test.
+#[test]
+fn a_second_start_asks_the_running_copy_before_it_tells_the_person() {
+    use lang_switcher::app::second_start_tells_the_person;
+
+    let asked = Cell::new(0);
+
+    assert!(
+        !second_start_tells_the_person(false, || {
+            asked.set(asked.get() + 1);
+            true
+        }),
+        "the request reached the running copy: no notification"
+    );
+    assert_eq!(asked.get(), 1, "and the running copy was asked once");
+
+    assert!(
+        second_start_tells_the_person(false, || {
+            asked.set(asked.get() + 1);
+            false
+        }),
+        "the request did not reach it (no window, a refusal, another integrity level): the \
+         notification of FR-82, as before"
+    );
+    assert_eq!(asked.get(), 2);
+
+    assert!(
+        !second_start_tells_the_person(true, || {
+            asked.set(asked.get() + 1);
+            true
+        }),
+        "a bench: no notification"
+    );
+    assert_eq!(asked.get(), 2, "and nothing asked of the running copy");
+}
