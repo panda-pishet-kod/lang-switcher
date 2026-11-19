@@ -255,7 +255,7 @@ pub const BRAND_MAX: Pt = Pt(18.0);
 
 /// The face of a text role: the system's main face, or its monospace one (§2: Segoe UI Variable
 /// Text or Segoe UI; Cascadia Mono or Consolas — chosen by `text.rs`, not here).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Face {
     Main,
     Mono,

@@ -35,6 +35,7 @@
 //! Knows nothing of elements or windows.
 
 use crate::diag;
+use crate::ui::text::Laid;
 use crate::ui::tokens::Rgb;
 use ::windows::Win32::Foundation::{
     COLORREF, D2DERR_RECREATE_TARGET, HMODULE, HWND, RECT, RPC_E_CHANGED_MODE,
@@ -44,13 +45,13 @@ use ::windows::Win32::Graphics::Direct2D::Common::{
     D2D1_PIXEL_FORMAT,
 };
 use ::windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DEBUG_LEVEL_NONE, D2D1_ELLIPSE, D2D1_FACTORY_OPTIONS,
-    D2D1_FACTORY_TYPE, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
-    D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE,
-    D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
-    ID2D1Factory, ID2D1HwndRenderTarget, ID2D1Layer, ID2D1RenderTarget, ID2D1SolidColorBrush,
-    ID2D1StrokeStyle,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DEBUG_LEVEL_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+    D2D1_ELLIPSE, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LAYER_OPTIONS_NONE,
+    D2D1_LAYER_PARAMETERS, D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE,
+    D2D1_ROUNDED_RECT, ID2D1Factory, ID2D1HwndRenderTarget, ID2D1Layer, ID2D1RenderTarget,
+    ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
 use ::windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use ::windows::Win32::Graphics::Imaging::{
@@ -852,6 +853,22 @@ impl Painter<'_> {
         }
     }
 
+    /// `laid` with its top left corner at `x`, `y` — the corner of the width it was laid out in,
+    /// so a right-to-left or centred run stands inside that width by itself.
+    pub fn text(&mut self, laid: &Laid, x: f32, y: f32, value: Rgb) {
+        match self.kind {
+            Kind::Direct2D { target, brush, .. } => {
+                let brush = Self::brush(brush, value);
+                let origin = ellipse(x, y, 0.0).point;
+                // SAFETY: inside a frame; the layout is alive.
+                unsafe {
+                    target.DrawTextLayout(origin, laid.layout(), brush, D2D1_DRAW_TEXT_OPTIONS_NONE)
+                };
+            }
+            Kind::Gdi { dc } => gdi::text(dc, self.scale, laid, x, y, value),
+        }
+    }
+
     /// The pattern of a panel: dots of `diameter` at the centre of every `step` × `step` cell of
     /// `area`. The plain look has no pattern.
     pub fn dots(&mut self, area: Rect, diameter: f32, step: f32, value: Rgb) {
@@ -974,16 +991,20 @@ fn rounded(rect: Rect, radius: f32) -> D2D1_ROUNDED_RECT {
 /// Drawn into a buffer of its own and copied to the window in one piece, so a frame never shows
 /// half drawn.
 mod gdi {
-    use super::{COLORREF, HWND, Image, Painter, RECT, Rect, Rgb};
+    use super::{COLORREF, HWND, Image, Laid, Painter, RECT, Rect, Rgb};
+    use crate::ui::text::{Align, Direction, Wrap};
     use ::windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection,
-        CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DeleteDC, DeleteObject, Ellipse, FillRect,
-        GdiFlush, GetDC, GetStockObject, HBITMAP, HDC, HGDIOBJ, IntersectClipRect, LineTo,
-        MoveToEx, NULL_BRUSH, NULL_PEN, PS_INSIDEFRAME, PS_SOLID, ReleaseDC, RestoreDC, SRCCOPY,
-        SaveDC, SelectObject,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+        CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush,
+        DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_NOCLIP,
+        DT_NOPREFIX, DT_RIGHT, DT_RTLREADING, DT_SINGLELINE, DT_WORDBREAK, DeleteDC, DeleteObject,
+        DrawTextW, Ellipse, FillRect, GdiFlush, GetDC, GetStockObject, HBITMAP, HDC, HGDIOBJ,
+        IntersectClipRect, LineTo, MoveToEx, NULL_BRUSH, NULL_PEN, OUT_DEFAULT_PRECIS,
+        PS_INSIDEFRAME, PS_SOLID, ReleaseDC, RestoreDC, SRCCOPY, SaveDC, SelectObject, SetBkMode,
+        SetTextColor, TRANSPARENT,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::IsWindow;
-    use ::windows::core::Result as WinResult;
+    use ::windows::core::{HSTRING, Result as WinResult};
     use std::ffi::c_void;
 
     /// A top-down 32-bit picture selected into a memory DC.
@@ -1161,6 +1182,55 @@ mod gdi {
             if made_brush {
                 let _ = DeleteObject(brush);
             }
+        }
+    }
+
+    /// The text of `laid` by `DrawTextW`, in a GDI font of the same family, size and weight.
+    pub(super) fn text(dc: HDC, scale: f32, laid: &Laid, x: f32, y: f32, value: Rgb) {
+        let style = laid.style();
+        let rtl = laid.direction() == Direction::RightToLeft;
+        let mut wide: Vec<u16> = laid.shown().encode_utf16().collect();
+        let mut flags = DT_NOPREFIX | DT_NOCLIP;
+        flags |= match laid.wrap() {
+            Wrap::Words => DT_WORDBREAK,
+            Wrap::OneLine => DT_SINGLELINE | DT_END_ELLIPSIS,
+        };
+        flags |= match (laid.align(), rtl) {
+            (Align::Centre, _) => DT_CENTER,
+            (Align::Start, false) | (Align::End, true) => DT_LEFT,
+            _ => DT_RIGHT,
+        };
+        if rtl {
+            flags |= DT_RTLREADING;
+        }
+        let height = laid.size().height.max(style.line_height());
+        let mut area = rect(Rect::new(x, y, laid.width(), height), scale);
+
+        // SAFETY: a font deleted below, after the previous one is selected back; the text and the
+        // rectangle are locals.
+        unsafe {
+            let font = CreateFontW(
+                -px(style.size, scale),
+                0,
+                0,
+                0,
+                i32::from(style.weight),
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
+                0,
+                &HSTRING::from(laid.family()),
+            );
+            let previous = SelectObject(dc, font.into());
+            SetTextColor(dc, colorref(value));
+            SetBkMode(dc, TRANSPARENT);
+            DrawTextW(dc, &mut wide, &mut area, flags);
+            SelectObject(dc, previous);
+            let _ = DeleteObject(font.into());
         }
     }
 

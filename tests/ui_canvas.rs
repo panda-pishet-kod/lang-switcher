@@ -5,7 +5,8 @@
 
 use lang_switcher::diag;
 use lang_switcher::ui::canvas::{self, Canvas, Image, Mode, Rect};
-use lang_switcher::ui::tokens::{Color, RADIUS_MEDIUM, Rgb, Theme};
+use lang_switcher::ui::text::{Align, Direction, Style, Text, Wrap};
+use lang_switcher::ui::tokens::{Color, RADIUS_MEDIUM, Rgb, Role, Theme};
 use windows::Win32::Foundation::HWND;
 
 /// The test picture: 100 × 60 points of `bg`, a rectangle of 80 × 40 points at 10, 10 rounded
@@ -281,4 +282,73 @@ fn a_target_refused_twice_turns_the_canvas_to_the_plain_look_and_says_so() {
         "two refusals in the journal"
     );
     assert!(count(plain) > plain_before, "the turn in the journal");
+}
+
+/// The box of every pixel that is not `bg`, in pixels: left, top, right, bottom.
+fn ink(image: &Image, bg: Rgb) -> Option<(u32, u32, u32, u32)> {
+    let mut found: Option<(u32, u32, u32, u32)> = None;
+    for y in 0..image.height {
+        for x in 0..image.width {
+            if image.at(x, y) != bg {
+                found = Some(found.map_or((x, y, x, y), |(l, t, r, b)| {
+                    (l.min(x), t.min(y), r.max(x), b.max(y))
+                }));
+            }
+        }
+    }
+    found
+}
+
+fn text_drawn(mode: Mode, locale: &str, direction: Direction, line: &str) -> (u32, u32, u32, u32) {
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let text = Text::new(locale, direction).expect("DirectWrite");
+    let laid = text
+        .lay(
+            line,
+            Style::of(Role::Body, 14.0, 512.0),
+            Wrap::OneLine,
+            Align::Start,
+            180.0,
+        )
+        .expect("a layout");
+    let mut canvas = Canvas::in_memory(200.0, 40.0, 1.0, mode).expect("a canvas");
+    canvas.frame(|painter| {
+        painter.clear(bg);
+        painter.text(&laid, 10.0, 10.0, Color::Text.get(theme));
+    });
+    ink(&canvas.image().expect("pixels"), bg).expect("some ink")
+}
+
+/// The plain look draws the same text in the same place: the ink of `DrawTextW` and of Direct2D
+/// starts at the same edge of the same box, within a few pixels of each other.
+#[test]
+fn the_plain_look_draws_text_where_direct2d_does_and_start_is_the_right_edge_in_hebrew() {
+    for (locale, direction, line) in [
+        ("en-US", Direction::LeftToRight, "Lang Switcher"),
+        ("he-IL", Direction::RightToLeft, "מקש קיצור"),
+    ] {
+        let smooth = text_drawn(Mode::Direct2D, locale, direction, line);
+        let plain = text_drawn(Mode::Gdi, locale, direction, line);
+
+        for (name, (left, top, right, bottom)) in [("Direct2D", smooth), ("GDI", plain)] {
+            assert!(
+                left >= 10 && right < 190 && top >= 10 && bottom < 40,
+                "{locale} {name}: {smooth:?}"
+            );
+            match direction {
+                Direction::LeftToRight => {
+                    assert!(left <= 12, "{locale} {name} starts at the left: {left}")
+                }
+                Direction::RightToLeft => {
+                    assert!(right >= 186, "{locale} {name} starts at the right: {right}")
+                }
+            }
+        }
+        let near = |a: u32, b: u32| a.abs_diff(b) <= 3;
+        assert!(
+            near(smooth.1, plain.1) && near(smooth.3, plain.3),
+            "{locale}: the same lines, Direct2D {smooth:?} and GDI {plain:?}"
+        );
+    }
 }
