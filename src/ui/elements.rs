@@ -32,6 +32,7 @@ use crate::ui::tokens::{
     PRESSED_MIX, RADIUS_CHECK, RADIUS_MEDIUM, RADIUS_SMALL, Rgb, Role, SECTION_PAD,
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
+use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, Face};
 
 /// What every element of one window shares: the theme, the direction, the type size and the faces.
 pub struct Look<'t> {
@@ -510,6 +511,19 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 false,
                 c(colour),
             );
+        }
+        Part::BrandName { text } => {
+            let style = Style {
+                face: Face::Main,
+                weight: BRAND_NAME_WEIGHT,
+                ..Style::of(Role::Brand, look.b, look.h)
+            };
+            if let Ok(laid) = look
+                .text
+                .lay(text, style, Wrap::OneLine, Align::Start, rect.w)
+            {
+                painter.text(&laid, rect.x, rect.y, c(BRAND_NAME_COLOR));
+            }
         }
         Part::Badge { text } => {
             let colour = if state.disabled {

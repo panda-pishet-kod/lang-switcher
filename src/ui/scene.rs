@@ -161,12 +161,20 @@ pub enum Node<I> {
 pub struct Window<I> {
     pub kind: WindowKind,
     pub art: Option<Art>,
-    /// The line under the picture: the name and its words.
-    pub brand: Option<String>,
+    /// The line under the picture: a name and an address (passport §2, `brand`).
+    pub brand: Option<Brand>,
     pub body: Node<I>,
     pub buttons: Vec<Node<I>>,
     /// The elements unavailable now: drawn in the look of §5, answering no press, skipped by Tab.
     pub disabled: Vec<I>,
+}
+
+/// The line under the picture of the panel: the name in the main face, the address beside it in
+/// the monospace one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Brand {
+    pub name: String,
+    pub address: String,
 }
 
 /// What the shell answers about a window's elements.

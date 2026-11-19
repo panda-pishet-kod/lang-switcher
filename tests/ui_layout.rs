@@ -9,7 +9,7 @@ use lang_switcher::ui::fit;
 use lang_switcher::ui::layout::{
     Class, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
 };
-use lang_switcher::ui::scene::{Art, ButtonKind, Node, Surface, Window, WindowKind};
+use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
 use lang_switcher::ui::text::{FixedAdvance, Measure, Style};
 use lang_switcher::ui::tokens::{
     BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role, TYPE_FLOOR,
@@ -519,7 +519,10 @@ fn a_narrow_window_puts_the_circle_beside_the_header_and_the_settings_do_not() {
     let window = |kind| Window {
         kind,
         art: Some(Art::About),
-        brand: Some("Lang Switcher".to_owned()),
+        brand: Some(Brand {
+            name: "Panda Koder".to_owned(),
+            address: "panda-pishet-kod.dev".to_owned(),
+        }),
         disabled: Vec::new(),
         body: header.clone(),
         buttons: Vec::new(),
@@ -610,7 +613,10 @@ fn every_window() -> Vec<Window<Id>> {
     let probe = Window {
         kind: WindowKind::Ordinary,
         art: Some(Art::About),
-        brand: Some("Lang Switcher".to_owned()),
+        brand: Some(Brand {
+            name: "Panda Koder".to_owned(),
+            address: "panda-pishet-kod.dev".to_owned(),
+        }),
         disabled: Vec::new(),
         body: Node::Column(vec![
             Node::Header {
@@ -758,6 +764,67 @@ fn the_mirror_reflects_the_window_descriptions_of_the_shell() {
                     size.w
                 );
             }
+        }
+    }
+}
+
+/// ◆ Content that does not fill the room stands in the middle of the free height above the row of
+/// buttons, as the mock-ups centre it; a window with a fill starts at the top.
+#[test]
+fn content_that_does_not_fill_the_room_stands_in_its_middle() {
+    let window = Window {
+        buttons: vec![button(Id::Close, "Close", ButtonKind::Primary)],
+        ..bare(text(Role::Body, "A short window"))
+    };
+    let layout = lay(&window, usual());
+    let line = texts(&layout)[0];
+    let rule = rects_of(&layout, |part| matches!(part, Part::ButtonRule))[0];
+    let top = CONTENT_PAD.v.at(layout.b);
+    let floor = rule.y - BLOCK_GAP.at(layout.b);
+
+    assert!(
+        close(line.y - top, floor - line.bottom()),
+        "as much room above as below: {line:?}, floor {floor}"
+    );
+}
+
+/// The line under the picture: the name, then the address beside it on the same line; mirrored, the
+/// name stands at the right.
+#[test]
+fn the_brand_line_is_the_name_and_the_address_beside_it() {
+    let window = Window {
+        art: Some(Art::About),
+        brand: Some(Brand {
+            name: "Panda Koder".to_owned(),
+            address: "panda-pishet-kod.dev".to_owned(),
+        }),
+        ..bare(text(Role::Body, "Body"))
+    };
+    for rtl in [false, true] {
+        let layout = lay_out(&window, usual(), 1.0, rtl, &MEASURE);
+        let name = rects_of(&layout, |part| matches!(part, Part::BrandName { .. }))[0];
+        let address = layout
+            .items
+            .iter()
+            .find(|item| {
+                matches!(
+                    &item.part,
+                    Part::Text {
+                        role: Role::Brand,
+                        ..
+                    }
+                )
+            })
+            .expect("the address")
+            .rect;
+        assert!(close(name.y, address.y), "one line");
+        if rtl {
+            assert!(
+                address.right() <= name.x,
+                "mirrored: the address left of the name"
+            );
+        } else {
+            assert!(address.x >= name.right(), "the address after the name");
         }
     }
 }

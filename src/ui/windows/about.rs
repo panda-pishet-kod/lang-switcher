@@ -14,7 +14,7 @@ use crate::settings::{
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
-use crate::ui::scene::{Art, ButtonKind, Event, Node, Role, Window, WindowKind};
+use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Window, WindowKind};
 
 /// The elements of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +55,13 @@ impl Content for About {
         Window {
             kind: WindowKind::Ordinary,
             art: Some(Art::About),
-            brand: Some(crate::APP_NAME.to_owned()),
+            // ◆ The author and the site under the panda, as in the mock-up. ⚠ Before this window
+            // reaches the product (T-120-13) the address moves to `letters::links`: criterion 4
+            // finds network addresses in a Release image only there.
+            brand: Some(Brand {
+                name: "Panda Koder".to_owned(),
+                address: "panda-pishet-kod.dev".to_owned(),
+            }),
             body: Node::Column(vec![
                 Node::Header {
                     eyebrow: Some(version),

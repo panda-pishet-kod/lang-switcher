@@ -31,6 +31,7 @@ use crate::ui::tokens::{
     SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
     WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
+use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +196,10 @@ pub enum Part {
     },
     /// A row of the tray menu.
     MenuRow,
+    /// The name in the line under the picture: the main face, the weight and colour of a name.
+    BrandName {
+        text: String,
+    },
     /// The number of an item of a numbered list.
     Number {
         text: String,
@@ -230,6 +235,7 @@ impl Part {
             Part::Dot(_) => "status dot",
             Part::Badge { .. } => "badge",
             Part::MenuRow => "menu row",
+            Part::BrandName { .. } => "brand name",
             Part::Number { .. } => "list number",
         }
     }
@@ -421,14 +427,34 @@ impl<I: Copy> Placer<'_, I> {
                     panel - edge * 2.0,
                     line,
                 );
+                // The name in the main face, the address beside it in the monospace one.
+                let name_style = Style {
+                    face: Face::Main,
+                    weight: BRAND_NAME_WEIGHT,
+                    ..style
+                };
+                let name_w = self.width_of(name_style, &brand.name).min(at.w);
+                let gap = BRAND_GAP.0 * style.size;
+                self.push(
+                    Part::BrandName {
+                        text: brand.name.clone(),
+                    },
+                    Rect::new(at.x, at.y, name_w, line),
+                    None,
+                );
                 self.push(
                     Part::Text {
                         role: Role::Brand,
-                        text: brand.clone(),
+                        text: brand.address.clone(),
                         wrap: Wrap::OneLine,
                         align: Align::Start,
                     },
-                    at,
+                    Rect::new(
+                        at.x + name_w + gap,
+                        at.y,
+                        (at.w - name_w - gap).max(0.0),
+                        line,
+                    ),
                     None,
                 );
             }
@@ -463,7 +489,15 @@ impl<I: Copy> Placer<'_, I> {
         let room = floor - top;
         let natural = self.height(&window.body, column, None);
         // The height of the room reaches a column, for its fills; nothing else stretches to it.
+        let fills = matches!(&window.body, Node::Column(children) if children.iter().any(|child| matches!(child, Node::Fill(_))));
         let slot = matches!(window.body, Node::Column(_)).then_some(room);
+        // ◆ Content that does not fill the room stands in the middle of it, as the mock-ups centre
+        // their content (`align-content: center`); a window with a fill takes the room from the top.
+        let top = if fills || natural >= room {
+            top
+        } else {
+            top + (room - natural) / 2.0
+        };
         self.node(&window.body, x, top, column, slot);
 
         if let Some((rule, buttons)) = row {

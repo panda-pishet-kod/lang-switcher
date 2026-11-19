@@ -593,6 +593,8 @@ pub const ART_RING: Pt = Pt(6.0);
 pub const BRAND_FROM_EDGE: Em = Em(1.6);
 /// Подпись под рисунком — от низа.
 pub const BRAND_FROM_BOTTOM: Em = Em(1.2);
+/// ◆ Подпись под рисунком — между именем и адресом, доля кегля подписи (из макета).
+pub const BRAND_GAP: Share = Share(0.5);
 /// Блок — поля.
 pub const BLOCK_PAD: Pad = Pad::em(0.8, 1.0);
 /// Блок — между строками.
