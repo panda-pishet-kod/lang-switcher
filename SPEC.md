@@ -100,6 +100,11 @@ windows = { version = "0.6x", features = [
   "Win32_UI_Controls",
   "Win32_Globalization",
   "Win32_Graphics_Dwm",
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Imaging",
 ] }
 serde = { version = "1", features = ["derive"] }
 toml  = "0.8"
@@ -114,6 +119,8 @@ codegen-units = 1
 panic         = "abort"
 strip         = true
 ```
+
+Пять feature — `Win32_Graphics_Direct2D`, `Win32_Graphics_Direct2D_Common`, `Win32_Graphics_DirectWrite`, `Win32_Graphics_Dxgi_Common`, `Win32_Graphics_Imaging` — добавлены 2026-11-19 по решению владельца 208.169 (этап Э120, оболочка интерфейса выпуска 1.8.0). Оболочка `src\ui\` рисует окна сама, средствами Windows: Direct2D в программном режиме — фигуры, обрезка, вывод рисунка; DirectWrite — текст, его замер и направление письма. `Direct2D_Common` и `Dxgi_Common` несут типы, без которых не вызвать ни одну функцию Direct2D (цвет, точка, прямоугольник, формат точек цели рисования); `Imaging` (WIC) — рисование в память для тестов и снимков стенда элементов. Список закрыт: шестая feature — только новым решением. Состав крейтов не меняется по той же причине, что и в прежних дополнениях: вывод `cargo tree` остаётся в 83 строки.
 
 Feature `Win32_Graphics_Dwm` добавлена 2026-08-21 по решению пользователя (вопрос 53). Без неё невыполнимо требование FR-92а в части заголовка окна: `DwmSetWindowAttribute` с атрибутом `DWMWA_USE_IMMERSIVE_DARK_MODE` — единственный документированный способ привести неклиентский заголовок к тёмной палитре, и в крейте `windows 0.62.2` этот вызов закрыт `#[cfg(feature = "Win32_Graphics_Dwm")]` (проверено контролером по исходнику крейта, `src/Windows/Win32/Graphics/Dwm/mod.rs`; сама feature объявлена как `Win32_Graphics_Dwm = ["Win32_Graphics"]`). Состав крейтов при этом не меняется: у крейта `windows` нет опциональных зависимостей, поэтому вывод `cargo tree` остаётся прежним и SEC-03 не затрагивается.
 

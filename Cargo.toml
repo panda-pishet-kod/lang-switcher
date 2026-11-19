@@ -86,6 +86,25 @@ windows = { version = "0.62.2", features = [
   # exactly that: `cargo tree` stays at 83 lines and criterion 4 of section 13 checks it.
   "Win32_Networking_WinHttp",
   "Win32_Security_Cryptography",
+  # Решение 208.169 (слово владельца: «Со всеми рекомендациями согласен») — the interface shell
+  # of `src\ui\` draws every window of 1.8.0 itself, in software, with the system's own
+  # Direct2D and DirectWrite. Five features, the closed list of stage Э120 — a sixth needs a
+  # new decision:
+  #
+  #   Win32_Graphics_Direct2D         — the factory, the render target, shapes, clipping
+  #   Win32_Graphics_Direct2D_Common  — the colour, point, rectangle and pixel-format types
+  #                                     every Direct2D call takes
+  #   Win32_Graphics_DirectWrite      — text: faces by role, measurement, reading direction
+  #   Win32_Graphics_Dxgi_Common      — DXGI_FORMAT, the pixel format of a render target
+  #   Win32_Graphics_Imaging          — WIC bitmaps: drawing into memory, for the tests and
+  #                                     for the snapshots of the element bench
+  #
+  # ⚠ **Crates: none added**, the same as above — `cargo tree` stays at 83 lines.
+  "Win32_Graphics_Direct2D",
+  "Win32_Graphics_Direct2D_Common",
+  "Win32_Graphics_DirectWrite",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Imaging",
 ] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
