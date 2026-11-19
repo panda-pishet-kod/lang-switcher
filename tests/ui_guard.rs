@@ -719,3 +719,28 @@ fn rule_3_tells_the_module_from_a_word_of_the_shell() {
         [r"src\ui\layout.rs:1: DirectWrite"]
     );
 }
+
+/// FR-72 in the shell: `tests\guard.rs` sweeps `src\*.rs` and not `src\ui\`, so the shell carries
+/// its own sweep — no bare `SendMessage` anywhere in it (the timeout form is what FR-72 names).
+#[test]
+fn rule_5_the_shell_sends_no_bare_message() {
+    check(
+        r"rule 5: a bare SendMessage in src\ui\ (FR-72)",
+        |file, tokens| {
+            tokens
+                .iter()
+                .filter_map(|token| match &token.tok {
+                    Tok::Ident(word)
+                        if matches!(
+                            word.as_str(),
+                            "SendMessageW" | "SendMessageA" | "SendMessage"
+                        ) =>
+                    {
+                        Some(at(file, token, word))
+                    }
+                    _ => None,
+                })
+                .collect()
+        },
+    );
+}

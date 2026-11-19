@@ -152,6 +152,8 @@ pub struct Window<I> {
     pub brand: Option<String>,
     pub body: Node<I>,
     pub buttons: Vec<Node<I>>,
+    /// The elements unavailable now: drawn in the look of §5, answering no press, skipped by Tab.
+    pub disabled: Vec<I>,
 }
 
 /// What the shell answers about a window's elements.

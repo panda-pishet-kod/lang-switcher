@@ -69,7 +69,7 @@ use std::mem::ManuallyDrop;
 use std::sync::OnceLock;
 
 /// The DPI of a point at 100 %: a device independent pixel of Direct2D.
-const POINT_DPI: f32 = 96.0;
+pub const POINT_DPI: f32 = 96.0;
 
 /// Render targets that could not be made, in a row, before the canvas turns to the plain look.
 pub const REFUSALS_BEFORE_PLAIN_LOOK: u8 = 2;

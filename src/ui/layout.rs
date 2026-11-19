@@ -63,6 +63,17 @@ fn class_of(w: f32) -> Class {
     }
 }
 
+/// The size and class of a window whose client area is `w` × `h` points: the window as it is,
+/// after the person dragged its frame.
+pub fn client_size(w: f32, h: f32) -> WindowSize {
+    WindowSize {
+        w,
+        h,
+        class: class_of(w),
+        scrolls: w < WINDOW_MIN.w.0 || h < WINDOW_MIN.h.0,
+    }
+}
+
 /// The window for a work area of `area_w` × `area_h` points (passport §3).
 pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
     if area_w < WINDOW_MIN.w.0 || area_h < WINDOW_MIN.h.0 {

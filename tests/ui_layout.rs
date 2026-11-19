@@ -52,6 +52,7 @@ fn bare(body: Node<Id>) -> Window<Id> {
         kind: WindowKind::Ordinary,
         art: None,
         brand: None,
+        disabled: Vec::new(),
         body,
         buttons: Vec::new(),
     }
@@ -277,6 +278,7 @@ fn the_steps_of_a_wizard_are_as_tall_as_the_tallest_and_the_buttons_do_not_move(
         kind: WindowKind::Wizard,
         art: None,
         brand: None,
+        disabled: Vec::new(),
         body: Node::Column(vec![
             Node::Steps(
                 current,
@@ -507,6 +509,7 @@ fn a_narrow_window_puts_the_circle_beside_the_header_and_the_settings_do_not() {
         kind,
         art: Some(Art::About),
         brand: Some("Lang Switcher".to_owned()),
+        disabled: Vec::new(),
         body: header.clone(),
         buttons: Vec::new(),
     };
@@ -597,6 +600,7 @@ fn every_window() -> Vec<Window<Id>> {
         kind: WindowKind::Ordinary,
         art: Some(Art::About),
         brand: Some("Lang Switcher".to_owned()),
+        disabled: Vec::new(),
         body: Node::Column(vec![
             Node::Header {
                 eyebrow: Some("Lang Switcher 1.8.0".to_owned()),
