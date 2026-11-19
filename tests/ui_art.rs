@@ -580,3 +580,29 @@ fn the_line_of_an_icon_is_1_2_points_at_18() {
         );
     }
 }
+
+/// T-120-8 (the request of the shell): a repeated frame copies the finished picture and draws
+/// nothing again; a new size and a new render target do draw it again. Feature `testing`: the
+/// counter `Art::drawn_afresh` exists only there — `cargo test --features testing --test ui_art`.
+#[cfg(feature = "testing")]
+#[test]
+fn a_repeated_frame_does_not_draw_the_picture_again() {
+    fn frame(art: &mut Art, canvas: &Canvas, radius: f32) {
+        canvas.frame(|target| {
+            art.draw(target, "hello", (radius, radius), radius)
+                .expect("the picture")
+        });
+    }
+    let canvas = Canvas::new(520, 96.0);
+    let mut art = Art::new();
+    for _ in 0..3 {
+        frame(&mut art, &canvas, 120.0);
+    }
+    assert_eq!(art.drawn_afresh(), 1, "three frames of one size");
+    for _ in 0..2 {
+        frame(&mut art, &canvas, 260.0);
+    }
+    assert_eq!(art.drawn_afresh(), 2, "a new size, then a repeat");
+    frame(&mut art, &Canvas::new(520, 96.0), 260.0);
+    assert_eq!(art.drawn_afresh(), 3, "a new render target");
+}
