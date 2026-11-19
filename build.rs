@@ -27,6 +27,11 @@
 // one body: they differ in the manifest resource and in the fields derived from the content
 // hash, and nowhere else. Decision R-01, TOOLCHAIN.md section 8.2, SPEC.md section 8.2.
 
+// Stage E120, task T-120-12: the reader of the panda drawings, a file of its own so the tests
+// read with the same code. See drawings() below.
+#[path = "build/svg.rs"]
+mod svg;
+
 fn main() {
     println!("cargo:rerun-if-changed=app.rc");
     // Stage L10N, task T-L10N-2: the string tables live in res/lang/<tag>.rc, included by app.rc.
@@ -101,6 +106,7 @@ fn main() {
         .unwrap();
 
     shipped_languages();
+    drawings();
 
     let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets the package version");
     let mut numbers = version.split('.').map(|part| {
@@ -181,4 +187,62 @@ fn shipped_languages() {
         code,
     )
     .expect("OUT_DIR/shipped_languages.rs must be writable");
+}
+
+// Stage E120, task T-120-12: the drawings of the windows, res/art/**/*.svg, read into plain drawing
+// commands at build time and written to OUT_DIR/art.rs as `DRAWINGS`, named by the path under
+// res/art without `.svg` ("hello", later "icons/<name>"), in the order of those names. The system
+// reader of SVG exists only from Windows 10 1703 and the program runs from 1607 (decision
+// 208.170); build/svg.rs says what it reads. A drawing with anything outside that subset stops the
+// build with the file and the name of what was not understood, and so does a file in res/art that
+// is not a drawing: left out in silence, it would be a window without its picture.
+fn drawings() {
+    // A folder is watched whole, every file below it.
+    println!("cargo:rerun-if-changed=res/art");
+    println!("cargo:rerun-if-changed=build/svg.rs");
+
+    fn collect(folder: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        let entries = std::fs::read_dir(folder)
+            .unwrap_or_else(|error| panic!("{}: {error}", folder.display()));
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|error| panic!("{}: {error}", folder.display()))
+                .path();
+            if path.is_dir() {
+                collect(&path, files);
+            } else if path.extension().is_some_and(|extension| extension == "svg") {
+                files.push(path);
+            } else {
+                panic!(
+                    "{}: res/art holds drawings, .svg, and nothing else",
+                    path.display()
+                );
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(std::path::Path::new("res/art"), &mut files);
+
+    let mut drawings: Vec<(String, svg::Drawing)> = files
+        .iter()
+        .map(|path| {
+            let shown = path.to_string_lossy().replace('\\', "/");
+            let text =
+                std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{shown}: {error}"));
+            let drawing = svg::parse(&shown, &text).unwrap_or_else(|error| panic!("{error}"));
+            let name = shown
+                .strip_prefix("res/art/")
+                .and_then(|name| name.strip_suffix(".svg"))
+                .unwrap_or_else(|| panic!("{shown}: not under res/art"));
+            (name.to_owned(), drawing)
+        })
+        .collect();
+    drawings.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let out = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
+    std::fs::write(
+        std::path::Path::new(&out).join("art.rs"),
+        svg::to_rust(&drawings),
+    )
+    .expect("OUT_DIR/art.rs must be writable");
 }
