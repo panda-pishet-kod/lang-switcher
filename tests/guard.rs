@@ -683,8 +683,17 @@ fn send_message_is_used_nowhere_and_the_timeout_is_the_fifty_of_fr72() {
 }
 
 /// **Acceptance point 12.** The subscription of `EVENT_OBJECT_FOCUS` is the one task T-03-3 made,
-/// and this task raised no second one: `SetWinEventHook` occurs in `src\watchdog.rs` and nowhere
-/// else.
+/// and this task raised no second one: `SetWinEventHook` occurs in `src\watchdog.rs` — and, since
+/// stage E119, in `src\flags.rs`, which subscribes nothing of focus.
+///
+/// ⭐ **Stage E119, task T-119-4, решение 208.142.** The layout flag of FR-90б learns that the
+/// list of layouts at the clock closed (Windows 10 tells a choice by the mouse there by nothing
+/// else) from a second subscription: `flags::ListWatch`, on the UI thread, only while the flag is
+/// on, for the process `explorer` alone — SPEC §6.1 names it under the UI thread. It is admitted
+/// here by what it subscribes, not by its file name: the range is `EVENT_OBJECT_DESTROY` …
+/// `EVENT_OBJECT_HIDE`, and module `flags` names neither `EVENT_OBJECT_FOCUS` nor
+/// `EVENT_SYSTEM_FOREGROUND` anywhere in its code. A focus subscription there, or a subscription
+/// in a third module, fails this test.
 #[test]
 fn the_focus_subscription_is_still_the_only_one_in_the_program() {
     let mut owners = Vec::new();
@@ -700,10 +709,46 @@ fn the_focus_subscription_is_still_the_only_one_in_the_program() {
         }
     }
 
+    owners.sort();
+
     assert_eq!(
         owners,
-        ["watchdog.rs"],
-        "the WinEvent subscriptions belong to module watchdog and to no other"
+        ["flags.rs", "watchdog.rs"],
+        "the WinEvent subscriptions belong to module watchdog and, for the list of layouts, to \
+         module flags — to no other"
+    );
+
+    let flags = source_of("flags.rs");
+
+    for focus in ["EVENT_OBJECT_FOCUS", "EVENT_SYSTEM_FOREGROUND"] {
+        assert!(
+            code_lines_with(&flags, focus).is_empty(),
+            "src\\flags.rs: {focus} — the focus and the foreground are module watchdog's \
+             subscription, the flag's is the list of layouts only"
+        );
+    }
+
+    let lines: Vec<&str> = flags.lines().map(str::trim).collect();
+    let calls: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.starts_with("//") && line.starts_with("SetWinEventHook("))
+        .map(|(at, _)| at)
+        .collect();
+
+    assert_eq!(
+        calls.len(),
+        1,
+        "src\\flags.rs: exactly one call of SetWinEventHook, the one of ListWatch"
+    );
+
+    let range = &lines[calls[0] + 1..calls[0] + 3];
+
+    assert_eq!(
+        range,
+        ["EVENT_OBJECT_DESTROY,", "EVENT_OBJECT_HIDE,"],
+        "src\\flags.rs: ListWatch subscribes the range EVENT_OBJECT_DESTROY … EVENT_OBJECT_HIDE \
+         (the list of layouts closing) and nothing wider"
     );
 }
 
