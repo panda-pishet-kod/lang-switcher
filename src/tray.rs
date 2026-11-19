@@ -2455,6 +2455,18 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
         return Some(LRESULT(0));
     }
 
+    // FR-82 since 1.8.0, task T-119-14: the settings a second start opened come forward.
+    if message == WM_TIMER && wparam.0 == SECOND_START_TIMER {
+        if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+            // SAFETY: the timer of this window this very message names; one-shot by this kill.
+            let _ =
+                unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), wparam.0) };
+        }
+
+        bring_the_open_window_forward();
+        return Some(LRESULT(0));
+    }
+
     if message == WM_TIMER && crate::flags::LIST_TIMERS.contains(&wparam.0) {
         list_timer(wparam.0);
         return Some(LRESULT(0));
@@ -5545,17 +5557,42 @@ pub fn refresh_flag() {
 /// this session. The settings window comes up — through the door of the menu,
 /// [`dispatch_command`] — or, when it (or the «О программе» window that locks it) is already up,
 /// that window comes forward. On the UI thread, outside every borrow: the dialog is modal.
+///
+/// ⚠ **The dialog comes up above the window in front but not in front of it** (stand T-119-14,
+/// Windows 11, 2026-11-20: the settings on top, the foreground still Блокнот) — a modal dialog
+/// activates itself and does not take the foreground. So a one-shot timer of the UI window
+/// ([`SECOND_START_TIMER`]), served by the dialog's own message loop, brings it forward while the
+/// right the second start gave is still good.
 pub fn show_settings_for_a_second_start() {
-    if let Some(open) = settings::open_window() {
-        // SAFETY: a live window of this thread by value; the second start gave this process the
-        // right to the foreground (`AllowSetForegroundWindow`), and a refusal leaves it where it is.
-        let _ = unsafe { SetForegroundWindow(open) };
+    if bring_the_open_window_forward() {
         return;
     }
 
     if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+        // SAFETY: the live UI window and an identifier of this module; one-shot by the kill in
+        // `handle_ui_message`.
+        let _ = unsafe { SetTimer(Some(hwnd), SECOND_START_TIMER, SECOND_START_MS, None) };
         dispatch_command(hwnd, CMD_SETTINGS);
     }
+}
+
+/// The timer of [`show_settings_for_a_second_start`] — an identifier of the UI window, after the
+/// flag's `27`…`29` (`flags::LIST_TIMERS`).
+pub const SECOND_START_TIMER: usize = 30;
+
+/// Its delay, in milliseconds: the dialog is made before its loop serves the first timer.
+const SECOND_START_MS: u32 = 150;
+
+/// The settings window or the «О программе» window of this thread forward, if one is up.
+fn bring_the_open_window_forward() -> bool {
+    let Some(open) = settings::open_window() else {
+        return false;
+    };
+
+    // SAFETY: a live window of this thread by value; the second start gave this process the right
+    // to the foreground (`AllowSetForegroundWindow`), and a refusal leaves it where it is.
+    let _ = unsafe { SetForegroundWindow(open) };
+    true
 }
 
 /// Copies `text` into one of the fixed fields of the notification area, always NUL-terminated

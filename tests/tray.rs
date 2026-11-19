@@ -7009,3 +7009,20 @@ fn a_second_start_asks_the_running_copy_before_it_tells_the_person() {
     );
     assert_eq!(asked.get(), 2, "and nothing asked of the running copy");
 }
+
+/// **The one-shot timers of the UI window do not share an identifier** (tasks T-119-3, T-119-4,
+/// T-119-14): the re-readings of the flag, the three of a list opened by a click on the flag, the
+/// settings a second start brings forward — and the letters' tick, `2`.
+#[test]
+fn the_timers_of_the_ui_window_are_distinct() {
+    let mut ids: Vec<usize> = lang_switcher::flags::REREAD_TIMERS.to_vec();
+    ids.extend(lang_switcher::flags::LIST_TIMERS);
+    ids.push(tray::SECOND_START_TIMER);
+
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    assert_eq!(sorted.len(), ids.len(), "two timers of one window: {ids:?}");
+    assert!(!ids.contains(&2), "2 is the letters' tick");
+}
