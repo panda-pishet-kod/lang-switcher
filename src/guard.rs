@@ -2502,7 +2502,7 @@ fn is_password_element() -> Option<bool> {
 /// `try_borrow_mut` and not `borrow_mut`, **on top of** that and not instead of it (variant 2 of
 /// the finding, allowed beside variant 1): should a probe ever be entered inside the creation
 /// itself, it is answered «no answer» — FR-73, buffering on — rather than with a panic.
-fn automation_client() -> Option<IUIAutomation> {
+pub(crate) fn automation_client() -> Option<IUIAutomation> {
     AUTOMATION.with(|cell| {
         let Ok(mut slot) = cell.try_borrow_mut() else {
             return None;

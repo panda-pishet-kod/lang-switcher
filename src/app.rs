@@ -3938,6 +3938,14 @@ unsafe extern "system" fn window_proc(
             // watcher looks at the window in front again for two seconds, on a timer of its own
             // window. The watcher window only (SEC-05); the message carries nothing, and a look
             // acts only on a change the program has not been told of.
+            // FR-90б, task T-119-4: the UI thread asks for the name of the input indicator — a console
+            // is in front and `switch::read` is blind there. UI Automation is this thread's (its STA).
+            // The watcher window only (SEC-05); the message carries nothing.
+            if message == crate::flags::WM_APP_FLAG_CONSOLE && is_watcher_window(hwnd) {
+                crate::flags::answer_console();
+                return LRESULT(0);
+            }
+
             if message == crate::watchdog::WM_APP_RECHECK_FOREGROUND && is_watcher_window(hwnd) {
                 crate::watchdog::arm_foreground_recheck();
 

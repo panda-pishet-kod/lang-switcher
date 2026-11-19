@@ -2701,6 +2701,27 @@ pub use profile::{CallbackLatency, callback_latency, record_callback_ticks};
 /// The value returned to suppress a stroke: anything non-zero.
 const SUPPRESS: LRESULT = LRESULT(1);
 
+/// Whether the key let go of ends a switch of layout by the keys of Windows — [`crate::flags::ends_a_switch_by_keys`]
+/// with the modifiers still held, read only for the keys that rule cares about (task T-119-4).
+fn flag_release(vk: u16) -> bool {
+    if !matches!(vk, 0x10 | 0x11 | 0x12 | 0x20 | 0x5B | 0x5C | 0xA0..=0xA5) {
+        return false;
+    }
+
+    let held = |key: u16| {
+        // SAFETY: reads the asynchronous key state of a virtual key; no memory of ours is touched.
+        is_held(unsafe { GetAsyncKeyState(i32::from(key)) })
+    };
+
+    crate::flags::ends_a_switch_by_keys(
+        vk,
+        held(VK_MENU.0),
+        held(VK_CONTROL.0),
+        held(VK_SHIFT.0),
+        held(VK_LWIN.0) || held(0x5C),
+    )
+}
+
 /// The low-level keyboard hook procedure of FR-01.
 ///
 /// # What this function is allowed to do
@@ -2794,6 +2815,14 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         // SAFETY: as for the forwarding call above.
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     };
+
+    // FR-90б, task T-119-4 (решение 208.113): the keys Windows switches layouts with — `Alt+Shift`,
+    // `Ctrl+Shift`, `Win+Space` — are let go: the flag re-reads 60 and 300 ms later. With the flag off
+    // this is one relaxed load per release; with it on, three key states for the five keys concerned
+    // and a post that queues and returns (NFR-01, NFR-04).
+    if edge == Edge::Up && crate::flags::is_on() && flag_release(vk) {
+        let _ = crate::app::post_to_ui_thread(crate::flags::WM_APP_FLAG_LATER);
+    }
 
     // The whole stroke, read out of `KBDLLHOOKSTRUCT` in one place: the three fields the
     // decision needs and the three the record of FR-04 needs — the scan code, the flags

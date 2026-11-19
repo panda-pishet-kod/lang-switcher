@@ -673,6 +673,12 @@ pub struct Tray {
     /// The flag of FR-90б while `general.tray_flag` is on — task T-119-2. `None` with the flag
     /// off: nothing of the flag exists then.
     flag: Option<FlagState>,
+    /// The subscription to the list of layouts closing (task T-119-4), held only while the flag is
+    /// on — [crate::flags::ListWatch].
+    list_watch: Option<crate::flags::ListWatch>,
+    /// What this tray last published to [`crate::flags::set_on`] — published only when it changes,
+    /// so a tray with the flag off never writes the switch at all (it starts off).
+    flag_published: bool,
 }
 
 /// What the flag of FR-90б shows and the icon drawn for it — task T-119-2.
@@ -810,11 +816,14 @@ impl Tray {
             announce_calls: 0,
             finished: false,
             flag: None,
+            list_watch: None,
+            flag_published: false,
         };
 
         tray.add_icon();
 
         // FR-90б: a flag that was on when the program stopped is the icon from the start.
+        tray.sync_flag_watch();
         if tray.flag_on() {
             tray.refresh_flag();
         }
@@ -825,6 +834,29 @@ impl Tray {
     /// Whether the icon is the flag of the layout — `general.tray_flag`, FR-90б, task T-119-2.
     pub fn flag_on(&self) -> bool {
         self.config.general.tray_flag
+    }
+
+    /// Publishes the setting to the threads that tell the flag of a change and holds the
+    /// subscription to the list of layouts closing exactly while the flag is on — task T-119-4.
+    /// Off: the atomic says no and the subscription is gone (no new hook, no new thread).
+    pub fn sync_flag_watch(&mut self) {
+        let on = self.flag_on();
+
+        if on != self.flag_published {
+            crate::flags::set_on(on);
+            self.flag_published = on;
+        }
+
+        if !on {
+            self.list_watch = None;
+        } else if self.list_watch.is_none() {
+            self.list_watch = crate::flags::ListWatch::start();
+        }
+    }
+
+    /// Whether the subscription to the list of layouts is held — for `tests\tray.rs`.
+    pub fn watches_the_list(&self) -> bool {
+        self.list_watch.is_some()
     }
 
     /// The layout the flag shows, while it is on — for `tests\tray.rs` and the tooltip.
@@ -846,7 +878,13 @@ impl Tray {
     /// layout last known: the flag does not go blank between two windows.
     pub fn refresh_flag(&mut self) {
         let reading = crate::switch::read();
-        let layout = (!reading.blind && reading.layout.raw() != 0).then_some(reading.layout);
+        let layout = if reading.blind {
+            // A classic console (FR-52): the layout the watcher found by the name of the input
+            // indicator, when it has just found one (task T-119-4), else the layout last known.
+            crate::flags::take_console_layout()
+        } else {
+            (reading.layout.raw() != 0).then_some(reading.layout)
+        };
 
         self.show_flag_of(layout);
     }
@@ -1369,6 +1407,7 @@ impl Tray {
         self.config = config;
         // FR-90б, task T-119-2: the check box of the flag acts at once — a flag put on reads the
         // layout now, a flag taken off gives the icon of FR-90 back in the same update.
+        self.sync_flag_watch();
         if self.flag_on() {
             self.refresh_flag();
         }
@@ -1393,6 +1432,13 @@ impl Tray {
             return;
         }
         self.finished = true;
+
+        // Task T-119-4: the flag's subscription and switch leave with the tray.
+        self.list_watch = None;
+        if self.flag_published {
+            crate::flags::set_on(false);
+            self.flag_published = false;
+        }
 
         // FR-83, "удаление иконки".
         self.remove_icon();
@@ -1752,6 +1798,11 @@ impl Tray {
     fn readd_icon(&mut self) {
         self.remove_icon();
         self.add_icon();
+
+        // Task T-119-4: a new taskbar is most likely a new explorer — the subscription to its list
+        // of layouts names a process that is gone; take it again.
+        self.list_watch = None;
+        self.sync_flag_watch();
     }
 
     // -----------------------------------------------------------------------------------
@@ -2325,6 +2376,49 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
     // and outside it — the schedule reads the configuration through `with_tray` of its own.
     if message == WM_TIMER && wparam.0 == LETTERS_TIMER {
         on_letters_tick();
+        return Some(LRESULT(0));
+    }
+
+    // FR-90б, task T-119-4: the layout may have moved — read it now, and for `LATER` again after
+    // each of the delays, by one-shot timers (NFR-10: no poll). Outside the borrow: `refresh_flag`
+    // takes it. SEC-05: the messages carry nothing; a forged one buys a reading of the layout.
+    if message == crate::flags::WM_APP_FLAG_NOW || message == crate::flags::WM_APP_FLAG_LATER {
+        refresh_flag();
+
+        if message == crate::flags::WM_APP_FLAG_LATER
+            && let Some(hwnd) = with_tray(|tray| tray.hwnd)
+        {
+            for (timer, delay) in crate::flags::REREAD_TIMERS
+                .into_iter()
+                .zip(crate::flags::REREAD_MS)
+            {
+                // SAFETY: the live UI window and identifiers of this module; a timer that exists
+                // is replaced, which is what a second `LATER` within the delay wants.
+                let _ = unsafe { SetTimer(Some(hwnd), timer, delay, None) };
+            }
+        }
+
+        return Some(LRESULT(0));
+    }
+
+    if message == WM_TIMER && crate::flags::REREAD_TIMERS.contains(&wparam.0) {
+        if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
+            // SAFETY: the timer of this window this very message names; one-shot by this kill.
+            let _ =
+                unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), wparam.0) };
+        }
+
+        refresh_flag();
+
+        // The last re-read: a console in front is blind to `switch::read` — ask the watcher for the
+        // name of the input indicator (решение 208.142: once, about 300 ms after the event).
+        if wparam.0 == crate::flags::REREAD_TIMERS[1]
+            && crate::flags::is_on()
+            && crate::switch::read().blind
+        {
+            let _ = app::post_to_watcher_thread(crate::flags::WM_APP_FLAG_CONSOLE);
+        }
+
         return Some(LRESULT(0));
     }
 

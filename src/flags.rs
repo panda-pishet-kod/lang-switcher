@@ -1749,3 +1749,321 @@ pub fn icon(face: &Face, look: Look) -> Option<windows::Win32::UI::WindowsAndMes
 
     icon
 }
+
+// -----------------------------------------------------------------------------------------
+// Knowing the layout without a timer — task T-119-4 (NFR-10, решения 208.113, 208.139, 208.142)
+// -----------------------------------------------------------------------------------------
+
+/// Whether the flag of FR-90б is on — published by the tray (the UI thread) whenever the setting
+/// is read or changed, and read by the paths that tell the flag the layout may have moved: the
+/// `WinEvent` callback of the watcher, the Raw Input of the input thread and the keyboard hook.
+/// **Off, each of them costs one load of this and nothing else**: no post, no subscription, no
+/// thread — «флаг выключен — нового кода нет в работе».
+static FLAG_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Publishes whether the flag is on — the tray, on the UI thread.
+pub fn set_on(on: bool) {
+    FLAG_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the flag is on — any thread, one relaxed load.
+pub fn is_on() -> bool {
+    FLAG_ON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `WM_APP + 25`, posted to the UI window: re-read the layout for the flag now. The first number
+/// free above `app::WM_APP_OWN_LAYOUT` (`+ 24`). SEC-05: it carries nothing, and a forged one buys
+/// its sender one reading of the layout of the window in front.
+pub const WM_APP_FLAG_NOW: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 25;
+
+/// `WM_APP + 26`, posted to the UI window: re-read now and again after each of [`REREAD_MS`] —
+/// two one-shot timers, not a poll (NFR-10). For the moments the layout is about to change rather
+/// than has changed: a mouse button released, the keys of Windows released, the focus moving, the
+/// list of layouts closing. SEC-05 as [`WM_APP_FLAG_NOW`].
+pub const WM_APP_FLAG_LATER: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 26;
+
+/// The two re-reads after [`WM_APP_FLAG_LATER`], in milliseconds — PROBE Э119-П3: 60 ms holds the
+/// worst case of the stand (36 ms after the release, 24 after the list closed) with room, 300 is
+/// the margin for a slow machine.
+pub const REREAD_MS: [u32; 2] = [60, 300];
+
+/// The timer identifiers of the two re-reads on the UI window (the letters' clock is 2).
+pub const REREAD_TIMERS: [usize; 2] = [25, 26];
+
+/// Whether a key released now is the end of a switch of layout by the keys of Windows —
+/// `Alt+Shift`, `Ctrl+Shift`, `Win+Space` (решение 208.113: the hook sees them, then one reading).
+/// Pure: the caller hands in the virtual key released and which modifiers are still held.
+///
+/// Typing alone does not answer yes: a capital letter's `Shift` is released with neither `Alt` nor
+/// `Ctrl` held, a space between words without `Win`. Either order of releasing a pair is caught —
+/// the key let go first finds its partner still down. `Win` released is always a yes: it is rare,
+/// and `Win+Space` may be let go of `Win` first.
+pub fn ends_a_switch_by_keys(vk: u16, alt: bool, ctrl: bool, shift: bool, win: bool) -> bool {
+    match vk {
+        // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
+        0x10 | 0xA0 | 0xA1 => alt || ctrl,
+        // VK_MENU, VK_LMENU, VK_RMENU; VK_CONTROL, VK_LCONTROL, VK_RCONTROL
+        0x12 | 0xA4 | 0xA5 | 0x11 | 0xA2 | 0xA3 => shift,
+        // VK_SPACE
+        0x20 => win,
+        // VK_LWIN, VK_RWIN
+        0x5B | 0x5C => true,
+        _ => false,
+    }
+}
+
+/// The class of the window Windows shows its list of layouts in — `Shell_InputSwitchTopLevelWindow`
+/// of the process `explorer` (PROBE Э119-П2, П3). Undocumented; a Windows that renames it loses the
+/// main path on Windows 10 and keeps the release of the mouse (решение 208.142).
+pub const LIST_WINDOW_CLASS: &str = "Shell_InputSwitchTopLevelWindow";
+
+/// Whether a `WinEvent` says the list of layouts closed — `EVENT_OBJECT_HIDE` or
+/// `EVENT_OBJECT_DESTROY` of the window itself (`OBJID_WINDOW`, `CHILDID_SELF`) of
+/// [`LIST_WINDOW_CLASS`]. Not `EVENT_OBJECT_CLOAKED`: the window is born cloaked too (PROBE Э119-П3),
+/// and the hide follows the choice by 8–10 ms, which the 60 ms of [`REREAD_MS`] covers. Pure.
+pub fn closes_the_list(event: u32, object_id: i32, child_id: i32, class: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE};
+
+    (event == EVENT_OBJECT_HIDE || event == EVENT_OBJECT_DESTROY)
+        && object_id == 0
+        && child_id == 0
+        && class == LIST_WINDOW_CLASS
+}
+
+/// The subscription to the list of layouts closing — Windows 10's main path of решение 208.142,
+/// set **only while the flag is on**, out of context, for the process `explorer` alone, events
+/// `EVENT_OBJECT_DESTROY`…`EVENT_OBJECT_HIDE`. Removed when this value is dropped. Installed by the
+/// UI thread, so the callback runs there and posts [`WM_APP_FLAG_LATER`] to its own window.
+///
+/// Explorer that restarts is another process: the tray drops this and takes a new one on
+/// `TaskbarCreated` (FR-81).
+pub struct ListWatch {
+    hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+}
+
+impl ListWatch {
+    /// Subscribes, or `None` when there is no taskbar or the system refused (NFR-13: the flag then
+    /// follows the other paths — the release of the mouse, the keys, the window in front).
+    pub fn start() -> Option<Self> {
+        use windows::Win32::UI::Accessibility::SetWinEventHook;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, FindWindowW, GetWindowThreadProcessId,
+            WINEVENT_OUTOFCONTEXT,
+        };
+
+        // SAFETY: a constant class name, no window name; a null answer is checked.
+        let taskbar = unsafe { FindWindowW(windows::core::w!("Shell_TrayWnd"), None) }.ok()?;
+        let mut explorer = 0u32;
+
+        // SAFETY: a live window handle by value and a local for the process id.
+        unsafe { GetWindowThreadProcessId(taskbar, Some(&mut explorer)) };
+
+        if explorer == 0 {
+            return None;
+        }
+
+        // SAFETY: out of context — no DLL anywhere; the callback is a `'static` function of this
+        // image; the range is two event codes of one process. Null is the documented failure.
+        let hook = unsafe {
+            SetWinEventHook(
+                EVENT_OBJECT_DESTROY,
+                EVENT_OBJECT_HIDE,
+                None,
+                Some(list_event_proc),
+                explorer,
+                0,
+                WINEVENT_OUTOFCONTEXT,
+            )
+        };
+
+        (!hook.0.is_null()).then_some(Self { hook })
+    }
+}
+
+impl Drop for ListWatch {
+    fn drop(&mut self) {
+        // SAFETY: the handle of a successful `SetWinEventHook` of this thread, unhooked once.
+        let _ = unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(self.hook) };
+    }
+}
+
+/// The callback of [`ListWatch`]: the list closed → [`WM_APP_FLAG_LATER`]. Nothing here can panic,
+/// allocate or block; the class name is read into a stack buffer.
+unsafe extern "system" fn list_event_proc(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    event: u32,
+    window: windows::Win32::Foundation::HWND,
+    object_id: i32,
+    child_id: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    if object_id != 0 || child_id != 0 || window.0.is_null() {
+        return;
+    }
+
+    let mut name = [0u16; 64];
+
+    // SAFETY: a window handle by value (the window is alive: the class is readable even in its
+    // `EVENT_OBJECT_DESTROY`, PROBE Э119-П3) and a stack buffer whose length is passed.
+    let len = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut name) };
+    let len = usize::try_from(len).unwrap_or(0).min(name.len());
+    let class = String::from_utf16_lossy(&name[..len]);
+
+    if closes_the_list(event, object_id, child_id, &class) {
+        let _ = crate::app::post_to_ui_thread(WM_APP_FLAG_LATER);
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// The console — task T-119-4, решение 208.142: the name of the input indicator
+// -----------------------------------------------------------------------------------------
+
+/// `WM_APP + 27`, posted by the UI thread to the **watcher** window when the window in front is a
+/// classic console (`switch::read` is blind there, FR-52) at the last re-read after an event: the
+/// watcher reads the name of the input indicator by UI Automation (its STA, section 6.1) and posts
+/// [`WM_APP_FLAG_NOW`] back. SEC-05: carries nothing; a forged one buys one reading of a name.
+pub const WM_APP_FLAG_CONSOLE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 27;
+
+/// The layout the input indicator named at the watcher's last reading, raw, or 0 — taken once by
+/// the UI thread ([`take_console_layout`]).
+static CONSOLE_LAYOUT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The layout the watcher found for a console, once: a second blind reading does not see it again.
+pub fn take_console_layout() -> Option<LayoutId> {
+    let raw = CONSOLE_LAYOUT.swap(0, std::sync::atomic::Ordering::Relaxed);
+    (raw != 0).then(|| LayoutId::from_raw(raw))
+}
+
+/// The first layout of the session whose language the indicator's name names — the name says the
+/// language, not the layout (PROBE Э119-П2, Б), so two layouts of one language are not told apart
+/// and the first stands for both. `language_of` gives the language of a layout in the words of
+/// Windows' interface — the words the indicator is written in. Pure.
+pub fn layout_named_in(
+    name: &str,
+    session: &[LayoutId],
+    language_of: impl Fn(LayoutId) -> Option<String>,
+) -> Option<LayoutId> {
+    session.iter().copied().find(|layout| {
+        language_of(*layout)
+            .is_some_and(|language| !language.is_empty() && name.contains(&language))
+    })
+}
+
+/// The language of a layout in the words of Windows' interface — `LOCALE_SLOCALIZEDLANGUAGENAME`.
+fn localized_language(layout: LayoutId) -> Option<String> {
+    let mut locale = [0u16; 85];
+
+    // SAFETY: a live buffer of this frame and its length; zero is the documented failure.
+    let written = unsafe {
+        windows::Win32::Globalization::LCIDToLocaleName(
+            u32::from(layout.language_id()),
+            Some(&mut locale),
+            0,
+        )
+    };
+
+    if written <= 0 {
+        return None;
+    }
+
+    let mut out = [0u16; 128];
+
+    // SAFETY: the NUL-terminated name written above and a live buffer whose length bounds the write.
+    let written = unsafe {
+        windows::Win32::Globalization::GetLocaleInfoEx(
+            windows::core::PCWSTR(locale.as_ptr()),
+            windows::Win32::Globalization::LOCALE_SLOCALIZEDLANGUAGENAME,
+            Some(&mut out),
+        )
+    };
+
+    let units = usize::try_from(written).ok()?.checked_sub(1)?;
+    Some(String::from_utf16_lossy(&out[..units.min(out.len())]))
+}
+
+/// The watcher's answer to [`WM_APP_FLAG_CONSOLE`]: read the indicator's name, find its layout,
+/// publish it and ask the UI thread to read again. Nothing when the flag went off meanwhile.
+pub(crate) fn answer_console() {
+    if !is_on() {
+        return;
+    }
+
+    let Some(name) = indicator_name() else {
+        return;
+    };
+
+    let session = crate::layouts::enumerate().unwrap_or_default();
+
+    if let Some(layout) = layout_named_in(&name, &session, localized_language) {
+        CONSOLE_LAYOUT.store(layout.raw(), std::sync::atomic::Ordering::Relaxed);
+        let _ = crate::app::post_to_ui_thread(WM_APP_FLAG_NOW);
+    }
+}
+
+/// The name of the input indicator (РУС/ENG) by UI Automation, on the watcher thread.
+///
+/// Windows 10: the Win32 window `InputIndicatorButton` inside `TrayInputIndicatorWClass` — found by
+/// class, whatever the language of Windows. Windows 11: the button of the taskbar with the
+/// automation id `SystemTrayIcon` whose name names a language of the session (every icon of the tray
+/// has that id; the name is the only sign — decision 208.113 п. 3, ⚠ Russian Windows 11 not measured).
+fn indicator_name() -> Option<String> {
+    use windows::Win32::UI::Accessibility::TreeScope_Descendants;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW};
+    use windows::core::w;
+
+    let client = crate::guard::automation_client()?;
+
+    // SAFETY: constant class names and window handles by value; a null answer is checked.
+    let taskbar = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.ok()?;
+    let button = unsafe {
+        FindWindowExW(Some(taskbar), None, w!("TrayNotifyWnd"), None)
+            .and_then(|notify| {
+                FindWindowExW(Some(notify), None, w!("TrayInputIndicatorWClass"), None)
+            })
+            .and_then(|indicator| {
+                FindWindowExW(Some(indicator), None, w!("InputIndicatorButton"), None)
+            })
+    };
+
+    if let Ok(button) = button {
+        // SAFETY: a live window handle by value; the call crosses into explorer and answers.
+        let element = unsafe { client.ElementFromHandle(button) }.ok()?;
+        // SAFETY: a live element of this STA.
+        return unsafe { element.CurrentName() }
+            .ok()
+            .map(|name| name.to_string());
+    }
+
+    // Windows 11.
+    // SAFETY: as above; the true condition needs no VARIANT (the feature list is closed).
+    let root = unsafe { client.ElementFromHandle(taskbar) }.ok()?;
+    let condition = unsafe { client.CreateTrueCondition() }.ok()?;
+    let all = unsafe { root.FindAll(TreeScope_Descendants, &condition) }.ok()?;
+    let count = unsafe { all.Length() }.ok()?;
+    let session = crate::layouts::enumerate().unwrap_or_default();
+
+    for index in 0..count {
+        // SAFETY: an index inside the length the array answered.
+        let Ok(element) = (unsafe { all.GetElement(index) }) else {
+            continue;
+        };
+        let id = unsafe { element.CurrentAutomationId() }
+            .map(|id| id.to_string())
+            .unwrap_or_default();
+
+        if id != "SystemTrayIcon" {
+            continue;
+        }
+
+        let name = unsafe { element.CurrentName() }
+            .map(|name| name.to_string())
+            .unwrap_or_default();
+
+        if layout_named_in(&name, &session, localized_language).is_some() {
+            return Some(name);
+        }
+    }
+
+    None
+}

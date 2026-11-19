@@ -366,11 +366,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DBT_DEVTYP_DEVICEINTERFACE, DEV_BROADCAST_DEVICEINTERFACE_W, DEVICE_NOTIFY_WINDOW_HANDLE,
     EVENT_OBJECT_FOCUS, EVENT_SYSTEM_DESKTOPSWITCH, EVENT_SYSTEM_FOREGROUND, GA_ROOT, GetAncestor,
     GetForegroundWindow, GetMessageTime, GetWindowThreadProcessId, HDEVNOTIFY, KillTimer,
-    PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_2_DOWN, RI_MOUSE_BUTTON_3_DOWN,
-    RI_MOUSE_BUTTON_4_DOWN, RI_MOUSE_BUTTON_5_DOWN, RegisterDeviceNotificationW, SetTimer,
-    UnregisterDeviceNotification, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
-    WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE, WM_POWERBROADCAST, WM_TIMER,
-    WM_WTSSESSION_CHANGE, WTS_CONSOLE_DISCONNECT, WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK,
+    PBT_APMRESUMEAUTOMATIC, RI_MOUSE_BUTTON_1_DOWN, RI_MOUSE_BUTTON_1_UP, RI_MOUSE_BUTTON_2_DOWN,
+    RI_MOUSE_BUTTON_2_UP, RI_MOUSE_BUTTON_3_DOWN, RI_MOUSE_BUTTON_3_UP, RI_MOUSE_BUTTON_4_DOWN,
+    RI_MOUSE_BUTTON_4_UP, RI_MOUSE_BUTTON_5_DOWN, RI_MOUSE_BUTTON_5_UP,
+    RegisterDeviceNotificationW, SetTimer, UnregisterDeviceNotification, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS, WM_APP, WM_DEVICECHANGE, WM_INPUT, WM_INPUT_DEVICE_CHANGE,
+    WM_POWERBROADCAST, WM_TIMER, WM_WTSSESSION_CHANGE, WTS_CONSOLE_DISCONNECT,
+    WTS_REMOTE_DISCONNECT, WTS_SESSION_LOCK,
 };
 use windows::core::{Error as WinError, GUID, PCWSTR, Result as WinResult};
 
@@ -602,6 +604,14 @@ const BUTTON_DOWN_BITS: u16 = (RI_MOUSE_BUTTON_1_DOWN
     | RI_MOUSE_BUTTON_3_DOWN
     | RI_MOUSE_BUTTON_4_DOWN
     | RI_MOUSE_BUTTON_5_DOWN) as u16;
+
+/// The `usButtonFlags` bits that mean "a button went **up**" — task T-119-4 (FR-90б), the release
+/// the flag re-reads after (решение 208.142). Not a row of FR-10: a release flushes nothing.
+pub const BUTTON_UP_BITS: u16 = (RI_MOUSE_BUTTON_1_UP
+    | RI_MOUSE_BUTTON_2_UP
+    | RI_MOUSE_BUTTON_3_UP
+    | RI_MOUSE_BUTTON_4_UP
+    | RI_MOUSE_BUTTON_5_UP) as u16;
 
 // ---------------------------------------------------------------------------------------
 // Pure decisions — everything here is testable without a window, a mouse or a hook
@@ -1682,6 +1692,14 @@ fn mouse_button_time(lparam: LPARAM) -> Option<u32> {
     // structure was filled by the call above, which reported how many bytes it wrote.
     let button_flags = unsafe { raw.data.mouse.Anonymous.Anonymous.usButtonFlags };
 
+    // FR-90б, task T-119-4, решение 208.142: a button **released** — the insurance path of Windows 10
+    // for a choice by the mouse in the list at the clock (and any other click that may have moved
+    // the layout): the flag re-reads 60 and 300 ms later. Ahead of the early return below, which
+    // only lets presses through; one mask for every packet and, only for a release, one relaxed load.
+    if button_flags & BUTTON_UP_BITS != 0 && crate::flags::is_on() {
+        let _ = crate::app::post_to_ui_thread(crate::flags::WM_APP_FLAG_LATER);
+    }
+
     if !mouse_button_pressed(button_flags) {
         // FR-10 and FR-13: cursor movement is **not** a flush. This is the arm the overwhelming
         // majority of packets take, and it costs one mask and one comparison.
@@ -2738,6 +2756,14 @@ unsafe extern "system" fn win_event_proc(
 
     // The window the program is told of from here on — what the re-check compares with.
     let _ = tell(Tell::Passed(root));
+
+    // FR-90б, task T-119-4: a window or a focus of the foreground moved — the layout the flag shows
+    // may have moved with it. Windows 11 tells the choice by the mouse in the list at the clock by
+    // exactly this, `EVENT_OBJECT_FOCUS` of the shell (решение 208.113). One relaxed load with the
+    // flag off; a post to the UI window, which queues and returns, with it on (NFR-04).
+    if crate::flags::is_on() {
+        let _ = crate::app::post_to_ui_thread(crate::flags::WM_APP_FLAG_LATER);
+    }
 
     if focus_repeated(event, window, object_id, child_id) {
         // **Task T-10-0e: the frontmost window's own churn re-announces the focus it

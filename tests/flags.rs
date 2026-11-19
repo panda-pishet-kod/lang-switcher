@@ -398,3 +398,189 @@ fn dump_the_flags_for_review() {
     std::fs::write(&out, format!("[{}]", rows.join(",\n"))).expect("the dump is written");
     println!("{} images into {out}", rows.len());
 }
+
+// =========================================================================================
+// T-119-4 — knowing the layout without a timer
+// =========================================================================================
+
+/// **The keys of Windows that switch a layout, and only they, make the flag re-read** — the rule
+/// of `flags::ends_a_switch_by_keys`. Red before: the function did not exist.
+#[test]
+fn only_the_keys_that_switch_a_layout_make_the_flag_re_read() {
+    use flags::ends_a_switch_by_keys as ends;
+
+    // Alt+Shift and Ctrl+Shift, released in either order; Win+Space; Win alone.
+    assert!(
+        ends(0xA0, true, false, false, false),
+        "Shift let go with Alt held"
+    );
+    assert!(
+        ends(0xA1, false, true, false, false),
+        "right Shift let go with Ctrl held"
+    );
+    assert!(
+        ends(0xA4, false, false, true, false),
+        "Alt let go with Shift held"
+    );
+    assert!(
+        ends(0xA3, false, false, true, false),
+        "Ctrl let go with Shift held"
+    );
+    assert!(
+        ends(0x20, false, false, false, true),
+        "Space let go with Win held"
+    );
+    assert!(ends(0x5B, false, false, false, false), "Win let go");
+
+    // Typing.
+    assert!(
+        !ends(0xA0, false, false, false, false),
+        "a capital letter's Shift"
+    );
+    assert!(
+        !ends(0x20, false, false, false, false),
+        "a space between words"
+    );
+    assert!(
+        !ends(0x41, true, true, true, true),
+        "a letter, whatever is held"
+    );
+    assert!(
+        !ends(0xA4, false, true, false, false),
+        "Alt let go with Ctrl but no Shift"
+    );
+}
+
+/// **The list of layouts closes — the hide or the destruction of its own window, nothing else.**
+#[test]
+fn the_list_closes_on_the_hide_or_destruction_of_its_window_only() {
+    use flags::{LIST_WINDOW_CLASS, closes_the_list};
+
+    const DESTROY: u32 = 0x8001;
+    const SHOW: u32 = 0x8002;
+    const HIDE: u32 = 0x8003;
+    const CLOAKED: u32 = 0x8017;
+
+    assert!(closes_the_list(HIDE, 0, 0, LIST_WINDOW_CLASS));
+    assert!(closes_the_list(DESTROY, 0, 0, LIST_WINDOW_CLASS));
+    assert!(
+        !closes_the_list(SHOW, 0, 0, LIST_WINDOW_CLASS),
+        "the list opening"
+    );
+    assert!(
+        !closes_the_list(CLOAKED, 0, 0, LIST_WINDOW_CLASS),
+        "born cloaked too"
+    );
+    assert!(
+        !closes_the_list(HIDE, -4, 0, LIST_WINDOW_CLASS),
+        "a part of it, not the window"
+    );
+    assert!(
+        !closes_the_list(HIDE, 0, 3, LIST_WINDOW_CLASS),
+        "a child, not the window"
+    );
+    assert!(
+        !closes_the_list(HIDE, 0, 0, "Shell_TrayWnd"),
+        "another window of explorer"
+    );
+}
+
+/// **The guard of «флаг выключен — нового кода нет в работе», on the source:** every post of the
+/// flag's messages from the watcher, the Raw Input and the hook stands behind `flags::is_on()` in
+/// the very condition that guards it.
+///
+/// ⚠ Control: a post with the condition taken off is found.
+#[test]
+fn every_post_of_the_flag_stands_behind_the_switch() {
+    fn ungated(text: &str) -> Vec<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut found = Vec::new();
+
+        for (n, line) in lines.iter().enumerate() {
+            if line.contains("post_to_ui_thread(crate::flags::WM_APP_FLAG_") {
+                let guard = lines[..n]
+                    .iter()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or(&"");
+                if !(guard.trim_start().starts_with("if ")
+                    && guard.contains("crate::flags::is_on()"))
+                {
+                    found.push(format!("{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+
+        found
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut posts = 0;
+
+    for file in ["watchdog.rs", "hook.rs"] {
+        let text = std::fs::read_to_string(root.join(file)).expect("a source reads");
+        posts += text
+            .matches("post_to_ui_thread(crate::flags::WM_APP_FLAG_")
+            .count();
+        let bad = ungated(&text);
+        assert!(
+            bad.is_empty(),
+            "{file}: a post of the flag with the flag off:\n{}",
+            bad.join("\n")
+        );
+    }
+
+    assert_eq!(
+        posts, 3,
+        "the window, the mouse released, the keys released"
+    );
+
+    let control = "    if edge == Edge::Up {\n        let _ = crate::app::post_to_ui_thread(crate::flags::WM_APP_FLAG_LATER);\n";
+    assert_eq!(
+        ungated(control).len(),
+        1,
+        "the control: a post with the switch taken off is found"
+    );
+}
+
+/// **The console (FR-52 is blind there): the name of the input indicator names a language, and the
+/// first layout of the session of that language stands for it** — `flags::layout_named_in`.
+#[test]
+fn the_name_of_the_indicator_finds_the_layout_of_its_language() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let ru_typewriter = LayoutId::from_raw(0xF008_0419);
+    let names = |layout: LayoutId| -> Option<String> {
+        Some(match layout.language_id() {
+            0x0409 => "Английский".to_owned(),
+            0x0419 => "Русский".to_owned(),
+            _ => return None,
+        })
+    };
+
+    let session = [us, ru, ru_typewriter];
+    assert_eq!(
+        flags::layout_named_in(
+            "Индикатор ввода в области уведомлений - Русский",
+            &session,
+            names
+        ),
+        Some(ru),
+        "Windows 10: the first layout of the language"
+    );
+    assert_eq!(
+        flags::layout_named_in(
+            "Индикатор ввода в области уведомлений - Английский (США)",
+            &session,
+            names
+        ),
+        Some(us)
+    );
+    assert_eq!(
+        flags::layout_named_in("Lang Switcher", &session, names),
+        None,
+        "another icon"
+    );
+}

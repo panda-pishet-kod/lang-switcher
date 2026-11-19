@@ -6800,6 +6800,8 @@ fn is_disabled(menu: HMENU, position: u32) -> bool {
 fn the_flag_is_the_icon_only_while_the_check_box_is_on() {
     use lang_switcher::layouts::LayoutId;
 
+    let _flag = flag_tests();
+
     let window = TestWindow::new();
     let product = ProductImage::open();
     let mut tray = Tray::install_at(window.handle, product.instance(), None)
@@ -6880,4 +6882,49 @@ fn the_tooltip_of_the_flag_names_the_layout_and_then_the_program() {
         tray::icon_tip(true),
         "and the tooltip of FR-90 under it"
     );
+}
+
+/// **Task T-119-4 — the subscription to the list of layouts and the switch of the posts live
+/// exactly while the check box is on.** Off by default: `flags::is_on` says no and no subscription
+/// is held; on: both; off again: neither.
+/// One test of the flag at a time: [`lang_switcher::flags::is_on`] is one switch for the process.
+fn flag_tests() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[test]
+fn the_watch_of_the_flag_lives_exactly_while_the_check_box_is_on() {
+    let _flag = flag_tests();
+    let window = TestWindow::new();
+    let product = ProductImage::open();
+    let mut tray = Tray::install_at(window.handle, product.instance(), None)
+        .expect("the tray must install: the icons are in the product binary's resources");
+
+    assert!(
+        !lang_switcher::flags::is_on(),
+        "off: the posts are switched off"
+    );
+    assert!(!tray.watches_the_list(), "off: no subscription");
+
+    let mut on = tray.config().clone();
+    on.general.tray_flag = true;
+    tray.replace_config(on);
+
+    assert!(
+        lang_switcher::flags::is_on(),
+        "on: the posts are switched on"
+    );
+    assert!(
+        tray.watches_the_list(),
+        "on: the list of layouts of explorer is watched"
+    );
+
+    let mut off = tray.config().clone();
+    off.general.tray_flag = false;
+    tray.replace_config(off);
+
+    assert!(!lang_switcher::flags::is_on(), "off again");
+    assert!(!tray.watches_the_list(), "and the subscription is gone");
 }
