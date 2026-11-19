@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Erindi sent"
     IDS_WIZARD_SENT_TEXT    "Takk fyrir að senda erindið! Ég er glaður að þú takir þátt í lífi verkefnisins og ég les allt í frístundum."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x0F, 0x01

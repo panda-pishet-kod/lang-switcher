@@ -260,6 +260,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "پیام ارسال شد"
     IDS_WIZARD_SENT_TEXT    "از اینکه پیام را فرستادید سپاسگزارم! از مشارکت شما در زندگی پروژه خوشحالم و همه‌ی آن را در اوقات فراغت حتماً می‌خوانم."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x29, 0x01

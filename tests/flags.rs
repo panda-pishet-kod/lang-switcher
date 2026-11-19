@@ -737,3 +737,171 @@ fn the_shell_is_not_the_window_the_person_typed_in() {
         );
     }
 }
+
+/// **The list of the program's own (T-119-3, part Б): what its choice gives the window.** Nothing of
+/// it reaches the window by itself — the chosen layout is given unless the window is in it, and a
+/// console is given it too (its reading is blind; the choice of Windows' list reached it by itself,
+/// this one does not).
+#[test]
+fn the_choice_in_the_own_list_is_given_by_the_program() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let none = LayoutId::from_raw(0);
+
+    assert_eq!(flags::own_layout_to_give(ru, us, false), Some(ru));
+    assert_eq!(
+        flags::own_layout_to_give(ru, ru, false),
+        None,
+        "already in it: no second switch"
+    );
+    assert_eq!(
+        flags::own_layout_to_give(ru, none, true),
+        Some(ru),
+        "a console: given"
+    );
+    assert_eq!(
+        flags::own_layout_to_give(none, us, false),
+        None,
+        "nothing chosen"
+    );
+}
+
+/// **The geometry of the own list — the mock-up's numbers at 96 DPI, scaled with the monitor.**
+#[test]
+fn the_own_list_has_the_size_of_the_mock_up_and_scales() {
+    let at_100 = flags::own_geometry(2, 96);
+
+    assert_eq!(at_100.width, 300, "the mock-up's width");
+    assert_eq!(at_100.row, 40);
+    assert_eq!(at_100.code, 44);
+    assert_eq!(
+        at_100.height,
+        6 + 25 + 2 * 40 + 9 + 32 + 6,
+        "padding, title, two rows, separator, link, padding"
+    );
+
+    let at_150 = flags::own_geometry(2, 144);
+
+    assert_eq!(at_150.width, 450);
+    assert_eq!(at_150.row, 60);
+    assert!(
+        flags::own_geometry(5, 96).height > at_100.height,
+        "more layouts, a taller list"
+    );
+    assert_eq!(flags::own_geometry(0, 96), flags::own_geometry(1, 96));
+}
+
+/// **Where the own list stands: beside the flag, inside the work area, on every side of the
+/// taskbar** — the requirement «у значка на любой стороне панели задач … не выходя за рабочую
+/// область».
+#[test]
+fn the_own_list_stands_beside_the_flag_inside_the_work_area() {
+    use windows::Win32::Foundation::RECT;
+
+    let rect = |left, top, right, bottom| RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    let size = (300, 160);
+    let inside = |(x, y): (i32, i32), work: RECT| {
+        x >= work.left && y >= work.top && x + size.0 <= work.right && y + size.1 <= work.bottom
+    };
+
+    // The taskbar below (1280×800, the bar 48 high): above the icon, the right edges together.
+    let work = rect(0, 0, 1280, 752);
+    let icon = rect(1054, 752, 1086, 800);
+    let at = flags::own_place(icon, work, size, 8);
+    assert_eq!(at, (1086 - 300, 752 - 8 - 160));
+    assert!(inside(at, work));
+
+    // An icon at the very right: pulled inside.
+    let at = flags::own_place(rect(1250, 752, 1280, 800), work, size, 8);
+    assert_eq!(at.0, 1280 - 300);
+    assert!(inside(at, work));
+
+    // The taskbar at the top: below the icon.
+    let work = rect(0, 48, 1280, 800);
+    let at = flags::own_place(rect(1054, 0, 1086, 48), work, size, 8);
+    assert_eq!(at.1, 48 + 8);
+    assert!(inside(at, work));
+
+    // On the right: left of the icon.
+    let work = rect(0, 0, 1232, 800);
+    let at = flags::own_place(rect(1232, 700, 1280, 732), work, size, 8);
+    assert_eq!(at.0, 1232 - 8 - 300);
+    assert!(inside(at, work));
+
+    // On the left: right of the icon.
+    let work = rect(48, 0, 1280, 800);
+    let at = flags::own_place(rect(0, 700, 48, 732), work, size, 8);
+    assert_eq!(at.0, 48 + 8);
+    assert!(inside(at, work));
+
+    // An icon at the top of a short screen: never above the work area.
+    let work = rect(0, 0, 1280, 120);
+    let at = flags::own_place(rect(1054, 120, 1086, 168), work, size, 8);
+    assert!(at.1 >= 0, "the top stays on the screen");
+}
+
+/// **The keyboard in the own list — as in the list of Windows:** arrows, Home and End, no wrapping.
+#[test]
+fn the_arrows_move_the_mark_without_wrapping() {
+    const UP: u16 = 0x26;
+    const DOWN: u16 = 0x28;
+    const HOME: u16 = 0x24;
+    const END: u16 = 0x23;
+
+    assert_eq!(flags::own_step(0, 3, DOWN), 1);
+    assert_eq!(flags::own_step(2, 3, DOWN), 2, "no wrapping at the end");
+    assert_eq!(flags::own_step(0, 3, UP), 0, "no wrapping at the start");
+    assert_eq!(flags::own_step(2, 3, UP), 1);
+    assert_eq!(flags::own_step(1, 3, HOME), 0);
+    assert_eq!(flags::own_step(0, 3, END), 2);
+    assert_eq!(
+        flags::own_step(1, 3, 0x41),
+        1,
+        "another key leaves the mark"
+    );
+}
+
+/// **A point of the own list falls on a row, on the link, or on nothing.**
+#[test]
+fn a_point_of_the_own_list_falls_on_a_row_or_the_link() {
+    let geometry = flags::own_geometry(2, 96);
+    let first = 6 + 25 + 5;
+    let second = 6 + 25 + 40 + 5;
+    let link = 6 + 25 + 2 * 40 + 9 + 5;
+
+    assert_eq!(flags::own_hit(2, &geometry, 100, first), Some(0));
+    assert_eq!(flags::own_hit(2, &geometry, 100, second), Some(1));
+    assert_eq!(flags::own_hit(2, &geometry, 100, link), Some(usize::MAX));
+    assert_eq!(flags::own_hit(2, &geometry, 100, 10), None, "the title");
+    assert_eq!(flags::own_hit(2, &geometry, 2, first), None, "the padding");
+}
+
+/// **The rows of the own list are the layouts of the session in their order, coded by language.**
+#[test]
+fn the_rows_of_the_own_list_are_the_layouts_of_the_session() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let rows = flags::own_rows(
+        &[us, ru],
+        &[
+            "English (United States)".to_owned(),
+            "Русский (Россия)".to_owned(),
+        ],
+        flags::language_code,
+    );
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].layout, us);
+    assert_eq!(rows[0].code, "ENG");
+    assert_eq!(rows[1].code, "RUS");
+    assert_eq!(rows[1].name, "Русский (Россия)");
+}

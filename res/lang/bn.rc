@@ -254,6 +254,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "বার্তা পাঠানো হয়েছে"
     IDS_WIZARD_SENT_TEXT    "বার্তা পাঠানোর জন্য ধন্যবাদ! প্রকল্পের জীবনে আপনি অংশ নিচ্ছেন জেনে আমি আনন্দিত, আর অবসর সময়ে সবটুকু অবশ্যই পড়ব।"
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x45, 0x01

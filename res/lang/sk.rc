@@ -253,6 +253,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Správa odoslaná"
     IDS_WIZARD_SENT_TEXT    "Ďakujem, že ste odoslali správu! Teší ma, že sa zapájate do života projektu, a všetko si prečítam vo voľnom čase."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x1B, 0x01

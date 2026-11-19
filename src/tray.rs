@@ -698,8 +698,12 @@ struct ListSession {
     target: usize,
     /// The layout the flag showed at the click.
     before: LayoutId,
-    /// The layout read of the shell after the list closed — what the person chose.
+    /// The layout read of the shell after the list closed — what the person chose; for the list of
+    /// the program's own, the row chosen.
     chosen: LayoutId,
+    /// Whether the list is the program's own (РУС/ENG hidden at the clock — part Б): its choice
+    /// never reaches the window by itself, the program's switch gives it, a console included.
+    own: bool,
 }
 
 /// What the flag of FR-90б shows and the icon drawn for it — task T-119-2.
@@ -2571,10 +2575,15 @@ fn open_list() {
             return None;
         }
 
+        if crate::flags::own_list_is_open() {
+            return None;
+        }
+
         tray.list_session = Some(ListSession {
             target: tray.last_person,
             before: tray.flag_layout().unwrap_or_default(),
             chosen: LayoutId::default(),
+            own: false,
         });
 
         Some(tray.hwnd)
@@ -2594,16 +2603,101 @@ fn open_list() {
 }
 
 /// No list of Windows to open — РУС/ENG is hidden at the clock (the watcher found no indicator, or
-/// the list did not come up within the look of [`crate::flags::LIST_MS`]). The session is dropped.
+/// the list did not come up within the look of [`crate::flags::LIST_MS`]): the list of the
+/// program's own comes up beside the flag — task T-119-3, part Б. The session goes on as its own;
+/// when even that window cannot be made, the session is dropped (NFR-13).
 fn list_missing() {
-    with_tray(|tray| tray.list_session = None);
+    let Some((hwnd, before)) = with_tray(|tray| {
+        let open = tray.list_session.as_mut()?;
+
+        if open.own {
+            return None;
+        }
+
+        open.own = true;
+        Some((tray.hwnd, open.before))
+    })
+    .flatten() else {
+        return;
+    };
+
+    // SAFETY: the timer of this window; a missing one is no error worth a word.
+    let _ = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), crate::flags::LIST_TIMERS[0])
+    };
+
+    let shown = icon_rect(hwnd).is_some_and(|icon| crate::flags::show_own_list(icon, before));
+
+    if !shown {
+        with_tray(|tray| tray.list_session = None);
+    }
+}
+
+/// The rectangle of the icon on the screen — `Shell_NotifyIconGetRect`; under a closed ^ the shell
+/// answers the rectangle of ^ itself, which is where the list of the program's own then stands.
+fn icon_rect(hwnd: HWND) -> Option<RECT> {
+    use windows::Win32::UI::Shell::{NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect};
+
+    let icon = NOTIFYICONIDENTIFIER {
+        cbSize: u32::try_from(size_of::<NOTIFYICONIDENTIFIER>()).unwrap_or(0),
+        hWnd: hwnd,
+        uID: TRAY_ICON_ID,
+        ..Default::default()
+    };
+
+    // SAFETY: a live local whose `cbSize` describes it; the answer is a value.
+    unsafe { Shell_NotifyIconGetRect(&icon) }.ok()
+}
+
+/// The list of the program's own ended — called by module `flags` on this thread, outside its
+/// borrow. A row chosen: the focus goes back to the person's window and, 120 ms later, the program's
+/// switch of FR-50 gives the layout (a console too — the program's list is not Windows', nothing
+/// reaches the window by itself). `Esc`: the focus goes back, nothing else. Away (a click
+/// elsewhere, the link): the session ends and the focus stays where the person put it.
+pub(crate) fn own_list_ended(end: crate::flags::OwnListEnd) {
+    let Some((hwnd, session)) =
+        with_tray(|tray| tray.list_session.map(|s| (tray.hwnd, s))).flatten()
+    else {
+        return;
+    };
+
+    let give_back = || {
+        if session.target != 0 {
+            // SAFETY: a window handle by value; a stale one is refused by the system, not misused.
+            let _ = unsafe { SetForegroundWindow(HWND(session.target as *mut core::ffi::c_void)) };
+        }
+    };
+
+    match end {
+        crate::flags::OwnListEnd::Chosen(layout) => {
+            with_tray(|tray| {
+                if let Some(open) = tray.list_session.as_mut() {
+                    open.chosen = layout;
+                }
+            });
+            give_back();
+            arm_list_timer(hwnd, 2);
+        }
+        crate::flags::OwnListEnd::Escaped => {
+            with_tray(|tray| tray.list_session = None);
+            give_back();
+        }
+        crate::flags::OwnListEnd::Away => {
+            with_tray(|tray| tray.list_session = None);
+        }
+    }
 }
 
 /// The list closed (`flags::ListWatch`). For a list of the program's own the choice is read 60 ms
-/// later; a list the person opened at the clock has no session and is left alone.
+/// later; a list the person opened at the clock has no session and is left alone, and so has the
+/// list of the program's own — it is no list of Windows.
 fn list_closed() {
-    let Some(hwnd) = with_tray(|tray| tray.list_session.is_some().then_some(tray.hwnd)).flatten()
-    else {
+    let Some(hwnd) = with_tray(|tray| {
+        tray.list_session
+            .is_some_and(|open| !open.own)
+            .then_some(tray.hwnd)
+    })
+    .flatten() else {
         return;
     };
 
@@ -2657,7 +2751,7 @@ fn list_timer(timer: usize) {
     let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), timer) };
 
     if timer == crate::flags::LIST_TIMERS[0] {
-        if !crate::flags::list_is_open() {
+        if !session.own && !crate::flags::list_is_open() {
             list_missing();
         }
 
@@ -2685,14 +2779,19 @@ fn list_timer(timer: usize) {
     with_tray(|tray| tray.list_session = None);
 
     let reading = crate::switch::read();
-
-    if reading.window.raw() == session.target
-        && let Some(layout) = crate::flags::layout_to_give(
+    let give = if session.own {
+        crate::flags::own_layout_to_give(session.chosen, reading.layout, reading.blind)
+    } else {
+        crate::flags::layout_to_give(
             session.before,
             session.chosen,
             reading.layout,
             reading.blind,
         )
+    };
+
+    if reading.window.raw() == session.target
+        && let Some(layout) = give
     {
         // FR-50, the program's own switch — no sound: the person chose, the program completes.
         let _ = crate::switch::to(layout);

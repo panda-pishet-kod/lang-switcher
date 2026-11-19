@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Bericht verzonden"
     IDS_WIZARD_SENT_TEXT    "Bedankt voor het versturen van je bericht! Ik ben blij dat je betrokken bent bij het project en ik zal alles in mijn vrije tijd lezen."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x13, 0x01

@@ -3823,6 +3823,11 @@ pub const IDS_ABOUT_HELP_6: u16 = 3263;
 /// «Флаг раскладки в трее» — the check box of FR-90б in «Общие», task T-119-2 (решения 208.88,
 /// 208.89). The first of the block 3264…3279.
 pub const IDS_TRAY_FLAG: u16 = 3264;
+/// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
+/// is hidden at the clock, task T-119-3, part Б (решение 208.88).
+pub const IDS_OWN_LIST_TITLE: u16 = 3265;
+/// «Дополнительные параметры клавиатуры» — the link at the bottom of that list.
+pub const IDS_OWN_LIST_MORE: u16 = 3266;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4381,7 +4386,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and forty-five since stage E120, tasks T-120-21 and T-120-22** — решение
 /// 208.169, С10 and С12: «Состояние» for a person, nine (3280…3288), and «Нашли ошибку в
 /// переводе?», four (3289…3292). 232 + 13.
-pub const INTERFACE_STRINGS: [u16; 245] = [
+///
+/// ⚠ **Two hundred and forty-seven since task T-119-3, part Б** — решение 208.88: the title and
+/// the link of the list of the program's own, [`IDS_OWN_LIST_TITLE`] and [`IDS_OWN_LIST_MORE`]
+/// (3265, 3266). 245 + 2.
+pub const INTERFACE_STRINGS: [u16; 247] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4638,6 +4647,8 @@ pub const INTERFACE_STRINGS: [u16; 245] = [
     IDS_WIZARD_SENT_TITLE,
     IDS_WIZARD_SENT_TEXT,
     IDS_TRAY_FLAG,
+    IDS_OWN_LIST_TITLE,
+    IDS_OWN_LIST_MORE,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

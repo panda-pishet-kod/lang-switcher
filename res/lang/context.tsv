@@ -21,6 +21,8 @@ IDS_CYCLE_UP	IDD_SETTINGS	IDC_CYCLE_UP	77x30	-	-
 IDS_CYCLE_DOWN	IDD_SETTINGS	IDC_CYCLE_DOWN	77x30	-	-
 IDS_SELECTION_ENABLED	IDD_SETTINGS	IDC_SELECTION_ENABLED	343x21	-	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
 IDS_TRAY_FLAG	IDD_SETTINGS	IDC_TRAY_FLAG	343x21	-	the check box of the flag of the layout on the tray icon (T-119-2): with it, the icon of the program becomes the flag of the keyboard layout in force; a row of «General» under «Convert selected text»
+IDS_OWN_LIST_TITLE	own list of layouts (drawn by the program)	-	a title line of 288x19 px over the rows (11 px text)	-	E119 (T-119-3): the title of the list a click on the flag shows when the indicator ENG/RUS of Windows is hidden; a copy of the list of Windows 11 - the word Windows writes over its own list of keyboard layouts
+IDS_OWN_LIST_MORE	own list of layouts (drawn by the program)	-	a link line of 272x32 px under the rows (13 px text)	-	E119 (T-119-3): the link at the bottom of that list; it opens the keyboard page of the Settings of Windows - the words of the link of Windows' own list
 IDS_GROUP_EXCLUSIONS	IDD_SETTINGS	IDC_GROUP_EXCLUSIONS	350x17	-	-
 IDS_EXCLUSION_REMOVE	IDD_SETTINGS	IDC_EXCLUSION_REMOVE	105x30	-	-
 IDS_EXCLUSION_ADD	IDD_SETTINGS	IDC_EXCLUSION_ADD	105x30	-	-

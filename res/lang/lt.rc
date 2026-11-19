@@ -253,6 +253,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Kreipimasis išsiųstas"
     IDS_WIZARD_SENT_TEXT    "Ačiū, kad išsiuntėte kreipimąsi! Džiaugiuosi, kad dalyvaujate projekto gyvenime, ir būtinai viską perskaitysiu laisvu laiku."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x27, 0x01

@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Anfonwyd y neges"
     IDS_WIZARD_SENT_TEXT    "Diolch am anfon y neges! Rwy'n falch eich bod yn cymryd rhan ym mywyd y prosiect, a byddaf yn darllen y cyfan yn fy amser rhydd."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x52, 0x01

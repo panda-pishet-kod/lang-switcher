@@ -253,6 +253,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Đã gửi tin nhắn"
     IDS_WIZARD_SENT_TEXT    "Cảm ơn bạn đã gửi tin nhắn! Tôi rất vui vì bạn tham gia vào đời sống của dự án, và tôi chắc chắn sẽ đọc hết khi có thời gian rảnh."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x2A, 0x01

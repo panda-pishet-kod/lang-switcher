@@ -256,6 +256,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Порука је послата"
     IDS_WIZARD_SENT_TEXT    "Хвала што сте послали поруку! Драго ми је што учествујете у животу пројекта, а све ћу прочитати у слободно време."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x1A, 0x0A

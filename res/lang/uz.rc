@@ -256,6 +256,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Murojaat yuborildi"
     IDS_WIZARD_SENT_TEXT    "Murojaat yuborganingiz uchun rahmat! Loyiha hayotida ishtirok etayotganingizdan xursandman va hammasini boʻsh vaqtimda albatta oʻqib chiqaman."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x43, 0x01

@@ -259,6 +259,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "A bejelentés elküldve"
     IDS_WIZARD_SENT_TEXT    "Köszönöm, hogy elküldte a bejelentést! Örülök, hogy részt vesz a projekt életében, és szabadidőmben mindent elolvasok."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x0E, 0x01

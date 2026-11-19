@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "បានផ្ញើសារ"
     IDS_WIZARD_SENT_TEXT    "អរគុណដែលបានផ្ញើសារ! ខ្ញុំរីករាយដែលអ្នកចូលរួមក្នុងជីវិតនៃគម្រោង ហើយខ្ញុំនឹងអានទាំងអស់ក្នុងពេលទំនេរ។"
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x53, 0x01

@@ -1633,6 +1633,9 @@ END
 #define IDS_ABOUT_HELP_6        3263
 // Stage E119, task T-119-2: the check box of the flag of the layout, the first of the block 3264..3279.
 #define IDS_TRAY_FLAG           3264
+// Stage E119, task T-119-3, part B: the title and the link of the list of the program's own (РУС/ENG hidden at the clock).
+#define IDS_OWN_LIST_TITLE      3265
+#define IDS_OWN_LIST_MORE       3266
 // Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
 // (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
 // button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two

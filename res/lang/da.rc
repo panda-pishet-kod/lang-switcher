@@ -253,6 +253,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Henvendelsen er sendt"
     IDS_WIZARD_SENT_TEXT    "Tak, fordi du sendte henvendelsen! Jeg er glad for, at du tager del i projektets liv, og jeg læser det hele i min fritid."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x06, 0x01

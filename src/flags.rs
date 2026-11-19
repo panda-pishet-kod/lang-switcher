@@ -2188,6 +2188,13 @@ pub fn layout_to_give(
     (known && chosen != before && now != chosen).then_some(chosen)
 }
 
+/// The same for the list of the program's own (part Б): nothing chosen there reaches the window by
+/// itself, so the chosen layout is given unless the window is already in it — and a console, whose
+/// reading is blind, is given it too (FR-50 posts to a console without verifying). Pure.
+pub fn own_layout_to_give(chosen: LayoutId, now: LayoutId, blind: bool) -> Option<LayoutId> {
+    (chosen.raw() != 0 && (blind || now != chosen)).then_some(chosen)
+}
+
 /// Windows 10: presses the input indicator the way the probe measured 80 of 80 (решение 208.123) —
 /// `WM_LBUTTONDOWN` and `WM_LBUTTONUP` posted to the middle of `InputIndicatorButton`. UI Automation
 /// `Invoke` races the focus there (9 of 31), MSAA needs `VARIANT`, outside the closed feature list.
@@ -2283,4 +2290,816 @@ pub fn list_is_open() -> bool {
     let overlay = unsafe { FindWindowW(w!("Shell_InputSwitchDismissOverlay"), None) };
 
     list.is_ok_and(shown) || overlay.is_ok_and(shown)
+}
+
+// -----------------------------------------------------------------------------------------
+// The list of the program's own — task T-119-3, part Б (решение 208.88): РУС/ENG hidden at the
+// clock, Windows has no list to open, and the flag shows a copy of it in the style of Windows 11
+// (the mock-up's `.w11.sw`, design-notes of E119): the title «Раскладка», a row per layout of the
+// session — the code, the name — the row of the layout in force marked by the accent bar, the row
+// under the mouse or the keyboard by a ground, a separator and the link «Дополнительные параметры
+// клавиатуры». Not a new style: the colours are those of the list of Windows, light or dark as
+// Windows is.
+// -----------------------------------------------------------------------------------------
+
+/// One row of the list of the program's own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnRow {
+    /// The layout the row switches to.
+    pub layout: LayoutId,
+    /// The code in the left column — the three letters of the language, `ENG`, `RUS`.
+    pub code: String,
+    /// The name — the language in its own words, as the lists of the settings window give it
+    /// (вопрос 92, the discriminator of решение 82.1 when two rows share it).
+    pub name: String,
+}
+
+/// The rows of the list: every layout of the session in its order, with its code and name. Pure.
+pub fn own_rows(
+    session: &[LayoutId],
+    names: &[String],
+    code_of: impl Fn(LayoutId) -> String,
+) -> Vec<OwnRow> {
+    session
+        .iter()
+        .zip(names)
+        .map(|(layout, name)| OwnRow {
+            layout: *layout,
+            code: code_of(*layout),
+            name: name.clone(),
+        })
+        .collect()
+}
+
+/// The code of a layout's language — `LOCALE_SISO639LANGNAME2` in capitals (`ENG`, `RUS`), what the
+/// indicator of an English Windows writes; empty when Windows does not name the language.
+pub fn language_code(layout: LayoutId) -> String {
+    let mut locale = [0u16; 85];
+
+    // SAFETY: a live buffer of this frame and its length; zero is the documented failure.
+    let written = unsafe {
+        windows::Win32::Globalization::LCIDToLocaleName(
+            u32::from(layout.language_id()),
+            Some(&mut locale),
+            0,
+        )
+    };
+
+    if written <= 0 {
+        return String::new();
+    }
+
+    let mut out = [0u16; 16];
+
+    // SAFETY: the NUL-terminated name written above and a live buffer whose length bounds the write.
+    let written = unsafe {
+        windows::Win32::Globalization::GetLocaleInfoEx(
+            windows::core::PCWSTR(locale.as_ptr()),
+            windows::Win32::Globalization::LOCALE_SISO639LANGNAME2,
+            Some(&mut out),
+        )
+    };
+
+    let units = usize::try_from(written).unwrap_or(0).saturating_sub(1);
+    String::from_utf16_lossy(&out[..units.min(out.len())]).to_uppercase()
+}
+
+/// The geometry of the list at a DPI, in pixels — the mock-up's numbers at 96 DPI, scaled. Pure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnGeometry {
+    /// Width of the window (300 at 96 DPI).
+    pub width: i32,
+    /// The inner padding of the window (6).
+    pub padding: i32,
+    /// The height of the title «Раскладка» with its own padding (25).
+    pub title: i32,
+    /// The height of a row (40).
+    pub row: i32,
+    /// The width of the column of the code (44).
+    pub code: i32,
+    /// The separator with its margins (9).
+    pub separator: i32,
+    /// The height of the link (32).
+    pub link: i32,
+    /// The height of the whole window.
+    pub height: i32,
+}
+
+/// [`OwnGeometry`] for `rows` rows at `dpi`. Pure.
+pub fn own_geometry(rows: usize, dpi: i32) -> OwnGeometry {
+    let dpi = if dpi > 0 { dpi } else { 96 };
+    let at = |px: i32| (px * dpi + 48) / 96;
+    let rows = i32::try_from(rows).unwrap_or(64).clamp(1, 64);
+
+    let padding = at(6);
+    let title = at(25);
+    let row = at(40);
+    let separator = at(9);
+    let link = at(32);
+
+    OwnGeometry {
+        width: at(300),
+        padding,
+        title,
+        row,
+        code: at(44),
+        separator,
+        link,
+        height: padding * 2 + title + row * rows + separator + link,
+    }
+}
+
+/// Where the list stands — the window's left-top — beside the icon it was opened from, inside the
+/// work area: above the icon when the taskbar is below, below it when the taskbar is at the top,
+/// beside it when the taskbar is on a side; its right edge on the icon's right. `gap` — the distance
+/// from the icon. Pure.
+pub fn own_place(
+    icon: windows::Win32::Foundation::RECT,
+    work: windows::Win32::Foundation::RECT,
+    size: (i32, i32),
+    gap: i32,
+) -> (i32, i32) {
+    let (width, height) = size;
+    let (x, y) = if icon.top >= work.bottom - gap {
+        // The taskbar is below the work area.
+        (icon.right - width, icon.top - gap - height)
+    } else if icon.bottom <= work.top + gap {
+        // At the top.
+        (icon.right - width, icon.bottom + gap)
+    } else if icon.left >= work.right - gap {
+        // On the right.
+        (icon.left - gap - width, icon.bottom - height)
+    } else if icon.right <= work.left + gap {
+        // On the left.
+        (icon.right + gap, icon.bottom - height)
+    } else {
+        // Inside the work area — the open list of ^ above the taskbar.
+        (icon.right - width, icon.top - gap - height)
+    };
+
+    (
+        x.clamp(work.left, (work.right - width).max(work.left)),
+        y.clamp(work.top, (work.bottom - height).max(work.top)),
+    )
+}
+
+/// The row the keyboard marks after a key — `VK_UP`, `VK_DOWN`, `VK_HOME`, `VK_END` — in a list of
+/// `rows` rows, as in the list of Windows: no wrapping. Other keys leave it. Pure.
+pub fn own_step(at: usize, rows: usize, vk: u16) -> usize {
+    let last = rows.saturating_sub(1);
+
+    match vk {
+        0x26 => at.saturating_sub(1).min(last),
+        0x28 => (at + 1).min(last),
+        0x24 => 0,
+        0x23 => last,
+        _ => at.min(last),
+    }
+}
+
+/// How a list of the program's own ended — what `tray::own_list_ended` is told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnListEnd {
+    /// A row was chosen — by the mouse, or by `Enter` / space on the marked row.
+    Chosen(LayoutId),
+    /// `Esc`: the list closed with nothing chosen; the focus goes back to the person's window.
+    Escaped,
+    /// The list lost the activation — a click elsewhere, the link: nothing chosen, and the focus is
+    /// where the person put it.
+    Away,
+}
+
+/// The class of the window of the list.
+const OWN_CLASS: windows::core::PCWSTR = windows::core::w!("LangSwitcher.LayoutList");
+
+/// The URI the link opens — the keyboard page of the settings of Windows.
+const OWN_LINK: &str = "ms-settings:keyboard";
+
+/// The colours of the list of Windows 11 — the mock-up's, light and dark: the ground, the frame and
+/// separator, the title, the text, the ground of a marked row, the accent (bar, link).
+#[derive(Clone, Copy)]
+struct OwnColours {
+    ground: (u8, u8, u8),
+    frame: (u8, u8, u8),
+    muted: (u8, u8, u8),
+    text: (u8, u8, u8),
+    hover: (u8, u8, u8),
+    accent: (u8, u8, u8),
+}
+
+const OWN_LIGHT: OwnColours = OwnColours {
+    ground: (0xF9, 0xF9, 0xF9),
+    frame: (0xE0, 0xE0, 0xE0),
+    muted: (0x5F, 0x5F, 0x5F),
+    text: (0x1A, 0x1A, 0x1A),
+    hover: (0xED, 0xED, 0xED),
+    accent: (0x00, 0x5F, 0xB8),
+};
+
+const OWN_DARK: OwnColours = OwnColours {
+    ground: (0x2C, 0x2C, 0x2C),
+    frame: (0x41, 0x41, 0x41),
+    muted: (0xB8, 0xB8, 0xB8),
+    text: (0xFF, 0xFF, 0xFF),
+    hover: (0x3F, 0x3F, 0x3F),
+    accent: (0x60, 0xCD, 0xFF),
+};
+
+fn colour((r, g, b): (u8, u8, u8)) -> windows::Win32::Foundation::COLORREF {
+    windows::Win32::Foundation::COLORREF(u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16))
+}
+
+/// The state of the list on the screen — one at a time, on the UI thread.
+struct OwnState {
+    hwnd: windows::Win32::Foundation::HWND,
+    rows: Vec<OwnRow>,
+    current: LayoutId,
+    marked: usize,
+    link_hover: bool,
+    tracking: bool,
+    title: String,
+    link: String,
+    ended: bool,
+}
+
+thread_local! {
+    static OWN: std::cell::RefCell<Option<OwnState>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Whether the list of the program's own is on the screen.
+pub fn own_list_is_open() -> bool {
+    OWN.with(|own| own.borrow().is_some())
+}
+
+/// Shows the list of the program's own beside `icon` (the rectangle of the flag's icon), with
+/// `current` marked, and gives it the foreground — the click on the flag gave this process the
+/// right. `false` when the window could not be made (NFR-13: the click then does nothing).
+pub fn show_own_list(icon: windows::Win32::Foundation::RECT, current: LayoutId) -> bool {
+    use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect,
+    };
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CS_DROPSHADOW, CreateWindowExW, HWND_TOPMOST, IDC_ARROW, LoadCursorW, RegisterClassExW,
+        SW_SHOW, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow, WNDCLASSEXW,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    };
+
+    if own_list_is_open() {
+        return true;
+    }
+
+    let session = crate::layouts::enumerate().unwrap_or_default();
+
+    if session.is_empty() {
+        return false;
+    }
+
+    let names = crate::settings::layout_labels(&session, &session);
+    let rows = own_rows(&session, &names, language_code);
+    let marked = rows
+        .iter()
+        .position(|row| row.layout == current)
+        .unwrap_or(0);
+
+    // SAFETY: `None` names the running executable; the handle is borrowed, not freed.
+    let Ok(module) = (unsafe { GetModuleHandleW(None) }) else {
+        return false;
+    };
+
+    // SAFETY: a stock cursor of the system; a refusal leaves the class without one.
+    let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
+    let class = WNDCLASSEXW {
+        cbSize: u32::try_from(size_of::<WNDCLASSEXW>()).unwrap_or(0),
+        style: CS_DROPSHADOW,
+        lpfnWndProc: Some(own_proc),
+        hInstance: module.into(),
+        hCursor: cursor,
+        lpszClassName: OWN_CLASS,
+        ..Default::default()
+    };
+
+    // SAFETY: a live structure of this frame; a second registration of the class answers 0 and is
+    // no error — the class is already there.
+    let _ = unsafe { RegisterClassExW(&class) };
+
+    // SAFETY: the class just registered, a module of this process, no parent: a top-level popup.
+    let Ok(hwnd) = (unsafe {
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            OWN_CLASS,
+            windows::core::PCWSTR::null(),
+            WS_POPUP,
+            icon.left,
+            icon.top,
+            1,
+            1,
+            None,
+            None,
+            Some(module.into()),
+            None,
+        )
+    }) else {
+        return false;
+    };
+
+    // Windows 11 rounds the corners as it rounds its own list's (`DWMWA_WINDOW_CORNER_PREFERENCE`,
+    // `DWMWCP_ROUND`); Windows 10 has no such attribute and keeps them square.
+    let round = 2u32;
+
+    // SAFETY: the live window just made and a local of the size passed.
+    let _ = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(33),
+            (&raw const round).cast(),
+            u32::try_from(size_of::<u32>()).unwrap_or(4),
+        )
+    };
+
+    let dpi = window_dpi(hwnd);
+    let geometry = own_geometry(rows.len(), dpi);
+
+    // SAFETY: a rectangle by reference; the nearest monitor is always answered.
+    let monitor = unsafe { MonitorFromRect(&icon, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(size_of::<MONITORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+
+    // SAFETY: a monitor handle by value and a live local whose `cbSize` describes it.
+    let _ = unsafe { GetMonitorInfoW(monitor, &mut info) };
+
+    let (x, y) = own_place(
+        icon,
+        info.rcWork,
+        (geometry.width, geometry.height),
+        (8 * dpi + 48) / 96,
+    );
+
+    OWN.with(|own| {
+        *own.borrow_mut() = Some(OwnState {
+            hwnd,
+            rows,
+            current,
+            marked,
+            link_hover: false,
+            tracking: false,
+            title: crate::settings::text(crate::settings::IDS_OWN_LIST_TITLE),
+            link: crate::settings::text(crate::settings::IDS_OWN_LIST_MORE),
+            ended: false,
+        });
+    });
+
+    // SAFETY: the live window of this thread; the position and size computed above.
+    let _ = unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            x,
+            y,
+            geometry.width,
+            geometry.height,
+            SWP_SHOWWINDOW,
+        )
+    };
+
+    // SAFETY: as above.
+    let _ = unsafe { ShowWindow(hwnd, SW_SHOW) };
+    // SAFETY: as above; the click on the flag gave this process the right to the foreground.
+    let _ = unsafe { SetForegroundWindow(hwnd) };
+
+    true
+}
+
+/// The DPI of the monitor a window is on, by its DC (`PerMonitorV2`, section 8.1); 96 when no DC.
+fn window_dpi(hwnd: windows::Win32::Foundation::HWND) -> i32 {
+    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+
+    // SAFETY: a live window of this thread; the DC is released below on the same thread.
+    let dc = unsafe { GetDC(Some(hwnd)) };
+
+    if dc.is_invalid() {
+        return 96;
+    }
+
+    let dpi = crate::theme::dc_dpi(dc);
+
+    // SAFETY: the DC taken a line above from this window.
+    unsafe { ReleaseDC(Some(hwnd), dc) };
+
+    dpi
+}
+
+/// Ends the list: the window goes, the state goes, and the tray is told how — outside the borrow.
+fn own_end(end: OwnListEnd) {
+    use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+    let hwnd = OWN.with(|own| {
+        let mut own = own.borrow_mut();
+        let state = own.as_mut()?;
+
+        if state.ended {
+            return None;
+        }
+
+        state.ended = true;
+        Some(state.hwnd)
+    });
+
+    let Some(hwnd) = hwnd else {
+        return;
+    };
+
+    // SAFETY: the live window of this thread, destroyed once (`ended`). Its `WM_ACTIVATE` of the
+    // destruction finds `ended` set and adds nothing.
+    let _ = unsafe { DestroyWindow(hwnd) };
+
+    OWN.with(|own| *own.borrow_mut() = None);
+    crate::tray::own_list_ended(end);
+}
+
+/// Which row (or the link, `Some(usize::MAX)`) a point of the client area falls on. Pure.
+pub fn own_hit(rows: usize, geometry: &OwnGeometry, x: i32, y: i32) -> Option<usize> {
+    if x < geometry.padding || x >= geometry.width - geometry.padding {
+        return None;
+    }
+
+    let top = geometry.padding + geometry.title;
+    let rows = i32::try_from(rows).unwrap_or(0);
+
+    if y >= top && y < top + geometry.row * rows {
+        return usize::try_from((y - top) / geometry.row).ok();
+    }
+
+    let link = top + geometry.row * rows + geometry.separator;
+
+    (y >= link && y < link + geometry.link).then_some(usize::MAX)
+}
+
+/// The row count of the list on the screen, for its geometry (1 when there is none).
+fn own_rows_now() -> usize {
+    OWN.with(|own| own.borrow().as_ref().map_or(1, |state| state.rows.len()))
+}
+
+/// The window procedure of the list.
+unsafe extern "system" fn own_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::Graphics::Gdi::InvalidateRect;
+    use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DefWindowProcW, WA_INACTIVE, WM_ACTIVATE, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
+    };
+
+    let low = |value: isize| i32::from((value & 0xFFFF) as u16 as i16);
+    let high = |value: isize| i32::from(((value >> 16) & 0xFFFF) as u16 as i16);
+    let redraw = || {
+        // SAFETY: the live window this procedure runs for.
+        let _ = unsafe { InvalidateRect(Some(hwnd), None, false) };
+    };
+
+    match message {
+        WM_PAINT => {
+            own_paint(hwnd);
+            return LRESULT(0);
+        }
+        WM_ACTIVATE if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE => {
+            own_end(OwnListEnd::Away);
+            return LRESULT(0);
+        }
+        WM_KEYDOWN => {
+            let vk = u16::try_from(wparam.0 & 0xFFFF).unwrap_or(0);
+
+            match vk {
+                // VK_ESCAPE
+                0x1B => own_end(OwnListEnd::Escaped),
+                // VK_RETURN, VK_SPACE
+                0x0D | 0x20 => {
+                    let chosen = OWN.with(|own| {
+                        own.borrow()
+                            .as_ref()
+                            .and_then(|state| state.rows.get(state.marked).map(|row| row.layout))
+                    });
+
+                    if let Some(layout) = chosen {
+                        own_end(OwnListEnd::Chosen(layout));
+                    }
+                }
+                _ => {
+                    OWN.with(|own| {
+                        if let Some(state) = own.borrow_mut().as_mut() {
+                            state.marked = own_step(state.marked, state.rows.len(), vk);
+                        }
+                    });
+                    redraw();
+                }
+            }
+
+            return LRESULT(0);
+        }
+        WM_MOUSEMOVE => {
+            let geometry = own_geometry(own_rows_now(), window_dpi(hwnd));
+            let first = OWN.with(|own| {
+                let mut own = own.borrow_mut();
+                let state = own.as_mut()?;
+                let hit = own_hit(state.rows.len(), &geometry, low(lparam.0), high(lparam.0));
+
+                if let Some(at) = hit.filter(|at| *at != usize::MAX) {
+                    state.marked = at;
+                }
+
+                state.link_hover = hit == Some(usize::MAX);
+
+                let first = !state.tracking;
+                state.tracking = true;
+                Some(first)
+            });
+
+            if first == Some(true) {
+                let mut tracking = TRACKMOUSEEVENT {
+                    cbSize: u32::try_from(size_of::<TRACKMOUSEEVENT>()).unwrap_or(0),
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
+
+                // SAFETY: a live local whose `cbSize` describes it, for the live window.
+                let _ = unsafe { TrackMouseEvent(&mut tracking) };
+            }
+
+            redraw();
+            return LRESULT(0);
+        }
+        WM_MOUSELEAVE => {
+            OWN.with(|own| {
+                if let Some(state) = own.borrow_mut().as_mut() {
+                    state.link_hover = false;
+                    state.tracking = false;
+                }
+            });
+            redraw();
+            return LRESULT(0);
+        }
+        WM_LBUTTONUP => {
+            let geometry = own_geometry(own_rows_now(), window_dpi(hwnd));
+            let hit = OWN.with(|own| {
+                let own = own.borrow();
+                let state = own.as_ref()?;
+                let at = own_hit(state.rows.len(), &geometry, low(lparam.0), high(lparam.0))?;
+
+                Some(if at == usize::MAX {
+                    None
+                } else {
+                    state.rows.get(at).map(|row| row.layout)
+                })
+            });
+
+            match hit {
+                Some(Some(layout)) => own_end(OwnListEnd::Chosen(layout)),
+                Some(None) => {
+                    own_end(OwnListEnd::Away);
+                    open_keyboard_settings();
+                }
+                None => {}
+            }
+
+            return LRESULT(0);
+        }
+        _ => {}
+    }
+
+    // SAFETY: the arguments this procedure was called with, handed on unchanged.
+    unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+}
+
+/// The link: the keyboard page of the settings of Windows — through the one door this program
+/// opens anything by (`settings::open_in_the_shell`). A page that does not open is seen by the
+/// person, and nothing of this program depends on it.
+fn open_keyboard_settings() {
+    let _ = crate::settings::open_in_the_shell(OWN_LINK);
+}
+
+/// `WM_PAINT` of the list: the ground and the frame, the title, the rows (the marked one on its
+/// ground, the layout in force with the accent bar), the separator, the link.
+fn own_paint(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        BeginPaint, CreateFontIndirectW, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT,
+        DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, EndPaint, FW_NORMAL,
+        FW_SEMIBOLD, FillRect, FrameRect, HFONT, HGDIOBJ, PAINTSTRUCT, SelectObject, SetBkMode,
+        SetTextColor, TRANSPARENT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    let mut paint = PAINTSTRUCT::default();
+
+    // SAFETY: the live window this `WM_PAINT` is for; ended by `EndPaint` below.
+    let dc = unsafe { BeginPaint(hwnd, &mut paint) };
+
+    let snapshot = OWN.with(|own| {
+        own.borrow().as_ref().map(|state| {
+            (
+                state.rows.clone(),
+                state.current,
+                state.marked,
+                state.link_hover,
+                state.title.clone(),
+                state.link.clone(),
+            )
+        })
+    });
+
+    if let Some((rows, current, marked, link_hover, title, link)) = snapshot {
+        let dpi = crate::theme::dc_dpi(dc);
+        let geometry = own_geometry(rows.len(), dpi);
+        let colours = if crate::theme::system_is_light() {
+            OWN_LIGHT
+        } else {
+            OWN_DARK
+        };
+        let at = |px: i32| (px * dpi + 48) / 96;
+        let mut client = RECT::default();
+
+        // SAFETY: the live window and a local rectangle.
+        let _ = unsafe { GetClientRect(hwnd, &mut client) };
+
+        // SAFETY: colours by value; the brushes are deleted at the end of this paint.
+        let (ground, frame, hover, accent) = unsafe {
+            (
+                CreateSolidBrush(colour(colours.ground)),
+                CreateSolidBrush(colour(colours.frame)),
+                CreateSolidBrush(colour(colours.hover)),
+                CreateSolidBrush(colour(colours.accent)),
+            )
+        };
+
+        // SAFETY: the live paint DC and brushes of this frame.
+        unsafe {
+            FillRect(dc, &client, ground);
+            FrameRect(dc, &client, frame);
+        }
+
+        let font = |px: i32, weight: u32| -> HFONT {
+            let mut logical = crate::tray::menu_item_logfont().unwrap_or_default();
+            logical.lfHeight = -at(px);
+            logical.lfWidth = 0;
+            logical.lfWeight = i32::try_from(weight).unwrap_or(400);
+
+            // SAFETY: a live local; the font is deleted at the end of this paint.
+            unsafe { CreateFontIndirectW(&raw const logical) }
+        };
+
+        let small = font(11, FW_NORMAL.0);
+        let normal = font(13, FW_NORMAL.0);
+        let bold = font(13, FW_SEMIBOLD.0);
+
+        // SAFETY: the live paint DC; the mode is the DC's own for this paint.
+        unsafe { SetBkMode(dc, TRANSPARENT) };
+
+        let text = |what: &str, mut area: RECT, ink: (u8, u8, u8), face: HFONT, centred: bool| {
+            let mut wide: Vec<u16> = what.encode_utf16().collect();
+            let align = if centred { DT_CENTER } else { DT_LEFT };
+
+            // SAFETY: the live paint DC, a live font of this frame, a local buffer and rectangle;
+            // the previous font is selected back.
+            unsafe {
+                SetTextColor(dc, colour(ink));
+                let previous = SelectObject(dc, HGDIOBJ::from(face));
+                DrawTextW(
+                    dc,
+                    &mut wide,
+                    &mut area,
+                    align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+                );
+                SelectObject(dc, previous);
+            }
+        };
+
+        let left = geometry.padding;
+        let right = geometry.width - geometry.padding;
+        let mut top = geometry.padding;
+
+        text(
+            &title,
+            RECT {
+                left: left + at(8),
+                top: top + at(4),
+                right: right - at(8),
+                bottom: top + geometry.title - at(6),
+            },
+            colours.muted,
+            small,
+            false,
+        );
+        top += geometry.title;
+
+        for (index, row) in rows.iter().enumerate() {
+            let area = RECT {
+                left,
+                top,
+                right,
+                bottom: top + geometry.row,
+            };
+
+            if index == marked {
+                crate::theme::paint_rounded(dc, &area, at(4), colour(colours.hover), hover, dpi);
+            }
+
+            if row.layout == current {
+                let bar = RECT {
+                    left,
+                    top: top + at(14),
+                    right: left + at(3),
+                    bottom: top + geometry.row - at(14),
+                };
+
+                // SAFETY: the live paint DC and a brush of this frame.
+                unsafe { FillRect(dc, &bar, accent) };
+            }
+
+            text(
+                &row.code,
+                RECT {
+                    left,
+                    top,
+                    right: left + geometry.code,
+                    bottom: area.bottom,
+                },
+                colours.text,
+                bold,
+                true,
+            );
+            text(
+                &row.name,
+                RECT {
+                    left: left + geometry.code + at(8),
+                    top,
+                    right: right - at(8),
+                    bottom: area.bottom,
+                },
+                colours.text,
+                normal,
+                false,
+            );
+
+            top += geometry.row;
+        }
+
+        let line = RECT {
+            left: left + at(8),
+            top: top + at(4),
+            right: right - at(8),
+            bottom: top + at(5),
+        };
+
+        // SAFETY: the live paint DC and a brush of this frame.
+        unsafe { FillRect(dc, &line, frame) };
+        top += geometry.separator;
+
+        if link_hover {
+            let area = RECT {
+                left,
+                top,
+                right,
+                bottom: top + geometry.link,
+            };
+            crate::theme::paint_rounded(dc, &area, at(4), colour(colours.hover), hover, dpi);
+        }
+
+        text(
+            &link,
+            RECT {
+                left: left + at(8),
+                top,
+                right: right - at(8),
+                bottom: top + geometry.link,
+            },
+            colours.accent,
+            normal,
+            false,
+        );
+
+        // SAFETY: objects of this frame, no longer selected into any DC.
+        unsafe {
+            let _ = DeleteObject(ground.into());
+            let _ = DeleteObject(frame.into());
+            let _ = DeleteObject(hover.into());
+            let _ = DeleteObject(accent.into());
+            let _ = DeleteObject(small.into());
+            let _ = DeleteObject(normal.into());
+            let _ = DeleteObject(bold.into());
+        }
+    }
+
+    // SAFETY: the paint begun above.
+    let _ = unsafe { EndPaint(hwnd, &paint) };
 }

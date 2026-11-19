@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Appeal sent"
     IDS_WIZARD_SENT_TEXT    "Thank you for sending the appeal! I am glad you take part in the life of the project, and I will read it all in my free time."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x09, 0x01

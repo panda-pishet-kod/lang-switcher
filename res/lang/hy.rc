@@ -260,6 +260,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Դիմումն ուղարկված է"
     IDS_WIZARD_SENT_TEXT    "Շնորհակալություն դիմումն ուղարկելու համար։ Ուրախ եմ, որ մասնակցում եք նախագծի կյանքին, և անպայման ամեն ինչ կկարդամ ազատ ժամանակ։"
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x2B, 0x01

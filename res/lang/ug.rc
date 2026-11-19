@@ -260,6 +260,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "ئۇچۇر ئەۋەتىلدى"
     IDS_WIZARD_SENT_TEXT    "ئۇچۇر ئەۋەتكىنىڭىزگە رەھمەت! تۈرنىڭ ھاياتىغا قاتناشقىنىڭىزدىن خۇشالمەن، بىكار ۋاقتىمدا ھەممىنى چوقۇم ئوقۇيمەن."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x80, 0x01

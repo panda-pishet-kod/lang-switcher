@@ -254,6 +254,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Мөрәҗәгать җибәрелде"
     IDS_WIZARD_SENT_TEXT    "Мөрәҗәгать җибәргәнегез өчен рәхмәт! Проект тормышында катнашуыгызга шатмын һәм барысын да буш вакытымда укырмын."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x44, 0x01

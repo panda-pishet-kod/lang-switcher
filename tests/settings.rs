@@ -18449,7 +18449,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **245 since stage E120, tasks T-120-21 and T-120-22** — решение 208.169, С10 and С12:
 /// «Состояние» for a person (3280…3288) and «Нашли ошибку в переводе?» (3289…3292) — 232 + 13.
-const FR_94_STRINGS: [(u16, &str, &str); 245] = [
+///
+/// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
+/// program's own (3265, 3266) — 245 + 2.
+const FR_94_STRINGS: [(u16, &str, &str); 247] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -19534,6 +19537,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 245] = [
         settings::IDS_TRAY_FLAG,
         "Флаг раскладки в трее",
         "Layout flag in the tray",
+    ),
+    // Task T-119-3, part Б: the title and the link of the list of the program's own.
+    (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
+    (
+        settings::IDS_OWN_LIST_MORE,
+        "Дополнительные параметры клавиатуры",
+        "More keyboard settings",
     ),
 ];
 
@@ -27127,8 +27137,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        245,
-        "two hundred and FORTY-FIVE identifiers in use since stage E120, tasks T-120-21 and \
+        247,
+        "two hundred and FORTY-SEVEN identifiers in use since task T-119-3, part Б (решение \
+         208.88): the title and the link of the list of the program's own (3265, 3266). Two \
+         hundred and forty-five since stage E120, tasks T-120-21 and \
          T-120-22 (решение 208.169): «Состояние» for a person, nine (3280…3288), and «Нашли \
          ошибку в переводе?», four (3289…3292). Two hundred and thirty-two since task T-119-2 \
          (FR-90б): the check box \

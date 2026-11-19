@@ -257,6 +257,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Müraciət göndərildi"
     IDS_WIZARD_SENT_TEXT    "Müraciət göndərdiyiniz üçün təşəkkür edirəm! Layihənin həyatında iştirak etməyinizə şadam və hamısını boş vaxtımda mütləq oxuyacağam."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x2C, 0x01

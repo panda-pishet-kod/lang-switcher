@@ -256,6 +256,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Звяртанне адпраўлена"
     IDS_WIZARD_SENT_TEXT    "Дзякуй, што адправілі звяртанне! Я рады вашай актыўнасці ў жыцці праекта і абавязкова ўсё прачытаю ў вольны час."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x23, 0x01

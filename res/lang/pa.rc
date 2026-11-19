@@ -255,6 +255,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "ਸੁਨੇਹਾ ਭੇਜ ਦਿੱਤਾ ਗਿਆ"
     IDS_WIZARD_SENT_TEXT    "ਸੁਨੇਹਾ ਭੇਜਣ ਲਈ ਧੰਨਵਾਦ! ਪ੍ਰੋਜੈਕਟ ਵਿੱਚ ਤੁਹਾਡੀ ਸ਼ਮੂਲੀਅਤ ਨਾਲ ਮੈਨੂੰ ਖ਼ੁਸ਼ੀ ਹੈ, ਅਤੇ ਮੈਂ ਵਿਹਲੇ ਸਮੇਂ ਵਿੱਚ ਸਭ ਕੁਝ ਜ਼ਰੂਰ ਪੜ੍ਹਾਂਗਾ।"
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x46, 0x01

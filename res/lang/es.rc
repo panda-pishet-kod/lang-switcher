@@ -258,6 +258,8 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Mensaje enviado"
     IDS_WIZARD_SENT_TEXT    "¡Gracias por enviar el mensaje! Me alegra que participe en la vida del proyecto, y lo leeré todo sin falta en mi tiempo libre."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_OWN_LIST_TITLE      "Keyboard layout"
+    IDS_OWN_LIST_MORE       "More keyboard settings"
 END
 
 LANGUAGE 0x0A, 0x01

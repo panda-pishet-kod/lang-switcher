@@ -15,7 +15,8 @@ page. Dates are the days the releases were published (UTC).
   gets a plate with the letters of the language; pause greys the flag, an unread letter puts its dot on it. With the tick
   off the program is what it was.
 - A click on the flag opens the list of layouts of Windows, as a click on ENG/РУС at the clock does; after the choice the
-  window you typed in gets the focus and the layout back, Edge included. The right click keeps the menu.
+  window you typed in gets the focus and the layout back, Edge included. When ENG/РУС is hidden at the clock, the flag
+  shows a list of its own in the look of the list of Windows 11. The right click keeps the menu.
 - Starting Lang Switcher while it is already running opens its settings window instead of the message «already running».
 
 ## 1.6.1 — 2026-11-16
