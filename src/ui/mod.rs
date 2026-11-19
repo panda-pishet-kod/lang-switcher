@@ -14,6 +14,8 @@ pub mod elements;
 pub mod fit;
 pub mod host;
 pub mod layout;
+#[cfg(feature = "testing")]
+pub mod probe;
 pub mod scene;
 pub mod text;
 pub mod tokens;

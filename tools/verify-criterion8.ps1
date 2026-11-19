@@ -141,10 +141,11 @@ $Strings = @(
     # Stage E120: the switches of the interface shell and of its probe, all under the testing feature.
     @{ Name = 'LANGSW_TESTING_UI_GDI';             Value = 'LANGSW_TESTING_UI_GDI';             Source = 'src\ui\canvas.rs';         Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_UI_HARDWARE';        Value = 'LANGSW_TESTING_UI_HARDWARE';        Source = 'src\ui\canvas.rs';         Control = 'testing' },
-    @{ Name = 'LANGSW_TESTING_UI_PROBE';           Value = 'LANGSW_TESTING_UI_PROBE';           Source = 'src\ui\windows\about.rs';  Control = 'testing' },
-    @{ Name = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Value = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Source = 'src\ui\windows\about.rs';  Control = 'testing' },
-    @{ Name = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Value = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Source = 'src\ui\windows\about.rs';  Control = 'testing' },
-    @{ Name = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Value = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Source = 'src\ui\windows\about.rs';  Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE';           Value = 'LANGSW_TESTING_UI_PROBE';           Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Value = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Value = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Value = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_TWICE';     Value = 'LANGSW_TESTING_UI_PROBE_TWICE';     Source = 'src\ui\probe.rs';          Control = 'testing' },
     @{ Name = 'probe switch --ui-probe-about';     Value = '--ui-probe-about';                  Source = 'src\main.rs';              Control = 'testing' }
 )
 

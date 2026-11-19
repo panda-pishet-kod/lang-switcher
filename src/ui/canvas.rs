@@ -237,11 +237,32 @@ fn release_factory() {
         if let Some(entry) = shared.as_mut() {
             entry.holders = entry.holders.saturating_sub(1);
             if entry.holders == 0 {
-                *shared = None;
+                // Testing: release the last reference by hand and keep what Direct2D answers —
+                // 0 when the factory dies here, more when something still holds it.
+                #[cfg(feature = "testing")]
+                {
+                    let factory = entry.factory.clone();
+                    *shared = None;
+                    // SAFETY: `factory` holds one owned reference, released once here and then
+                    // forgotten so that its `Drop` does not release it a second time.
+                    let left =
+                        unsafe { (Interface::vtable(&factory).base__.Release)(factory.as_raw()) };
+                    std::mem::forget(factory);
+                    FACTORY_REFS_LEFT.store(i64::from(left), std::sync::atomic::Ordering::Relaxed);
+                }
+                #[cfg(not(feature = "testing"))]
+                {
+                    *shared = None;
+                }
             }
         }
     });
 }
+
+/// Testing: the references the factory of Direct2D still had when the last canvas let it go —
+/// 0 means it died there (−1: not yet released). The probe of the shell reports it.
+#[cfg(feature = "testing")]
+pub static FACTORY_REFS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
 
 /// Whether this thread holds a factory now — for the test of release.
 pub fn factory_is_held() -> bool {

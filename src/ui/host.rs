@@ -876,6 +876,9 @@ impl<C: Content> Handler for Host<C> {
             }
             WM_KEYDOWN => self.key(hwnd, wparam.0 as u16).then_some(LRESULT(0)),
             WM_DESTROY => {
+                // The pictures first: `art.rs` keeps bitmaps with the render target, which holds
+                // the factory — gone before the canvas, the factory dies with the canvas.
+                self.pictures = None;
                 self.canvas = None;
                 self.layout = None;
                 self.text = None;

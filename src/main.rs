@@ -26,7 +26,7 @@ fn main() -> ExitCode {
     // shell, opened alone, in the testing build only.
     #[cfg(feature = "testing")]
     if std::env::args().any(|argument| argument == "--ui-probe-about") {
-        return lang_switcher::ui::windows::about::probe_main();
+        return lang_switcher::ui::probe::run_about();
     }
 
     lang_switcher::app::run()

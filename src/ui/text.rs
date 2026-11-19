@@ -26,7 +26,7 @@ use crate::ui::tokens::{self, Face, Role};
 use ::windows::Win32::Foundation::{HMODULE, LPARAM};
 use ::windows::Win32::Globalization::{LCMAP_LINGUISTIC_CASING, LCMAP_UPPERCASE, LCMapStringEx};
 use ::windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS,
+    DWRITE_FACTORY_TYPE, DWRITE_FACTORY_TYPE_ISOLATED, DWRITE_FONT_METRICS,
     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
     DWRITE_HIT_TEST_METRICS, DWRITE_LINE_SPACING_METHOD_UNIFORM, DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
     DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT,
@@ -212,7 +212,7 @@ fn create_factory() -> WinResult<IDWriteFactory> {
     let mut raw = std::ptr::null_mut();
 
     // SAFETY: the interface asked for is the one whose pointer is written to `raw`.
-    unsafe { create(DWRITE_FACTORY_TYPE_SHARED, &IDWriteFactory::IID, &mut raw) }.ok()?;
+    unsafe { create(DWRITE_FACTORY_TYPE_ISOLATED, &IDWriteFactory::IID, &mut raw) }.ok()?;
 
     // SAFETY: on success `raw` holds an owned reference to an `IDWriteFactory`.
     Ok(unsafe { IDWriteFactory::from_raw(raw) })
