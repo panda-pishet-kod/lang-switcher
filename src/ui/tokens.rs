@@ -557,8 +557,14 @@ pub const WINDOW_SHARE: Share = Share(2.0 / 3.0);
 pub const WINDOW_MIN: SizePt = SizePt::pt(620.0, 500.0);
 /// ◆ Окно — не больше; рамку можно тянуть в этих пределах, «развернуть» нет.
 pub const WINDOW_MAX: SizePt = SizePt::pt(1280.0, 720.0);
-/// Две колонки — с этой ширины окна.
-pub const TWO_COLUMNS_FROM: Pt = Pt(680.0);
+/// ◆ Две колонки с панелью — с этой ширины окна (208.168: 880, не 680).
+pub const TWO_COLUMNS_FROM: Pt = Pt(880.0);
+/// ◆ Окно при открытии — не меньше, пока рабочая область позволяет (208.168).
+pub const WINDOW_OPEN_MIN: SizePt = SizePt::pt(900.0, 540.0);
+/// ◆ Класс кегля «обычное» — с этого размера окна (208.168).
+pub const CLASS_ORDINARY_FROM: SizePt = SizePt::pt(900.0, 540.0);
+/// ◆ Класс кегля «большое» — с этого размера окна (208.168).
+pub const CLASS_LARGE_FROM: SizePt = SizePt::pt(1280.0, 690.0);
 /// Две колонки — панель, доля ширины окна.
 pub const PANEL_SHARE: Share = Share(0.38);
 /// Колонка содержимого — не шире.
@@ -569,8 +575,8 @@ pub const CONTENT_PAD: Pad = Pad::em(2.2, 2.6);
 pub const NARROW_PAD: Pad = Pad::em(1.5, 1.8);
 /// Узкое окно — кружок с рисунком рядом с заголовком.
 pub const NARROW_ART: Em = Em(4.6);
-/// Пара в ряду — половина не уже, иначе одна под другой.
-pub const PAIR_MIN_HALF: Em = Em(20.0);
+/// ◆ Пара в ряду — половина не уже, иначе одна под другой (208.168: 15 B; пара — в колонке текста).
+pub const PAIR_MIN_HALF: Em = Em(15.0);
 /// Между блоками.
 pub const BLOCK_GAP: Em = Em(1.0);
 /// Панель — точка узора (`line2`).

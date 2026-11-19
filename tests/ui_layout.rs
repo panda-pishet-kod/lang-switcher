@@ -96,7 +96,7 @@ fn the_size_of_a_window_is_two_thirds_of_the_work_area_within_its_limits() {
     let cases = [
         (
             (1366.0, 728.0),
-            (1366.0 * 2.0 / 3.0, 500.0),
+            (1366.0 * 2.0 / 3.0, 540.0),
             Class::Ordinary,
             false,
         ),
@@ -106,10 +106,11 @@ fn the_size_of_a_window_is_two_thirds_of_the_work_area_within_its_limits() {
             Class::Large,
             false,
         ),
+        ((700.0, 560.0), (700.0, 540.0), Class::Narrow, false),
         ((2560.0, 1400.0), (1280.0, 720.0), Class::Large, false),
         ((3840.0, 2120.0), (1280.0, 720.0), Class::Large, false),
         ((640.0, 360.0), (640.0, 360.0), Class::Narrow, true),
-        ((930.0, 750.0), (620.0, 500.0), Class::Narrow, false),
+        ((930.0, 750.0), (900.0, 540.0), Class::Ordinary, false),
     ];
 
     for ((aw, ah), (w, h), class, scrolls) in cases {
@@ -180,11 +181,11 @@ fn a_row_wraps_like_the_words_of_a_line() {
 /// same for three columns.
 #[test]
 fn equal_columns_stand_side_by_side_down_to_twenty_b_each() {
-    assert_eq!(PAIR_MIN_HALF.0, 20.0);
+    assert_eq!(PAIR_MIN_HALF.0, 15.0);
     let b = 12.0;
     let gap = BLOCK_GAP.at(b);
 
-    for (each, beside) in [(20.0, true), (19.9, false)] {
+    for (each, beside) in [(15.0, true), (14.9, false)] {
         assert_eq!(
             columns_fit(2, 2.0 * each * b + gap, b),
             beside,
@@ -198,34 +199,44 @@ fn equal_columns_stand_side_by_side_down_to_twenty_b_each() {
     }
 }
 
-/// Under 20 B a half a pair and a triple fall to one column a block's gap apart, at the full width.
-/// ⚠ In a window this is always so today: the content column is at most 40 B (question T-120-5).
+/// In the usual window (911 × 512, a column of 35 B) a pair stands side by side, 17 B a half, and a
+/// triple — under 15 B each — falls to one column a block's gap apart, at the full width (208.168).
 #[test]
-fn a_pair_and_a_triple_under_twenty_b_fall_to_a_column() {
+fn in_the_usual_window_a_pair_stands_side_by_side_and_a_triple_falls_to_a_column() {
     let cell = |s: &str| Node::Surface(Surface::Nested, Box::new(text(Role::Body, s)));
-    for body in [
-        Node::Pair(Box::new(cell("a")), Box::new(cell("b"))),
-        Node::Triple(
-            Box::new(cell("a")),
-            Box::new(cell("b")),
-            Box::new(cell("c")),
-        ),
-    ] {
-        let layout = lay(&bare(body), usual());
-        let cells = rects_of(&layout, |part| matches!(part, Part::Surface(_)));
-        let gap = BLOCK_GAP.at(layout.b);
+    let pair = lay(
+        &bare(Node::Pair(Box::new(cell("a")), Box::new(cell("b")))),
+        usual(),
+    );
+    let halves = rects_of(&pair, |part| matches!(part, Part::Surface(_)));
+    assert!(
+        close(halves[0].y, halves[1].y) && halves[1].x > halves[0].right(),
+        "{halves:?}"
+    );
+    assert!(
+        close(halves[0].h, halves[1].h),
+        "the halves share one height"
+    );
 
-        assert!(
-            cells
-                .windows(2)
-                .all(|pair| close(pair[1].y, pair[0].bottom() + gap))
-        );
-        assert!(
-            cells
-                .iter()
-                .all(|cell| close(cell.w, cells[0].w) && close(cell.x, cells[0].x))
-        );
-    }
+    let triple = Node::Triple(
+        Box::new(cell("a")),
+        Box::new(cell("b")),
+        Box::new(cell("c")),
+    );
+    let layout = lay(&bare(triple), usual());
+    let cells = rects_of(&layout, |part| matches!(part, Part::Surface(_)));
+    let gap = BLOCK_GAP.at(layout.b);
+
+    assert!(
+        cells
+            .windows(2)
+            .all(|pair| close(pair[1].y, pair[0].bottom() + gap))
+    );
+    assert!(
+        cells
+            .iter()
+            .all(|cell| close(cell.w, cells[0].w) && close(cell.x, cells[0].x))
+    );
 }
 
 #[test]

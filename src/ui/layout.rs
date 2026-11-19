@@ -25,10 +25,11 @@ use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
-    CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em, FIELD_PAD, HEADER_SUBTITLE_GAP,
-    HEADER_TITLE_GAP, LINE, NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART,
-    PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
-    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
+    CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
+    FIELD_PAD, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP, LINE, NARROW_ART, NARROW_PAD, NESTED_PAD,
+    NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD,
+    SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
+    WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
@@ -53,13 +54,14 @@ pub struct WindowSize {
     pub scrolls: bool,
 }
 
-fn class_of(w: f32) -> Class {
-    if w < TWO_COLUMNS_FROM.0 {
-        Class::Narrow
-    } else if w < WINDOW_MAX.w.0 {
+fn class_of(w: f32, h: f32) -> Class {
+    let reaches = |from: tokens::SizePt| w >= from.w.0 && h >= from.h.0;
+    if reaches(CLASS_LARGE_FROM) {
+        Class::Large
+    } else if reaches(CLASS_ORDINARY_FROM) {
         Class::Ordinary
     } else {
-        Class::Large
+        Class::Narrow
     }
 }
 
@@ -69,7 +71,7 @@ pub fn client_size(w: f32, h: f32) -> WindowSize {
     WindowSize {
         w,
         h,
-        class: class_of(w),
+        class: class_of(w, h),
         scrolls: w < WINDOW_MIN.w.0 || h < WINDOW_MIN.h.0,
     }
 }
@@ -80,18 +82,25 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
         return WindowSize {
             w: area_w,
             h: area_h,
-            class: class_of(area_w),
+            class: class_of(area_w, area_h),
             scrolls: true,
         };
     }
 
-    let w = (area_w * WINDOW_SHARE.0).clamp(WINDOW_MIN.w.0, WINDOW_MAX.w.0);
-    let h = (area_h * WINDOW_SHARE.0).clamp(WINDOW_MIN.h.0, WINDOW_MAX.h.0);
+    // Two thirds of the work area, but at opening no less than 900 × 540 while the area holds it
+    // (208.168), within the limits of the frame.
+    let side = |area: f32, open: f32, least: f32, most: f32| {
+        (area * WINDOW_SHARE.0)
+            .max(open.min(area))
+            .clamp(least, most)
+    };
+    let w = side(area_w, WINDOW_OPEN_MIN.w.0, WINDOW_MIN.w.0, WINDOW_MAX.w.0);
+    let h = side(area_h, WINDOW_OPEN_MIN.h.0, WINDOW_MIN.h.0, WINDOW_MAX.h.0);
 
     WindowSize {
         w,
         h,
-        class: class_of(w),
+        class: class_of(w, h),
         scrolls: false,
     }
 }
@@ -287,7 +296,7 @@ pub fn lay_out<I: Copy>(
     let mut place = Placer {
         b,
         h: size.h,
-        class: size.class,
+        one_column: size.w < TWO_COLUMNS_FROM.0,
         kind: window.kind,
         art: window.art,
         tight: false,
@@ -322,10 +331,8 @@ pub fn lay_out<I: Copy>(
 }
 
 /// The rule of the pair (passport §3): `count` equal columns stand side by side in `width` points at
-/// the type size `b` while each is at least 20 B wide, the blocks' gap between them.
-///
-/// ⚠ The content column is at most 40 B wide (§3), so a pair in it is at most (40 − 1) / 2 = 19.5 B a
-/// half and never stands side by side — question to the controller, T-120-5.
+/// the type size `b` while each is at least 15 B wide (208.168), the blocks' gap between them. A pair
+/// lives in the column of text, at most 40 B: up to 19,5 B a half.
 pub fn columns_fit(count: usize, width: f32, b: f32) -> bool {
     let count = count.max(1) as f32;
     let each = (width - BLOCK_GAP.at(b) * (count - 1.0)) / count;
@@ -346,7 +353,8 @@ struct Placer<'m, I> {
     b: f32,
     /// The window's height: the brand line is sized by it.
     h: f32,
-    class: Class,
+    /// The window stands in one column: the circle beside the header, the sections as tabs.
+    one_column: bool,
     kind: WindowKind,
     art: Option<Art>,
     tight: bool,
@@ -388,7 +396,8 @@ impl<I: Copy> Placer<'_, I> {
 
     /// The whole window; answers what does not fit.
     fn window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
-        let narrow = size.class == Class::Narrow;
+        // One column under the width of two (208.168: 880), whatever the class of type sizes.
+        let narrow = size.w < TWO_COLUMNS_FROM.0;
         let (mut area_x, mut area_w) = (0.0, size.w);
 
         if let (Some(art), false) = (window.art, narrow) {
@@ -724,8 +733,7 @@ impl<I: Copy> Placer<'_, I> {
         y: f32,
         w: f32,
     ) -> f32 {
-        let circle =
-            self.class == Class::Narrow && self.art.is_some() && self.kind != WindowKind::Settings;
+        let circle = self.one_column && self.art.is_some() && self.kind != WindowKind::Settings;
         let side = if circle { self.em(NARROW_ART) } else { 0.0 };
         let beside = if circle {
             side + self.em(BLOCK_GAP)
@@ -1123,7 +1131,7 @@ impl<I: Copy> Placer<'_, I> {
         let (v, h) = (self.em(SECTION_PAD.v), self.em(SECTION_PAD.h));
         let gap = self.em(SECTION_GAP);
         let item_h = style.line_height() + v * 2.0;
-        let narrow = self.class == Class::Narrow;
+        let narrow = self.one_column;
         let (mut left, mut top) = (x, y);
 
         for (index, label) in items.iter().enumerate() {
@@ -1170,7 +1178,7 @@ pub fn place_node<I: Copy>(
     let mut place = Placer {
         b,
         h: WINDOW_MIN.h.0,
-        class,
+        one_column: class == Class::Narrow,
         kind: WindowKind::Ordinary,
         art: None,
         tight: false,

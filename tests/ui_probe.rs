@@ -7,13 +7,11 @@
 
 use lang_switcher::settings::{self, Language};
 use lang_switcher::theme::ThemeSetting;
-use lang_switcher::ui::canvas::{Canvas, Mode};
-use lang_switcher::ui::elements::{self, Look, State};
 use lang_switcher::ui::fit;
 use lang_switcher::ui::host::Content;
-use lang_switcher::ui::layout::{Layout, WindowSize, client_size, window_size};
+use lang_switcher::ui::layout::{Layout, WindowSize, client_size};
 use lang_switcher::ui::text::{Direction, Text};
-use lang_switcher::ui::tokens::{Color, TYPE_FLOOR, Theme};
+use lang_switcher::ui::tokens::{TYPE_FLOOR, Theme};
 use lang_switcher::ui::windows::about::{About, Id};
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -109,6 +107,11 @@ fn about_fits_the_least_window_in_every_language_of_the_probe_at_twelve_and_up()
 #[cfg(feature = "testing")]
 #[test]
 fn print_the_pictures_of_the_probe() {
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::layout::window_size;
+    use lang_switcher::ui::tokens::Color;
+
     let Some(folder) = std::env::var_os("LANGSW_UI_PROBE_DIR") else {
         return;
     };
