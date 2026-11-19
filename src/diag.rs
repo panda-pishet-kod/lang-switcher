@@ -850,6 +850,10 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // GDI. Appended at the end so that no index above them moves; a fact and no value.
     ("ui canvas: target refused", Kind::Window),
     ("ui canvas: plain look", Kind::Window),
+    // Stage Э120, task T-120-5: a window of the shell did not fit at the factor of its type size
+    // and was laid out at a smaller one, down to the floor of 12 points (`ui::fit`). A fact and no
+    // value; appended at the end so that no index above it moves.
+    ("ui layout: type size lowered", Kind::Window),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

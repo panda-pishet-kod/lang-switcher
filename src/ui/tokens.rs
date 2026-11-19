@@ -649,6 +649,12 @@ pub const KEY_BOTTOM: Pt = Pt(3.0);
 pub const KEY_PAD: Pad = Pad::em(0.1, 0.5);
 /// Точка состояния — диаметр.
 pub const STATUS_DOT: Em = Em(0.55);
+/// ◆ Шапка окна — заголовок под надписью (из макета: 0,2 кегля заголовка).
+pub const HEADER_TITLE_GAP: Em = Em(0.32);
+/// ◆ Шапка окна — подпись под заголовком (из макета: 0,25 кегля подписи).
+pub const HEADER_SUBTITLE_GAP: Em = Em(0.215);
+/// ◆ Флажок, радиокнопка, выключатель — от подписи (из макета).
+pub const CONTROL_GAP: Em = Em(0.6);
 /// Окно в углу — ширина.
 pub const CORNER_WIDTH: Pt = Pt(364.0);
 /// Окно в углу — поля.
