@@ -685,12 +685,13 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        232,
+        245,
         "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
          (T-119-8): eleven that left with «Что нового» and the balloon «обновлён до X», and the \
-         check box of the flag of T-119-2"
+         check box of the flag of T-119-2, and stage E120 (T-120-21, T-120-22): nine strings of \
+         «Состояние» for a person and four of «Нашли ошибку в переводе?»"
     );
 
     let mut refused = Vec::new();
