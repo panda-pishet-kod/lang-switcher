@@ -492,6 +492,25 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             };
             painter.fill_circle(x, rect.y + rect.h / 2.0, radius, c(colour));
         }
+        Part::Number { text } => {
+            let colour = if state.disabled {
+                Color::Ink3
+            } else {
+                Color::Accent
+            };
+            write(
+                painter,
+                look,
+                Role::Body,
+                None,
+                text,
+                rect,
+                Wrap::OneLine,
+                Align::Start,
+                false,
+                c(colour),
+            );
+        }
         Part::Badge { text } => {
             let colour = if state.disabled {
                 Color::Ink3

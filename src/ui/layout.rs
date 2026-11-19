@@ -186,6 +186,10 @@ pub enum Part {
     },
     /// A row of the tray menu.
     MenuRow,
+    /// The number of an item of a numbered list.
+    Number {
+        text: String,
+    },
 }
 
 impl Part {
@@ -217,6 +221,7 @@ impl Part {
             Part::Dot(_) => "status dot",
             Part::Badge { .. } => "badge",
             Part::MenuRow => "menu row",
+            Part::Number { .. } => "list number",
         }
     }
 }
@@ -581,6 +586,7 @@ impl<I: Copy> Placer<'_, I> {
                 );
                 h
             }
+            Node::Numbered(items) => self.numbered(items, x, y, w),
             Node::Divider => {
                 self.push(Part::Divider, Rect::new(x, y, w, LINE.0), None);
                 LINE.0
@@ -1027,6 +1033,30 @@ impl<I: Copy> Placer<'_, I> {
         let height = inner + v * 2.0;
         self.out[card].rect.h = height;
         height
+    }
+
+    /// A numbered list: a column of numbers as wide as the widest, the items beside them.
+    fn numbered(&mut self, items: &[String], x: f32, y: f32, w: f32) -> f32 {
+        let style = self.style(Role::Body);
+        let numbers: Vec<String> = (1..=items.len()).map(|n| format!("{n}.")).collect();
+        let column = numbers
+            .iter()
+            .map(|n| self.width_of(style, n))
+            .fold(0.0, f32::max)
+            + self.em(CONTROL_GAP);
+        let mut top = y;
+        for (index, (number, item)) in numbers.into_iter().zip(items).enumerate() {
+            if index > 0 {
+                top += self.em(BLOCK_ROW_GAP);
+            }
+            self.push(
+                Part::Number { text: number },
+                Rect::new(x, top, column, style.line_height()),
+                None,
+            );
+            top += self.text(Role::Body, item, x + column, top, w - column, Wrap::Words);
+        }
+        top - y
     }
 
     fn track(&mut self, id: I, options: &[String], selected: usize, at: Rect) {

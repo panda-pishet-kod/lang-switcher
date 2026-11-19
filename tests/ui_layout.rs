@@ -710,3 +710,43 @@ fn the_mirror_reflects_every_rectangle_and_keeps_the_order_of_tab() {
 
     assert!(faults.is_empty(), "not mirrored:\n{}", faults.join("\n"));
 }
+
+/// The mirror test over the windows of `src\ui\windows\`: «О программе» in Hebrew and Arabic, at the
+/// usual and the narrow size (the strings themselves may be empty in a test process — the
+/// rectangles are what is compared).
+#[test]
+fn the_mirror_reflects_the_window_descriptions_of_the_shell() {
+    use lang_switcher::settings::Language;
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::about::About;
+
+    let narrow = WindowSize {
+        w: 640.0,
+        h: 500.0,
+        class: Class::Narrow,
+        scrolls: false,
+    };
+    for language in [Language::He, Language::Ar] {
+        let window = About {
+            language,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::System,
+        }
+        .describe();
+        for size in [usual(), narrow] {
+            let straight = lay_out(&window, size, 1.0, false, &MEASURE);
+            let mirrored = lay_out(&window, size, 1.0, true, &MEASURE);
+            assert_eq!(straight.focus_order(), mirrored.focus_order());
+            for (left, right) in straight.items.iter().zip(&mirrored.items) {
+                let reflected = size.w - left.rect.x - left.rect.w;
+                assert!(
+                    close(right.rect.x, reflected) && close(right.rect.y, left.rect.y),
+                    "{language:?} {} at {}",
+                    left.part.name(),
+                    size.w
+                );
+            }
+        }
+    }
+}

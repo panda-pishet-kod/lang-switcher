@@ -22,5 +22,12 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    // The probe of the interface shell (stage Э120, T-120-9): the window «О программе» on the
+    // shell, opened alone, in the testing build only.
+    #[cfg(feature = "testing")]
+    if std::env::args().any(|argument| argument == "--ui-probe-about") {
+        return lang_switcher::ui::windows::about::probe_main();
+    }
+
     lang_switcher::app::run()
 }

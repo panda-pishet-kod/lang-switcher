@@ -14,7 +14,9 @@
 //!
 //! Knows nothing of Win32.
 
-use crate::ui::tokens::Role;
+/// The roles of text, as a window description names them: the vocabulary of the passport §2, not its
+/// values (a description does not reach `tokens`, `testsI_guard.rs` rule 2).
+pub use crate::ui::tokens::Role;
 
 /// The look of a button: one per kind (passport §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +147,8 @@ pub enum Node<I> {
         items: Vec<String>,
         current: usize,
     },
+    /// A numbered list: the numbers in `accent` (§1), the items wrapped beside them.
+    Numbered(Vec<String>),
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
