@@ -44,6 +44,10 @@
       LANGSW_CONTROL    The project's control folder. The bench tests\e2e writes the protocol of
                         position 2 and its raw series into its reports\ subfolder.
                         Without it: <target folder>\e2e-reports\.
+      LANGSW_ART_REF    The folder of the reference pictures of the panda: the SVG files of
+                        res\art rendered by a browser (stage E120, T-120-12). tests\ui_art.rs
+                        compares the drawings with them.
+                        Without it: the two comparisons print SKIPPED_NO_ART_REF and pass.
 
     cargo is not configured here: it comes from PATH, and CARGO_HOME, RUSTUP_HOME and
     CARGO_TARGET_DIR keep cargo's own defaults unless they are set -- in the environment, or here
@@ -59,3 +63,4 @@
 # if (-not $env:LANGSW_NEWS_KEYS) { $env:LANGSW_NEWS_KEYS = 'C:\Keys\LangSwitcher\news-keys' }
 # if (-not $env:LANGSW_NEWS_SITE) { $env:LANGSW_NEWS_SITE = 'C:\Builds\LangSwitcher\news-site\news.toml' }
 # if (-not $env:LANGSW_CONTROL)   { $env:LANGSW_CONTROL   = 'C:\Projects\LangSwitcher-control' }
+# if (-not $env:LANGSW_ART_REF)   { $env:LANGSW_ART_REF   = 'C:\Builds\LangSwitcher\art-ref' }
