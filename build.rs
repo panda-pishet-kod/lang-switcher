@@ -234,6 +234,14 @@ fn drawings() {
                 .strip_prefix("res/art/")
                 .and_then(|name| name.strip_suffix(".svg"))
                 .unwrap_or_else(|| panic!("{shown}: not under res/art"));
+            // Part C: a menu icon takes its colour from the shell and has none of its own; a
+            // picture has every colour of its own.
+            let colours = if name.starts_with("icons/") {
+                svg::check_icon(&drawing)
+            } else {
+                svg::check_picture(&drawing)
+            };
+            colours.unwrap_or_else(|error| panic!("{shown}: {error}"));
             (name.to_owned(), drawing)
         })
         .collect();

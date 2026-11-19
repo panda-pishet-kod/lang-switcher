@@ -54,11 +54,19 @@ pub enum Join {
     Round,
 }
 
+/// The colour of a stroke: written in the file, or given by the shell when it draws — SVG's
+/// `currentColor`, the colour of a menu icon (task T-120-12, part C).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Ink {
+    Color(Rgb),
+    Current,
+}
+
 /// The stroke of a shape. `width` and `dash` are in the units of the shape, as SVG writes them;
 /// an empty `dash` is a solid line.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Stroke {
-    pub color: Rgb,
+    pub color: Ink,
     pub width: f32,
     pub opacity: f32,
     pub cap: Cap,
@@ -584,7 +592,10 @@ impl<'a> Attrs<'a> {
         };
         let stroke = match self.take("stroke") {
             None | Some("none") => None,
-            Some(value) => Some(color("stroke", value).map_err(|error| self.fail(error))?),
+            Some("currentColor") => Some(Ink::Current),
+            Some(value) => Some(Ink::Color(
+                color("stroke", value).map_err(|error| self.fail(error))?,
+            )),
         };
         let width = self.positive_or("stroke-width", Some(1.0))?;
         let opacity = match self.number("stroke-opacity")? {
@@ -1102,6 +1113,56 @@ fn field(attrs: &mut Attrs) -> Result<(f64, f64), String> {
     Ok((width, height))
 }
 
+/// A menu icon, `res/art/icons/`: no colour of its own — every shape unfilled, every stroke in the
+/// colour the shell gives (task T-120-12, part C).
+pub fn check_icon(drawing: &Drawing) -> Result<(), String> {
+    for (index, shape) in drawing.shapes.iter().enumerate() {
+        if let Some(rgb) = shape.fill {
+            return Err(format!(
+                "shape {}: an icon is not filled (fill=\"none\"), and this one is filled with {}",
+                index + 1,
+                hex(rgb)
+            ));
+        }
+        match shape.stroke.map(|stroke| stroke.color) {
+            Some(Ink::Current) => {}
+            Some(Ink::Color(rgb)) => {
+                return Err(format!(
+                    "shape {}: an icon has no colour of its own (stroke=\"currentColor\"), and this one has {}",
+                    index + 1,
+                    hex(rgb)
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "shape {}: an icon is drawn by its stroke, and this one has none",
+                    index + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A picture: every colour written in the file — the colour by parameter is the icons' alone.
+pub fn check_picture(drawing: &Drawing) -> Result<(), String> {
+    match drawing.shapes.iter().position(|shape| {
+        shape
+            .stroke
+            .is_some_and(|stroke| stroke.color == Ink::Current)
+    }) {
+        None => Ok(()),
+        Some(index) => Err(format!(
+            "shape {}: stroke=\"currentColor\" is for the icons of res/art/icons only",
+            index + 1
+        )),
+    }
+}
+
+fn hex(rgb: Rgb) -> String {
+    format!("#{:02X}{:02X}{:02X}", rgb.r, rgb.g, rgb.b)
+}
+
 /// One drawing. `file` names it in every error.
 pub fn parse(file: &str, text: &str) -> Result<Drawing, String> {
     Reader {
@@ -1187,7 +1248,10 @@ fn rust_stroke(stroke: &Stroke) -> String {
     };
     format!(
         "Stroke {{ color: {}, width: {:?}, opacity: {:?}, cap: Cap::{cap}, join: Join::{join}, dash: &{:?} }}",
-        rust_rgb(stroke.color),
+        match stroke.color {
+            Ink::Color(rgb) => format!("Ink::Color({})", rust_rgb(rgb)),
+            Ink::Current => "Ink::Current".to_owned(),
+        },
         stroke.width,
         stroke.opacity,
         stroke.dash

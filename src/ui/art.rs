@@ -32,7 +32,8 @@ use ::windows::core::{Error, Interface, Result};
 #[path = "../../build/svg.rs"]
 mod svg;
 
-use svg::{Cap, Drawing, Geometry, Join, Rgb, Segment, Shape, Stroke};
+use super::tokens;
+use svg::{Cap, Drawing, Geometry, Ink, Join, Rgb, Segment, Shape, Stroke};
 
 /// `DRAWINGS`, written by build.rs out of `res\art`.
 mod data {
@@ -78,17 +79,67 @@ const DIPS_PER_INCH: f32 = 96.0;
 /// width (ID2D1StrokeStyle::GetMiterLimit), so the same limit is 8 there.
 const MITER_LIMIT: f32 = 8.0;
 
+/// The folder of the menu icons under `res\art`; their names here go without it.
+const ICONS: &str = "icons/";
+
 /// The names of the pictures, in the order of `res\art`.
 pub fn names() -> impl Iterator<Item = &'static str> {
-    data::DRAWINGS.iter().map(|(name, _)| *name)
+    data::DRAWINGS
+        .iter()
+        .map(|(name, _)| *name)
+        .filter(|name| !name.starts_with(ICONS))
+}
+
+/// The names of the menu icons, the files of `res\art\icons`, in their order.
+pub fn icon_names() -> impl Iterator<Item = &'static str> {
+    data::DRAWINGS
+        .iter()
+        .filter_map(|(name, _)| name.strip_prefix(ICONS))
 }
 
 fn find(name: &str) -> Result<(&'static str, &'static Drawing)> {
     data::DRAWINGS
         .iter()
-        .find(|(known, _)| *known == name)
+        .find(|(known, _)| *known == name && !known.starts_with(ICONS))
         .map(|(known, drawing)| (*known, drawing))
         .ok_or_else(|| Error::new(E_INVALIDARG, format!("no picture «{name}» in res\\art")))
+}
+
+/// Draws the menu icon `name`, a file of `res\art\icons`, in `color` into the square with this
+/// top-left `corner` and `side`, in the device-independent pixels of `target`, between its
+/// `BeginDraw` and `EndDraw`. The corner lands on a whole pixel. An icon is a few lines and is
+/// drawn afresh each time: its colour changes with the state of its item.
+pub fn draw_icon(
+    target: &ID2D1RenderTarget,
+    name: &str,
+    color: tokens::Rgb,
+    corner: (f32, f32),
+    side: f32,
+) -> Result<()> {
+    let drawing = data::DRAWINGS
+        .iter()
+        .find(|(known, _)| known.strip_prefix(ICONS) == Some(name))
+        .map(|(_, drawing)| drawing)
+        .ok_or_else(|| Error::new(E_INVALIDARG, format!("no icon «{name}» in res\\art\\icons")))?;
+    let scale = scale_of(target);
+    let left = (corner.0 * scale).round() / scale;
+    let top = (corner.1 * scale).round() / scale;
+    let half = side / 2.0;
+    paint(
+        target,
+        drawing,
+        (left + half, top + half),
+        half,
+        channels(color.r, color.g, color.b),
+    )
+}
+
+/// Device pixels per device-independent pixel of `target`.
+fn scale_of(target: &ID2D1RenderTarget) -> f32 {
+    let (mut dpi_x, mut dpi_y) = (0.0, 0.0);
+    // SAFETY: two writable floats for the two values the call fills in.
+    unsafe { target.GetDpi(&mut dpi_x, &mut dpi_y) };
+    dpi_x / DIPS_PER_INCH
 }
 
 /// One finished picture: drawn for `target` at `pixels` across.
@@ -124,10 +175,7 @@ impl Art {
         radius: f32,
     ) -> Result<()> {
         let (name, drawing) = find(name)?;
-        let (mut dpi_x, mut dpi_y) = (0.0, 0.0);
-        // SAFETY: two writable floats for the two values the call fills in.
-        unsafe { target.GetDpi(&mut dpi_x, &mut dpi_y) };
-        let scale = dpi_x / DIPS_PER_INCH;
+        let scale = scale_of(target);
         let pixels = (2.0 * radius * scale).round().max(1.0) as u32;
 
         let fresh = |finished: &Finished| {
@@ -199,7 +247,7 @@ fn finish(
         bitmap_target.BeginDraw();
         bitmap_target.Clear(Some(&D2D1_COLOR_F::default()));
         let half = across / 2.0;
-        let painted = paint(&bitmap_target, drawing, (half, half), half);
+        let painted = paint(&bitmap_target, drawing, (half, half), half, no_parameter());
         let ended = bitmap_target.EndDraw(None, None);
         painted?;
         ended?;
@@ -207,26 +255,35 @@ fn finish(
     }
 }
 
-/// Paints a picture that is not in `res\art`, read from its text now — for the tests of the
-/// traps: a fill with a self-crossing outline, which none of the pictures of 1.8.0 has.
+/// Paints a drawing that is not in `res\art`, read from its text now, with `color` for the colour
+/// by parameter — for the tests of the traps: a fill with a self-crossing outline, which none of
+/// the pictures of 1.8.0 has, and the colour of an icon.
 #[doc(hidden)]
 pub fn paint_svg(
     target: &ID2D1RenderTarget,
     text: &str,
+    color: tokens::Rgb,
     centre: (f32, f32),
     radius: f32,
 ) -> Result<()> {
     let drawing = svg::parse("svg text", text).map_err(|error| Error::new(E_INVALIDARG, error))?;
-    paint(target, &drawing, centre, radius)
+    paint(
+        target,
+        &drawing,
+        centre,
+        radius,
+        channels(color.r, color.g, color.b),
+    )
 }
 
 /// Paints `drawing` straight onto `target`: its field fitted to the square around the circle,
-/// under the transform the target already has.
+/// under the transform the target already has; a stroke of the colour by parameter in `current`.
 fn paint(
     target: &ID2D1RenderTarget,
     drawing: &Drawing,
     centre: (f32, f32),
     radius: f32,
+    current: D2D1_COLOR_F,
 ) -> Result<()> {
     // SAFETY: plain Direct2D calls on live interfaces; every structure passed by pointer lives
     // across its call, and the transform of the target is put back on every way out.
@@ -273,7 +330,7 @@ fn paint(
         let mut result = Ok(());
         for shape in drawing.shapes {
             target.SetTransform(&(matrix!(shape.matrix.0) * field));
-            result = paint_shape(target, &factory, &brush, shape);
+            result = paint_shape(target, &factory, &brush, shape, current);
             if result.is_err() {
                 break;
             }
@@ -287,12 +344,26 @@ fn paint(
 }
 
 fn color(rgb: Rgb) -> D2D1_COLOR_F {
+    channels(rgb.r, rgb.g, rgb.b)
+}
+
+/// An opaque colour of Direct2D out of three channels of 0..=255.
+fn channels(red: u8, green: u8, blue: u8) -> D2D1_COLOR_F {
     let channel = |value: u8| f32::from(value) / f32::from(u8::MAX);
     D2D1_COLOR_F {
-        r: channel(rgb.r),
-        g: channel(rgb.g),
-        b: channel(rgb.b),
+        r: channel(red),
+        g: channel(green),
+        b: channel(blue),
         a: 1.0,
+    }
+}
+
+/// The colour by parameter of a picture: none has one (build.rs refuses it outside the icons), so
+/// this is never painted — SVG's own default, black, stands for it.
+fn no_parameter() -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        a: 1.0,
+        ..Default::default()
     }
 }
 
@@ -313,6 +384,7 @@ unsafe fn paint_shape(
     factory: &ID2D1Factory,
     brush: &ID2D1SolidColorBrush,
     shape: &Shape,
+    current: D2D1_COLOR_F,
 ) -> Result<()> {
     let outline = match shape.geometry {
         Geometry::Ellipse { cx, cy, rx, ry } => Outline::Ellipse(D2D1_ELLIPSE {
@@ -360,7 +432,10 @@ unsafe fn paint_shape(
             }
         }
         if let Some(stroke) = shape.stroke {
-            brush.SetColor(&color(stroke.color));
+            brush.SetColor(&match stroke.color {
+                Ink::Color(rgb) => color(rgb),
+                Ink::Current => current,
+            });
             brush.SetOpacity(stroke.opacity);
             let style = stroke_style(factory, &stroke)?;
             let width = stroke.width;

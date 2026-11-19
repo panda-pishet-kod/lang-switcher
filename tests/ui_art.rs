@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use lang_switcher::ui::art::{self, Art};
+use lang_switcher::ui::tokens::Rgb;
 use windows::Win32::Foundation::GENERIC_READ;
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
@@ -401,7 +402,9 @@ fn a_self_crossing_outline_fills_by_nonzero() {
     // fill (measured: a browser draws all eight the same under evenodd), so the trap is held here.
     let star = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 5L79 95L2 39L98 39L21 95Z"/></svg>"#;
     let canvas = Canvas::new(100, 96.0);
-    canvas.frame(|target| art::paint_svg(target, star, (50.0, 50.0), 50.0).expect("the star"));
+    canvas.frame(|target| {
+        art::paint_svg(target, star, Rgb::from_hex(0), (50.0, 50.0), 50.0).expect("the star")
+    });
     canvas.save("star");
     let pixels = canvas.pixels();
     let alpha = |x: u32, y: u32| pixels[((y * 100 + x) * 4 + 3) as usize];
@@ -485,4 +488,23 @@ fn an_unknown_name_is_an_error() {
         assert!(art.draw(target, "nobody", (5.0, 5.0), 5.0).is_err());
     });
     assert_eq!(art::names().count(), 8);
+}
+
+#[test]
+fn a_stroke_by_parameter_takes_the_colour_it_is_given() {
+    // The colour of a menu icon is the shell's (part C): `stroke="currentColor"`, no number.
+    let icon = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 12H22" fill="none" stroke="currentColor" stroke-width="4"/></svg>"#;
+    let canvas = Canvas::new(24, 96.0);
+    canvas.frame(|target| {
+        art::paint_svg(target, icon, Rgb::from_hex(0xC8_1E_3C), (12.0, 12.0), 12.0)
+            .expect("the line")
+    });
+    let pixels = canvas.pixels();
+    let at = ((12 * 24 + 12) * 4) as usize;
+    assert_eq!(
+        &pixels[at..at + 4],
+        &[0x3C, 0x1E, 0xC8, 0xFF],
+        "BGRA in the middle of the line"
+    );
+    assert_eq!(pixels[3], 0, "the corner stays empty");
 }

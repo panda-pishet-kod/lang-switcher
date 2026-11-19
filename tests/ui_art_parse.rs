@@ -12,7 +12,7 @@
 #[path = "../build/svg.rs"]
 mod svg;
 
-use svg::{Cap, Geometry, Join, Matrix, Point, Rgb, Segment, Shape};
+use svg::{Cap, Geometry, Ink, Join, Matrix, Point, Rgb, Segment, Shape};
 
 const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
 
@@ -309,11 +309,11 @@ fn default_stroke_width_one_butt_miter_opaque_solid() {
     let stroke = shape.stroke.expect("a stroke");
     assert_eq!(
         stroke.color,
-        Rgb {
+        Ink::Color(Rgb {
             r: 0x1C,
             g: 0x1B,
             b: 0x18
-        }
+        })
     );
     assert_eq!(stroke.width, 1.0);
     assert_eq!(stroke.opacity, 1.0);
@@ -330,11 +330,11 @@ fn fill_none_and_every_stroke_attribute() {
     let stroke = shape.stroke.expect("a stroke");
     assert_eq!(
         stroke.color,
-        Rgb {
+        Ink::Color(Rgb {
             r: 255,
             g: 255,
             b: 255
-        }
+        })
     );
     assert_eq!((stroke.width, stroke.opacity), (7.0, 0.85));
     assert_eq!((stroke.cap, stroke.join), (Cap::Round, Join::Round));
@@ -391,6 +391,57 @@ fn shapes_in_document_order() {
     .map(|shape| shape.fill.map(|rgb| rgb.b))
     .collect();
     assert_eq!(fills, [Some(1), Some(2), Some(3)]);
+}
+
+// ---- the colour by parameter (part C, the menu icons) ----
+
+const ICON_LINE: &str = r#"<path d="M4 12H20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>"#;
+
+#[test]
+fn stroke_current_color_is_the_colour_by_parameter() {
+    let stroke = one(ICON_LINE).stroke.expect("a stroke");
+    assert_eq!(stroke.color, Ink::Current);
+    assert_eq!(stroke.width, 1.6);
+}
+
+#[test]
+fn fill_current_color_is_refused() {
+    refused(r#"<circle r="1" fill="currentColor"/>"#, "currentColor");
+}
+
+#[test]
+fn an_icon_has_no_colour_of_its_own() {
+    let check = |body: &str| svg::check_icon(&drawing(body).unwrap());
+    assert_eq!(check(ICON_LINE), Ok(()));
+    assert_eq!(
+        check(&format!(
+            r#"{ICON_LINE}<circle r="3" fill="none" stroke="currentColor"/>"#
+        )),
+        Ok(())
+    );
+    for (body, named) in [
+        (
+            r##"<path d="M0 0L1 1" fill="none" stroke="#1C1B18"/>"##,
+            "#1C1B18",
+        ),
+        (r#"<path d="M0 0L1 1" stroke="currentColor"/>"#, "fill"),
+        (r#"<path d="M0 0L1 1" fill="none"/>"#, "stroke"),
+    ] {
+        match check(body) {
+            Ok(()) => panic!("{body}: an icon with a colour of its own"),
+            Err(error) => assert!(error.contains(named), "{body}: {error}"),
+        }
+    }
+}
+
+#[test]
+fn a_picture_has_no_colour_by_parameter() {
+    let check = |body: &str| svg::check_picture(&drawing(body).unwrap());
+    assert_eq!(check(r##"<path d="M0 0L1 1" stroke="#1C1B18"/>"##), Ok(()));
+    match check(ICON_LINE) {
+        Ok(()) => panic!("a picture with the colour by parameter"),
+        Err(error) => assert!(error.contains("currentColor"), "{error}"),
+    }
 }
 
 #[test]
