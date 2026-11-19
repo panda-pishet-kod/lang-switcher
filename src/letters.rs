@@ -351,17 +351,19 @@ pub const NEWS_KEPT: usize = 3;
 // 3. What a letter is
 // =========================================================================================
 
-/// The five letters of FR-101.
+/// The four letters of FR-101.
 ///
 /// «Новость» carries the identifier of the feed entry it is about, because there can be up to
 /// [`NEWS_KEPT`] of them and every rule that follows — read, reminded, expired — is about one
 /// of them by number.
+///
+/// ⛔ **«Что нового» больше нет — решение владельца 208.94 п. 4, задача T-119-8.** Письмо было
+/// закрыто воротами с решения 118.5 и хранилось на случай возврата; возврата не будет: после
+/// важного обновления говорит окно «Обновлено» в углу (208.90–208.94), а не письмо.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Letter {
     /// «Привет» — the first run, when there was no configuration file to start from.
     Welcome,
-    /// «Что нового» — the build's version differs from the one the state remembers.
-    WhatsNew,
     /// «Обновление» — the feed named a version newer than this one.
     Update,
     /// «Новость» — an unread entry of the feed, by identifier.
@@ -537,12 +539,8 @@ impl FeedView<'_> {
 /// 4. **«Обновление» → «Новость» → «Спасибо»** — the priority of FR-101, from the letter about
 ///    the program the person is running to the letter about the author.
 ///
-/// ⛔ **«Что нового» в этом порядке больше нет — решение владельца 118.5, задача T-53a-5.**
-/// Оно стояло третьим, между гейтами и «Обновлением»; ворота закрыты, потому что описание
-/// изменений должно приходить с сигналом ленты **до** установки, а не письмом после неё.
-/// Письмо, его строки и его место в приоритете целы — закрыто одно `if`, и подробности при
-/// нём. Число писем в этой доке — четыре, а не пять: доктекст, защищающий замысел, которого
-/// код не исполняет, хуже отсутствия доктекста (урок Э49).
+/// ⛔ **«Что нового» в этом порядке нет — решение 118.5 закрыло его ворота, решение 208.94 п. 4
+/// (задача T-119-8) убрало само письмо.**
 pub fn due(
     state: &Letters,
     today: Date,
@@ -558,18 +556,8 @@ pub fn due(
         return None;
     }
 
-    // ⛔ **ВОРОТА «Что нового» ЗАКРЫТЫ — решение владельца 118.5 (Р5 ТЗ Э53а), 2026-09-10.**
-    // Здесь стояло `if state.last_seen_version != version { return Some(Letter::WhatsNew); }`.
-    // Описание изменений должно приходить ВМЕСТЕ с сигналом ленты о новой версии на сайте, ДО
-    // установки, а не письмом после неё: человек, уже поставивший обновление, читать о нём
-    // поздно. Ворота закрыты именно здесь, а не удалением письма: `Letter::WhatsNew` цел в
-    // перечислении, его строки целы в `app.rc`, `plan_for` и `toast_strings` отвечают, как
-    // отвечали, и `after_shown` по-прежнему двигает версию, — так что вернуть письмо значит
-    // вернуть одно `if`, а не восстанавливать разобранное.
-    //
-    // ⚠ **`last_seen_version` продолжает двигаться и без письма** — её ведёт [`initialise`] на
-    // каждом старте. Без этого отметка застыла бы на версии закрытия ворот, и человек,
-    // которому письмо однажды вернут, получил бы его за все пропущенные версии разом.
+    // ⚠ **`last_seen_version` движется без письма** — её ведёт [`initialise`] на каждом старте;
+    // по ней [`was_updated`] узнаёт первый старт после обновления.
 
     // ⭐ TZ E104 §0 п. 20 (решение 189.18): since stage Э104 the updater installs a new version by
     // itself, and «Обновление» is its fallback — due only once the feed has named the newer version
@@ -817,7 +805,6 @@ pub fn initialise(state: &mut Letters, today: Date, version: &str) -> bool {
 /// rule; and each letter marks the thing that stops it coming back:
 ///
 /// * «Привет» — shown, once and for ever;
-/// * «Что нового» — the version it was about;
 /// * «Обновление» — the version it announced, so the letter is one per version while the menu
 ///   entry of FR-91 stays until the person updates;
 /// * «Новость» — the day of the **first** showing, and after that the count of reminders;
@@ -830,7 +817,6 @@ pub fn after_shown(state: &mut Letters, letter: Letter, today: Date, version: &s
 
     match letter {
         Letter::Welcome => state.welcome_shown = true,
-        Letter::WhatsNew => state.last_seen_version = version.to_owned(),
         Letter::Update => state.latest_known = version.to_owned(),
         Letter::News(id) => {
             if state.first_shown_on(id).is_none() {
@@ -1895,8 +1881,6 @@ pub struct LetterPlan {
 pub struct PlanContext<'a> {
     /// This build's version, as `VERSIONINFO` spells it.
     pub version: String,
-    /// The version the state remembers — empty on a machine raised from schema 5.
-    pub previous_version: String,
     /// The hotkey as it acts, for the chip of «Привет».
     pub hotkey: String,
     /// Whether «Спасибо» may still offer its one snooze.
@@ -1909,15 +1893,13 @@ pub struct PlanContext<'a> {
 /// string tables, the state and the feed.
 pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
-        IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD,
-        IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3,
-        IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT,
-        IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON,
-        IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD,
-        IDS_THANKS_PARA, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW,
-        IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, IDS_WHATSNEW_1,
-        IDS_WHATSNEW_2, IDS_WHATSNEW_3, IDS_WHATSNEW_FROM, IDS_WHATSNEW_FULL, IDS_WHATSNEW_PANEL,
-        IDS_WHATSNEW_TITLE, IDS_WHATSNEW_TODAY, format_text, text,
+        IDS_CLOSE, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK,
+        IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS,
+        IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
+        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
+        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_PARA,
+        IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1,
+        IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, format_text, text,
     };
 
     let caption = text(IDS_LETTER_CAPTION);
@@ -1980,41 +1962,6 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                 .then(|| Button::live(text(IDS_THANKS_SNOOZE), Action::Snooze)),
             accent: Some(Button::live(text(IDS_CLOSE), Action::Close)),
             foot: text(IDS_THANKS_FOOT),
-            ..LetterPlan::default()
-        },
-
-        Letter::WhatsNew => LetterPlan {
-            caption,
-            title: format_text(IDS_WHATSNEW_TITLE, &[&context.version]),
-            // A machine raised from schema 5 has no previous version to name — the rung left
-            // the field empty on purpose — so it is told only that it was updated today.
-            subtitle: if context.previous_version.is_empty() {
-                text(IDS_WHATSNEW_TODAY)
-            } else {
-                format_text(IDS_WHATSNEW_FROM, &[&context.previous_version])
-            },
-            panel: text(IDS_WHATSNEW_PANEL),
-            rows: vec![
-                Row {
-                    marker: "·".to_owned(),
-                    text: text(IDS_WHATSNEW_1),
-                },
-                Row {
-                    marker: "·".to_owned(),
-                    text: text(IDS_WHATSNEW_2),
-                },
-                Row {
-                    marker: "·".to_owned(),
-                    text: text(IDS_WHATSNEW_3),
-                },
-            ],
-            para: text(IDS_WHATSNEW_FULL),
-            left: Some(Button::link(
-                text(IDS_CHANNEL_OPEN),
-                Action::OpenChannel,
-                links::CHANNEL_URL,
-            )),
-            accent: Some(Button::live(text(IDS_CLOSE), Action::Close)),
             ..LetterPlan::default()
         },
 
@@ -6667,7 +6614,7 @@ pub fn item_of(letter: Letter) -> Option<FeedItem> {
     match letter {
         Letter::Update => with_feed(|feed| feed.update.cloned()),
         Letter::News(id) => with_feed(|feed| feed.news.iter().find(|item| item.id == id).cloned()),
-        Letter::Welcome | Letter::Thanks | Letter::WhatsNew => None,
+        Letter::Welcome | Letter::Thanks => None,
     }
 }
 
@@ -7136,7 +7083,6 @@ pub fn show_letter(owner: HWND, letter: Letter, item: Option<&FeedItem>, activat
         letter,
         &PlanContext {
             version: version.clone(),
-            previous_version: stored.last_seen_version.clone(),
             hotkey: String::new(),
             snooze_offered: snooze_is_offered(&stored),
             item,
@@ -7404,10 +7350,6 @@ thread_local! {
     /// Cleared when the letter is shown, however it is shown: by the click on the balloon, or
     /// by itself at the next quiet moment.
     static ANNOUNCED: RefCell<Option<Letter>> = const { RefCell::new(None) };
-
-    /// Whether the balloon on the icon now is «Lang Switcher обновлён до X» — TZ E104 §0 п. 5:
-    /// its click opens the page «Что нового», not a letter.
-    static UPDATED_ANNOUNCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // -----------------------------------------------------------------------------------------
@@ -7604,11 +7546,10 @@ pub fn tick(owner: HWND) {
         );
     }
 
-    // TZ E104 §0 п. 5, 21: the first tick after an update knocks with «Lang Switcher обновлён до
-    // X» and with nothing else — **not a letter**: the rule of one letter a day does not count it,
-    // and the letters wait for the next tick.
+    // TZ E104 §0 п. 21: the first tick after an update belongs to the update and to nothing else;
+    // the letters wait for the next tick. ⛔ Its balloon «Lang Switcher обновлён до X» (`NIF_INFO`,
+    // T-104-7) is gone — решение 208.94 п. 4, задача T-119-8: the window «Обновлено» replaces it.
     if updated {
-        announce_updated(&version);
         return;
     }
 
@@ -7636,33 +7577,12 @@ pub fn tick(owner: HWND) {
     // is actually on the screen.
     announce(letter, &version);
     ANNOUNCED.with_borrow_mut(|slot| *slot = Some(letter));
-    UPDATED_ANNOUNCED.set(false);
-}
-
-/// Knocks with «Lang Switcher обновлён до X» — TZ E104 §0 п. 5, 21, task T-104-7. A click on it
-/// opens the page «Что нового» of the language of the interface ([`open_announced`]).
-fn announce_updated(version: &str) {
-    use crate::settings::{IDS_TOAST_UPDATED, IDS_TOAST_UPDATED_TITLE, format_text, text};
-
-    crate::tray::announce_letter(
-        &format_text(IDS_TOAST_UPDATED_TITLE, &[version]),
-        &text(IDS_TOAST_UPDATED),
-    );
-    ANNOUNCED.with_borrow_mut(|slot| *slot = None);
-    UPDATED_ANNOUNCED.set(true);
 }
 
 /// Opens the letter the balloon announced — FR-101, the click on the balloon.
 ///
-/// The person asked for it, so the window comes up with the focus. The balloon «обновлён до X»
-/// (TZ E104 §0 п. 5) opens no letter: it opens the page «Что нового» in the browser, by the one
-/// door of the program ([`open_link`]).
+/// The person asked for it, so the window comes up with the focus.
 pub fn open_announced(owner: HWND) {
-    if UPDATED_ANNOUNCED.replace(false) {
-        open_link(links::changelog_url(settings::ui_language()));
-        return;
-    }
-
     let Some(letter) = ANNOUNCED.with_borrow(|announced| *announced) else {
         return;
     };
@@ -7715,15 +7635,10 @@ fn show(owner: HWND, letter: Letter, today: Date, version: &str, activate: bool)
 /// уже стоит и работает, а загружать по этому письму нечего. Нашлось это глазом на снимке
 /// пользователя, потому что проверить было нечем: строки выбирались внутри функции, которой
 /// нужен живой трей. Теперь выбор — чистая функция, и `tests\letters.rs` перебирает по ней все
-/// пять писем разом.
-///
-/// ⭐ Заголовок «Что нового» — тот же [`IDS_WHATSNEW_TITLE`], которым подписано само письмо:
-/// слова там те же и уже переведены на четырнадцать языков, а стук и письмо обязаны говорить
-/// одно и то же.
+/// письма разом. Письма «Что нового» с её стуком больше нет (решение 208.94 п. 4, T-119-8).
 pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
     use crate::settings::{
-        IDS_TOAST_NEWS, IDS_TOAST_THANKS, IDS_TOAST_TITLE, IDS_TOAST_UPDATE,
-        IDS_TOAST_UPDATE_TITLE, IDS_TOAST_WHATSNEW, IDS_WHATSNEW_TITLE,
+        IDS_TOAST_NEWS, IDS_TOAST_THANKS, IDS_TOAST_TITLE, IDS_TOAST_UPDATE, IDS_TOAST_UPDATE_TITLE,
     };
 
     match letter {
@@ -7731,7 +7646,6 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
         Letter::Thanks => Some((IDS_TOAST_TITLE, IDS_TOAST_THANKS)),
         Letter::News(_) => Some((IDS_TOAST_TITLE, IDS_TOAST_NEWS)),
         Letter::Update => Some((IDS_TOAST_UPDATE_TITLE, IDS_TOAST_UPDATE)),
-        Letter::WhatsNew => Some((IDS_WHATSNEW_TITLE, IDS_TOAST_WHATSNEW)),
     }
 }
 
@@ -7756,8 +7670,6 @@ fn announce(letter: Letter, version: &str) {
 
             format_text(title_id, &[&newer])
         }
-        // And in «Что нового» — the one just installed.
-        Letter::WhatsNew => format_text(title_id, &[version]),
         _ => text(title_id),
     };
 
@@ -7843,7 +7755,6 @@ fn refresh_plan(state: &mut WindowState) {
                     letter,
                     &PlanContext {
                         version,
-                        previous_version: stored.last_seen_version.clone(),
                         hotkey: String::new(),
                         snooze_offered: snooze_is_offered(&stored),
                         item: item.as_ref(),

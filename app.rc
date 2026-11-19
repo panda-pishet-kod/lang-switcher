@@ -1666,14 +1666,8 @@ END
 #define IDS_SUPPORT_TEXT        3099
 #define IDS_THANKS_SNOOZE       3100
 #define IDS_THANKS_FOOT         3101
-#define IDS_WHATSNEW_TITLE      3102
-#define IDS_WHATSNEW_FROM       3103
-#define IDS_WHATSNEW_TODAY      3104
-#define IDS_WHATSNEW_PANEL      3105
-#define IDS_WHATSNEW_1          3106
-#define IDS_WHATSNEW_2          3107
-#define IDS_WHATSNEW_3          3108
-#define IDS_WHATSNEW_FULL       3109
+// Stage E119, task T-119-8 (decision 208.94 p. 4): 3102...3109 are holes -- the letter «Что нового»
+// (closed by decision 118.5) left with its eight strings, IDS_WHATSNEW_*. Do not reuse the numbers.
 #define IDS_AUTHOR_CAPTION      3110
 // ⛔⛔ **3111 — `IDS_AUTHOR_VERSION` — УДАЛЕНА задачей T-81-3, решение 142.2 п. 5.** Она несла
 // «версия {0} · Панда, он же Panda_Pishet_Kod»; слово владельца: «не надо вставлять панда, он же
@@ -1791,13 +1785,8 @@ END
 #define IDS_WIZARD_FAILED       3207
 // Stage E107, task T-107-3 (decision 199.10): 3208...3211 are holes -- the two thanks gave way to
 // one, IDS_WIZARD_SENT_TITLE and IDS_WIZARD_SENT_TEXT.
-// ⛔ **Задача Т-33а-4, решение 104.4.** Уведомление письма «Что нового» несло слова уведомления
-// «Обновления» — «Вышла версия 0.43.0 · Три изменения и ссылка на загрузку». У «Что нового»
-// загружать нечего: версия уже стоит, письмо рассказывает, что в ней. Тело у него теперь своё.
-// ⭐ **Заголовок НЕ новый:** его несёт `IDS_WHATSNEW_TITLE` (3102) — те же слова «Что нового
-// в {0}», уже переведённые на четырнадцать языков, и шар с письмом обязаны говорить одно и то
-// же. Новая строка ровно одна.
-#define IDS_TOAST_WHATSNEW      3212
+// Stage E119, task T-119-8 (decision 208.94 p. 4): 3212 is a hole -- the balloon of the letter
+// «Что нового» (IDS_TOAST_WHATSNEW, Т-33а-4) left with the letter.
 // Task T-34-3, finding С48 — the button «Сохранить журнал» of «Диагностика» and the one sentence
 // its refusal shows. Same block as the toast above (3200…3215 is one resource of sixteen).
 #define IDS_LOG_SAVE            3213
@@ -1857,11 +1846,8 @@ END
 #define IDS_WIZARD_COPY_ADDRESS 3246
 #define IDS_WIZARD_TEXT_COPIED  3247
 #define IDS_WIZARD_ADDRESS_COPIED 3248
-// Stage E104, task T-104-7 (TZ E104 p. 5 and 12, decisions 189.3 and 189.18): the balloon after
-// an update -- «Lang Switcher обновлён до {0}», «Щёлкните, чтобы узнать, что нового.» -- in the
-// block 3248..3263 the two above opened. {0} is the version of the running build.
-#define IDS_TOAST_UPDATED_TITLE 3249
-#define IDS_TOAST_UPDATED       3250
+// Stage E119, task T-119-8 (decision 208.94 p. 4): 3249 and 3250 are holes -- the balloon after an
+// update («Lang Switcher обновлён до {0}», T-104-7) gave way to the window «Обновлено».
 // Stage L10N, task T-L10N-10 (decisions 200.10 and 200.10а): three pieces the code glued into its
 // text as literals until 1.1.0 -- the separator of a list («, » in IDS_LAYOUT_NOTE), the arrow
 // between the layouts of a cycle (« → » in IDS_STATE_CYCLE) and the form of the tooltip

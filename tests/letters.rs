@@ -125,26 +125,11 @@ fn update(version: &str) -> FeedItem {
 /// несло слова уведомления «Обновления»: «Вышла версия 0.43.0 · Три изменения **и ссылка на
 /// загрузку**». Версия не «вышла» — она уже стоит и работает; загружать по этому письму нечего.
 ///
-/// Красное «до» — вот это самое утверждение: до правки обе пары были ОДИНАКОВЫ, и `assert_ne!`
-/// ниже падал. Проверить это раньше было нечем: строки выбирались внутри `announce`, которой
-/// нужен живой трей; теперь выбор — чистая функция.
+/// Письма «Что нового» с его стуком больше нет (решение 208.94 п. 4, T-119-8); сторож остался на
+/// том, ради чего он был: ни одно письмо не стучится чужими словами.
 #[test]
-fn the_whats_new_balloon_speaks_with_its_own_words_and_not_the_updates() {
-    let whats_new = letters::toast_strings(Letter::WhatsNew).expect("«Что нового» объявляется");
+fn every_letter_knocks_with_its_own_words() {
     let update = letters::toast_strings(Letter::Update).expect("«Обновление» объявляется");
-
-    println!("«Что нового»: {whats_new:?}, «Обновление»: {update:?}");
-
-    assert_ne!(
-        whats_new, update,
-        "«Что нового» обязано стучаться своими словами: у него нечего загружать"
-    );
-
-    assert_eq!(
-        whats_new,
-        (settings::IDS_WHATSNEW_TITLE, settings::IDS_TOAST_WHATSNEW),
-        "заголовок общий с самим письмом, тело — своё"
-    );
 
     assert_eq!(
         update,
@@ -169,15 +154,10 @@ fn the_whats_new_balloon_speaks_with_its_own_words_and_not_the_updates() {
 
     // И ни одно письмо не делит тело с другим: одинаковые слова на разные поводы — это ровно
     // тот дефект, который здесь чинится, только в другом месте таблицы.
-    let bodies: Vec<u16> = [
-        Letter::WhatsNew,
-        Letter::Update,
-        Letter::News(1),
-        Letter::Thanks,
-    ]
-    .into_iter()
-    .filter_map(|letter| letters::toast_strings(letter).map(|(_, body)| body))
-    .collect();
+    let bodies: Vec<u16> = [Letter::Update, Letter::News(1), Letter::Thanks]
+        .into_iter()
+        .filter_map(|letter| letters::toast_strings(letter).map(|(_, body)| body))
+        .collect();
 
     let mut unique = bodies.clone();
     unique.sort_unstable();
@@ -515,8 +495,8 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
     };
 
     // ⛔ Ступень, которой не стало: `last_seen_version` = «0.38.0» при сборке «0.39.0» — ровно
-    // то состояние, что прежде давало `Some(Letter::WhatsNew)` первым. Теперь первым идёт
-    // «Обновление», и это проверяется здесь же, до всякой правки состояния.
+    // то состояние, что прежде давало письмо «Что нового» первым (решение 118.5 закрыло его,
+    // 208.94 убрало). Первым идёт «Обновление», и это проверяется здесь же.
     assert_eq!(
         letters::due(&state, today, "0.39.0", feed, true),
         Some(Letter::Update),
@@ -553,16 +533,11 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
 // «Что нового» — FR-101
 // =========================================================================================
 
-/// ⚠⚠ **ПЕРЕВЁРНУТ задачей T-53a-5, решение владельца 118.5: ворота закрыты.**
+/// ⚠⚠ **ПЕРЕВЁРНУТ задачей T-53a-5 (решение 118.5: ворота закрыты), письмо убрано задачей
+/// T-119-8 (решение 208.94 п. 4).**
 ///
-/// До неё тест утверждал «показывается один раз на версию, и метка — сама версия». Первой
-/// половины больше нет: письмо не показывается вовсе, потому что описание изменений приходит с
-/// сигналом ленты **до** установки. **Вторая половина цела и стала главной:** метка версии
-/// по-прежнему движется — без этого письмо, однажды возвращённое, пришло бы за все пропущенные
-/// версии разом. Двигает её теперь `initialise`, а не `after_shown`.
-///
-/// ⭐ И проверяется, что письмо **разобрано не было**: `after_shown` для него отвечает, как
-/// отвечал, — вернуть его значит вернуть одно `if` в `due`.
+/// Письма «Что нового» нет. **Метка версии по-прежнему движется** — на всяком старте, её ведёт
+/// `initialise`: по ней `was_updated` узнаёт первый старт после обновления.
 #[test]
 fn whats_new_is_not_shown_but_the_version_mark_keeps_moving() {
     let mut state = settled("0.38.0");
@@ -593,19 +568,6 @@ fn whats_new_is_not_shown_but_the_version_mark_keeps_moving() {
     let later = today.plus_days(2);
     assert!(letters::initialise(&mut state, later, "0.40.0"));
     assert_eq!(state.last_seen_version, "0.40.0");
-
-    // ⛔ Письмо не разобрано: механика показа цела и вернётся вместе с воротами.
-    letters::after_shown(&mut state, Letter::WhatsNew, today, "0.41.0");
-    assert_eq!(
-        state.last_seen_version, "0.41.0",
-        "`after_shown` для «Что нового» обязан работать, как работал: закрыты ворота, а не \
-         письмо"
-    );
-    assert_eq!(
-        state.last_letter,
-        Some(today),
-        "и день оно по-прежнему тратит — FR-101 освобождает от этого только «Привет»"
-    );
 }
 
 // =========================================================================================
@@ -847,9 +809,10 @@ fn the_balloon_after_an_update_comes_once_per_version() {
     );
 }
 
-/// **The tick asks whether it was an update before `initialise` moves the version, and knocks
-/// with the balloon of the update, not a letter** — the order of the code lines of `tick`, as
-/// `the_attempt_is_written_before_the_read` holds the feed's.
+/// **The tick asks whether it was an update before `initialise` moves the version, and the first
+/// tick after an update gives no letter** — the order of the code lines of `tick`, as
+/// `the_attempt_is_written_before_the_read` holds the feed's. ⛔ The balloon «обновлён до X» it
+/// knocked with is gone (решение 208.94 п. 4, T-119-8).
 #[test]
 fn the_tick_asks_about_the_update_before_it_moves_the_version_and_knocks_once() {
     let source = std::fs::read_to_string(
@@ -875,9 +838,8 @@ fn the_tick_asks_about_the_update_before_it_moves_the_version_and_knocks_once() 
     );
     assert!(
         at("if updated {") < at("let due = with_feed("),
-        "the balloon of the update comes before any letter"
+        "the update comes before any letter"
     );
-    assert!(at("announce_updated(&version);") < at("let due = with_feed("));
 }
 
 // =========================================================================================
@@ -2036,8 +1998,8 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
 /// The half a pure function cannot show: which address the window's own code hands the shell. So
 /// the bodies are read — the arm of «Спасибо» in [`letters::plan_for`] must name
 /// [`links::feedback_url`] and not `CHANNEL_URL`; the action of «Спасибо» must open the address of
-/// its window; and «Что нового», the «От автора» of FR-103 and the thanks of the wizard
-/// (`IDC_WZ_CHANNEL`) are on the channel as before.
+/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`IDC_WZ_CHANNEL`) are
+/// on the channel as before.
 ///
 /// ⭐ Until stage E107 the wizard's «Скопировать и открыть…» was the second of the two; решение
 /// 199.3 took the group and the issues out of the wizard, and `wizard_copy` is gone —
@@ -2051,11 +2013,6 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
     let thanks = plan_arm(
         &source,
         "Letter::Thanks => LetterPlan {",
-        "Letter::WhatsNew => LetterPlan {",
-    );
-    let whats_new = plan_arm(
-        &source,
-        "Letter::WhatsNew => LetterPlan {",
         "Letter::Update | Letter::News(_) =>",
     );
     let perform = squeezed_code(
@@ -2074,12 +2031,8 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         "the action of «Спасибо» must open the address of its window:\n{perform}"
     );
 
-    // The news stays where the news is.
-    assert!(
-        squeezed_code(whats_new)
-            .contains("text(IDS_CHANNEL_OPEN), Action::OpenChannel, links::CHANNEL_URL,"),
-        "«Что нового» opens the channel as before:\n{whats_new}"
-    );
+    // The news stays where the news is. (The letter «Что нового», which opened the channel too,
+    // is gone — решение 208.94 п. 4, T-119-8.)
     assert!(
         perform.contains("Action::OpenChannel => open_link(links::CHANNEL_URL)"),
         "«Открыть канал» opens the channel as before"
@@ -2628,15 +2581,13 @@ fn the_demonstration_draws_the_pair_of_its_plan() {
 /// The **structure** and not the words: the words are the string tables, and
 /// `tests\settings.rs` checks all hundred and thirty-four of them against both locales. What
 /// this test is about is that «Привет» has a demonstration and «Спасибо» does not, that the
-/// panel of «Что нового» holds three rows, that the letters out of the feed refuse to be built
-/// without an entry behind them.
+/// letters out of the feed refuse to be built without an entry behind them.
 #[test]
 fn each_letter_fills_the_slots_of_its_own_shape() {
     with_product_strings();
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
-        previous_version: String::new(),
         hotkey: "Pause".to_owned(),
         snooze_offered: true,
         item: None,
@@ -2685,14 +2636,6 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
     );
     assert!(second.left.is_none(), "the snooze is offered once");
 
-    let news = letters::plan_for(Letter::WhatsNew, &context);
-    assert_eq!(news.rows.len(), 3, "«Что нового» names three changes");
-    assert!(!news.demo);
-    assert!(
-        news.left.as_ref().is_some_and(|button| button.enabled),
-        "«Открыть канал» is live once the channel's address is real (решение 139.2)"
-    );
-
     // The two letters out of the feed have nothing to say without an entry behind them, and a
     // plan with no heading is what `show_letter` refuses to open a window for.
     for letter in [Letter::Update, Letter::News(12)] {
@@ -2721,7 +2664,6 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
-        previous_version: "0.38.0".to_owned(),
         hotkey: "Pause".to_owned(),
         snooze_offered: false,
         item: Some(&item),
@@ -2835,46 +2777,6 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert!(
         plan.foot.contains("0.41.0"),
         "and the line under the buttons names the one in the menu"
-    );
-}
-
-/// «Что нового» names the version it came from when it knows it, and does not invent one when
-/// it does not — the case a machine raised from schema 5 is in.
-#[test]
-fn whats_new_names_the_previous_version_only_when_there_is_one() {
-    with_product_strings();
-
-    let context = letters::PlanContext {
-        version: "0.39.0".to_owned(),
-        previous_version: "0.38.0".to_owned(),
-        hotkey: String::new(),
-        snooze_offered: false,
-        item: None,
-    };
-
-    let known = letters::plan_for(Letter::WhatsNew, &context);
-    let unknown = letters::plan_for(
-        Letter::WhatsNew,
-        &letters::PlanContext {
-            previous_version: String::new(),
-            ..context.clone()
-        },
-    );
-
-    assert!(
-        known.subtitle.contains("0.38.0"),
-        "the version it came from is named: {}",
-        known.subtitle
-    );
-    assert!(
-        !unknown.subtitle.contains("0.38.0") && !unknown.subtitle.is_empty(),
-        "and a machine that does not know still says something: {}",
-        unknown.subtitle
-    );
-    assert!(
-        known.title.contains("0.39.0"),
-        "and the heading names the version now running: {}",
-        known.title
     );
 }
 
@@ -4607,7 +4509,7 @@ fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
         "an identifier that has fallen out of the feed finds nothing"
     );
 
-    for letter in [Letter::Welcome, Letter::Thanks, Letter::WhatsNew] {
+    for letter in [Letter::Welcome, Letter::Thanks] {
         assert!(
             letters::item_of(letter).is_none(),
             "{letter:?} says its own words and has no entry"
@@ -4620,7 +4522,6 @@ fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
         Letter::News(13),
         &letters::PlanContext {
             version: "0.40.0".to_owned(),
-            previous_version: String::new(),
             hotkey: String::new(),
             snooze_offered: false,
             item: Some(&item),
@@ -4646,7 +4547,6 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
         Letter::Update,
         &letters::PlanContext {
             version: "0.40.0".to_owned(),
-            previous_version: String::new(),
             hotkey: String::new(),
             snooze_offered: false,
             item: Some(&announced),
@@ -4670,7 +4570,6 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
         Letter::Update,
         &letters::PlanContext {
             version: "0.40.0".to_owned(),
-            previous_version: String::new(),
             hotkey: String::new(),
             snooze_offered: false,
             item: Some(&announced),
@@ -4998,5 +4897,116 @@ fn the_mark_of_the_first_run_is_wired_from_the_tick_to_the_answer() {
             && !update.contains("first=1")
             && !update.contains("marked("),
         "the updater never sends the mark"
+    );
+}
+
+// =========================================================================================
+// T-119-8 — the letter «Что нового» and the balloon «обновлён до X» are gone, решение 208.94 п. 4
+// =========================================================================================
+
+/// The names the cleanup of task T-119-8 took away. A line that is only a comment may still name
+/// them (the holes are documented where the numbers were); a line of code or a row of a table may
+/// not.
+const RETIRED_T_119_8: [&str; 14] = [
+    "IDS_WHATSNEW_TITLE",
+    "IDS_WHATSNEW_FROM",
+    "IDS_WHATSNEW_TODAY",
+    "IDS_WHATSNEW_PANEL",
+    "IDS_WHATSNEW_1",
+    "IDS_WHATSNEW_2",
+    "IDS_WHATSNEW_3",
+    "IDS_WHATSNEW_FULL",
+    "IDS_TOAST_WHATSNEW",
+    "IDS_TOAST_UPDATED_TITLE",
+    "IDS_TOAST_UPDATED",
+    "Letter::WhatsNew",
+    "fn announce_updated",
+    "UPDATED_ANNOUNCED",
+];
+
+/// Every line of `text` that is not a comment and names one of [`RETIRED_T_119_8`], as
+/// `file:line: text`. A name is matched as a whole word, so `IDS_TOAST_UPDATE` (the letter
+/// «Обновление», which stays) is not taken for `IDS_TOAST_UPDATED`.
+fn retired_names_in(file: &str, text: &str) -> Vec<String> {
+    let whole = |line: &str, name: &str| {
+        line.match_indices(name).any(|(at, _)| {
+            let after = line[at + name.len()..].chars().next();
+            !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    };
+
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let code = line.trim_start();
+            !code.starts_with("//") && !code.starts_with('#') || code.starts_with("#define")
+        })
+        .filter(|(_, line)| RETIRED_T_119_8.iter().any(|name| whole(line, name)))
+        .map(|(n, line)| format!("{file}:{}: {}", n + 1, line.trim()))
+        .collect()
+}
+
+/// **Task T-119-8, решение 208.94 п. 4 — the remains of 118.5 are gone from the tables and the
+/// code.** The letter «Что нового» (closed since 118.5 and kept for a return that will not come),
+/// its eight strings and its balloon, and the balloon «Lang Switcher обновлён до X» with its two
+/// strings: not a row in any of the sixty-six `res\lang\*.rc`, not a `#define` in `app.rc`, not a
+/// line of code in `src`. The window «Обновлено» says what they said.
+///
+/// Red before (on `46673be`): 66 × 11 rows of the tables, eleven `#define`s, the variant and its
+/// arms, `announce_updated`.
+///
+/// ⚠ Control: a row put back into a table and a variant put back into the code are found.
+#[test]
+fn the_letter_whats_new_and_the_balloon_after_an_update_are_gone() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found: Vec<String> = Vec::new();
+    let mut tables = 0;
+
+    for entry in std::fs::read_dir(root.join("res").join("lang")).expect("res\\lang") {
+        let path = entry.expect("an entry").path();
+        if path.extension().is_some_and(|ext| ext == "rc") {
+            tables += 1;
+            let text = std::fs::read_to_string(&path).expect("a table reads");
+            found.extend(retired_names_in(&path.display().to_string(), &text));
+        }
+    }
+
+    let app_rc = std::fs::read_to_string(root.join("app.rc")).expect("app.rc");
+    found.extend(retired_names_in("app.rc", &app_rc));
+
+    let mut sources = 0;
+    for entry in std::fs::read_dir(root.join("src")).expect("src") {
+        let path = entry.expect("an entry").path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            sources += 1;
+            let text = std::fs::read_to_string(&path).expect("a source reads");
+            found.extend(retired_names_in(&path.display().to_string(), &text));
+        }
+    }
+
+    assert_eq!(tables, 66, "sixty-six tables are swept");
+    assert!(sources > 20, "the sources are swept: {sources}");
+    assert!(
+        found.is_empty(),
+        "the remains of 118.5 are back:\n{}",
+        found.join("\n")
+    );
+
+    // The control: one row of a table and one arm of code put back are each found.
+    let uk_back = "    IDS_TOAST_UPDATED       \"Клацніть, щоб дізнатися, що нового.\"\n";
+    assert_eq!(
+        retired_names_in("uk.rc", uk_back).len(),
+        1,
+        "a row put back is found"
+    );
+    let code_back = "        Letter::WhatsNew => None,\n        // Letter::WhatsNew in a comment\n";
+    assert_eq!(
+        retired_names_in("letters.rs", code_back).len(),
+        1,
+        "an arm put back is found"
+    );
+    assert!(
+        retired_names_in("settings.rs", "pub const IDS_TOAST_UPDATE: u16 = 3138;\n").is_empty(),
+        "and the letter «Обновление», which stays, is not taken for the balloon that left"
     );
 }

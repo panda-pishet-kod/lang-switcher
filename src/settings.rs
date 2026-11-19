@@ -3880,23 +3880,9 @@ pub const IDS_SUPPORT_TEXT: u16 = 3099;
 pub const IDS_THANKS_SNOOZE: u16 = 3100;
 /// The line under «Спасибо»: it is shown once.
 pub const IDS_THANKS_FOOT: u16 = 3101;
-/// «Что нового» — the heading, with the version substituted.
-pub const IDS_WHATSNEW_TITLE: u16 = 3102;
-/// «Что нового» — the second line when the previous version is known.
-pub const IDS_WHATSNEW_FROM: u16 = 3103;
-/// «Что нового» — the second line when it is not (a file raised from schema 5).
-pub const IDS_WHATSNEW_TODAY: u16 = 3104;
-/// «Что нового» — the caption of the panel.
-pub const IDS_WHATSNEW_PANEL: u16 = 3105;
-/// ⚠ **Per-delivery text.** The first of the three sentences of «Что нового» — rewritten in all
-/// fourteen tables for every release; the check-list of `tools\release.ps1` is the reminder.
-pub const IDS_WHATSNEW_1: u16 = 3106;
-/// The second sentence — see [`IDS_WHATSNEW_1`].
-pub const IDS_WHATSNEW_2: u16 = 3107;
-/// The third sentence — see [`IDS_WHATSNEW_1`].
-pub const IDS_WHATSNEW_3: u16 = 3108;
-/// «Полный список изменений опубликован в канале.»
-pub const IDS_WHATSNEW_FULL: u16 = 3109;
+// ⛔⛔ **3102…3109 — `IDS_WHATSNEW_*` (восемь строк письма «Что нового») — сняты задачей
+// T-119-8, решение 208.94 п. 4.** Письмо было закрыто решением 118.5 и теперь убрано целиком;
+// номера не занимать — у старых таблиц переводов они значили другое.
 /// The caption of the «От автора» window — FR-103.
 pub const IDS_AUTHOR_CAPTION: u16 = 3110;
 // ⛔⛔ **3111 — `IDS_AUTHOR_VERSION` — снята задачей T-81-3, решение 142.2 п. 5.** Она несла
@@ -3959,15 +3945,8 @@ pub const IDS_TOAST_THANKS: u16 = 3136;
 pub const IDS_TOAST_UPDATE_TITLE: u16 = 3137;
 /// The balloon's text before «Обновление».
 pub const IDS_TOAST_UPDATE: u16 = 3138;
-/// The balloon's text before «Что нового» — задача Т-33а-4, решение 104.4.
-///
-/// ⛔ Своя, потому что до этой задачи «Что нового» брало текст «Обновления» — «Три изменения и
-/// **ссылка на загрузку**», — а загружать ему нечего: версия уже стоит, письмо рассказывает,
-/// что в ней. Нашёл это контролёр на снимке пользователя, а не тест.
-///
-/// ⭐ Заголовок остался общий с письмом — [`IDS_WHATSNEW_TITLE`]: слова там те же, они уже
-/// переведены на четырнадцать языков, и шар с письмом обязаны говорить одно и то же.
-pub const IDS_TOAST_WHATSNEW: u16 = 3212;
+// ⛔⛔ **3212 — `IDS_TOAST_WHATSNEW` (стук письма «Что нового») — снята задачей T-119-8 вместе с
+// письмом, решение 208.94 п. 4.** Номер не занимать.
 /// «Сохранить журнал» — the button of «Диагностика» that writes the dump of the running
 /// session now; task T-34-3, finding С48. No ellipsis since task T-39-11 (решение 122.5): the
 /// button opens no dialog.
@@ -4084,11 +4063,9 @@ pub const IDS_WIZARD_COPY_ADDRESS: u16 = 3246;
 pub const IDS_WIZARD_TEXT_COPIED: u16 = 3247;
 /// «Адрес скопирован: {0}.» — the answer to «Скопировать адрес».
 pub const IDS_WIZARD_ADDRESS_COPIED: u16 = 3248;
-/// «Lang Switcher обновлён до {0}» — the title of the balloon after an update, TZ E104 §0 п. 5 и
-/// 12 (task T-104-7); `{0}` is the version of the running build.
-pub const IDS_TOAST_UPDATED_TITLE: u16 = 3249;
-/// «Щёлкните, чтобы узнать, что нового.» — its text; the click opens the page «Что нового».
-pub const IDS_TOAST_UPDATED: u16 = 3250;
+// ⛔⛔ **3249, 3250 — `IDS_TOAST_UPDATED_TITLE`, `IDS_TOAST_UPDATED` (шар «Lang Switcher обновлён до
+// X», T-104-7) — сняты задачей T-119-8, решение 208.94 п. 4:** после обновления говорит окно
+// «Обновлено». Номера не занимать.
 /// The separator of a list the program builds — «, » in every language until a translation gives
 /// its own — stage L10N, task T-L10N-10 (decisions 200.10 and 200.10а). Until 1.1.0 a literal of
 /// the code, which a translation could not reach; joins the layouts of [`IDS_LAYOUT_NOTE`].
@@ -4340,7 +4317,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and thirty-seven since task T-104-7** — TZ E104 §0 п. 5 и 12 (решения 189.3,
 /// 189.18): the program updates itself, and the balloon after an update got its two words,
-/// [`IDS_TOAST_UPDATED_TITLE`] and [`IDS_TOAST_UPDATED`] (3249, 3250).
+/// `IDS_TOAST_UPDATED_TITLE` and `IDS_TOAST_UPDATED` (3249, 3250).
 ///
 /// ⚠ **Two hundred and forty since stage L10N, task T-L10N-10** — решения 200.10 и 200.10а: the
 /// three pieces the code glued as literals became strings, [`IDS_LIST_SEPARATOR`],
@@ -4351,7 +4328,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// [`IDS_WIZARD_SEND`] … [`IDS_WIZARD_SENT_TEXT`] (3254…3262); eight left with the group, the
 /// issues, the note of the letter of a trouble and the two thanks — 3202, 3204, 3205, 3208…3211 and
 /// 3243 are holes that are not walked. 240 − 8 + 9.
-pub const INTERFACE_STRINGS: [u16; 242] = [
+///
+/// ⚠ **Two hundred and thirty-one since stage E119, task T-119-8** — решение 208.94 п. 4: the letter
+/// «Что нового» left with its eight words and its balloon (3102…3109, 3212), and the balloon
+/// «обновлён до X» with its two (3249, 3250) — eleven holes that are not walked. 242 − 11.
+pub const INTERFACE_STRINGS: [u16; 231] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4460,14 +4441,6 @@ pub const INTERFACE_STRINGS: [u16; 242] = [
     IDS_SUPPORT_TEXT,
     IDS_THANKS_SNOOZE,
     IDS_THANKS_FOOT,
-    IDS_WHATSNEW_TITLE,
-    IDS_WHATSNEW_FROM,
-    IDS_WHATSNEW_TODAY,
-    IDS_WHATSNEW_PANEL,
-    IDS_WHATSNEW_1,
-    IDS_WHATSNEW_2,
-    IDS_WHATSNEW_3,
-    IDS_WHATSNEW_FULL,
     IDS_AUTHOR_CAPTION,
     IDS_AUTHOR_PANEL,
     IDS_AUTHOR_TEXT,
@@ -4496,7 +4469,6 @@ pub const INTERFACE_STRINGS: [u16; 242] = [
     IDS_TOAST_THANKS,
     IDS_TOAST_UPDATE_TITLE,
     IDS_TOAST_UPDATE,
-    IDS_TOAST_WHATSNEW,
     IDS_ABOUT_AUTHOR,
     IDS_ENTRY_UPDATE_MARK,
     IDS_ENTRY_UNREAD_MARK,
@@ -4589,8 +4561,6 @@ pub const INTERFACE_STRINGS: [u16; 242] = [
     IDS_WIZARD_TEXT_COPIED,
     IDS_WIZARD_ADDRESS_COPIED,
     // Task T-104-7, TZ E104 §0 п. 5 и 12 — the balloon after an update.
-    IDS_TOAST_UPDATED_TITLE,
-    IDS_TOAST_UPDATED,
     // Stage L10N, task T-L10N-10 — the pieces the code glued as literals until 1.1.0.
     IDS_LIST_SEPARATOR,
     IDS_CYCLE_ARROW,

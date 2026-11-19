@@ -16587,12 +16587,7 @@ fn every_balloon_string_fits_the_shell_in_all_fourteen_languages() {
     for language in Language::shipped() {
         settings::set_ui_language(language);
 
-        for letter in [
-            Letter::WhatsNew,
-            Letter::Update,
-            Letter::News(1),
-            Letter::Thanks,
-        ] {
+        for letter in [Letter::Update, Letter::News(1), Letter::Thanks] {
             let Some((title_id, body_id)) = letters::toast_strings(letter) else {
                 continue;
             };
@@ -18434,7 +18429,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// site from the last step of the wizard. Nine arrived and eight left (the group, the issues, the
 /// note of the letter of a trouble, the two thanks) — 240 − 8 + 9, row for row with
 /// `settings::INTERFACE_STRINGS`.
-const FR_94_STRINGS: [(u16, &str, &str); 242] = [
+///
+/// ⚠ **231 since stage E119, task T-119-8** — решение 208.94 п. 4: the letter «Что нового» with its
+/// eight words and its balloon, and the balloon «обновлён до X» with its two — 242 − 11.
+const FR_94_STRINGS: [(u16, &str, &str); 231] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18859,57 +18857,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 242] = [
         "Это письмо показывается один раз.",
         "This letter is shown once.",
     ),
-    (
-        settings::IDS_WHATSNEW_TITLE,
-        "Что нового в {0}",
-        "What is new in {0}",
-    ),
-    (
-        settings::IDS_WHATSNEW_FROM,
-        "было {0} · обновлено сегодня",
-        "you had {0} · updated today",
-    ),
-    (
-        settings::IDS_WHATSNEW_TODAY,
-        "обновлено сегодня",
-        "updated today",
-    ),
-    (
-        settings::IDS_WHATSNEW_PANEL,
-        "Три изменения",
-        "Three changes",
-    ),
-    // ⚠ Три строки «Что нового» меняются КАЖДОЙ поставкой — это их назначение. Здесь слова
-    // **четырёх** поставок (задача T-52-6): 0.51.0 и 0.50.0 сведены в один слот, 0.49.0 стоит
-    // как стояло, третий слот отдан 0.52.0. Ни одно из этих писем пользователю ещё не
-    // показывалось (`last_seen_version = "0.48.0"`: FR-101 показывает не больше одного письма в
-    // сутки), и правило Э47 — слот не опустошать, а нести в нём то, чего пользователь ещё не
-    // читал — соблюдено: сведение не выбрасывает ни одной поставки, а лишь укладывает две
-    // близкие по смыслу (кегль окон и высота строк списка — обе про вид окон) в одну строку.
-    // Решение пользователя 2026-09-09. Две оставшиеся строки 0.52.0 — таймаут покоя FR-15 и
-    // горячая клавиша в исключённом процессе FR-84 — идут в долг следующей поставке.
-    // 0.53.0 (Э34, task T-34-9): the three lines of this delivery — the state panel, the
-    // «Сохранить журнал…» button with the dump header, and the journal's reliability.
-    (
-        settings::IDS_WHATSNEW_1,
-        "Панель «Состояние» говорит по-человечески: работает / приостановлена / перехват не установлен / нужен перезапуск — и показывает действующую пару раскладок и отказы выбора.",
-        "The “State” panel speaks plainly: working / suspended / the hook is not installed / a restart is needed — and shows the acting pair of layouts and the refusals of selection.",
-    ),
-    (
-        settings::IDS_WHATSNEW_2,
-        "Кнопка «Сохранить журнал…» пишет журнал сейчас; в его шапке — время снятия и признак «сеанс продолжается».",
-        "The “Save the journal…” button writes the journal now; its header carries the time it was taken and says whether the session was still running.",
-    ),
-    (
-        settings::IDS_WHATSNEW_3,
-        "Журнал надёжнее: неудачная запись не портит прежний файл, галка «Вести журнал» действует сразу в этом сеансе, а серый пункт «Возобновить» говорит, почему он серый.",
-        "The journal is more reliable: a failed write does not damage the previous file, “Keep a journal” acts at once in this session, and the grayed “Resume” says why it is gray.",
-    ),
-    (
-        settings::IDS_WHATSNEW_FULL,
-        "Полный список изменений опубликован в канале.",
-        "The full list of changes is published in the channel.",
-    ),
     (settings::IDS_AUTHOR_CAPTION, "От автора", "From the author"),
     // ⛔⛔ `IDS_AUTHOR_VERSION` (3111) стояла здесь и **снята задачей T-81-3**, решение 142.2
     // п. 5: «версия {0} · Панда, он же Panda_Pishet_Kod». Шапка двух окон стала одной, и строку
@@ -19059,13 +19006,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 242] = [
         settings::IDS_TOAST_UPDATE,
         "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать.",
         "Three changes and a link to the download. Click to read it.",
-    ),
-    // Задача Т-33а-4: у «Что нового» своё тело. Строка над этой — «Обновления», и они обязаны
-    // отличаться: сравнение этих двух литералов и есть красное «до» задачи.
-    (
-        settings::IDS_TOAST_WHATSNEW,
-        "Три изменения. Нажмите, чтобы прочитать.",
-        "Three changes. Click to read them.",
     ),
     (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
     (
@@ -19473,18 +19413,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 242] = [
         "Адрес скопирован: {0}.",
         "Address copied: {0}.",
     ),
-    // Task T-104-7 — the balloon after an update, решение 189.12 word for word in Russian (TZ E104
-    // §0 п. 12), the English in natural English of its own.
-    (
-        settings::IDS_TOAST_UPDATED_TITLE,
-        "Lang Switcher обновлён до {0}",
-        "Lang Switcher has been updated to {0}",
-    ),
-    (
-        settings::IDS_TOAST_UPDATED,
-        "Щёлкните, чтобы узнать, что нового.",
-        "Click to see what's new.",
-    ),
     (settings::IDS_LIST_SEPARATOR, ", ", ", "),
     (settings::IDS_CYCLE_ARROW, " → ", " → "),
     (settings::IDS_TIP_FORMAT, "{0} — {1}", "{0} — {1}"),
@@ -19600,7 +19528,6 @@ fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
 
     let context = letters::PlanContext {
         version: "0.102.0".to_owned(),
-        previous_version: String::new(),
         hotkey: "Pause".to_owned(),
         snooze_offered: true,
         item: None,
@@ -19634,17 +19561,16 @@ fn the_plan_of_hello_carries_the_pair_of_the_language_it_is_built_in() {
         "and another caption with it"
     );
 
-    // The letters without a demonstration carry no pair to draw.
-    for letter in [letters::Letter::Thanks, letters::Letter::WhatsNew] {
-        let plan = letters::plan_for(letter, &context);
+    // A letter without a demonstration carries no pair to draw. («Что нового» stood here beside
+    // «Спасибо» until task T-119-8 took it away.)
+    let plan = letters::plan_for(letters::Letter::Thanks, &context);
 
-        assert!(!plan.demo, "{letter:?} has no demonstration");
-        assert_eq!(
-            plan.demo_pair,
-            letters::DemoPair::default(),
-            "{letter:?}: and no pair"
-        );
-    }
+    assert!(!plan.demo, "«Спасибо» has no demonstration");
+    assert_eq!(
+        plan.demo_pair,
+        letters::DemoPair::default(),
+        "«Спасибо»: and no pair"
+    );
 }
 
 /// **Задача T-102-3, сторож (2), решение 178.6 — the caption under the demonstration names the pair
@@ -27050,52 +26976,6 @@ fn every_locale_carries_every_interface_string() {
     );
 }
 
-/// **The balloon after an update fits the balloon in all fourteen languages** — task T-104-7,
-/// the stand of fit of TZ E104 §0 п. 12 for the notification: `szInfoTitle` holds 63 UTF-16 units
-/// and `szInfo` 255 (the tray truncates rather than refuses — a title cut in the middle is the
-/// defect this catches), with the longest version a build of this numbering can carry, and the
-/// title carries the version itself.
-///
-/// ⚠ Control: the same check with a ceiling of 20 units must find titles that do not fit — the
-/// check reads the real strings and is able to fail.
-#[test]
-fn the_balloon_after_an_update_fits_in_every_language() {
-    let product = ProductImage::shared();
-    let version = "0.999.99";
-    let mut too_long: Vec<String> = Vec::new();
-    let mut short_ceiling = 0;
-
-    for (tag, langid, _) in shipped_locales() {
-        let tag = tag.as_str();
-        let title = product
-            .string_of_langid(langid, settings::IDS_TOAST_UPDATED_TITLE)
-            .replace("{0}", version);
-        let text = product.string_of_langid(langid, settings::IDS_TOAST_UPDATED);
-        let title_units = title.encode_utf16().count();
-        let text_units = text.encode_utf16().count();
-
-        if !title.contains(version)
-            || title_units > 63
-            || text_units > 255
-            || text.trim().is_empty()
-        {
-            too_long.push(format!(
-                "{tag}: title {title_units} «{title}», text {text_units}"
-            ));
-        }
-
-        if title_units > 20 {
-            short_ceiling += 1;
-        }
-    }
-
-    assert!(too_long.is_empty(), "{}", too_long.join("\n"));
-    assert!(
-        short_ceiling > 0,
-        "control: a ceiling of 20 units must be exceeded somewhere"
-    );
-}
-
 /// **Task Т-31-3 — the retired number 3004 is a hole, and a hole costs nothing.**
 ///
 /// Решение 99.4 took `IDS_LANGUAGE_RESTART` out of all fourteen tables and left its number
@@ -27115,6 +26995,10 @@ fn the_balloon_after_an_update_fits_in_every_language() {
 #[test]
 fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     const RETIRED: u16 = 3004;
+    // Stage E119, task T-119-8 (решение 208.94 п. 4): «Что нового» and «обновлён до X».
+    const RETIRED_E119: [u16; 11] = [
+        3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250,
+    ];
 
     assert!(
         !settings::INTERFACE_STRINGS.contains(&RETIRED),
@@ -27146,10 +27030,21 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
             "{hole} left the vocabulary with task T-107-3 and must not come back into it"
         );
     }
+    // ⛔ **Eleven more holes since stage E119, task T-119-8** — решение 208.94 п. 4: the letter
+    // «Что нового» with its eight words (3102…3109) and its balloon (3212), and the balloon
+    // «обновлён до X» with its two (3249, 3250). Held by the same three checks.
+    for hole in RETIRED_E119 {
+        assert!(
+            !settings::INTERFACE_STRINGS.contains(&hole),
+            "{hole} left the vocabulary with task T-119-8 and must not come back into it"
+        );
+    }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        242,
-        "two hundred and FORTY-TWO identifiers in use since stage E114, task T-114-2 (решение \
+        231,
+        "two hundred and THIRTY-ONE identifiers in use since stage E119, task T-119-8 (решение \
+         208.94 п. 4): the letter «Что нового» and the balloon «обновлён до X» left with eleven \
+         strings. Two hundred and forty-two since stage E114, task T-114-2 (решение \
          208.5, 6а): the sixth row of the help, 3263. Two hundred and forty-one since stage \
          E107, task T-107-3 (решения \
          199.3, 199.10, 199.11): the appeal goes to the site — nine arrived (3254…3262), eight \
@@ -27201,7 +27096,7 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         // has to be gone from the resource and not only from the crate's list, and its block has
         // to read across it. 3111 sits in the block 3104..3119, so 3110 and 3112 are its
         // neighbours and 3119 is the last row of that block.
-        for retired_id in [RETIRED, 3111, 3041] {
+        for retired_id in [RETIRED, 3111, 3041].into_iter().chain(RETIRED_E119) {
             let retired = product.string_of_langid(langid, retired_id);
 
             if !retired.trim().is_empty() {
@@ -27213,7 +27108,12 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
 
         // The two neighbours of each hole and the last row of each sixteen-string block — 3041
         // (task T-93-2) sits in the block 3040..3055.
-        for id in [3003_u16, 3005, 3015, 3110, 3112, 3119, 3040, 3042, 3055] {
+        // Since task T-119-8: 3101 before the run 3102…3109, 3213 and 3215 round 3212, 3248, 3251
+        // and 3263 round 3249…3250 (3110 after the run is read above).
+        for id in [
+            3003_u16, 3005, 3015, 3110, 3112, 3119, 3040, 3042, 3055, 3101, 3213, 3215, 3248, 3251,
+            3263,
+        ] {
             let string = product.string_of_langid(langid, id);
             read += 1;
 
@@ -27237,8 +27137,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        shipped_locales().len() * 9,
-        "nine rows in each of the fourteen locales — three round each of the three holes (the \
+        shipped_locales().len() * 15,
+        "fifteen rows in each locale — six round the holes of task T-119-8, and nine, three round each of the first three holes (the \
          third, 3041, since task T-93-2); «no holes» out of no readings is the cheapest lie such \
          a sweep tells"
     );

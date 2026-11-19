@@ -115,14 +115,6 @@ IDS_SUPPORT_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid 
 IDS_SUPPORT_TEXT	IDD_LETTER	IDC_LETTER_PANEL_TEXT	382x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_THANKS_SNOOZE	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
 IDS_THANKS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WHATSNEW_TITLE	IDD_LETTER,toast	IDC_LETTER_TITLE,title	354x47 (2 lines)	{0} = the version, «1.1.0» (code: &context.version)	the window is laid out when shown: the height grows with the text, the width does not; also the title of a balloon (toast)
-IDS_WHATSNEW_FROM	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	{0} = the version before the update (code: &context.previous_version)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WHATSNEW_TODAY	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WHATSNEW_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WHATSNEW_1	IDD_LETTER	IDC_LETTER_ROW_1	362x19	-	the window is laid out when shown: the height grows with the text, the width does not; changes with every delivery; «selection» is the choice of the target layout — refusals to pick the layout to convert into (layouts::selection_failures, SelectionError of FR-35), not a selection of text
-IDS_WHATSNEW_2	IDD_LETTER	IDC_LETTER_ROW_2	362x19	-	the window is laid out when shown: the height grows with the text, the width does not; changes with every delivery
-IDS_WHATSNEW_3	IDD_LETTER	IDC_LETTER_ROW_3	362x19	-	the window is laid out when shown: the height grows with the text, the width does not; changes with every delivery
-IDS_WHATSNEW_FULL	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_AUTHOR_CAPTION	IDD_AUTHOR	caption	window caption: 448 px wide	-	-
 IDS_AUTHOR_PANEL	IDD_AUTHOR	IDC_AUTHOR_PANEL	406x17	-	-
 IDS_AUTHOR_TEXT	IDD_AUTHOR	IDC_AUTHOR_TEXT	382x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -151,7 +143,6 @@ IDS_TOAST_NEWS	toast	text	balloon text: 255 characters	-	-
 IDS_TOAST_THANKS	toast	text	balloon text: 255 characters	-	-
 IDS_TOAST_UPDATE_TITLE	toast	title	balloon title: 63 characters	{0} = the new version, «1.1.0»	-
 IDS_TOAST_UPDATE	toast	text	balloon text: 255 characters	-	-
-IDS_TOAST_WHATSNEW	toast	text	balloon text: 255 characters	-	-
 IDS_ABOUT_AUTHOR	IDD_ABOUT	IDC_ABOUT_AUTHOR	161x30	-	the button takes it since 1.1.0 (stage E106, T-106-2); in 1.0.0 it showed the Russian literal of the template
 IDS_ENTRY_UPDATE_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date; {1} = the installed version, «1.0.0» (code: &update.date.map_or_else(String::new, format_date), version)	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_ENTRY_UNREAD_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
@@ -221,8 +212,6 @@ IDS_WIZARD_COPY_TEXT	IDD_WIZARD	IDC_WZ_COPY	228x30	-	-
 IDS_WIZARD_COPY_ADDRESS	IDD_WIZARD	IDC_WZ_COPY_ADDRESS	172x30	-	-
 IDS_WIZARD_TEXT_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = code: address | links::MAIL_ADDRESS	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_ADDRESS_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = the address of the letter (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_TOAST_UPDATED_TITLE	toast	title	balloon title: 63 characters	{0} = the new version, «1.1.0» (code: version)	Lang Switcher is not translated
-IDS_TOAST_UPDATED	toast	text	balloon text: 255 characters	-	-
 IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_FAILED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_LIST_SEPARATOR	IDD_SETTINGS	IDC_LAYOUT_NOTE	343x36 (2 lines)	-	the separator of the list in {0} of IDS_LAYOUT_NOTE, «, » with its space; right to left: the separator of the language («،») is the translator's choice, the stand checks it

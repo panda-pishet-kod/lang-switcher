@@ -685,10 +685,11 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        242,
+        231,
         "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
-         and the two thanks, and stage E114 (T-114-2): the sixth row of the help"
+         and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
+         (T-119-8): eleven that left with «Что нового» and the balloon «обновлён до X»"
     );
 
     let mut refused = Vec::new();
@@ -1048,7 +1049,7 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
     };
     let state_pair = line_of("IDS_STATE_PAIR");
     let autostart = line_of("IDS_STATE_AUTOSTART");
-    let panel = line_of("IDS_WHATSNEW_PANEL");
+    let panel = line_of("IDS_GROUP_HOTKEY");
     assert!(
         state_pair.contains("{1}"),
         "the mutant of a substitution needs a {{1}}"
@@ -1061,22 +1062,22 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
     let mutants: [(&str, String, &[&str]); 11] = [
         (
             // Stage E108, решение 202.8: the mistake of the trial of Hindi, in Cyrillic — a Greek
-            // «ρ» in place of the Cyrillic «р» of «Три» looks the same and is another script.
+            // «ρ» in place of the Cyrillic «р» of «Гаряча» looks the same and is another script.
             "a letter of another script",
             uk.replacen(&panel, &panel.replacen('р', "ρ", 1), 1),
-            &["uk.rc: IDS_WHATSNEW_PANEL — знаки чужого письма"],
+            &["uk.rc: IDS_GROUP_HOTKEY — знаки чужого письма"],
         ),
         (
             // Stage E108, wave 2: the Macedonian «сѐ» was typed with a Latin «è» — Latin is
-            // allowed in every table, so only the word gives it away. Here a Latin «i» in «зміни».
+            // allowed in every table, so only the word gives it away. Here a Latin «i» in «клавіша».
             "a Latin letter inside a word of another script",
             uk.replacen(&panel, &panel.replacen('і', "i", 1), 1),
-            &["uk.rc: IDS_WHATSNEW_PANEL — смешение письма в слове"],
+            &["uk.rc: IDS_GROUP_HOTKEY — смешение письма в слове"],
         ),
         (
             "an identifier taken out",
             uk.replacen(&format!("{panel}\n"), "", 1),
-            &["uk.rc: нет IDS_WHATSNEW_PANEL"],
+            &["uk.rc: нет IDS_GROUP_HOTKEY"],
         ),
         (
             "{1} turned into {2}",
@@ -1088,8 +1089,8 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
         ),
         (
             "an empty string",
-            uk.replacen(&panel, "    IDS_WHATSNEW_PANEL      \"\"", 1),
-            &["uk.rc: IDS_WHATSNEW_PANEL — пустая строка"],
+            uk.replacen(&panel, "    IDS_GROUP_HOTKEY        \"\"", 1),
+            &["uk.rc: IDS_GROUP_HOTKEY — пустая строка"],
         ),
         (
             "a single backslash",
@@ -1105,10 +1106,10 @@ fn the_guard_refuses_each_kind_of_broken_file_with_its_reason() {
             "a quote not doubled",
             uk.replacen(
                 &panel,
-                "    IDS_WHATSNEW_PANEL      \"Три \"нові\" зміни\"",
+                "    IDS_GROUP_HOTKEY        \"Гаряча \"клавіша\"\"",
                 1,
             ),
-            &["uk.rc: IDS_WHATSNEW_PANEL — после закрывающей кавычки лишнее"],
+            &["uk.rc: IDS_GROUP_HOTKEY — после закрывающей кавычки лишнее"],
         ),
         (
             "the code page line taken out",
