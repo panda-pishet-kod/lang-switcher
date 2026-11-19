@@ -1372,6 +1372,12 @@ pub const QUIET_IDLE_SECONDS: u32 = 30;
 /// this function are exactly that (the start-up check of NFR-08 and the hourly one of NFR-10),
 /// which is what makes the substitution exact rather than approximate.
 pub fn moment_is_quiet() -> bool {
+    moment_is_quiet_for(QUIET_IDLE_SECONDS)
+}
+
+/// [`moment_is_quiet`] with a quiet of `seconds` — the window «Обновлено» waits five without a key
+/// (task T-119-6), a letter thirty. The same two calls, the same clock, the same refusals.
+pub fn moment_is_quiet_for(seconds: u32) -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
     use windows::Win32::UI::Shell::{QUNS_ACCEPTS_NOTIFICATIONS, SHQueryUserNotificationState};
     use windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
@@ -1409,7 +1415,7 @@ pub fn moment_is_quiet() -> bool {
     // counter, and the difference of two of them is right across the wrap that happens every
     // forty-nine days. A machine that has been up that long is exactly the machine this
     // program is meant to survive on (FR-80).
-    now.wrapping_sub(info.dwTime) / 1000 >= QUIET_IDLE_SECONDS
+    now.wrapping_sub(info.dwTime) / 1000 >= seconds
 }
 
 // =========================================================================================

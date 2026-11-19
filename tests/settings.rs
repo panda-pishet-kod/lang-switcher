@@ -18452,7 +18452,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 247] = [
+const FR_94_STRINGS: [(u16, &str, &str); 260] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -19544,6 +19544,65 @@ const FR_94_STRINGS: [(u16, &str, &str); 247] = [
         settings::IDS_OWN_LIST_MORE,
         "Дополнительные параметры клавиатуры",
         "More keyboard settings",
+    ),
+    // Tasks T-119-5, T-119-6, T-119-7, T-119-10: the window in the corner, the menu, «От автора».
+    (settings::IDS_CORNER_UPDATE, "обновление", "update"),
+    (
+        settings::IDS_RELEASE_TITLE,
+        "Lang Switcher обновлён до {0}",
+        "Lang Switcher has been updated to {0}",
+    ),
+    (
+        settings::IDS_RELEASE_TEXT,
+        "Было {0}. Новое: значок программы может показывать флаг текущей раскладки. Щелчок по \
+         флагу — список раскладок Windows. Включается галочкой в настройках.",
+        "It was {0}. New: the icon of the program can show the flag of the current layout. A \
+         click on the flag opens the list of layouts of Windows. Turned on with a tick in the \
+         settings.",
+    ),
+    (
+        settings::IDS_RELEASE_CHANGES,
+        "Все изменения на сайте",
+        "All the changes on the site",
+    ),
+    (
+        settings::IDS_RELEASE_HOWTO,
+        "Как пользоваться",
+        "How to use it",
+    ),
+    (settings::IDS_CORNER_OK, "Понятно", "Got it"),
+    (
+        settings::IDS_RELEASE_NEVER,
+        "Больше не показывать окна обновлений",
+        "Do not show update windows again",
+    ),
+    (settings::IDS_CORNER_FLAG, "флаг раскладки", "layout flag"),
+    (
+        settings::IDS_HINT_TITLE,
+        "Флаг раскладки включён",
+        "The layout flag is on",
+    ),
+    (
+        settings::IDS_HINT_TEXT,
+        "Чтобы флаг всегда был виден на панели задач, включите Lang Switcher в Параметрах: Панель \
+         задач → Другие значки на панели задач. Пока он под стрелкой ^.",
+        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Taskbar → \
+         Other system tray icons. For now it is under the arrow ^.",
+    ),
+    (
+        settings::IDS_HINT_OPEN,
+        "Открыть Параметры Windows",
+        "Open Windows Settings",
+    ),
+    (
+        settings::IDS_MENU_WHATSNEW,
+        "Что нового в {0}…",
+        "What’s new in {0}…",
+    ),
+    (
+        settings::IDS_UPDATES_SWITCH,
+        "Сообщать об обновлениях программы",
+        "Tell me about updates of the program",
     ),
 ];
 
@@ -27137,8 +27196,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        247,
-        "two hundred and FORTY-SEVEN identifiers in use since task T-119-3, part Б (решение \
+        260,
+        "two hundred and SIXTY identifiers in use since tasks T-119-5, -6, -7 and -10: the window \
+         in the corner, the entry «Что нового в X…» and the switch of «От автора» (3267…3279). \
+         Two hundred and forty-seven since task T-119-3, part Б (решение \
          208.88): the title and the link of the list of the program's own (3265, 3266). Two \
          hundred and forty-five since stage E120, tasks T-120-21 and \
          T-120-22 (решение 208.169): «Состояние» for a person, nine (3280…3288), and «Нашли \

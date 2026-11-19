@@ -1805,6 +1805,27 @@ pub struct Letters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_noticed: Option<letters::Date>,
 
+    /// Whether the window «Обновлено» comes up after an important release — task T-119-6
+    /// (решения 208.93, 208.119). The check box «Больше не показывать окна обновлений» of that
+    /// window and the switch «Сообщать об обновлениях программы» of «От автора» (T-119-10) are this
+    /// one setting; it silences only that window — the entry of the menu and the fallback letter
+    /// stay. On by default. No schema of its own, as `update_noticed` before it.
+    #[serde(default = "default_true")]
+    pub release_window: bool,
+
+    /// While the window «Обновлено» is due and not yet shown, the version the program was updated
+    /// **from** («Было Y» of its text) — task T-119-6: written when the start after an important
+    /// update finds it due, emptied the moment the window is shown — so it is shown **once**, even
+    /// when it was never closed and the computer restarted, and still shown when the program
+    /// stopped before its quiet moment came. Empty — nothing is due.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub release_due: String,
+
+    /// The day of the last update — task T-119-7: the entry «Что нового в X…» of the menu stands
+    /// for a week from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_on: Option<letters::Date>,
+
     /// ⭐ **The mark of the first run — stage E116, task T-116-12, решение 208.59.** `due` only in
     /// a file this run created ([`read_from_via`], no file at all); `sent` after any HTTP answer to
     /// the read of the feed that carried `?first=1`. Absent — a file of an older build, an update —
@@ -1854,6 +1875,9 @@ impl Default for Letters {
             first_feed_letter: None,
             latest_known: String::new(),
             update_noticed: None,
+            release_window: true,
+            release_due: String::new(),
+            updated_on: None,
             first_mark: None,
             read_ids: Vec::new(),
             reminders: BTreeMap::new(),
@@ -3828,6 +3852,33 @@ pub const IDS_TRAY_FLAG: u16 = 3264;
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
 /// «Дополнительные параметры клавиатуры» — the link at the bottom of that list.
 pub const IDS_OWN_LIST_MORE: u16 = 3266;
+/// «обновление» — what the window in the corner is about after an update (its header), T-119-6.
+pub const IDS_CORNER_UPDATE: u16 = 3267;
+/// «Lang Switcher обновлён до {0}» — the title of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_TITLE: u16 = 3268;
+/// «Было {0}. Новое: …» — the short text of the last important release (a permanent name), T-119-6.
+pub const IDS_RELEASE_TEXT: u16 = 3269;
+/// «Все изменения на сайте» — the link of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_CHANGES: u16 = 3270;
+/// «Как пользоваться» — the second button of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_HOWTO: u16 = 3271;
+/// «Понятно» — the button that closes a window in the corner, T-119-5 and T-119-6.
+pub const IDS_CORNER_OK: u16 = 3272;
+/// «Больше не показывать окна обновлений» — the check box of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_NEVER: u16 = 3273;
+/// «флаг раскладки» — what the hint of the flag is about (its header), T-119-5.
+pub const IDS_CORNER_FLAG: u16 = 3274;
+/// «Флаг раскладки включён» — the title of the hint, T-119-5.
+pub const IDS_HINT_TITLE: u16 = 3275;
+/// «Чтобы флаг всегда был виден на панели задач, …» — the text of the hint, T-119-5.
+pub const IDS_HINT_TEXT: u16 = 3276;
+/// «Открыть Параметры Windows» — the main button of the hint, T-119-5.
+pub const IDS_HINT_OPEN: u16 = 3277;
+/// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
+pub const IDS_MENU_WHATSNEW: u16 = 3278;
+/// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
+/// 3264…3279.
+pub const IDS_UPDATES_SWITCH: u16 = 3279;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4390,7 +4441,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and forty-seven since task T-119-3, part Б** — решение 208.88: the title and
 /// the link of the list of the program's own, [`IDS_OWN_LIST_TITLE`] and [`IDS_OWN_LIST_MORE`]
 /// (3265, 3266). 245 + 2.
-pub const INTERFACE_STRINGS: [u16; 247] = [
+///
+/// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
+/// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
+/// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
+pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4649,6 +4704,19 @@ pub const INTERFACE_STRINGS: [u16; 247] = [
     IDS_TRAY_FLAG,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
+    IDS_CORNER_UPDATE,
+    IDS_RELEASE_TITLE,
+    IDS_RELEASE_TEXT,
+    IDS_RELEASE_CHANGES,
+    IDS_RELEASE_HOWTO,
+    IDS_CORNER_OK,
+    IDS_RELEASE_NEVER,
+    IDS_CORNER_FLAG,
+    IDS_HINT_TITLE,
+    IDS_HINT_TEXT,
+    IDS_HINT_OPEN,
+    IDS_MENU_WHATSNEW,
+    IDS_UPDATES_SWITCH,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

@@ -1636,6 +1636,21 @@ END
 // Stage E119, task T-119-3, part B: the title and the link of the list of the program's own (РУС/ENG hidden at the clock).
 #define IDS_OWN_LIST_TITLE      3265
 #define IDS_OWN_LIST_MORE       3266
+// Stage E119, tasks T-119-5, T-119-6, T-119-7, T-119-10: the window in the corner (the hint of the flag, «Обновлено»),
+// the entry «Что нового в X…» of the menu and the switch of «От автора» -- the rest of the block 3264..3279.
+#define IDS_CORNER_UPDATE       3267
+#define IDS_RELEASE_TITLE       3268
+#define IDS_RELEASE_TEXT        3269
+#define IDS_RELEASE_CHANGES     3270
+#define IDS_RELEASE_HOWTO       3271
+#define IDS_CORNER_OK           3272
+#define IDS_RELEASE_NEVER       3273
+#define IDS_CORNER_FLAG         3274
+#define IDS_HINT_TITLE          3275
+#define IDS_HINT_TEXT           3276
+#define IDS_HINT_OPEN           3277
+#define IDS_MENU_WHATSNEW       3278
+#define IDS_UPDATES_SWITCH      3279
 // Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
 // (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
 // button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two

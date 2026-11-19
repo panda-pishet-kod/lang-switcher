@@ -226,6 +226,10 @@ pub const CMD_UPDATE: u32 = 0x1008;
 /// identifiers.
 pub const CMD_AUTHOR: u32 = 0x1009;
 
+/// Command identifier of the temporary entry `Что нового в X…` — task T-119-7 (решения 208.93
+/// п. 5, 208.94 п. 5). Present for a week after **any** update.
+pub const CMD_WHATSNEW: u32 = 0x100A;
+
 /// Number of entries FR-91 puts in the menu when nothing temporary is due: **six** commands and
 /// two separators.
 ///
@@ -2176,6 +2180,10 @@ pub fn attach_at_via(
     // seconds away (NFR-08).
     start_letters_clock(hwnd);
 
+    // Task T-119-6: the start after an important update owes the window «Обновлено» — planned here,
+    // before the first tick of the letters moves the version seen; it waits for its quiet moment.
+    let _ = crate::corner::plan_release_window(hwnd);
+
     Ok(Attachment {
         _not_send: PhantomData,
     })
@@ -2452,6 +2460,22 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
 
     if message == crate::flags::WM_APP_LIST_MISSING {
         list_missing();
+        return Some(LRESULT(0));
+    }
+
+    // Task T-119-6: the window «Обновлено» waits for its quiet moment, once a second while it is
+    // due; task T-119-5: the hint of the flag goes once the flag is on the taskbar. Outside the
+    // borrow — the window in the corner reads the configuration through `with_tray` of its own.
+    if message == WM_TIMER && wparam.0 == crate::corner::QUIET_TIMER {
+        let hwnd = with_tray(|tray| tray.hwnd)?;
+        let sound = with_tray(|tray| tray.config().feedback.sound).unwrap_or(false);
+        crate::corner::quiet_tick(hwnd, sound);
+        return Some(LRESULT(0));
+    }
+
+    if message == WM_TIMER && wparam.0 == crate::corner::HINT_TIMER {
+        let hwnd = with_tray(|tray| tray.hwnd)?;
+        crate::corner::hint_tick(hwnd, TRAY_ICON_ID);
         return Some(LRESULT(0));
     }
 
@@ -2853,12 +2877,14 @@ pub struct Pending {
     pub unread: bool,
     /// The feed names this version, and it is newer than the one running.
     pub update: Option<String>,
+    /// The version running, for a week after an update — the entry «Что нового в X…» (T-119-7).
+    pub whats_new: Option<String>,
 }
 
 impl Pending {
-    /// Whether either entry is due — what decides the rule under them.
+    /// Whether any entry is due — what decides the rule under them.
     pub fn any(&self) -> bool {
-        self.unread || self.update.is_some()
+        self.unread || self.update.is_some() || self.whats_new.is_some()
     }
 }
 
@@ -2952,6 +2978,16 @@ impl Menu {
             menu.append_command(
                 CMD_UPDATE,
                 &settings::format_text(settings::IDS_MENU_UPDATE, &[version]),
+                false,
+                true,
+            )?;
+        }
+
+        // Task T-119-7: a week after any update.
+        if let Some(version) = pending.whats_new.as_deref() {
+            menu.append_command(
+                CMD_WHATSNEW,
+                &settings::format_text(settings::IDS_MENU_WHATSNEW, &[version]),
                 false,
                 true,
             )?;
@@ -4656,6 +4692,10 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         // they are about.
         CMD_UNREAD | CMD_UPDATE => show_pending_letter(hwnd, command == CMD_UPDATE),
 
+        // Task T-119-7: the window «Обновлено» once more if it has not been seen, else the page of
+        // the changes on the site.
+        CMD_WHATSNEW => crate::corner::whats_new(),
+
         // The ordinary way out. Nothing is cleaned up here: asking `app` to come down leads
         // the UI thread out of its message loop and into the one cleanup path of FR-83,
         // `Tray::shut_down`, by way of `Attachment::drop`. The same route the FR-97 timeout
@@ -4730,8 +4770,15 @@ fn on_letters_tick() {
 /// read the configuration.
 fn pending_now() -> Pending {
     let (unread, update) = crate::letters::pending();
+    let state = crate::letters::state_now();
+    let whats_new = crate::corner::whats_new_stands(state.updated_on, crate::letters::today())
+        .then(crate::letters::version_string);
 
-    Pending { unread, update }
+    Pending {
+        unread,
+        update,
+        whats_new,
+    }
 }
 
 /// Shows the letter one of the two temporary menu entries is about — FR-91, task Т-32-4.
@@ -4834,7 +4881,18 @@ fn open_settings(hwnd: HWND) {
 /// The registry is the one destination of the three that can answer no, and what is done with
 /// that answer is [`apply_settings_via`], one function down.
 fn apply_settings(config: &Config) {
+    let flag_was_on = with_tray(|tray| tray.flag_on()).unwrap_or(false);
+
     apply_settings_via(config, settings::set_autostart);
+
+    // Task T-119-5: the flag was just turned on — once per turning on, and only while it stands
+    // under ^, its hint comes up by the notification area.
+    if !flag_was_on
+        && config.general.tray_flag
+        && let Some(hwnd) = with_tray(|tray| tray.hwnd)
+    {
+        crate::corner::show_flag_hint(hwnd, TRAY_ICON_ID);
+    }
 }
 
 /// The same, with the registry half of FR-93 handed in — task T-13-24.

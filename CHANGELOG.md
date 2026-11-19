@@ -18,6 +18,10 @@ page. Dates are the days the releases were published (UTC).
   window you typed in gets the focus and the layout back, Edge included. When ENG/РУС is hidden at the clock, the flag
   shows a list of its own in the look of the list of Windows 11. The right click keeps the menu.
 - Starting Lang Switcher while it is already running opens its settings window instead of the message «already running».
+- After an important update a small window by the notification area says what is new, once, when you are not typing;
+  it does not take the focus. «Do not show update windows again» turns it off.
+- When the flag is turned on but stands under the arrow ^ of the taskbar, a hint tells where to pin it.
+- For a week after an update the menu of the icon has «What's new in X…».
 
 ## 1.6.1 — 2026-11-16
 

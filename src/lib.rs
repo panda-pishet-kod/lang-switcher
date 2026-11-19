@@ -15,6 +15,7 @@
 pub mod app;
 pub mod buffer;
 pub mod convert;
+pub mod corner;
 pub mod diag;
 pub mod flags;
 pub mod guard;

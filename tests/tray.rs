@@ -103,6 +103,7 @@ const ABOUT_UP: bool = true;
 /// read behind it is nothing at all: no unread news and no newer version. The menu then has
 /// exactly the [`MENU_ENTRY_COUNT`] entries of FR-91, and the tests below are about those.
 const NOTHING_PENDING: Pending = Pending {
+    whats_new: None,
     unread: false,
     update: None,
 };
