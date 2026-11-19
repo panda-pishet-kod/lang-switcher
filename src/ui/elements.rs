@@ -28,8 +28,8 @@ use crate::ui::text::{Align, Style, Text, Wrap};
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
-    FOCUS_RING, HOVER_MIX, KEY_BOTTOM, LINE, LINK_UNDERLINE, PANEL_DOT, PANEL_DOT_STEP,
-    PRESSED_MIX, RADIUS_CHECK, RADIUS_MEDIUM, RADIUS_SMALL, Rgb, Role, SECTION_PAD,
+    FOCUS_RING, HOVER_MIX, KEY_BOTTOM, LINE, LINK_UNDERLINE, MULTILINE_PAD, PANEL_DOT,
+    PANEL_DOT_STEP, PRESSED_MIX, RADIUS_CHECK, RADIUS_MEDIUM, RADIUS_SMALL, Rgb, Role, SECTION_PAD,
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, Face};
@@ -136,7 +136,7 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
         | Part::Link { .. }
         | Part::Segment { .. }
         | Part::Field { .. }
-        | Part::Input
+        | Part::Input { .. }
         | Part::Section { .. }
         | Part::ListRow { .. }
         | Part::MenuRow => Some(rect),
@@ -155,7 +155,7 @@ fn takes_ring(part: &Part) -> bool {
             | Part::Track
             | Part::Field { .. }
             | Part::Section { .. }
-            | Part::ListRow { .. }
+            | Part::List(_)
     )
 }
 
@@ -342,7 +342,47 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             );
             chevron(painter, look, rect, state);
         }
-        Part::Input => field(painter, look, rect, state),
+        Part::Input {
+            multiline,
+            value,
+            hint,
+        } => {
+            field(painter, look, rect, state);
+            let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };
+            let (pad_h, pad_v) = (pad.h.at(look.b), pad.v.at(look.b));
+            let (text, colour) = if value.is_empty() {
+                (hint, Color::Ink3)
+            } else if state.disabled {
+                (value, Color::Ink3)
+            } else {
+                (value, Color::Ink)
+            };
+            let inner = Rect::new(
+                rect.x + pad_h,
+                rect.y + pad_v,
+                rect.w - pad_h * 2.0,
+                rect.h - pad_v * 2.0,
+            );
+            let wrap = if *multiline {
+                Wrap::Words
+            } else {
+                Wrap::OneLine
+            };
+            painter.clip_rect(inner);
+            write(
+                painter,
+                look,
+                Role::Body,
+                None,
+                text,
+                inner,
+                wrap,
+                Align::Start,
+                !*multiline,
+                c(colour),
+            );
+            painter.unclip();
+        }
         Part::Section { current, label, .. } => {
             if *current && !state.disabled {
                 painter.fill_rect(rect, RADIUS_MEDIUM.0, c(Color::Surface));
@@ -437,15 +477,29 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 painter.stroke_rect(rect, RADIUS_MEDIUM.0, line, c(frame_of(state)));
             }
         }
-        Part::List => {
+        Part::List(_) => {
             painter.fill_rect(rect, RADIUS_MEDIUM.0, c(Color::Surface));
             painter.stroke_rect(rect, RADIUS_MEDIUM.0, line, c(frame_of(state)));
         }
-        Part::ListRow { selected } => {
+        Part::ListRow { selected, .. } => {
             if *selected && !state.disabled {
                 selected_frame(painter, look, rect, RADIUS_SMALL.0, state);
             } else if let Some(fill) = stepped(None, state) {
                 painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
+            }
+        }
+        Part::Scroll {
+            first,
+            visible,
+            total,
+        } => {
+            painter.fill_rect(rect, rect.w / 2.0, c(Color::Surface2));
+            if *total > *visible {
+                let length = (rect.h * *visible as f32 / *total as f32).max(rect.w * 2.0);
+                let travel = rect.h - length;
+                let at = travel * *first as f32 / (*total - *visible) as f32;
+                let thumb = Rect::new(rect.x, rect.y + at, rect.w, length);
+                painter.fill_rect(thumb, rect.w / 2.0, c(Color::Edge));
             }
         }
         Part::Progress { done } => {
@@ -568,6 +622,11 @@ fn selected_frame(painter: &mut Painter, look: &Look, rect: Rect, radius: f32, s
 }
 
 /// The wrapper of a field: `surface` and a frame of `edge`, of `ink` with the keyboard.
+/// The fill of a field's wrapper in `state`: the background the `EDIT` inside it takes too.
+pub fn input_fill(state: State) -> Color {
+    stepped(Some(Color::Surface), state).unwrap_or(Color::Bg)
+}
+
 fn field(painter: &mut Painter, look: &Look, rect: Rect, state: State) {
     if let Some(fill) = stepped(Some(Color::Surface), state) {
         painter.fill_rect(rect, RADIUS_SMALL.0, look.colour(fill));

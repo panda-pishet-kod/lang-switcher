@@ -20,6 +20,13 @@
 //!   inside a group (segments, sections), the space bar presses, Enter is the focused button or the
 //!   main one, Esc closes (in a wizard — the content's «Cancel»). The keyboard ring shows only after
 //!   a key. The strings carry no accelerator letters today (no `&` in `res\lang`), so none are read.
+//! * **The text fields** are fields of Windows inside drawn wrappers (`field.rs`): placed by the
+//!   layout, coloured through `WM_CTLCOLOREDIT`, their typing an `Edited` event; Tab, Shift+Tab, Esc
+//!   and Enter pressed in a field come back here, so the keyboard ring goes between a field and the
+//!   drawn elements both ways (T-120-18).
+//! * **A list** is one stop of Tab: the arrows, Home, End, Page Up and Down select rows (and scroll
+//!   the selected one into view), the space bar turns the check box of the selected row, the wheel
+//!   scrolls the list under the mouse; a click on a row with a check box selects it and turns it.
 //! * **Live:** a change of the theme of Windows or of the content's own setting, of the scale
 //!   (`WM_DPICHANGED`, the rectangle the system offers) and of the language lays out and draws
 //!   again in the same window.
@@ -30,36 +37,42 @@
 //! Knows nothing of what a window contains.
 
 use crate::theme::{ThemeSetting, resolve, system_is_light, title_bar_is_dark};
-use crate::ui::canvas::{Canvas, POINT_DPI};
-use crate::ui::elements::{self, Look, State, hit_area};
+use crate::ui::canvas::{Canvas, POINT_DPI, Rect};
+use crate::ui::elements::{self, Look, State, hit_area, input_fill};
+use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
-use crate::ui::layout::{Layout, Part, client_size, window_size};
+use crate::ui::layout::{Layout, ListView, Part, client_size, window_size};
 use crate::ui::scene::{ButtonKind, Event, Window};
-use crate::ui::text::{Direction, Text};
-use crate::ui::tokens::{Color, Rgb, Theme, WINDOW_MAX, WINDOW_MIN};
+use crate::ui::text::{Direction, Style, Text};
+use crate::ui::tokens::{
+    Color, FIELD_PAD, LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, Theme, WINDOW_MAX, WINDOW_MIN,
+};
 use ::windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use ::windows::Win32::Graphics::Dwm::{
     DWMWA_CAPTION_COLOR, DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
 };
 use ::windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetDC, GetDeviceCaps, GetMonitorInfoW, InvalidateRect, LOGPIXELSY,
+    BeginPaint, EndPaint, GetDC, GetDeviceCaps, GetMonitorInfoW, HDC, InvalidateRect, LOGPIXELSY,
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, ReleaseDC,
+    ScreenToClient,
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use ::windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_DOWN,
-    VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+    VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
+    VK_SPACE, VK_TAB, VK_UP,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    CREATESTRUCTW, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA,
-    GetClientRect, GetCursorPos, GetWindowLongPtrW, GetWindowRect, HTCLIENT, IDC_ARROW, IDC_HAND,
-    LoadCursorW, MINMAXINFO, PostMessageW, RegisterClassExW, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOZORDER, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE, WM_DESTROY,
-    WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETTINGCHANGE, WM_SIZE,
-    WM_THEMECHANGED, WNDCLASSEXW, WS_CAPTION, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED,
-    WS_SYSMENU, WS_THICKFRAME,
+    CREATESTRUCTW, CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, EN_CHANGE,
+    EN_KILLFOCUS, EN_SETFOCUS, GWLP_USERDATA, GetClientRect, GetCursorPos, GetWindowLongPtrW,
+    GetWindowRect, HTCLIENT, IDC_ARROW, IDC_HAND, LoadCursorW, MINMAXINFO, PostMessageW,
+    RegisterClassExW, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SetCursor, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, WHEEL_DELTA, WM_CLOSE, WM_COMMAND, WM_CTLCOLOREDIT,
+    WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
+    WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WNDCLASSEXW, WS_CAPTION,
+    WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_THICKFRAME,
 };
 use ::windows::core::{BOOL, HSTRING, PCWSTR, Result as WinResult, w};
 use std::cell::RefCell;
@@ -110,6 +123,10 @@ pub struct Probe {
     pub scale: f32,
     /// The factor of the type size the window is laid out at.
     pub k: Option<f32>,
+    /// The text fields of Windows in the window, by identifier.
+    pub fields: Vec<(String, HWND)>,
+    /// What the layout placed: the part, its identifier and its rectangle in client pixels.
+    pub items: Vec<(String, Option<String>, Rect)>,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -144,6 +161,10 @@ struct Host<C: Content> {
     background: Option<Rgb>,
     /// What draws the pictures of the panda: `art.rs`, its pictures kept at their size and scale.
     pictures: Option<Box<dyn crate::ui::canvas::Pictures>>,
+    /// The text fields of Windows inside the drawn wrappers.
+    fields: Fields<C::Id>,
+    /// What the wheel turned short of a whole notch.
+    wheel: i32,
 }
 
 /// The class of every window of the shell.
@@ -197,7 +218,13 @@ pub fn create<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResul
             WS_EX_APPWINDOW,
             class(),
             &title,
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
+            // The fields of Windows are children: the frame of the canvas goes round them.
+            WS_OVERLAPPED
+                | WS_CAPTION
+                | WS_SYSMENU
+                | WS_MINIMIZEBOX
+                | WS_THICKFRAME
+                | WS_CLIPCHILDREN,
             0,
             0,
             0,
@@ -392,6 +419,8 @@ impl<C: Content> Host<C> {
             frames: 0,
             background: None,
             pictures: Some(Box::new(crate::ui::art::Art::new())),
+            fields: Fields::default(),
+            wheel: 0,
         }
     }
 
@@ -460,20 +489,166 @@ impl<C: Content> Host<C> {
         // lowers it further only for content that still does not fit here.
         let k = fit::k_for(&self.locale, size.class);
         self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
+        self.sync_fields(hwnd);
+    }
+
+    /// The fields of Windows where the layout put their wrappers, in the font and colours now.
+    fn sync_fields(&mut self, hwnd: HWND) {
+        let (Some(layout), Some(text)) = (self.layout.as_ref(), self.text.as_ref()) else {
+            return;
+        };
+        let scale = self.scale;
+        let px = |points: f32| (points * scale).round() as i32;
+        let style = Style::of(Role::Body, layout.b, layout.size.h);
+        let look = field::Look {
+            face: text.main_face().to_owned(),
+            px: px(style.size),
+            weight: style.weight,
+            hint: Color::Ink3.get(self.theme),
+            rtl: self.rtl,
+        };
+        let specs: Vec<Spec<'_, C::Id>> = layout
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let Part::Input {
+                    multiline,
+                    value,
+                    hint,
+                } = &item.part
+                else {
+                    return None;
+                };
+                let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };
+                let (pad_h, pad_v) = (pad.h.at(layout.b), pad.v.at(layout.b));
+                let rect = item.rect;
+                let state = self.state_of(index, item.id);
+                let ink = if state.disabled {
+                    Color::Ink3
+                } else {
+                    Color::Ink
+                };
+                Some(Spec {
+                    id: item.id?,
+                    inner: RECT {
+                        left: px(rect.x + pad_h),
+                        top: px(rect.y + pad_v),
+                        right: px(rect.right() - pad_h),
+                        bottom: px(rect.bottom() - pad_v),
+                    },
+                    multiline: *multiline,
+                    value,
+                    hint,
+                    disabled: state.disabled,
+                    ink: ink.get(self.theme),
+                    fill: input_fill(state).get(self.theme),
+                })
+            })
+            .collect();
+        self.fields.sync(hwnd, &specs, &look);
     }
 
     fn state_of(&self, index: usize, id: Option<C::Id>) -> State {
         let disabled = id.is_some_and(|id| self.window.disabled.contains(&id));
+        // A field shows the keyboard after a click too: the caret is in it.
+        let input = self.layout.as_ref().is_some_and(|layout| {
+            matches!(
+                layout.items.get(index).map(|item| &item.part),
+                Some(Part::Input { .. })
+            )
+        });
         State {
             hover: self.hover == Some(index),
             pressed: self.pressed == Some(index) && self.hover == Some(index),
-            focus: self.cue && id.is_some() && id == self.focus,
+            focus: (self.cue || input) && id.is_some() && id == self.focus,
             disabled,
         }
     }
 
+    /// The keyboard where the focus is: in the field of Windows that has it, else in the window.
+    fn give_keyboard(&self, hwnd: HWND) {
+        let in_field = self.focus.is_some_and(|id| self.fields.focus(id));
+        if !in_field && self.fields.has_keyboard() {
+            // SAFETY: the window of this thread takes the keyboard back from its field.
+            let _ = unsafe { SetFocus(Some(hwnd)) };
+        }
+    }
+
+    /// The list `id`'s view, when `id` is a list.
+    fn list_view(&self, id: C::Id) -> Option<ListView> {
+        self.layout
+            .as_ref()?
+            .items
+            .iter()
+            .find_map(|item| match &item.part {
+                Part::List(view) if item.id == Some(id) => Some(*view),
+                _ => None,
+            })
+    }
+
+    /// The list under `x`, `y` (client pixels).
+    fn list_at(&self, x: f32, y: f32) -> Option<(C::Id, ListView)> {
+        let (x, y) = (x / self.scale, y / self.scale);
+        self.layout
+            .as_ref()?
+            .items
+            .iter()
+            .find_map(|item| match (&item.part, item.id) {
+                (Part::List(view), Some(id))
+                    if x >= item.rect.x
+                        && y >= item.rect.y
+                        && x < item.rect.right()
+                        && y < item.rect.bottom()
+                        && !self.window.disabled.contains(&id) =>
+                {
+                    Some((id, *view))
+                }
+                _ => None,
+            })
+    }
+
+    /// Selects `row` of the list `id` and scrolls it into view.
+    fn select_row(&mut self, hwnd: HWND, id: C::Id, view: ListView, row: usize) {
+        if row != view.selected && !self.deliver(hwnd, Event::Selected(id, row)) {
+            return;
+        }
+        let first = view.first_showing(row);
+        if first != view.first {
+            self.deliver(hwnd, Event::Scrolled(id, first));
+        }
+    }
+
+    /// The keys of a focused list; whether the key was one of them.
+    fn list_key(&mut self, hwnd: HWND, id: C::Id, view: ListView, key: u16) -> bool {
+        let last = view.total.saturating_sub(1);
+        let page = view.visible.saturating_sub(1).max(1);
+        let row = match key {
+            k if k == VK_UP.0 => view.selected.saturating_sub(1),
+            k if k == VK_DOWN.0 => (view.selected + 1).min(last),
+            k if k == VK_HOME.0 => 0,
+            k if k == VK_END.0 => last,
+            k if k == VK_PRIOR.0 => view.selected.saturating_sub(page),
+            k if k == VK_NEXT.0 => (view.selected + page).min(last),
+            k if k == VK_SPACE.0 => {
+                if let Some(on) = view.checked {
+                    self.deliver(hwnd, Event::RowChecked(id, view.selected, !on));
+                }
+                return true;
+            }
+            _ => return false,
+        };
+        if view.total > 0 {
+            self.select_row(hwnd, id, view, row);
+        }
+        invalidate(hwnd);
+        true
+    }
+
     fn paint(&mut self, hwnd: HWND) {
         self.lay_out(hwnd);
+        // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
+        self.sync_fields(hwnd);
         if self.canvas.is_none() {
             let mut client = RECT::default();
             // SAFETY: the out parameter is a local.
@@ -569,8 +744,37 @@ impl<C: Content> Host<C> {
                         _ => None,
                     })
             }
+            Part::ListRow {
+                index,
+                check: Some(on),
+                ..
+            } => Some(Event::RowChecked(id, *index, !on)),
+            Part::ListRow { index, .. } => Some(Event::Selected(id, *index)),
+            // A field and the frame of a list take the focus and press nothing.
+            Part::Input { .. } | Part::List(_) => None,
             _ => Some(Event::Pressed(id)),
         }
+    }
+
+    /// The events a press of the element at `index` makes: a row with a check box is selected
+    /// first, then its box turns.
+    fn presses(&self, index: usize) -> Vec<Event<C::Id>> {
+        let mut events = Vec::new();
+        if let Some(layout) = self.layout.as_ref()
+            && let Some(item) = layout.items.get(index)
+            && let (
+                Part::ListRow {
+                    selected: false,
+                    index: row,
+                    check: Some(_),
+                },
+                Some(id),
+            ) = (&item.part, item.id)
+        {
+            events.push(Event::Selected(id, *row));
+        }
+        events.extend(self.activation(index));
+        events
     }
 
     /// The element of `id` a key presses: its first part that answers a press.
@@ -581,15 +785,16 @@ impl<C: Content> Host<C> {
         })
     }
 
-    /// Hands `event` to the content and shows what it made of it.
-    fn deliver(&mut self, hwnd: HWND, event: Event<C::Id>) {
+    /// Hands `event` to the content and shows what it made of it; answers whether the window stays.
+    fn deliver(&mut self, hwnd: HWND, event: Event<C::Id>) -> bool {
         if self.content.event(event) == Reply::Close {
             close_later(hwnd);
-            return;
+            return false;
         }
         self.rebuild();
         self.read_theme(hwnd);
         invalidate(hwnd);
+        true
     }
 
     fn key(&mut self, hwnd: HWND, key: u16) -> bool {
@@ -600,6 +805,14 @@ impl<C: Content> Host<C> {
         let at = self
             .focus
             .and_then(|focus| order.iter().position(|id| *id == focus));
+
+        // A focused list takes its own keys: the rows, the pages, the ends, its check boxes.
+        if let Some(id) = self.focus
+            && let Some(view) = self.list_view(id)
+            && self.list_key(hwnd, id, view, key)
+        {
+            return true;
+        }
 
         match key {
             k if k == VK_TAB.0 => {
@@ -613,6 +826,7 @@ impl<C: Content> Host<C> {
                     (Some(at), true, n) => Some((at + n - 1) % n),
                 };
                 self.focus = next.map(|next| order[next]);
+                self.give_keyboard(hwnd);
             }
             k if [VK_LEFT.0, VK_RIGHT.0, VK_UP.0, VK_DOWN.0].contains(&k) => {
                 let forward = (k == VK_RIGHT.0) != self.rtl || k == VK_DOWN.0;
@@ -664,7 +878,9 @@ impl<C: Content> Host<C> {
             }
             k if k == VK_ESCAPE.0 => {
                 match self.content.escape() {
-                    Some(id) => self.deliver(hwnd, Event::Pressed(id)),
+                    Some(id) => {
+                        self.deliver(hwnd, Event::Pressed(id));
+                    }
                     None => close_later(hwnd),
                 }
                 return true;
@@ -852,6 +1068,7 @@ impl<C: Content> Handler for Host<C> {
                     .and_then(|index| self.layout.as_ref()?.items[index].id)
                 {
                     self.focus = Some(id);
+                    self.give_keyboard(hwnd);
                 }
                 // SAFETY: a live window of this thread.
                 unsafe { SetCapture(hwnd) };
@@ -866,16 +1083,68 @@ impl<C: Content> Handler for Host<C> {
                 let released = self.hit(x, y);
                 let pressed = self.pressed.take();
                 invalidate(hwnd);
-                if let Some(event) = pressed
+                let events = pressed
                     .filter(|index| released == Some(*index))
-                    .and_then(|index| self.activation(index))
-                {
-                    self.deliver(hwnd, event);
+                    .map_or_else(Vec::new, |index| self.presses(index));
+                for event in events {
+                    if !self.deliver(hwnd, event) {
+                        break;
+                    }
                 }
                 Some(LRESULT(0))
             }
+            WM_MOUSEWHEEL => {
+                // The point of the wheel is on the screen.
+                let (x, y) = point_of(lparam);
+                let mut point = POINT {
+                    x: x as i32,
+                    y: y as i32,
+                };
+                // SAFETY: a live window; the point is a local.
+                let _ = unsafe { ScreenToClient(hwnd, &mut point) };
+                self.lay_out(hwnd);
+                let (id, view) = self.list_at(point.x as f32, point.y as f32)?;
+                let notch = WHEEL_DELTA as i32;
+                self.wheel += i32::from((wparam.0 >> u16::BITS) as u16 as i16);
+                let notches = self.wheel / notch;
+                self.wheel -= notches * notch;
+                let first = view.scrolled(-(notches as isize) * LIST_WHEEL_ROWS.0 as isize);
+                if first != view.first {
+                    self.deliver(hwnd, Event::Scrolled(id, first));
+                }
+                Some(LRESULT(0))
+            }
+            WM_COMMAND => {
+                // What a field of Windows tells its window.
+                let control = HWND(lparam.0 as *mut _);
+                let id = self.fields.id_of(control)?;
+                match (wparam.0 >> u16::BITS) as u16 as u32 {
+                    EN_CHANGE => {
+                        self.deliver(hwnd, Event::Edited(id, field::text_of(control)));
+                    }
+                    EN_SETFOCUS => {
+                        self.focus = Some(id);
+                        invalidate(hwnd);
+                    }
+                    EN_KILLFOCUS => invalidate(hwnd),
+                    _ => {}
+                }
+                Some(LRESULT(0))
+            }
+            WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => self
+                .fields
+                .colours(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
+            WM_SETFOCUS => {
+                // The window activated again: the keyboard back to its field.
+                if let Some(id) = self.focus {
+                    self.fields.focus(id);
+                }
+                None
+            }
             WM_KEYDOWN => self.key(hwnd, wparam.0 as u16).then_some(LRESULT(0)),
             WM_DESTROY => {
+                // The fields first, while they are still the window's children.
+                self.fields.release();
                 // The pictures first: `art.rs` keeps bitmaps with the render target, which holds
                 // the factory — gone before the canvas, the factory dies with the canvas.
                 self.pictures = None;
@@ -895,6 +1164,26 @@ impl<C: Content> Handler for Host<C> {
             background: self.background,
             scale: self.scale,
             k: self.layout.as_ref().map(|layout| layout.k),
+            fields: self
+                .fields
+                .all()
+                .into_iter()
+                .map(|(id, hwnd)| (format!("{id:?}"), hwnd))
+                .collect(),
+            items: self
+                .layout
+                .iter()
+                .flat_map(|layout| layout.items.iter())
+                .map(|item| {
+                    let r = item.rect;
+                    let s = self.scale;
+                    (
+                        format!("{:?}", item.part),
+                        item.id.map(|id| format!("{id:?}")),
+                        Rect::new(r.x * s, r.y * s, r.w * s, r.h * s),
+                    )
+                })
+                .collect(),
         }
     }
 }

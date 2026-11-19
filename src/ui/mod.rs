@@ -11,6 +11,7 @@ pub mod art;
 pub mod bench;
 pub mod canvas;
 pub mod elements;
+pub mod field;
 pub mod fit;
 pub mod host;
 pub mod layout;

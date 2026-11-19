@@ -149,6 +149,23 @@ pub enum Node<I> {
     },
     /// A numbered list: the numbers in `accent` (§1), the items wrapped beside them.
     Numbered(Vec<String>),
+    /// A text field of Windows in the wrapper of the shell, its label above it.
+    Field {
+        id: I,
+        label: String,
+        value: String,
+        /// The hint an empty field shows.
+        hint: String,
+        kind: FieldKind,
+    },
+    /// A list drawn by the shell: rows with or without a check box, one selected, scrolled from
+    /// `first` (the layout moves `first` so that the selected row is seen).
+    List {
+        id: I,
+        rows: Vec<ListItem>,
+        selected: usize,
+        first: usize,
+    },
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
@@ -278,6 +295,30 @@ impl<I> Node<I> {
                 current,
             },
             Node::Numbered(items) => Node::Numbered(items),
+            Node::Field {
+                id,
+                label,
+                value,
+                hint,
+                kind,
+            } => Node::Field {
+                id: f(id),
+                label,
+                value,
+                hint,
+                kind,
+            },
+            Node::List {
+                id,
+                rows,
+                selected,
+                first,
+            } => Node::List {
+                id: f(id),
+                rows,
+                selected,
+                first,
+            },
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -350,6 +391,16 @@ impl<I> Node<I> {
             Node::Sections { items, .. } | Node::Numbered(items) => {
                 items.iter_mut().for_each(|item| f(Role::Body, item));
             }
+            Node::Field {
+                label, value, hint, ..
+            } => {
+                f(Role::FieldLabel, label);
+                f(Role::Body, value);
+                f(Role::Body, hint);
+            }
+            Node::List { rows, .. } => rows
+                .iter_mut()
+                .for_each(|row| f(Role::Body, &mut row.label)),
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }
@@ -376,6 +427,21 @@ impl<I> Window<I> {
     }
 }
 
+/// One line or several.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKind {
+    Line,
+    Text,
+}
+
+/// A row of a list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListItem {
+    pub label: String,
+    /// The row's check box, where it has one.
+    pub check: Option<bool>,
+}
+
 /// What the shell answers about a window's elements.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event<I> {
@@ -387,4 +453,8 @@ pub enum Event<I> {
     Selected(I, usize),
     /// The text of a field changed.
     Edited(I, String),
+    /// The check box of row `usize` of a list took the value.
+    RowChecked(I, usize, bool),
+    /// A list was scrolled to show row `usize` first.
+    Scrolled(I, usize),
 }

@@ -11,12 +11,11 @@
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::elements::{self, Look, State};
 use crate::ui::layout::{Class, Part, Placed, Status, place_node};
-use crate::ui::scene::{ButtonKind, Node, Surface};
+use crate::ui::scene::{ButtonKind, FieldKind, ListItem, Node, Surface};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::{
-    BUTTON_GAP, CHECK, CONTROL_GAP, CORNER_ART, CORNER_PAD, CORNER_WIDTH, KEY_PAD, LIST_PAD,
-    LIST_ROW_PAD, MENU_MIN_WIDTH, MENU_ROW_MIN_HEIGHT, PANEL_ART, PANEL_SHARE, Role, WIZARD_STEP,
-    WIZARD_STEP_GAP,
+    BUTTON_GAP, CONTROL_GAP, CORNER_ART, CORNER_PAD, CORNER_WIDTH, KEY_PAD, MENU_MIN_WIDTH,
+    MENU_ROW_MIN_HEIGHT, PANEL_ART, PANEL_SHARE, Role, WIZARD_STEP, WIZARD_STEP_GAP,
 };
 
 /// One element on the bench.
@@ -362,6 +361,115 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         },
     );
 
+    let field = |label: String, value: &str, hint: String, kind| Node::Field {
+        id: 1,
+        label,
+        value: value.to_owned(),
+        hint,
+        kind,
+    };
+    node(
+        "Поле",
+        3,
+        true,
+        wide,
+        Class::Ordinary,
+        field(
+            word("IDS_EXCLUSION_MANUAL"),
+            "game.exe",
+            word("IDS_EXCLUSION_HINT"),
+            FieldKind::Line,
+        ),
+    );
+    node(
+        "Поле с подсказкой",
+        3,
+        true,
+        wide,
+        Class::Ordinary,
+        field(
+            word("IDS_EXCLUSION_MANUAL"),
+            "",
+            word("IDS_EXCLUSION_HINT"),
+            FieldKind::Line,
+        ),
+    );
+    node(
+        "Многострочное поле",
+        3,
+        true,
+        wide,
+        Class::Ordinary,
+        field(
+            word("IDS_WIZARD_IDEA_WHAT"),
+            "",
+            word("IDS_WIZARD_IDEA_NOTE"),
+            FieldKind::Text,
+        ),
+    );
+    let themes = [
+        word("IDS_THEME_LIGHT"),
+        word("IDS_THEME_DARK"),
+        word("IDS_THEME_SYSTEM"),
+    ];
+    for (name, checks) in [("Список с флажками", true), ("Список без флажков", false)]
+    {
+        let rows = themes
+            .iter()
+            .enumerate()
+            .map(|(index, label)| ListItem {
+                label: label.clone(),
+                check: checks.then_some(index != 2),
+            })
+            .collect();
+        node(
+            name,
+            3,
+            true,
+            wide,
+            Class::Ordinary,
+            Node::List {
+                id: 1,
+                rows,
+                selected: 1,
+                first: 0,
+            },
+        );
+    }
+    let layouts = [
+        "English (United States)",
+        "Русская",
+        "Українська",
+        "Deutsch",
+        "Français",
+        "Español",
+        "Italiano",
+        "Polski",
+        "Türkçe",
+        "Ελληνικά",
+        "עברית",
+        "العربية",
+    ];
+    node(
+        "Список с прокруткой",
+        3,
+        true,
+        wide,
+        Class::Ordinary,
+        Node::List {
+            id: 1,
+            rows: layouts
+                .iter()
+                .map(|label| ListItem {
+                    label: (*label).to_owned(),
+                    check: None,
+                })
+                .collect(),
+            selected: 5,
+            first: 3,
+        },
+    );
+
     // The parts no node places yet.
     let measure_line = |role: Role, text: &str| {
         measure.measure(text, Style::of(role, b, 500.0), Wrap::OneLine, f32::MAX)
@@ -387,75 +495,6 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         })
     };
     let body = Style::of(Role::Body, b, 500.0).line_height();
-
-    let field_h = body + 2.0 * crate::ui::tokens::FIELD_PAD.v.at(b);
-    manual(
-        "Поле",
-        3,
-        true,
-        wide,
-        field_h,
-        vec![
-            Placed {
-                part: Part::Input,
-                rect: Rect::new(0.0, 0.0, wide, field_h),
-                id: Some(1),
-            },
-            text(
-                Role::Body,
-                "Lang Switcher".to_owned(),
-                Rect::new(
-                    crate::ui::tokens::FIELD_PAD.h.at(b),
-                    (field_h - body) / 2.0,
-                    wide,
-                    body,
-                ),
-            ),
-        ],
-    );
-
-    for (name, checks) in [("Список с флажками", true), ("Список без флажков", false)]
-    {
-        let (pad, row_v, row_h) = (LIST_PAD.at(b), LIST_ROW_PAD.v.at(b), LIST_ROW_PAD.h.at(b));
-        let row = body + 2.0 * row_v;
-        let labels = [
-            word("IDS_THEME_LIGHT"),
-            word("IDS_THEME_DARK"),
-            word("IDS_THEME_SYSTEM"),
-        ];
-        let h = pad * 2.0 + row * labels.len() as f32;
-        let mut items = vec![Placed {
-            part: Part::List,
-            rect: Rect::new(0.0, 0.0, wide, h),
-            id: None,
-        }];
-        for (index, label) in labels.into_iter().enumerate() {
-            let y = pad + row * index as f32;
-            items.push(Placed {
-                part: Part::ListRow {
-                    selected: index == 1,
-                },
-                rect: Rect::new(pad, y, wide - pad * 2.0, row),
-                id: Some(1),
-            });
-            let mut x = pad + row_h;
-            if checks {
-                let side = CHECK.at(b);
-                items.push(Placed {
-                    part: Part::Check { on: index != 2 },
-                    rect: Rect::new(x, y + (row - side) / 2.0, side, side),
-                    id: None,
-                });
-                x += side + CONTROL_GAP.at(b);
-            }
-            items.push(text(
-                Role::Body,
-                label,
-                Rect::new(x, y + row_v, wide - x - pad, body),
-            ));
-        }
-        manual(name, 3, true, wide, h, items);
-    }
 
     let (bar, gap) = (WIZARD_STEP.at(b), WIZARD_STEP_GAP.at(b));
     let each = (wide - gap * 4.0) / 5.0;

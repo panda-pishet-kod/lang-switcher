@@ -20,16 +20,17 @@
 //! How much does not fit is answered, not repaired: picking the factor k is `fit.rs`'s.
 
 use crate::ui::canvas::Rect;
-use crate::ui::scene::{Art, ButtonKind, Node, Surface, Window, WindowKind};
+use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
-    FIELD_PAD, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP, LINE, NARROW_ART, NARROW_PAD, NESTED_PAD,
-    NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD,
-    SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
-    WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
+    FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP, LINE,
+    LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART, NARROW_PAD,
+    NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD,
+    SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN,
+    WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 
@@ -172,13 +173,27 @@ pub enum Part {
     Card {
         selected: bool,
     },
-    /// The wrapper of a text field of Windows.
-    Input,
-    /// The frame of a list.
-    List,
-    /// A row of a list.
+    /// The wrapper of a text field of Windows: the field itself is an `EDIT` the host places inside
+    /// it; the value or, when it is empty, the hint is drawn under it too — for the first frame
+    /// and for the pictures made in memory.
+    Input {
+        multiline: bool,
+        value: String,
+        hint: String,
+    },
+    /// The frame of a list, with what the keys of the list need.
+    List(ListView),
+    /// A row of a list: its number among all the rows and its check box, where it has one.
     ListRow {
         selected: bool,
+        index: usize,
+        check: Option<bool>,
+    },
+    /// The thin scroll bar of a list that has more rows than it shows.
+    Scroll {
+        first: usize,
+        visible: usize,
+        total: usize,
     },
     /// One bar of the progress of a wizard.
     Progress {
@@ -206,6 +221,36 @@ pub enum Part {
     },
 }
 
+/// What the keys and the wheel of a list need of it: the selected row, the first row shown, how many
+/// are shown and how many there are, and the check box of the selected row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ListView {
+    pub selected: usize,
+    pub first: usize,
+    pub visible: usize,
+    pub total: usize,
+    pub checked: Option<bool>,
+}
+
+impl ListView {
+    /// The first row to show so that `row` is seen, the view moved as little as it can.
+    pub fn first_showing(self, row: usize) -> usize {
+        if row < self.first {
+            row
+        } else if row >= self.first + self.visible {
+            row + 1 - self.visible
+        } else {
+            self.first
+        }
+    }
+
+    /// The first row after scrolling by `rows` (back when negative), inside the list.
+    pub fn scrolled(self, rows: isize) -> usize {
+        let last = self.total.saturating_sub(self.visible);
+        self.first.saturating_add_signed(rows).min(last)
+    }
+}
+
 impl Part {
     /// The name of the kind, for the messages of the tests.
     pub fn name(&self) -> &'static str {
@@ -227,8 +272,9 @@ impl Part {
             Part::Hit => "hit area",
             Part::Radio { .. } => "radio button",
             Part::Card { .. } => "choice card",
-            Part::Input => "text field",
-            Part::List => "list",
+            Part::Input { .. } => "text field",
+            Part::List(_) => "list",
+            Part::Scroll { .. } => "list scroll bar",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -618,6 +664,19 @@ impl<I: Copy> Placer<'_, I> {
             } => self.segments(*id, label, options, *selected, x, y, w),
             Node::Choice { id, label, value } => self.choice(*id, label, value, x, y, w),
             Node::Sections { id, items, current } => self.sections(*id, items, *current, x, y, w),
+            Node::Field {
+                id,
+                label,
+                value,
+                hint,
+                kind,
+            } => self.field(*id, label, value, hint, *kind, x, y, w),
+            Node::List {
+                id,
+                rows,
+                selected,
+                first,
+            } => self.list(*id, rows, *selected, *first, x, y, w, slot),
             Node::Link { id, text } => {
                 let style = self.style(Role::Link);
                 let width = self.width_of(style, text).min(w);
@@ -1156,6 +1215,134 @@ impl<I: Copy> Placer<'_, I> {
         let above = self.text(Role::Body, label, x, y, w, Wrap::Words) + self.em(BLOCK_ROW_GAP);
         self.push(part, Rect::new(x, y + above, w, field_h), Some(id));
         above + field_h
+    }
+
+    /// A text field: its label above it, the wrapper one line high or `FIELD_TEXT_LINES` lines.
+    #[allow(clippy::too_many_arguments)]
+    fn field(
+        &mut self,
+        id: I,
+        label: &str,
+        value: &str,
+        hint: &str,
+        kind: FieldKind,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let above = if label.is_empty() {
+            0.0
+        } else {
+            self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
+        };
+        let (pad, lines) = match kind {
+            FieldKind::Line => (FIELD_PAD, 1.0),
+            FieldKind::Text => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
+        };
+        let h = self.style(Role::Body).line_height() * lines + self.em(pad.v) * 2.0;
+        self.push(
+            Part::Input {
+                multiline: kind == FieldKind::Text,
+                value: value.to_owned(),
+                hint: hint.to_owned(),
+            },
+            Rect::new(x, y + above, w, h),
+            Some(id),
+        );
+        above + h
+    }
+
+    /// A list: as many rows as its slot holds, or `LIST_VISIBLE_ROWS`, from `first` (kept inside
+    /// the list); a thin scroll bar at the end when not every row is shown.
+    #[allow(clippy::too_many_arguments)]
+    fn list(
+        &mut self,
+        id: I,
+        rows: &[ListItem],
+        selected: usize,
+        first: usize,
+        x: f32,
+        y: f32,
+        w: f32,
+        slot: Option<f32>,
+    ) -> f32 {
+        let style = self.style(Role::Body);
+        let (pad, row_v, row_h) = (
+            self.em(LIST_PAD),
+            self.em(LIST_ROW_PAD.v),
+            self.em(LIST_ROW_PAD.h),
+        );
+        let row = style.line_height() + row_v * 2.0;
+        let total = rows.len();
+        let room = match slot {
+            Some(slot) => ((slot - pad * 2.0) / row).floor().max(1.0) as usize,
+            None => LIST_VISIBLE_ROWS.0 as usize,
+        };
+        let visible = room.min(total).max(1);
+        let first = first.min(total.saturating_sub(visible));
+        let h = pad * 2.0 + row * visible as f32;
+        let bar = if total > visible {
+            LIST_BAR.0 + pad
+        } else {
+            0.0
+        };
+        let checked = rows.get(selected).and_then(|row| row.check);
+        self.push(
+            Part::List(ListView {
+                selected,
+                first,
+                visible,
+                total,
+                checked,
+            }),
+            Rect::new(x, y, w, h),
+            Some(id),
+        );
+
+        for (index, item) in rows.iter().enumerate().skip(first).take(visible) {
+            let top = y + pad + row * (index - first) as f32;
+            let end = x + w - pad - bar;
+            self.push(
+                Part::ListRow {
+                    selected: index == selected,
+                    index,
+                    check: item.check,
+                },
+                Rect::new(x + pad, top, end - x - pad, row),
+                Some(id),
+            );
+            let mut at = x + pad + row_h;
+            if let Some(on) = item.check {
+                let side = CHECK.at(self.b);
+                self.push(
+                    Part::Check { on },
+                    Rect::new(at, top + (row - side) / 2.0, side, side),
+                    None,
+                );
+                at += side + self.em(CONTROL_GAP);
+            }
+            self.text(
+                Role::Body,
+                &item.label,
+                at,
+                top + row_v,
+                end - row_h - at,
+                Wrap::OneLine,
+            );
+        }
+
+        if bar > 0.0 {
+            self.push(
+                Part::Scroll {
+                    first,
+                    visible,
+                    total,
+                },
+                Rect::new(x + w - pad - LIST_BAR.0, y + pad, LIST_BAR.0, h - pad * 2.0),
+                None,
+            );
+        }
+        h
     }
 
     /// The sections of the settings: a column, or in a narrow window a row of tabs that wraps.

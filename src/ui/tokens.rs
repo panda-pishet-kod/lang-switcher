@@ -663,6 +663,16 @@ pub const HEADER_TITLE_GAP: Em = Em(0.32);
 pub const HEADER_SUBTITLE_GAP: Em = Em(0.215);
 /// ◆ Флажок, радиокнопка, выключатель — от подписи (из макета).
 pub const CONTROL_GAP: Em = Em(0.6);
+/// ◆ Поле — подпись над полем, отступ (из макета: 0,3 кегля).
+pub const FIELD_LABEL_GAP: Em = Em(0.3);
+/// ◆ Многострочное поле — строк видно.
+pub const FIELD_TEXT_LINES: Share = Share(4.0);
+/// ◆ Список — строк видно, когда его высоту не задаёт окно.
+pub const LIST_VISIBLE_ROWS: Share = Share(6.0);
+/// ◆ Список — ширина своей тонкой полосы прокрутки.
+pub const LIST_BAR: Pt = Pt(4.0);
+/// ◆ Список — строк за один щелчок колеса мыши.
+pub const LIST_WHEEL_ROWS: Share = Share(3.0);
 /// Окно в углу — ширина.
 pub const CORNER_WIDTH: Pt = Pt(364.0);
 /// Окно в углу — поля.
