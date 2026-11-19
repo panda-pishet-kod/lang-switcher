@@ -845,6 +845,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // the end. Named by the step, as the three rows of the probe above are; appended at the end so
     // that no index above it moves; a fact and no value, `Kind::Process`, no new `Kind`.
     ("password probe: focus events", Kind::Process),
+    // Stage Э120, task T-120-3: the canvas of the interface shell (`ui::canvas`) — Direct2D refused
+    // a render target, and, after two refusals in a row, the canvas turned to the plain look of
+    // GDI. Appended at the end so that no index above them moves; a fact and no value.
+    ("ui canvas: target refused", Kind::Window),
+    ("ui canvas: plain look", Kind::Window),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
