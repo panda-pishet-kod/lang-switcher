@@ -439,3 +439,62 @@ fn a_picture_at_two_hundred_percent_is_twice_as_large_and_as_sharp_as_a_fresh_on
         "at 200 % the picture is drawn for 200 %, not stretched from 100 %"
     );
 }
+
+/// The picture is kept finished (sheet 8): a repeated frame does not draw it again, a new size
+/// does, and so does a new scale of the screen on the same window — the canvas gives the target its
+/// DPI, and `art.rs` sees it. A window that is never shown, so its target lives through the change.
+#[cfg(feature = "testing")]
+#[test]
+fn the_picture_is_drawn_again_for_a_new_size_or_scale_and_not_for_a_repeated_frame() {
+    use lang_switcher::ui::art::Art;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_OVERLAPPED,
+    };
+    use windows::core::w;
+
+    // SAFETY: a plain window of a system class, never shown, destroyed below.
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("STATIC"),
+            w!(""),
+            WS_OVERLAPPED,
+            0,
+            0,
+            200,
+            200,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("a window");
+    let mut canvas = Canvas::for_window(hwnd, 200, 200, 1.0);
+    let mut art = Art::new();
+    let mut frame = |canvas: &mut Canvas, radius: f32| {
+        let mode = canvas.frame_with(Some(&mut art), |painter| {
+            painter.picture("about", 100.0, 100.0, radius)
+        });
+        assert_eq!(mode, Mode::Direct2D);
+        art.drawn_afresh()
+    };
+
+    assert_eq!(frame(&mut canvas, 40.0), 1, "the first frame");
+    assert_eq!(
+        frame(&mut canvas, 40.0),
+        1,
+        "a repeated frame draws nothing again"
+    );
+    assert_eq!(frame(&mut canvas, 60.0), 2, "a new size draws it again");
+    canvas.set_scale(2.0);
+    assert_eq!(
+        frame(&mut canvas, 60.0),
+        3,
+        "a new scale of the screen draws it again"
+    );
+
+    drop(canvas);
+    // SAFETY: the window made above.
+    let _ = unsafe { DestroyWindow(hwnd) };
+}
