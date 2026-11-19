@@ -17,13 +17,13 @@
        "release without testing" measurement found the channel name, because what lay on disk
        was the build WITH the feature. Fact 8 of section 9 of STATE.md.
 
-    2. It runs a POSITIVE CONTROL over every one of the seven strings. Absence on its own
+    2. It runs a POSITIVE CONTROL over every one of the strings. Absence on its own
        proves nothing at all: the Release profile has `strip = true`, and a single typo in a
        search pattern gives the same answer as a string that is genuinely not there. Each
        string must be MISSING from the shipping build and FOUND in the build that is supposed
        to carry it. Decision R-25, question 29.
 
-       There are TWO such builds, because the seven strings are switched off by two different
+       There are TWO such builds, because the strings are switched off by two different
        mechanisms. Five are behind the `testing` feature and are controlled by measurement B.
        The sixth and the seventh, LANGSW_DEBUG_TIMEOUT_SEC and LANGSW_DEBUG_FONT_STEP, are
        behind `#[cfg(debug_assertions)]` and are controlled by measurement B2 -- a release
@@ -69,7 +69,7 @@
     in the system ANSI code page, and the parse dies on the first Russian word. Decision R-05.
     Windows PowerShell 5.1, not 7.x: no `&&`, no `??`, no ternary operator, no -AsHashtable.
 
-    Exit code: 0 only if all seven strings are absent from the shipping build, the five of the
+    Exit code: 0 only if all the strings are absent from the shipping build, those of the
     `testing` feature are present in the build with it, the sixth and the seventh are present in
     the build with debug assertions on, and the dependency sets agree. Otherwise non-zero,
     reasons listed.
@@ -137,7 +137,15 @@ $Strings = @(
     @{ Name = 'LANGSW_TESTING_PANIC_ON_VK';      Value = 'LANGSW_TESTING_PANIC_ON_VK';      Source = 'src\hook.rs';     Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_DROP_HOOK_MS';     Value = 'LANGSW_TESTING_DROP_HOOK_MS';     Source = 'src\watchdog.rs'; Control = 'testing' },
     @{ Name = 'LANGSW_DEBUG_TIMEOUT_SEC';        Value = 'LANGSW_DEBUG_TIMEOUT_SEC';        Source = 'src\app.rs, mod debug_timeout'; Control = 'debug-assertions' },
-    @{ Name = 'LANGSW_DEBUG_FONT_STEP';          Value = 'LANGSW_DEBUG_FONT_STEP';          Source = 'src\settings.rs, mod debug_font_step'; Control = 'debug-assertions' }
+    @{ Name = 'LANGSW_DEBUG_FONT_STEP';          Value = 'LANGSW_DEBUG_FONT_STEP';          Source = 'src\settings.rs, mod debug_font_step'; Control = 'debug-assertions' },
+    # Stage E120: the switches of the interface shell and of its probe, all under the testing feature.
+    @{ Name = 'LANGSW_TESTING_UI_GDI';             Value = 'LANGSW_TESTING_UI_GDI';             Source = 'src\ui\canvas.rs';         Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_HARDWARE';        Value = 'LANGSW_TESTING_UI_HARDWARE';        Source = 'src\ui\canvas.rs';         Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE';           Value = 'LANGSW_TESTING_UI_PROBE';           Source = 'src\ui\windows\about.rs';  Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Value = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Source = 'src\ui\windows\about.rs';  Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Value = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Source = 'src\ui\windows\about.rs';  Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Value = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Source = 'src\ui\windows\about.rs';  Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-about';     Value = '--ui-probe-about';                  Source = 'src\main.rs';              Control = 'testing' }
 )
 
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -204,7 +212,7 @@ Write-Host ("Target dir     {0}" -f $TargetDir)
 Write-Host ("Release binary {0}" -f $ReleaseExe)
 
 # ==========================================================================================
-# Measurement A -- the shipping configuration. All seven strings must be ABSENT.
+# Measurement A -- the shipping configuration. All the strings must be ABSENT.
 # ==========================================================================================
 Write-Host ''
 Write-Host '--- A. Release WITHOUT the `testing` feature ---------------------------'
@@ -405,7 +413,7 @@ if ($SkipFinalRebuild) {
     } else {
         Write-Host ''
         Write-Host '  Same SHA-256 as measurement A: the shipping binary is byte for byte the one'
-        Write-Host '  the seven strings were measured against.'
+        Write-Host '  the strings were measured against.'
     }
     if ($hashFinal -eq $hashTesting) {
         $Failures.Add('after the final rebuild the binary on disk is still the one with the `testing` feature')
@@ -417,7 +425,7 @@ Write-Host ''
 Write-Host '======================================================================'
 if ($Failures.Count -eq 0) {
     Write-Host ' RESULT: PASS'
-    Write-Host ' All seven strings are absent from the shipping build; the five of the `testing`'
+    Write-Host ' All the strings are absent from the shipping build; those of the `testing`'
     Write-Host ' feature are present in the build with it, the sixth and the seventh are present in'
     Write-Host ' the build with debug assertions on, and the dependency sets agree.'
     Write-Host '======================================================================'

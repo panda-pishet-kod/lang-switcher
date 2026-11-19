@@ -116,26 +116,63 @@ impl Content for About {
 }
 
 /// The entry of the probe, testing build only: `LangSwitcher.exe --ui-probe-about` opens the window
-/// in the language of the interface and runs until it is closed. With `LANGSW_TESTING_UI_PROBE`
-/// naming a file it writes there how long the first frame took, in milliseconds.
+/// in the language of the interface and runs until it is closed. For the instruments of the stand:
+///
+/// * `LANGSW_TESTING_UI_PROBE` — a file: the wall clock of the first finished frame,
+///   `first_frame_unix_ms`, and of the window's end, `closed_unix_ms` (the stand compares them
+///   with the moment it gave the command);
+/// * `LANGSW_TESTING_UI_PROBE_WAIT_MS` — the process waits so long before it asks for the window,
+///   so that its memory before the window can be read; `asked_unix_ms` is the moment it asks;
+/// * `LANGSW_TESTING_UI_PROBE_CLOSE_MS` — the window closes itself after so many milliseconds;
+/// * `LANGSW_TESTING_UI_PROBE_LINGER_MS` — the process stays so long after the window is gone, so
+///   that its memory after closing can be read.
 #[cfg(feature = "testing")]
 pub fn probe_main() -> std::process::ExitCode {
+    use ::windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetMessageW, IsWindow, MSG, TranslateMessage,
+        DispatchMessageW, GetMessageW, IsWindow, MSG, PostMessageW, TranslateMessage, WM_CLOSE,
     };
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    let started = std::time::Instant::now();
+    let now = || {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis())
+    };
+    let millis = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_millis)
+    };
+    let report = std::env::var_os("LANGSW_TESTING_UI_PROBE");
+    let mut lines = String::new();
+
     let about = About {
         language: settings::ui_language(),
         key: "Pause".to_owned(),
         theme: ThemeSetting::System,
     };
+    if let Some(wait) = millis("LANGSW_TESTING_UI_PROBE_WAIT_MS") {
+        std::thread::sleep(wait);
+    }
+    lines.push_str(&format!("asked_unix_ms={}\r\n", now()));
     let Ok(window) = crate::ui::host::open(about, None) else {
         return std::process::ExitCode::FAILURE;
     };
-    let first_frame = started.elapsed().as_millis();
-    if let Some(path) = std::env::var_os("LANGSW_TESTING_UI_PROBE") {
-        let _ = std::fs::write(path, format!("first_frame_ms={first_frame}\n"));
+    lines.push_str(&format!("first_frame_unix_ms={}\r\n", now()));
+    if let Some(path) = &report {
+        let _ = std::fs::write(path, &lines);
+    }
+
+    if let Some(after) = millis("LANGSW_TESTING_UI_PROBE_CLOSE_MS") {
+        let raw = window.0 as usize;
+        std::thread::spawn(move || {
+            std::thread::sleep(after);
+            // SAFETY: a posted message to the probe's window; a window already gone ignores it.
+            let _ =
+                unsafe { PostMessageW(Some(HWND(raw as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+        });
     }
 
     let mut message = MSG::default();
@@ -148,6 +185,14 @@ pub fn probe_main() -> std::process::ExitCode {
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+    }
+
+    lines.push_str(&format!("closed_unix_ms={}\r\n", now()));
+    if let Some(path) = &report {
+        let _ = std::fs::write(path, &lines);
+    }
+    if let Some(linger) = millis("LANGSW_TESTING_UI_PROBE_LINGER_MS") {
+        std::thread::sleep(linger);
     }
     std::process::ExitCode::SUCCESS
 }
