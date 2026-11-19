@@ -626,3 +626,114 @@ fn the_name_of_the_indicator_finds_the_layout_of_its_language() {
         "another icon"
     );
 }
+
+/// **The flag itself is never taken for the input indicator** (task T-119-3). Since T-119-2 the
+/// tooltip of the flag — the name of its button on the taskbar of Windows 11 — begins with the
+/// language of the layout, «Русский (Россия)», and every button of the tray there has the same
+/// automation id: on a Windows whose interface speaks the program's language the search for the
+/// indicator would find the flag first (it stands left of РУС/ENG) — the console would read the
+/// flag's own layout back, and a click on the flag would press the flag again.
+#[test]
+fn the_flag_is_not_taken_for_the_indicator() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let names = |layout: LayoutId| -> Option<String> {
+        Some(match layout.language_id() {
+            0x0409 => "Английский".to_owned(),
+            0x0419 => "Русский".to_owned(),
+            _ => return None,
+        })
+    };
+    let session = [us, ru];
+
+    assert_eq!(
+        flags::layout_named_in(
+            "Русский (Россия)\nLang Switcher — работает",
+            &session,
+            names
+        ),
+        None,
+        "the flag's own tooltip, whatever language it opens with"
+    );
+}
+
+/// **After a list the program opened has closed — what to give the window** (task T-119-3,
+/// решение 208.164): the layout chosen in the list, only where it did not arrive by itself.
+/// Edge does not get a layout chosen in a list the program opened (0 of 20 on each Windows);
+/// Блокнот and cmd do (20 of 20) — there nothing is switched a second time, nothing sounds.
+#[test]
+fn the_window_gets_the_chosen_layout_only_where_it_did_not_arrive() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let none = LayoutId::from_raw(0);
+
+    assert_eq!(
+        flags::layout_to_give(us, ru, ru, false),
+        None,
+        "arrived by itself (Блокнот)"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, us, false),
+        Some(ru),
+        "did not arrive (Edge): the program's own switch"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, us, us, false),
+        None,
+        "Esc, a click aside, the same row: nothing was chosen"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, us, true),
+        None,
+        "a console — the reading is blind, and the choice arrives there by itself"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, none, us, false),
+        None,
+        "the choice could not be read: nothing is guessed"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, none, false),
+        None,
+        "the window could not be read: nothing is guessed"
+    );
+}
+
+/// **The window the focus goes back to is the person's, never a part of the shell** (task
+/// T-119-3): a click on the flag puts the taskbar in front, and the list itself is a window of
+/// explorer — neither is where the person was typing.
+#[test]
+fn the_shell_is_not_the_window_the_person_typed_in() {
+    for shell in [
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "NotifyIconOverflowWindow",
+        "TopLevelWindowForOverflowXamlIsland",
+        "Shell_InputSwitchTopLevelWindow",
+        "Shell_InputSwitchDismissOverlay",
+        "Xaml_WindowedPopupClass",
+        "Windows.UI.Core.CoreWindow",
+        "#32768",
+        "Progman",
+        "WorkerW",
+    ] {
+        assert!(flags::is_shell_window_class(shell), "{shell} is the shell");
+    }
+
+    for person in [
+        "Notepad",
+        "Chrome_WidgetWin_1",
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "#32770",
+    ] {
+        assert!(
+            !flags::is_shell_window_class(person),
+            "{person} is a window a person types in"
+        );
+    }
+}

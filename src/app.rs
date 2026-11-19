@@ -3946,6 +3946,14 @@ unsafe extern "system" fn window_proc(
                 return LRESULT(0);
             }
 
+            // FR-90б, task T-119-3: a click on the flag — the UI thread asks for the input indicator
+            // of Windows 11 to be pressed; UI Automation is this thread's (its STA). The watcher
+            // window only (SEC-05); the message carries nothing.
+            if message == crate::flags::WM_APP_LIST_OPEN && is_watcher_window(hwnd) {
+                crate::flags::answer_list_open();
+                return LRESULT(0);
+            }
+
             if message == crate::watchdog::WM_APP_RECHECK_FOREGROUND && is_watcher_window(hwnd) {
                 crate::watchdog::arm_foreground_recheck();
 

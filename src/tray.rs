@@ -443,6 +443,9 @@ pub enum Reaction {
     /// a message loop that comes back into this module, and it must therefore not be opened
     /// while the tray is borrowed.
     ShowSettings,
+    /// Handled, except that the list of layouts has to be opened — task T-119-3: a left click on
+    /// the icon while it is the flag of FR-90б. Outside the borrow: the press reaches into explorer.
+    OpenList,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -679,6 +682,24 @@ pub struct Tray {
     /// What this tray last published to [`crate::flags::set_on`] — published only when it changes,
     /// so a tray with the flag off never writes the switch at all (it starts off).
     flag_published: bool,
+    /// The last window in front that is not a part of the shell, as the re-reading of the flag saw
+    /// it — where the focus goes back after a list opened by a click on the flag (task T-119-3). A
+    /// value, compared and handed to `SetForegroundWindow`, never dereferenced; 0 = none yet.
+    last_person: usize,
+    /// The list of layouts the program opened by a click on the flag, until it is finished — task
+    /// T-119-3. `None`: no list of the program's own; a list the person opened is not touched.
+    list_session: Option<ListSession>,
+}
+
+/// A list of layouts opened by a click on the flag — task T-119-3, решение 208.164.
+#[derive(Clone, Copy, Debug)]
+struct ListSession {
+    /// The window the person typed in before the click — [`Tray::last_person`] at that moment.
+    target: usize,
+    /// The layout the flag showed at the click.
+    before: LayoutId,
+    /// The layout read of the shell after the list closed — what the person chose.
+    chosen: LayoutId,
 }
 
 /// What the flag of FR-90б shows and the icon drawn for it — task T-119-2.
@@ -818,6 +839,8 @@ impl Tray {
             flag: None,
             list_watch: None,
             flag_published: false,
+            last_person: 0,
+            list_session: None,
         };
 
         tray.add_icon();
@@ -878,6 +901,14 @@ impl Tray {
     /// layout last known: the flag does not go blank between two windows.
     pub fn refresh_flag(&mut self) {
         let reading = crate::switch::read();
+
+        // Task T-119-3: the window the focus goes back to after a list opened by a click on the
+        // flag — the last one in front that is not a part of the shell. The click itself puts the
+        // taskbar in front, and its re-reading must not take the person's window's place.
+        if !reading.window.is_none() && !is_shell_window(reading.window.raw()) {
+            self.last_person = reading.window.raw();
+        }
+
         let layout = if reading.blind {
             // A classic console (FR-52): the layout the watcher found by the name of the input
             // indicator, when it has just found one (task T-119-4), else the layout last known.
@@ -1210,6 +1241,12 @@ impl Tray {
             // middle of the screen, or past its edge, while the program pulled itself to the
             // front to do it. It is [`menu_point`] that takes the point back onto the desktop;
             // whose point it is at all is settled a moment later, in [`show_menu`].
+            //
+            // ⭐ **Task T-119-3, решение 208.88: the flag answers a left click as РУС/ENG does** —
+            // with the list of layouts of Windows. Only the mouse's `NIN_SELECT` and only while the
+            // icon is the flag; Enter and Space (`NIN_KEYSELECT`), the right click, the menu key and
+            // Shift+F10 keep the menu, and so does the left click with the flag off (1.6.1).
+            NIN_SELECT if self.flag_on() => Reaction::OpenList,
             notification @ (WM_CONTEXTMENU | NIN_SELECT | NIN_KEYSELECT) => {
                 let (x, y) = menu_point((
                     coordinate(low_word(wparam.0)),
@@ -2401,6 +2438,24 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
         return Some(LRESULT(0));
     }
 
+    // FR-90б, task T-119-3: a list of layouts opened by a click on the flag — its close, the missing
+    // indicator, and the three one-shot timers of `flags::LIST_TIMERS`. Outside the borrow: the
+    // finish reads the layout and may switch it. SEC-05: the messages carry nothing.
+    if message == crate::flags::WM_APP_LIST_CLOSED {
+        list_closed();
+        return Some(LRESULT(0));
+    }
+
+    if message == crate::flags::WM_APP_LIST_MISSING {
+        list_missing();
+        return Some(LRESULT(0));
+    }
+
+    if message == WM_TIMER && crate::flags::LIST_TIMERS.contains(&wparam.0) {
+        list_timer(wparam.0);
+        return Some(LRESULT(0));
+    }
+
     if message == WM_TIMER && crate::flags::REREAD_TIMERS.contains(&wparam.0) {
         if let Some(hwnd) = with_tray(|tray| tray.hwnd) {
             // SAFETY: the timer of this window this very message names; one-shot by this kill.
@@ -2466,7 +2521,184 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
             dispatch_command(hwnd, CMD_SETTINGS);
             Some(LRESULT(0))
         }
+        // Task T-119-3. Outside the borrow: the press reaches into explorer.
+        Reaction::OpenList => {
+            open_list();
+            Some(LRESULT(0))
+        }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164
+// ---------------------------------------------------------------------------------------
+
+/// Whether the window a handle names is a part of the shell — the class through
+/// [`crate::flags::is_shell_window_class`].
+fn is_shell_window(raw: usize) -> bool {
+    let mut name = [0u16; 64];
+
+    // SAFETY: a window handle by value (a stale one answers 0) and a local buffer whose length is
+    // passed.
+    let len = unsafe { GetClassNameW(HWND(raw as *mut core::ffi::c_void), &mut name) };
+    let len = usize::try_from(len).unwrap_or(0).min(name.len());
+
+    crate::flags::is_shell_window_class(&String::from_utf16_lossy(&name[..len]))
+}
+
+/// Starts or replaces one of the one-shot timers of [`crate::flags::LIST_TIMERS`].
+fn arm_list_timer(hwnd: HWND, which: usize) {
+    // SAFETY: the live UI window and an identifier of this module; a timer that exists is
+    // replaced, which is what a second close within the delay wants.
+    let _ = unsafe {
+        SetTimer(
+            Some(hwnd),
+            crate::flags::LIST_TIMERS[which],
+            crate::flags::LIST_MS[which],
+            None,
+        )
+    };
+}
+
+/// A left click on the flag: the list of layouts of Windows — решение 208.88, «как если бы нажали по
+/// стандартному значку rus/eng». Windows 10 — `WM_LBUTTONDOWN`/`UP` posted to `InputIndicatorButton`
+/// on this thread (решение 208.123); Windows 11 — UI Automation `Invoke` on the watcher thread. The
+/// session remembers the window the person typed in and the layout the flag showed; whether the list
+/// opened at all is looked at once, 1.5 s after the press.
+fn open_list() {
+    let Some(hwnd) = with_tray(|tray| {
+        if !tray.flag_on() {
+            return None;
+        }
+
+        tray.list_session = Some(ListSession {
+            target: tray.last_person,
+            before: tray.flag_layout().unwrap_or_default(),
+            chosen: LayoutId::default(),
+        });
+
+        Some(tray.hwnd)
+    })
+    .flatten() else {
+        return;
+    };
+
+    if !crate::flags::press_indicator_button()
+        && !app::post_to_watcher_thread(crate::flags::WM_APP_LIST_OPEN)
+    {
+        list_missing();
+        return;
+    }
+
+    arm_list_timer(hwnd, 0);
+}
+
+/// No list of Windows to open — РУС/ENG is hidden at the clock (the watcher found no indicator, or
+/// the list did not come up within the look of [`crate::flags::LIST_MS`]). The session is dropped.
+fn list_missing() {
+    with_tray(|tray| tray.list_session = None);
+}
+
+/// The list closed (`flags::ListWatch`). For a list of the program's own the choice is read 60 ms
+/// later; a list the person opened at the clock has no session and is left alone.
+fn list_closed() {
+    let Some(hwnd) = with_tray(|tray| tray.list_session.is_some().then_some(tray.hwnd)).flatten()
+    else {
+        return;
+    };
+
+    // SAFETY: the timer of this window; a missing one is no error worth a word.
+    let _ = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), crate::flags::LIST_TIMERS[0])
+    };
+
+    arm_list_timer(hwnd, 1);
+}
+
+/// The layout of the taskbar's thread — what the person chose in a list the program opened: the
+/// click on the flag put the taskbar in front, and the choice lands on its thread (T-119-1).
+fn shell_layout() -> LayoutId {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowThreadProcessId};
+
+    // SAFETY: a constant class name; a null answer is checked.
+    let Ok(taskbar) = (unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }) else {
+        return LayoutId::default();
+    };
+
+    // SAFETY: a live window handle by value; no process id asked for.
+    let thread = unsafe { GetWindowThreadProcessId(taskbar, None) };
+
+    if thread == 0 {
+        return LayoutId::default();
+    }
+
+    // SAFETY: reads the layout of a thread by its identifier.
+    LayoutId::from_raw(unsafe { GetKeyboardLayout(thread) }.0 as usize)
+}
+
+/// One of the one-shot timers of a list the program opened.
+///
+/// - **0, the look (1.5 s after the press):** no list on the screen and none closed meanwhile — the
+///   indicator is hidden or did not answer; the session is dropped.
+/// - **1, the choice (60 ms after the close):** the layout of the shell's thread is what was chosen;
+///   the focus goes back to the person's window (`SetForegroundWindow`, no F24 — T-119-1, 60 of 60).
+/// - **2, the look at the window (120 ms later):** where the choice did not arrive by itself (Edge),
+///   the program's own switch of FR-50 gives it — [`crate::flags::layout_to_give`]; then the flag
+///   reads the layout and the session ends.
+fn list_timer(timer: usize) {
+    let Some((hwnd, session)) =
+        with_tray(|tray| tray.list_session.map(|s| (tray.hwnd, s))).flatten()
+    else {
+        return;
+    };
+
+    // SAFETY: the timer of this window this very message names; one-shot by this kill.
+    let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), timer) };
+
+    if timer == crate::flags::LIST_TIMERS[0] {
+        if !crate::flags::list_is_open() {
+            list_missing();
+        }
+
+        return;
+    }
+
+    if timer == crate::flags::LIST_TIMERS[1] {
+        let chosen = shell_layout();
+
+        with_tray(|tray| {
+            if let Some(open) = tray.list_session.as_mut() {
+                open.chosen = chosen;
+            }
+        });
+
+        if session.target != 0 {
+            // SAFETY: a window handle by value; a stale one is refused by the system, not misused.
+            let _ = unsafe { SetForegroundWindow(HWND(session.target as *mut core::ffi::c_void)) };
+        }
+
+        arm_list_timer(hwnd, 2);
+        return;
+    }
+
+    with_tray(|tray| tray.list_session = None);
+
+    let reading = crate::switch::read();
+
+    if reading.window.raw() == session.target
+        && let Some(layout) = crate::flags::layout_to_give(
+            session.before,
+            session.chosen,
+            reading.layout,
+            reading.blind,
+        )
+    {
+        // FR-50, the program's own switch — no sound: the person chose, the program completes.
+        let _ = crate::switch::to(layout);
+    }
+
+    refresh_flag();
 }
 
 // ---------------------------------------------------------------------------------------

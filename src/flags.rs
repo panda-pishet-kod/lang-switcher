@@ -1898,8 +1898,9 @@ impl Drop for ListWatch {
     }
 }
 
-/// The callback of [`ListWatch`]: the list closed → [`WM_APP_FLAG_LATER`]. Nothing here can panic,
-/// allocate or block; the class name is read into a stack buffer.
+/// The callback of [`ListWatch`]: the list closed → [`WM_APP_FLAG_LATER`] and
+/// [`WM_APP_LIST_CLOSED`]. Nothing here can panic or block; the class name is read into a stack
+/// buffer.
 unsafe extern "system" fn list_event_proc(
     _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
     event: u32,
@@ -1923,6 +1924,9 @@ unsafe extern "system" fn list_event_proc(
 
     if closes_the_list(event, object_id, child_id, &class) {
         let _ = crate::app::post_to_ui_thread(WM_APP_FLAG_LATER);
+        // Task T-119-3: a list the program opened itself is finished by the UI thread; a list the
+        // person opened at the clock is not the program's — the UI thread drops this then.
+        let _ = crate::app::post_to_ui_thread(WM_APP_LIST_CLOSED);
     }
 }
 
@@ -1950,11 +1954,21 @@ pub fn take_console_layout() -> Option<LayoutId> {
 /// language, not the layout (PROBE Э119-П2, Б), so two layouts of one language are not told apart
 /// and the first stands for both. `language_of` gives the language of a layout in the words of
 /// Windows' interface — the words the indicator is written in. Pure.
+///
+/// ⚠ **Task T-119-3: a name with the program's own in it is never the indicator.** The tooltip of
+/// the flag — the name of its button on the taskbar of Windows 11, where every button of the tray
+/// has the automation id `SystemTrayIcon` — begins with the language of its layout since T-119-2,
+/// and the flag stands left of РУС/ENG: unanswered, the console would read the flag's own layout
+/// back and a click on the flag would press the flag.
 pub fn layout_named_in(
     name: &str,
     session: &[LayoutId],
     language_of: impl Fn(LayoutId) -> Option<String>,
 ) -> Option<LayoutId> {
+    if name.contains(crate::APP_NAME) {
+        return None;
+    }
+
     session.iter().copied().find(|layout| {
         language_of(*layout)
             .is_some_and(|language| !language.is_empty() && name.contains(&language))
@@ -2019,25 +2033,9 @@ pub(crate) fn answer_console() {
 /// automation id `SystemTrayIcon` whose name names a language of the session (every icon of the tray
 /// has that id; the name is the only sign — decision 208.113 п. 3, ⚠ Russian Windows 11 not measured).
 fn indicator_name() -> Option<String> {
-    use windows::Win32::UI::Accessibility::TreeScope_Descendants;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW};
-    use windows::core::w;
-
     let client = crate::guard::automation_client()?;
 
-    // SAFETY: constant class names and window handles by value; a null answer is checked.
-    let taskbar = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.ok()?;
-    let button = unsafe {
-        FindWindowExW(Some(taskbar), None, w!("TrayNotifyWnd"), None)
-            .and_then(|notify| {
-                FindWindowExW(Some(notify), None, w!("TrayInputIndicatorWClass"), None)
-            })
-            .and_then(|indicator| {
-                FindWindowExW(Some(indicator), None, w!("InputIndicatorButton"), None)
-            })
-    };
-
-    if let Ok(button) = button {
+    if let Some(button) = indicator_button() {
         // SAFETY: a live window handle by value; the call crosses into explorer and answers.
         let element = unsafe { client.ElementFromHandle(button) }.ok()?;
         // SAFETY: a live element of this STA.
@@ -2046,8 +2044,51 @@ fn indicator_name() -> Option<String> {
             .map(|name| name.to_string());
     }
 
-    // Windows 11.
-    // SAFETY: as above; the true condition needs no VARIANT (the feature list is closed).
+    let element = indicator_element(&client)?;
+
+    // SAFETY: a live element of this STA.
+    unsafe { element.CurrentName() }
+        .ok()
+        .map(|name| name.to_string())
+}
+
+/// Windows 10: the Win32 button of the input indicator — `InputIndicatorButton` inside
+/// `TrayInputIndicatorWClass` of the taskbar, found by class whatever the language of Windows.
+/// `None` on Windows 11, which has no such window.
+fn indicator_button() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, FindWindowW};
+    use windows::core::w;
+
+    // SAFETY: constant class names and window handles by value; a null answer is checked.
+    let taskbar = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.ok()?;
+
+    // SAFETY: as above.
+    unsafe {
+        FindWindowExW(Some(taskbar), None, w!("TrayNotifyWnd"), None)
+            .and_then(|notify| {
+                FindWindowExW(Some(notify), None, w!("TrayInputIndicatorWClass"), None)
+            })
+            .and_then(|indicator| {
+                FindWindowExW(Some(indicator), None, w!("InputIndicatorButton"), None)
+            })
+    }
+    .ok()
+}
+
+/// Windows 11: the button of the taskbar with the automation id `SystemTrayIcon` whose name names
+/// a language of the session — and not the flag's own ([`layout_named_in`]). On the watcher
+/// thread's STA.
+fn indicator_element(
+    client: &windows::Win32::UI::Accessibility::IUIAutomation,
+) -> Option<windows::Win32::UI::Accessibility::IUIAutomationElement> {
+    use windows::Win32::UI::Accessibility::TreeScope_Descendants;
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    use windows::core::w;
+
+    // SAFETY: a constant class name; a null answer is checked.
+    let taskbar = unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.ok()?;
+    // SAFETY: a live window handle by value; the true condition needs no VARIANT (the feature list
+    // is closed).
     let root = unsafe { client.ElementFromHandle(taskbar) }.ok()?;
     let condition = unsafe { client.CreateTrueCondition() }.ok()?;
     let all = unsafe { root.FindAll(TreeScope_Descendants, &condition) }.ok()?;
@@ -2072,9 +2113,174 @@ fn indicator_name() -> Option<String> {
             .unwrap_or_default();
 
         if layout_named_in(&name, &session, localized_language).is_some() {
-            return Some(name);
+            return Some(element);
         }
     }
 
     None
+}
+
+// -----------------------------------------------------------------------------------------
+// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164
+// -----------------------------------------------------------------------------------------
+
+/// `WM_APP + 28`, posted to the UI window by the callback of [`ListWatch`] beside
+/// [`WM_APP_FLAG_LATER`] when the list of layouts closed. For a list the program opened itself the
+/// UI thread gives the focus back to the window the person typed in and, where the choice did not
+/// reach it, the layout ([`layout_to_give`]). SEC-05: carries nothing.
+pub const WM_APP_LIST_CLOSED: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 28;
+
+/// `WM_APP + 29`, posted by the UI thread to the **watcher** window: press the input indicator of
+/// Windows 11 by UI Automation (its STA, section 6.1). SEC-05: carries nothing; a forged one opens
+/// the list of layouts, which a click on РУС/ENG does anyway.
+pub const WM_APP_LIST_OPEN: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 29;
+
+/// `WM_APP + 30`, posted by the watcher back to the UI window when it found no input indicator to
+/// press — РУС/ENG is hidden at the clock, and there is no list of Windows to open. SEC-05: nothing.
+pub const WM_APP_LIST_MISSING: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 30;
+
+/// The one-shot timers of the UI window for a list opened by a click on the flag: whether it
+/// opened at all (1500 ms after the press), the reading of the choice after it closed (60 ms), the
+/// look at the person's window once the focus went back (120 ms). Identifiers of `tray`'s window,
+/// after [`REREAD_TIMERS`].
+pub const LIST_TIMERS: [usize; 3] = [27, 28, 29];
+
+/// The delays of [`LIST_TIMERS`], in milliseconds.
+pub const LIST_MS: [u32; 3] = [1500, 60, 120];
+
+/// Whether a window of this class is a part of the shell rather than a window a person types in —
+/// the taskbars, the overflow of the tray, the list of layouts and its overlay, the popups of XAML
+/// and of the Start menu, the desktop. A click on the flag puts the taskbar in front, and the focus
+/// goes back to the last window that is **not** one of these. Pure.
+pub fn is_shell_window_class(class: &str) -> bool {
+    matches!(
+        class,
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+            | "Xaml_WindowedPopupClass"
+            | "XamlExplorerHostIslandWindow"
+            | "Windows.UI.Core.CoreWindow"
+            | "Windows.UI.Input.InputSite.WindowClass"
+            | "#32768"
+            | "Progman"
+            | "WorkerW"
+    ) || class == LIST_WINDOW_CLASS
+        || class == LIST_OVERLAY_CLASS
+}
+
+/// What the person's window gets once a list the program opened has closed — решение 208.164: the
+/// layout chosen in the list, and only where it did not arrive by itself. `before` — the layout the
+/// flag showed at the click; `chosen` — what the shell's thread reads after the close; `now` and
+/// `blind` — the reading of the person's window once the focus went back. Edge does not get a layout
+/// chosen in a list the program opened (T-119-1: 0 of 20 on each Windows), Блокнот and cmd do (20
+/// of 20) — there nothing is switched a second time and nothing sounds. Esc, a click aside and the
+/// same row choose nothing; a blind reading (a console) and an unread one decide nothing. Pure.
+pub fn layout_to_give(
+    before: LayoutId,
+    chosen: LayoutId,
+    now: LayoutId,
+    blind: bool,
+) -> Option<LayoutId> {
+    let known = chosen.raw() != 0 && now.raw() != 0 && !blind;
+
+    (known && chosen != before && now != chosen).then_some(chosen)
+}
+
+/// Windows 10: presses the input indicator the way the probe measured 80 of 80 (решение 208.123) —
+/// `WM_LBUTTONDOWN` and `WM_LBUTTONUP` posted to the middle of `InputIndicatorButton`. UI Automation
+/// `Invoke` races the focus there (9 of 31), MSAA needs `VARIANT`, outside the closed feature list.
+/// `false` when there is no such button or it is hidden — Windows 11, or РУС/ENG turned off.
+pub fn press_indicator_button() -> bool {
+    use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, IsWindowVisible, PostMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    };
+
+    let Some(button) = indicator_button() else {
+        return false;
+    };
+
+    // SAFETY: a window handle by value; the answer is a plain BOOL.
+    if !unsafe { IsWindowVisible(button) }.as_bool() {
+        return false;
+    }
+
+    let mut client = RECT::default();
+
+    // SAFETY: a window handle by value and a local rectangle.
+    if unsafe { GetClientRect(button, &mut client) }.is_err() {
+        return false;
+    }
+
+    let x = u16::try_from(client.right.max(0) / 2).unwrap_or(0);
+    let y = u16::try_from(client.bottom.max(0) / 2).unwrap_or(0);
+    let point = LPARAM(isize::try_from((u32::from(y) << 16) | u32::from(x)).unwrap_or(0));
+
+    // SAFETY: posts of the system's own mouse messages to a window by value; they queue and return.
+    let down = unsafe { PostMessageW(Some(button), WM_LBUTTONDOWN, WPARAM(0x0001), point) };
+    // SAFETY: as above.
+    let up = unsafe { PostMessageW(Some(button), WM_LBUTTONUP, WPARAM(0), point) };
+
+    down.is_ok() && up.is_ok()
+}
+
+/// The watcher's answer to [`WM_APP_LIST_OPEN`] — Windows 11: the input indicator pressed by UI
+/// Automation `Invoke` (PROBE Э119-П, every time), or [`WM_APP_LIST_MISSING`] back to the UI thread
+/// when there is no indicator to press. Nothing when the flag went off meanwhile.
+pub(crate) fn answer_list_open() {
+    use windows::Win32::UI::Accessibility::{IUIAutomationInvokePattern, UIA_InvokePatternId};
+
+    if !is_on() {
+        return;
+    }
+
+    let pressed = crate::guard::automation_client()
+        .and_then(|client| indicator_element(&client))
+        .and_then(|element| {
+            // SAFETY: a live element of this STA; the pattern is asked by its own identifier.
+            unsafe {
+                element.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
+            }
+            .ok()
+        })
+        // SAFETY: a live pattern of this STA; the call crosses into explorer and returns.
+        .is_some_and(|invoke| unsafe { invoke.Invoke() }.is_ok());
+
+    if !pressed {
+        let _ = crate::app::post_to_ui_thread(WM_APP_LIST_MISSING);
+    }
+}
+
+/// Whether the list of layouts of Windows is on the screen — a visible, uncloaked window of
+/// [`LIST_WINDOW_CLASS`] (решение 208.123), or on Windows 11 its overlay.
+pub fn list_is_open() -> bool {
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible};
+    use windows::core::w;
+
+    let shown = |window: windows::Win32::Foundation::HWND| {
+        let mut cloaked = 0u32;
+
+        // SAFETY: a window handle by value and a local of the size passed.
+        let read = unsafe {
+            DwmGetWindowAttribute(
+                window,
+                DWMWA_CLOAKED,
+                (&raw mut cloaked).cast(),
+                u32::try_from(size_of::<u32>()).unwrap_or(4),
+            )
+        };
+
+        // SAFETY: a window handle by value.
+        unsafe { IsWindowVisible(window) }.as_bool() && (read.is_err() || cloaked == 0)
+    };
+
+    // SAFETY: constant class names; a null answer is checked.
+    let list = unsafe { FindWindowW(w!("Shell_InputSwitchTopLevelWindow"), None) };
+    // SAFETY: as above.
+    let overlay = unsafe { FindWindowW(w!("Shell_InputSwitchDismissOverlay"), None) };
+
+    list.is_ok_and(shown) || overlay.is_ok_and(shown)
 }
