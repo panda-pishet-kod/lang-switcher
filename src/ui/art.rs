@@ -157,11 +157,23 @@ struct Finished {
 #[derive(Default)]
 pub struct Art {
     finished: Vec<Finished>,
+    /// How many times a picture was drawn into a new bitmap — for the tests that a repeated
+    /// frame copies the finished picture and does not draw it again (T-120-8). Feature
+    /// `testing`, absent from the Release configuration (SEC-04a).
+    #[cfg(feature = "testing")]
+    drawn_afresh: usize,
 }
 
 impl Art {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// How many times this `Art` drew a picture into a new bitmap: once per picture, and again
+    /// only when its size in pixels or its render target changed.
+    #[cfg(feature = "testing")]
+    pub fn drawn_afresh(&self) -> usize {
+        self.drawn_afresh
     }
 
     /// Draws the picture `name` into the circle with this `centre` and `radius`, in the
@@ -187,6 +199,10 @@ impl Art {
             Some(finished) => finished.bitmap.clone(),
             None => {
                 let bitmap = finish(target, drawing, pixels, scale)?;
+                #[cfg(feature = "testing")]
+                {
+                    self.drawn_afresh += 1;
+                }
                 self.finished.retain(|finished| finished.name != name);
                 self.finished.push(Finished {
                     name,
