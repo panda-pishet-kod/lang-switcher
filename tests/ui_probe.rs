@@ -111,6 +111,12 @@ fn print_the_pictures_of_the_probe() {
     use lang_switcher::ui::elements::{self, Look, State};
     use lang_switcher::ui::layout::window_size;
     use lang_switcher::ui::tokens::Color;
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    // SAFETY: the apartment of this test's thread, for the whole test: `Art` keeps pictures past
+    // each canvas in memory.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut art = lang_switcher::ui::art::Art::new();
 
     let Some(folder) = std::env::var_os("LANGSW_UI_PROBE_DIR") else {
         return;
@@ -147,7 +153,7 @@ fn print_the_pictures_of_the_probe() {
                 };
                 let mut canvas =
                     Canvas::in_memory(size.w, size.h, scale, Mode::Direct2D).expect("a canvas");
-                canvas.frame(|painter| {
+                canvas.frame_with(Some(&mut art), |painter| {
                     painter.clear(Color::Bg.get(theme));
                     for item in &layout.items {
                         elements::draw(painter, &look, &item.part, item.rect, State::NORMAL);
