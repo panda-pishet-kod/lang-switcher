@@ -488,6 +488,14 @@ fn an_unknown_name_is_an_error() {
         assert!(art.draw(target, "nobody", (5.0, 5.0), 5.0).is_err());
     });
     assert_eq!(art::names().count(), 8);
+    assert_eq!(art::icon_names().count(), 10);
+    assert!(art::names().all(|name| !name.contains('/')));
+    canvas.frame(|target| {
+        assert!(art::draw_icon(target, "nobody", Rgb::from_hex(0), (0.0, 0.0), 10.0).is_err());
+        assert!(art::draw_icon(target, "hello", Rgb::from_hex(0), (0.0, 0.0), 10.0).is_err());
+        let mut art = Art::new();
+        assert!(art.draw(target, "icons/mail", (5.0, 5.0), 5.0).is_err());
+    });
 }
 
 #[test]
@@ -507,4 +515,68 @@ fn a_stroke_by_parameter_takes_the_colour_it_is_given() {
         "BGRA in the middle of the line"
     );
     assert_eq!(pixels[3], 0, "the corner stays empty");
+}
+
+// ---- the menu icons (part C) ----
+
+/// An icon drawn by `art::draw_icon` in black — the colour a browser gives `currentColor` in a
+/// picture of its own — into a canvas of `size` pixels at 96 dpi, filling it.
+fn icon(name: &str, size: u32) -> Canvas {
+    let canvas = Canvas::new(size, 96.0);
+    canvas.frame(|target| {
+        art::draw_icon(target, name, Rgb::from_hex(0), (0.0, 0.0), size as f32).expect("the icon")
+    });
+    canvas
+}
+
+#[test]
+fn every_icon_matches_the_browser() {
+    let Some(folder) = reference_folder() else {
+        return;
+    };
+    let folder = folder.join("icons");
+    let mut failed = Vec::new();
+    for name in art::icon_names() {
+        for size in [18, 36] {
+            let canvas = icon(name, size);
+            canvas.save(&format!("icon-{name}-{size}"));
+            let apart = difference(
+                &canvas.pixels(),
+                &reference(&folder, name, size),
+                size,
+                None,
+            );
+            println!(
+                "icons/{name}-{size}: mean {:.3}, far {:.4} %",
+                apart.mean,
+                apart.far_share * 100.0
+            );
+            if !apart.within_limits() {
+                failed.push(format!("icons/{name}-{size}: {apart:?}"));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "past the limits: {failed:#?}");
+}
+
+#[test]
+fn the_line_of_an_icon_is_1_2_points_at_18() {
+    // `stroke-width="1.6"` in the frame of 24 is 1.2 points in an icon of 18 (T-120-12, part C,
+    // item 3). Measured across the bottom bar of `down`, `M5 19h14`: the sum of the coverage
+    // down one column that crosses the bar and nothing else is the width of the line.
+    for (size, width, tolerance) in [(18_u32, 1.2_f32, 0.1_f32), (36, 2.4, 0.2)] {
+        let canvas = icon("down", size);
+        let pixels = canvas.pixels();
+        let k = size as f32 / 24.0;
+        let column = (8.0 * k) as u32;
+        let rows = ((17.0 * k) as u32)..((21.0 * k).ceil() as u32);
+        let measured: f32 = rows
+            .map(|row| f32::from(pixels[((row * size + column) * 4 + 3) as usize]) / 255.0)
+            .sum();
+        println!("down-{size}: the line is {measured:.3} points");
+        assert!(
+            (measured - width).abs() <= tolerance,
+            "at {size}: the line is {measured:.3} points, not {width} ± {tolerance}"
+        );
+    }
 }

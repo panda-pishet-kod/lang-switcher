@@ -15,8 +15,26 @@ mod built {
     include!(concat!(env!("OUT_DIR"), "/art.rs"));
 }
 
-const NAMES: [&str; 8] = [
-    "about", "avatar", "hello", "news", "settings", "thanks", "update", "wizard",
+/// The eight pictures of 1.8.0 and the ten menu icons of part C, in the order of their names.
+const NAMES: [&str; 18] = [
+    "about",
+    "avatar",
+    "hello",
+    "icons/boot",
+    "icons/down",
+    "icons/exit",
+    "icons/gear",
+    "icons/info",
+    "icons/mail",
+    "icons/pause",
+    "icons/pen",
+    "icons/play",
+    "icons/star",
+    "news",
+    "settings",
+    "thanks",
+    "update",
+    "wizard",
 ];
 
 fn read(name: &str) -> svg::Drawing {

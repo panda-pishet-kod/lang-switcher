@@ -214,16 +214,89 @@ fn path_arc_flags_and_zero_radius() {
     );
 }
 
+// ---- the commands of the menu icons (part C) ----
+
+#[test]
+fn path_l_relative() {
+    assert_eq!(
+        path("M1 2l3 4"),
+        [Segment::Move(p(1.0, 2.0)), Segment::Line(p(4.0, 6.0))]
+    );
+}
+
+#[test]
+fn path_h_relative() {
+    assert_eq!(
+        path("M5 19h14"),
+        [Segment::Move(p(5.0, 19.0)), Segment::Line(p(19.0, 19.0))]
+    );
+}
+
+#[test]
+fn path_z_lowercase_closes_like_z() {
+    assert_eq!(
+        path("M8 5.5v13l10.5-6.5z"),
+        [
+            Segment::Move(p(8.0, 5.5)),
+            Segment::Line(p(8.0, 18.5)),
+            Segment::Line(p(18.5, 12.0)),
+            Segment::Close
+        ]
+    );
+    // After z the pen is back at the start, as after Z.
+    assert_eq!(
+        path("M1 1h4zv2"),
+        [
+            Segment::Move(p(1.0, 1.0)),
+            Segment::Line(p(5.0, 1.0)),
+            Segment::Close,
+            Segment::Move(p(1.0, 1.0)),
+            Segment::Line(p(1.0, 3.0))
+        ]
+    );
+}
+
+#[test]
+fn path_repeated_pairs_of_l_and_cap_l_are_more_lines() {
+    // The envelope of the mail icon: one `l`, two segments, each from the end of the last.
+    assert_eq!(
+        path("M4 7l8 6 8-6"),
+        [
+            Segment::Move(p(4.0, 7.0)),
+            Segment::Line(p(12.0, 13.0)),
+            Segment::Line(p(20.0, 7.0))
+        ]
+    );
+    assert_eq!(
+        path("M0 0L1 2 3 4 5 6"),
+        [
+            Segment::Move(p(0.0, 0.0)),
+            Segment::Line(p(1.0, 2.0)),
+            Segment::Line(p(3.0, 4.0)),
+            Segment::Line(p(5.0, 6.0))
+        ]
+    );
+}
+
 #[test]
 fn path_refuses_what_is_outside_the_subset() {
     for (d, named) in [
         ("m1 1", "'m'"),
-        ("M1 1l2 2", "'l'"),
+        ("M1 1m2 2", "'m'"),
         ("M1 1S1 2 3 4", "'S'"),
         ("M1 1A1 1 0 0 1 2 2", "'A'"),
+        ("M1 1s1 2 3 4", "'s'"),
+        // A command repeated without its letter: only a line may (part C).
         ("M1 1 2 2", "M"),
+        ("M1 1H2 3", "H"),
+        ("M1 1h2 3", "h"),
+        ("M1 1v2 3", "v"),
+        ("M0 0c1 1 2 2 3 3 4 4 5 5 6 6", "c"),
+        ("M0 0q1 1 2 2 3 3 4 4", "q"),
+        ("M0 0a1 1 0 0 1 2 2 1 1 0 0 1 3 3", "a"),
         ("L1 1", "M"),
         ("M1 1L2", "L"),
+        ("M1 1l2 3 4", "l"),
         ("M0 0a1 1 0 2 1 2 2", "flag"),
     ] {
         match svg::path(d) {

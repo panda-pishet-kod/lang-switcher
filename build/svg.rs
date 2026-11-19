@@ -264,6 +264,18 @@ impl<'a> Scan<'a> {
         Ok(out)
     }
 
+    /// Whether a number follows: the same command again without its letter.
+    fn repeats(&self) -> bool {
+        let mut probe = Scan {
+            text: self.text,
+            at: self.at,
+        };
+        probe.skip_separator();
+        probe
+            .peek()
+            .is_some_and(|byte| byte == b'-' || byte == b'.' || byte.is_ascii_digit())
+    }
+
     /// An arc flag: one character, `0` or `1`.
     fn flag(&mut self, command: char) -> Result<bool, String> {
         self.skip_separator();
@@ -306,7 +318,10 @@ fn number(key: &str, value: &str) -> Result<f64, String> {
 // ---- path ----
 
 /// The path data of a `d` attribute, every point made absolute and `H`, `V` turned into lines.
-/// The commands are those of the drawings: `M L H V C Q Z` and the relative `a c q v`.
+/// The commands are those of the drawings: `M L H V C Q Z` and the relative `a c q v`, and those
+/// the menu icons add (part C, the word of the author of the task): the relative `l h z` and more
+/// pairs after `L` or `l` without the letter again — further lines. Any other command repeated
+/// without its letter stops the build.
 pub fn path(d: &str) -> Result<Vec<Segment>, String> {
     let mut scan = Scan::new(d);
     let mut out = Vec::new();
@@ -343,8 +358,25 @@ pub fn path(d: &str) -> Result<Vec<Segment>, String> {
                 (start_x, start_y) = (x, y);
                 out.push(Segment::Move(point(x, y)));
             }
-            'L' => {
-                [x, y] = scan.args(command, true)?;
+            'L' | 'l' => {
+                let mut after_letter = true;
+                loop {
+                    let [nx, ny] = scan.args(command, after_letter)?;
+                    (x, y) = if command == 'l' {
+                        (x + nx, y + ny)
+                    } else {
+                        (nx, ny)
+                    };
+                    out.push(Segment::Line(point(x, y)));
+                    after_letter = false;
+                    if !scan.repeats() {
+                        break;
+                    }
+                }
+            }
+            'h' => {
+                let [dx] = scan.args(command, true)?;
+                x += dx;
                 out.push(Segment::Line(point(x, y)));
             }
             'H' => {
@@ -407,7 +439,7 @@ pub fn path(d: &str) -> Result<Vec<Segment>, String> {
                     }
                 });
             }
-            'Z' => {
+            'Z' | 'z' => {
                 out.push(Segment::Close);
                 (x, y) = (start_x, start_y);
                 open = false;
