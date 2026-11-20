@@ -9081,11 +9081,13 @@ fn all_our_drawing_goes_by_the_step() {
     // know the very box of the hotkey field the background drew, and repaints only that.
     //
     // FR-92а: four of the 28 were the drawing of the old «О программе», which went to the shell;
-    // T-120-16: two more were the drawing of the old letters, which went too. 22 are left.
+    // T-120-16: two more were the drawing of the old letters, which went too.
+    // T-120-17: two more were the logo and the name «Lang Switcher» of the old «От автора», which
+    // went with it into the shell. 20 are left.
     assert_eq!(
         calls,
-        22 + 1 + 1 + 1,
-        "the 22 places of П4 left, the definition, the buffer's carry and the box of T-118-1"
+        20 + 1 + 1 + 1,
+        "the 20 places of П4 left, the definition, the buffer's carry and the box of T-118-1"
     );
 
     // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
@@ -9117,8 +9119,8 @@ fn all_our_drawing_goes_by_the_step() {
         .sum();
     assert_eq!(
         caught,
-        22 + 1 + 1,
-        "the text of e82 must be caught at all 22 places left, at the buffer's carry and at the \
+        20 + 1 + 1,
+        "the text of e82 must be caught at all 20 places left, at the buffer's carry and at the \
          box of T-118-1"
     );
 
