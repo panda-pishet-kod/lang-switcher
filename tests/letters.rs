@@ -5191,7 +5191,7 @@ fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() 
         .join("src")
         .join("tray.rs");
     let tray = std::fs::read_to_string(&tray_path)
-        .expect("src\tray.rs must be readable")
+        .expect(r"src\tray.rs must be readable")
         .replace("\r\n", "\n");
 
     assert!(

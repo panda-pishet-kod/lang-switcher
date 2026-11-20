@@ -1997,6 +1997,46 @@ fn chevron_rect_10() -> Option<RECT> {
     Some(rect)
 }
 
+/// ⭐ **`ExecutablePath` of `NotifyIconSettings` as a path of this machine** — defect 2 of the stand
+/// (2026-11-20): Windows 11 writes the head of the path as a known folder,
+/// `{6D809377-6AF0-444B-8957-A3773F02200E}\Lang_Switcher\LangSwitcher.exe` for Program Files, and the
+/// path compared letter for letter found no key — the hint of the flag never came. The head is opened
+/// by `SHGetKnownFolderPath`; a path without such a head is the path, and a folder the system does not
+/// know leaves it as written (it then matches nothing).
+pub fn executable_path_of(written: &str) -> String {
+    let written = written.trim_end_matches('\0');
+
+    let Some((id, tail)) = written
+        .strip_prefix('{')
+        .and_then(|rest| rest.split_once('}'))
+    else {
+        return written.to_owned();
+    };
+
+    let Ok(id) = windows::core::GUID::try_from(id) else {
+        return written.to_owned();
+    };
+
+    known_folder(&id).map_or_else(|| written.to_owned(), |head| format!("{head}{tail}"))
+}
+
+/// A known folder of the shell, by its GUID — `None` for one the system does not know.
+fn known_folder(id: &windows::core::GUID) -> Option<String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+
+    // SAFETY: `id` is a GUID of the caller's; no token means «this process's».
+    let path = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None) }.ok()?;
+
+    // SAFETY: the call answered a NUL-terminated string it allocated; read once, freed once below.
+    let text = unsafe { path.to_string() }.ok();
+
+    // SAFETY: frees exactly the string the call allocated, once.
+    unsafe { CoTaskMemFree(Some(path.0.cast())) };
+
+    text
+}
+
 /// Windows 11: `IsPromoted` of this program's key under `HKCU\Control Panel\NotifyIconSettings`;
 /// `None` when the keys are not there (Windows 10) or none is this program's.
 fn promoted_in_settings() -> Option<bool> {
@@ -2078,7 +2118,7 @@ fn promoted_in_settings() -> Option<bool> {
         let units = usize::try_from(bytes).unwrap_or(0) / 2;
         let text = String::from_utf16_lossy(&path[..units.min(path.len())]);
 
-        if text.trim_end_matches('\0').to_lowercase() != me {
+        if executable_path_of(&text).to_lowercase() != me {
             continue;
         }
 

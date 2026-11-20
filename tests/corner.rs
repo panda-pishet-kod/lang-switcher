@@ -296,3 +296,37 @@ fn a_second_start_before_the_first_tick_owes_no_second_window() {
 
     assert!(!corner::owe_release_window(&mut off, build));
 }
+
+/// ⭐ **The path Windows 11 writes in `NotifyIconSettings` is opened before it is compared** — defect 2
+/// of the stand (2026-11-20): the head of `ExecutablePath` is a known folder,
+/// `{6D809377-6AF0-444B-8957-A3773F02200E}` for Program Files, and the path compared letter for letter
+/// found no key, so the hint of the flag (T-119-5) never came.
+#[test]
+fn the_path_of_notify_icon_settings_is_opened_from_its_known_folder() {
+    let program_files = std::env::var("ProgramW6432")
+        .or_else(|_| std::env::var("ProgramFiles"))
+        .expect("Program Files is named in the environment");
+
+    assert_eq!(
+        corner::executable_path_of(
+            r"{6D809377-6AF0-444B-8957-A3773F02200E}\Lang_Switcher\LangSwitcher.exe"
+        )
+        .to_lowercase(),
+        format!(r"{program_files}\Lang_Switcher\LangSwitcher.exe").to_lowercase(),
+        "the head is Program Files, the rest as written"
+    );
+    assert_eq!(
+        corner::executable_path_of("C:\\lab\\ls\\LangSwitcher.exe\0"),
+        r"C:\lab\ls\LangSwitcher.exe",
+        "a path with no folder of its own is the path"
+    );
+    assert_eq!(
+        corner::executable_path_of(r"{00000000-0000-0000-0000-000000000001}\x\LangSwitcher.exe"),
+        r"{00000000-0000-0000-0000-000000000001}\x\LangSwitcher.exe",
+        "a folder the system does not know leaves it as written"
+    );
+    assert_eq!(
+        corner::executable_path_of(r"{not a guid}\LangSwitcher.exe"),
+        r"{not a guid}\LangSwitcher.exe"
+    );
+}
