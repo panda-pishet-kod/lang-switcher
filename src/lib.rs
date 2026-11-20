@@ -13,10 +13,12 @@
 //! exists from the very first task (decision R-11).
 
 pub mod app;
+pub mod appeal;
 pub mod buffer;
 pub mod convert;
 pub mod corner;
 pub mod diag;
+pub mod feed;
 pub mod flags;
 pub mod guard;
 pub mod hook;
@@ -24,6 +26,7 @@ pub mod inject;
 pub mod layouts;
 pub mod letter_stats;
 pub mod letters;
+pub mod links;
 pub mod sandbox;
 pub mod selection;
 pub mod settings;
