@@ -51,6 +51,57 @@ through a seqlock. The feed result goes through a mailbox under a mutex that is 
 path; the message to the UI thread carries no data, so a forged message of the same number only
 makes it look into an empty mailbox (SEC-05). No mutex on the hook path.
 
+## The interface shell (`src/ui`, stage E120)
+
+Since 1.8.0 every window of the program is a window of one shell, drawn by the program itself; the
+dialog templates of `app.rc` are gone. These stay on the older drawing of `theme.rs` and
+`widgets.rs`:
+- the windows "Already running" and "Could not save the journal";
+- the own list of layouts of stage E119.
+
+A window is a value, not code that paints:
+
+1. **The content** ([`src/ui/windows/*.rs`](src/ui/windows/)) implements `host::Content`.
+   `describe()` answers a `scene::Window`: a tree of `scene::Node` (column, pair, field, list,
+   button row…) with identifiers of its own. `event()` takes a `scene::Event` (pressed, toggled,
+   edited, timer…) and answers whether the window stays.
+2. **The layout** ([`src/ui/layout.rs`](src/ui/layout.rs)) places the tree for the window's size
+   and the factor `k` of its language. It answers a flat list of `layout::Part` with rectangles,
+   mirrored as a whole for a language read right to left. When text does not fit, it gives way in
+   the order of passport §3а (`Concession`).
+3. **The elements** ([`src/ui/elements.rs`](src/ui/elements.rs)) draw each part on the canvas
+   ([`src/ui/canvas.rs`](src/ui/canvas.rs)).
+   - The canvas is a Direct2D software target, with GDI as the emergency look.
+   - Text is DirectWrite ([`src/ui/text.rs`](src/ui/text.rs)).
+   - The panda pictures are vector drawings of `res\art`, drawn into a bitmap once per size
+     ([`src/ui/art.rs`](src/ui/art.rs)).
+   - Colours, sizes and roles of type come from [`src/ui/tokens.rs`](src/ui/tokens.rs) only.
+4. **The host** ([`src/ui/host.rs`](src/ui/host.rs)) owns the window: keyboard (Tab order, Esc,
+   Enter), mouse, timers, DPI and theme changes. After an event it asks the content again.
+
+**Text fields** are Windows' own `EDIT` controls inside a frame the shell draws
+([`src/ui/field.rs`](src/ui/field.rs)), so typing, the IME, the clipboard and undo stay the
+system's. A field of code reads in the direction of its own text.
+
+**Fitting.** The factor `k` per language and window class lives in
+[`src/ui/fit.rs`](src/ui/fit.rs). It is printed by the instrument `tests/ui_fit.rs`, which lays out
+every window in every language. Exceptions are recorded in `tests/support/excused.rs`, each with a
+category and a term (decision 208.175).
+
+**Memory.** Direct2D is loaded on first use. Its factory lives while some canvas of the thread
+does. When the last canvas lets it go, the free memory of the heaps goes back to Windows
+(`HeapOptimizeResources`, decision 208.183). The gate is
+`tests/ui_memory.rs::the_memory_does_not_grow_with_every_opening`.
+
+**Guards.** `tests/ui_guard.rs` keeps the layers apart:
+- colours appear only in the tokens;
+- no numbers or Direct2D names in the windows;
+- Direct2D names only in canvas, text and art;
+- no bare `SendMessage`.
+
+`src/sandbox.rs` stops a test build before it writes the real `Run` key or the real
+`%APPDATA%\Lang_Switcher` (decision 208.176).
+
 ## The path of one key press
 
 1. **The callback** ([`hook.rs`](src/hook.rs), `keyboard_hook_proc`) sees every key. The program's
