@@ -1008,7 +1008,7 @@ impl<I: Copy> Placer<'_, I> {
                 value,
                 hint,
                 kind,
-            } => self.field(*id, label, value, hint, *kind, x, y, w),
+            } => self.field(*id, label, value, hint, *kind, x, y, w, slot),
             Node::List {
                 id,
                 rows,
@@ -2394,7 +2394,9 @@ impl<I: Copy> Placer<'_, I> {
         above + field_h
     }
 
-    /// A text field: its label above it, the wrapper one line high or `FIELD_TEXT_LINES` lines.
+    /// A text field: its label above it, the wrapper one line high or `FIELD_TEXT_LINES` lines. In
+    /// a fill (`slot`) a field of many lines takes the whole room, its label above it, as a list does
+    /// (T-120-19, the text of the appeal on the wizard's last step); not less than its lines.
     #[allow(clippy::too_many_arguments)]
     fn field(
         &mut self,
@@ -2406,6 +2408,7 @@ impl<I: Copy> Placer<'_, I> {
         x: f32,
         y: f32,
         w: f32,
+        slot: Option<f32>,
     ) -> f32 {
         let above = if label.is_empty() {
             0.0
@@ -2423,6 +2426,12 @@ impl<I: Copy> Placer<'_, I> {
         let code = kind == FieldKind::Code;
         let role = if code { Role::Code } else { Role::Body };
         let h = self.style(role).line_height() * lines + self.em(pad.v) * 2.0;
+        let h = match slot {
+            Some(slot) if matches!(kind, FieldKind::Text | FieldKind::Code) => {
+                (slot - above).max(h)
+            }
+            _ => h,
+        };
         self.push(
             Part::Input {
                 multiline: matches!(kind, FieldKind::Text | FieldKind::Code),
