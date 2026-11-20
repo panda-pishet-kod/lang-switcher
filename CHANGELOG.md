@@ -32,6 +32,13 @@ page. Dates are the days the releases were published (UTC).
 - The last good news file is kept on disk (`news.toml` beside the settings) and its signature is checked again at
   every start, so a restart on the same day no longer loses that menu entry, the letter or the row until tomorrow.
 
+Known issues:
+
+- Windows 10: after a click on the flag the arrows do not work in the list of layouts of Windows; a choice with the
+  mouse does.
+- When ENG/РУС at the clock is hidden and Lang Switcher shows a list of its own, Microsoft Edge sometimes does not get
+  the chosen layout: Windows counts it as on, and Edge types in the previous one.
+
 ## 1.6.1 — 2026-11-16
 
 *The settings window no longer blinks, «Apply» is grey without changes, and Ctrl+A and Tab work in the wizard.*
