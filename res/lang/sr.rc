@@ -253,6 +253,8 @@ BEGIN
     IDS_WIZARD_SENT_TEXT    "Хвала што сте послали поруку! Драго ми је што учествујете у животу пројекта, а све ћу прочитати у слободно време."
     IDS_TRAY_FLAG           "Layout flag in the tray"
     IDS_NEW_BADGE           "new"
+    IDS_AUTHOR_SUPPORT      "Support"
+    IDS_AUTHOR_CHANNEL      "Channel"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

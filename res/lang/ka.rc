@@ -254,6 +254,8 @@ BEGIN
     IDS_WIZARD_SENT_TEXT    "გმადლობთ, რომ მიმართვა გამოგზავნეთ! მიხარია, რომ პროექტის ცხოვრებაში მონაწილეობთ, და ყველაფერს აუცილებლად წავიკითხავ თავისუფალ დროს."
     IDS_TRAY_FLAG           "Layout flag in the tray"
     IDS_NEW_BADGE           "new"
+    IDS_AUTHOR_SUPPORT      "Support"
+    IDS_AUTHOR_CHANNEL      "Channel"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

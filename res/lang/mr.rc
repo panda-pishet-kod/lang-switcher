@@ -251,6 +251,8 @@ BEGIN
     IDS_WIZARD_SENT_TEXT    "संदेश पाठवल्याबद्दल धन्यवाद! तुम्ही प्रकल्पात सहभागी होत आहात याचा मला आनंद आहे, आणि मी सर्व काही मोकळ्या वेळेत नक्की वाचेन."
     IDS_TRAY_FLAG           "Layout flag in the tray"
     IDS_NEW_BADGE           "new"
+    IDS_AUTHOR_SUPPORT      "Support"
+    IDS_AUTHOR_CHANNEL      "Channel"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

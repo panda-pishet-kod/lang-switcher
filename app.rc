@@ -637,6 +637,10 @@ END
 #define IDS_ENTRY_FALLBACK_MARK 3302
 #define IDS_SETTINGS_NOT_SAVED 3303
 #define IDS_NEW_BADGE 3304
+// Stage E120, task T-120-17 (слово владельца 208.178): the two buttons of the card «Поддержать
+// автора» of «От автора» — short, the arrow ↗ is drawn by the window.
+#define IDS_AUTHOR_SUPPORT 3305
+#define IDS_AUTHOR_CHANNEL 3306
 // Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
 // (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
 // button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two

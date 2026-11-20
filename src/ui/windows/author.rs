@@ -7,9 +7,9 @@
 
 use crate::letters::{self, Action, AuthorView, Deed};
 use crate::settings::{
-    self, IDS_AUTHOR_CAPTION, IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_FEEDBACK_PANEL, IDS_NEWS_DOWNLOAD,
-    IDS_NEWS_LETTERS, IDS_NEWS_PANEL, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_UPDATES_SWITCH,
-    IDS_WRITE_TO_AUTHOR, Language,
+    self, IDS_AUTHOR_CAPTION, IDS_AUTHOR_CHANNEL, IDS_AUTHOR_SUPPORT, IDS_CLOSE,
+    IDS_FEEDBACK_PANEL, IDS_NEWS_DOWNLOAD, IDS_NEWS_LETTERS, IDS_NEWS_PANEL, IDS_SUPPORT_PANEL,
+    IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
@@ -144,8 +144,8 @@ impl Content for Author {
             title: self.line(IDS_SUPPORT_PANEL),
             words: view.author_text.clone(),
             buttons: vec![
-                self.button(Id::Support, IDS_SUPPORT_OPEN, ButtonKind::Normal),
-                self.button(Id::Channel, IDS_CHANNEL_OPEN, ButtonKind::Normal),
+                self.button(Id::Support, IDS_AUTHOR_SUPPORT, ButtonKind::Normal),
+                self.button(Id::Channel, IDS_AUTHOR_CHANNEL, ButtonKind::Normal),
             ],
         };
         let feedback = Node::Action {

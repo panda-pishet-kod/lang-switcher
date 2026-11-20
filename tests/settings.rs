@@ -8939,7 +8939,10 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 265] = [
+///
+/// ⚠ **267 since task T-120-17** — the two buttons of the card «Поддержать автора» of «От автора»
+/// (слово владельца 208.178), keys of their own — 265 + 2.
+const FR_94_STRINGS: [(u16, &str, &str); 267] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -10014,6 +10017,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 265] = [
         "Layout flag in the tray",
     ),
     (settings::IDS_NEW_BADGE, "новое", "new"),
+    // T-120-17 (слово владельца 208.178): the two buttons of the card «Поддержать автора» of
+    // «От автора» — keys of their own, «Спасибо» and the wizard keep theirs.
+    (settings::IDS_AUTHOR_SUPPORT, "Поддержать", "Support"),
+    (settings::IDS_AUTHOR_CHANNEL, "Канал", "Channel"),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
     (
@@ -15405,9 +15412,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        265,
-        "two hundred and SIXTY-FIVE identifiers in use since task T-120-20: the note of a refused \
-         write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
+        267,
+        "two hundred and SIXTY-SEVEN identifiers in use since task T-120-17: the two buttons of $e         the card «Поддержать автора» of «От автора» (3305, 3306). Two hundred and sixty-five since $e         task T-120-20: the note of a refused write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
          body (3294). Two hundred and sixty-two since the header of the window in the corner \
          that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \
          the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \

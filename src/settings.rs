@@ -3874,6 +3874,12 @@ pub const IDS_TRAY_FLAG: u16 = 3264;
 /// The badge «новое» after the label of a setting that is new — «Флаг раскладки в трее» of the
 /// window of the settings (passport §6, T-120-20).
 pub const IDS_NEW_BADGE: u16 = 3304;
+/// «Поддержать» — the button of the card «Поддержать автора» of «От автора» (T-120-17, слово
+/// владельца 208.178). Its own key: «Спасибо» keeps [`IDS_SUPPORT_OPEN`] (T-79-1).
+pub const IDS_AUTHOR_SUPPORT: u16 = 3305;
+/// «Канал» — the second button of that card. Its own key: the wizard keeps [`IDS_CHANNEL_OPEN`]
+/// (FR-104).
+pub const IDS_AUTHOR_CHANNEL: u16 = 3306;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -4505,7 +4511,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty-five since task T-120-20** — the window of the settings: the note of a
 /// refused write, [`IDS_SETTINGS_NOT_SAVED`] (3303), and the badge «новое», [`IDS_NEW_BADGE`] (3304).
 /// 263 + 2.
-pub const INTERFACE_STRINGS: [u16; 265] = [
+///
+/// ⚠ **Two hundred and sixty-seven since task T-120-17** — the two buttons of the card «Поддержать
+/// автора» of «От автора», [`IDS_AUTHOR_SUPPORT`] (3305) and [`IDS_AUTHOR_CHANNEL`] (3306). 265 + 2.
+pub const INTERFACE_STRINGS: [u16; 267] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4759,6 +4768,8 @@ pub const INTERFACE_STRINGS: [u16; 265] = [
     IDS_WIZARD_SENT_TEXT,
     IDS_TRAY_FLAG,
     IDS_NEW_BADGE,
+    IDS_AUTHOR_SUPPORT,
+    IDS_AUTHOR_CHANNEL,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

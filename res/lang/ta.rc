@@ -254,6 +254,8 @@ BEGIN
     IDS_WIZARD_SENT_TEXT    "அறிக்கையை அனுப்பியதற்கு நன்றி! திட்டத்தின் வளர்ச்சியில் நீங்கள் பங்கேற்பதில் மகிழ்ச்சி; எல்லாவற்றையும் என் ஓய்வு நேரத்தில் கண்டிப்பாகப் படிப்பேன்."
     IDS_TRAY_FLAG           "Layout flag in the tray"
     IDS_NEW_BADGE           "new"
+    IDS_AUTHOR_SUPPORT      "Support"
+    IDS_AUTHOR_CHANNEL      "Channel"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"
