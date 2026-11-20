@@ -170,7 +170,7 @@ impl LetterView {
 
         let mut cards = plan.cards.iter().map(|card| Node::Action {
             title: card.title.clone(),
-            text: card.words.clone(),
+            words: card.words.clone(),
             buttons: vec![button(&card.button, ButtonKind::Normal)],
         });
         // The pair stands side by side while a half is wide enough (the rule of the pair), one
@@ -186,7 +186,7 @@ impl LetterView {
         if let Some(link) = &plan.link {
             parts.push(Node::Link {
                 id: Id::Do(link.action),
-                text: link.label.clone(),
+                words: link.label.clone(),
             });
         }
         if !plan.foot.is_empty() {

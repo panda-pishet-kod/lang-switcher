@@ -421,16 +421,15 @@ pub fn plan_release_window(owner: HWND) -> Option<String> {
         return previous;
     }
 
-    let due = if updated && release_is_due(&state.last_seen_version, &build, LAST_IMPORTANT.version)
-    {
-        let from = state.last_seen_version.clone();
+    let mut owed = state.clone();
+    let due = owe_release_window(&mut owed, &build);
+
+    if owed.release_due != state.release_due || owed.last_seen_version != state.last_seen_version {
         crate::letters::update_state(move |letters| {
-            letters.release_due = from;
+            letters.release_due = owed.release_due;
+            letters.last_seen_version = owed.last_seen_version;
         });
-        true
-    } else {
-        !state.release_due.is_empty()
-    };
+    }
 
     if due {
         // SAFETY: the live UI window and an identifier of this module; replaced if it exists.
@@ -438,6 +437,27 @@ pub fn plan_release_window(owner: HWND) -> Option<String> {
     }
 
     previous
+}
+
+/// ⭐ **Whether this start owes the window «Обновлено», and what that writes** — the pure body of
+/// [`plan_release_window`]. A start after an important update writes the window as due **and moves
+/// the version seen to this build at once**: until the stand of 2026-11-20 the version seen moved only
+/// at the first tick of the letters, ninety seconds on, and a second start before it owed the window a
+/// second time. A window due from before — the program stopped before its quiet moment — stays due.
+pub fn owe_release_window(letters: &mut crate::settings::Letters, build: &str) -> bool {
+    if !letters.release_window {
+        return false;
+    }
+
+    if crate::letters::was_updated(letters, build)
+        && release_is_due(&letters.last_seen_version, build, LAST_IMPORTANT.version)
+    {
+        letters.release_due = letters.last_seen_version.clone();
+        letters.last_seen_version = build.to_owned();
+        return true;
+    }
+
+    !letters.release_due.is_empty()
 }
 
 /// [`QUIET_TIMER`]: the window «Обновлено» comes when the moment is quiet — five seconds without a

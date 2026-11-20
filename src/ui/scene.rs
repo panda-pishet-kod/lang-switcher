@@ -47,6 +47,12 @@ pub enum Art {
     About,
     /// The panda of the windows in the corner and of the letters.
     Avatar,
+    /// The pictures of the letters (T-120-16) and of the wizard (T-120-19).
+    Hello,
+    Thanks,
+    News,
+    Update,
+    Wizard,
 }
 
 impl Art {
@@ -55,6 +61,11 @@ impl Art {
         match self {
             Art::About => "about",
             Art::Avatar => "avatar",
+            Art::Hello => "hello",
+            Art::Thanks => "thanks",
+            Art::News => "news",
+            Art::Update => "update",
+            Art::Wizard => "wizard",
         }
     }
 }
@@ -71,6 +82,28 @@ pub enum WindowKind {
     Bare,
     /// The window in the corner (passport §2–§3): its own sizes, the buttons in shares 1 : 2.
     Corner,
+    /// The menu of the icon (passport §3, T-120-15): rows of items, its own sizes.
+    Menu,
+}
+
+/// The state the head of the menu reports: a dot `accent`, `ink3` or `warn` and its words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuState {
+    Working,
+    Paused,
+    Restart,
+}
+
+/// What an item of the menu shows at its end.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Trailing {
+    None,
+    /// The key of the action, in its frame.
+    Key(String),
+    /// A dot `accent`: something new behind the item.
+    Dot,
+    /// A switch: the item turns it, and the menu stays.
+    Switch(bool),
 }
 
 /// A part of a window description.
@@ -117,7 +150,7 @@ pub enum Node<I> {
     /// A card with a title, a text and buttons under the text — beside it when the window is tight.
     Action {
         title: String,
-        text: String,
+        words: String,
         buttons: Vec<Node<I>>,
     },
     /// A line of settings with a switch at its end; the whole line is pressed.
@@ -135,7 +168,7 @@ pub enum Node<I> {
     ChoiceCard {
         id: I,
         title: String,
-        text: String,
+        words: String,
         selected: bool,
     },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
@@ -191,8 +224,34 @@ pub enum Node<I> {
     /// The picture of «Обновлено»: the strip of the taskbar with the person's flag, at one moment
     /// of its animation.
     Taskbar(Taskbar),
+    /// The head of the menu: the program's icon, «LANG SWITCHER», and the state at the end.
+    MenuHead { state: MenuState, words: String },
+    /// An item of the menu: an icon of `resrticons`, its label, what it shows at its end;
+    /// `emphasis` — the label bold and the icon and label `accent` (an unread letter).
+    MenuItem {
+        id: I,
+        icon: String,
+        label: String,
+        trailing: Trailing,
+        emphasis: bool,
+    },
+    /// The line between the groups of the menu.
+    MenuRule,
+    /// The example with a key (passport §6 «Клавиша»): the word typed, the key, the word fixed.
+    Example {
+        typed: String,
+        key: String,
+        fixed: String,
+    },
+    /// The card of a letter (passport §6): its label, title, one line of its text, its buttons.
+    LetterCard {
+        label: String,
+        title: String,
+        words: String,
+        buttons: Vec<Node<I>>,
+    },
     /// A link to the site.
-    Link { id: I, text: String },
+    Link { id: I, words: String },
     /// A line across.
     Divider,
 }
@@ -262,11 +321,11 @@ impl<I> Node<I> {
             Node::Buttons(nodes) => Node::Buttons(all(nodes)),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => Node::Action {
                 title,
-                text,
+                words,
                 buttons: all(buttons),
             },
             Node::Toggle {
@@ -293,12 +352,12 @@ impl<I> Node<I> {
             Node::ChoiceCard {
                 id,
                 title,
-                text,
+                words,
                 selected,
             } => Node::ChoiceCard {
                 id: f(id),
                 title,
-                text,
+                words,
                 selected,
             },
             Node::Segments {
@@ -363,7 +422,34 @@ impl<I> Node<I> {
                 link: link.map(|(id, text)| (f(id), text)),
             },
             Node::Taskbar(picture) => Node::Taskbar(picture),
-            Node::Link { id, text } => Node::Link { id: f(id), text },
+            Node::MenuHead { state, words } => Node::MenuHead { state, words },
+            Node::MenuItem {
+                id,
+                icon,
+                label,
+                trailing,
+                emphasis,
+            } => Node::MenuItem {
+                id: f(id),
+                icon,
+                label,
+                trailing,
+                emphasis,
+            },
+            Node::MenuRule => Node::MenuRule,
+            Node::Example { typed, key, fixed } => Node::Example { typed, key, fixed },
+            Node::LetterCard {
+                label,
+                title,
+                words,
+                buttons,
+            } => Node::LetterCard {
+                label,
+                title,
+                words,
+                buttons: buttons.into_iter().map(|node| node.map(f)).collect(),
+            },
+            Node::Link { id, words } => Node::Link { id: f(id), words },
             Node::Divider => Node::Divider,
         }
     }
@@ -406,11 +492,11 @@ impl<I> Node<I> {
             Node::Button { label, .. } => f(Role::Button, label),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => {
                 f(Role::Strong, title);
-                f(Role::Body, text);
+                f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
             Node::Toggle { label, hint, .. } => {
@@ -420,9 +506,9 @@ impl<I> Node<I> {
                 }
             }
             Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
-            Node::ChoiceCard { title, text, .. } => {
+            Node::ChoiceCard { title, words, .. } => {
                 f(Role::Strong, title);
-                f(Role::Small, text);
+                f(Role::Small, words);
             }
             Node::Segments { label, options, .. } => {
                 f(Role::Body, label);
@@ -454,7 +540,32 @@ impl<I> Node<I> {
                 }
             }
             Node::Taskbar(_) => {}
-            Node::Link { text, .. } => f(Role::Link, text),
+            Node::MenuHead { words, .. } => f(Role::Small, words),
+            Node::MenuItem {
+                label, trailing, ..
+            } => {
+                f(Role::Body, label);
+                if let Trailing::Key(key) = trailing {
+                    f(Role::Small, key);
+                }
+            }
+            Node::MenuRule => {}
+            Node::Example { typed, fixed, .. } => {
+                f(Role::Code, typed);
+                f(Role::Code, fixed);
+            }
+            Node::LetterCard {
+                label,
+                title,
+                words,
+                buttons,
+            } => {
+                f(Role::Label, label);
+                f(Role::Strong, title);
+                f(Role::Body, words);
+                buttons.iter_mut().for_each(|node| node.texts_mut(f));
+            }
+            Node::Link { words, .. } => f(Role::Link, words),
             Node::Divider => {}
         }
     }
@@ -539,6 +650,8 @@ pub enum Event<I> {
     RowChecked(I, usize, bool),
     /// A list was scrolled to show row `usize` first.
     Scrolled(I, usize),
+    /// The tick the window asked for (`host::Content::tick`, T-120-25).
+    Tick,
 }
 
 impl<I: PartialEq> Node<I> {

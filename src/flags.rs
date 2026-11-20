@@ -2195,6 +2195,24 @@ pub fn own_layout_to_give(chosen: LayoutId, now: LayoutId, blind: bool) -> Optio
     (chosen.raw() != 0 && (blind || now != chosen)).then_some(chosen)
 }
 
+/// ⭐ **Whether the flag shows the layout just given, without reading it back** — defect 3 of the
+/// stand (2026-11-20): after a choice in the list of the program's own, a console (`blind`, FR-52)
+/// kept the old flag — its layout is known only from the name of РУС/ENG, and that indicator is
+/// hidden whenever this list is open at all. When the program has itself sent the chosen layout to
+/// that window (`Sent` — a console gives no verdict — or `Switched`), the flag shows it. A window
+/// that can be read is read as before; the list of Windows is never its own (`own` false). Pure.
+pub fn flag_shows_the_given(
+    own: bool,
+    blind: bool,
+    sent: &Result<crate::switch::Outcome, crate::switch::SwitchError>,
+) -> bool {
+    own && blind
+        && matches!(
+            sent,
+            Ok(crate::switch::Outcome::Sent | crate::switch::Outcome::Switched)
+        )
+}
+
 /// Windows 10: presses the input indicator the way the probe measured 80 of 80 (решение 208.123) —
 /// `WM_LBUTTONDOWN` and `WM_LBUTTONUP` posted to the middle of `InputIndicatorButton`. UI Automation
 /// `Invoke` races the focus there (9 of 31), MSAA needs `VARIANT`, outside the closed feature list.

@@ -768,6 +768,41 @@ fn the_choice_in_the_own_list_is_given_by_the_program() {
     );
 }
 
+/// ⭐ **After a choice in the own list, a console shows the layout given** — defect 3 of the stand
+/// (2026-11-20, Windows 11, cmd): the flag stayed on the old layout (row 0 of 4, keys 0 of 3) — a
+/// console reads blind and РУС/ENG, whose name would tell it, is hidden whenever this list is open.
+#[test]
+fn a_console_shows_the_layout_the_own_list_gave_it() {
+    use lang_switcher::switch::{Outcome, SwitchError};
+
+    assert!(
+        flags::flag_shows_the_given(true, true, &Ok(Outcome::Sent)),
+        "a console of the own list: the flag shows what was sent"
+    );
+    assert!(flags::flag_shows_the_given(
+        true,
+        true,
+        &Ok(Outcome::Switched)
+    ));
+    assert!(
+        !flags::flag_shows_the_given(true, false, &Ok(Outcome::Switched)),
+        "a window that reads is read back as before"
+    );
+    assert!(
+        !flags::flag_shows_the_given(false, true, &Ok(Outcome::Sent)),
+        "the list of Windows: the indicator is there to read"
+    );
+    assert!(
+        !flags::flag_shows_the_given(true, true, &Err(SwitchError::NoForeground)),
+        "nothing sent, nothing shown"
+    );
+    assert!(!flags::flag_shows_the_given(
+        true,
+        true,
+        &Ok(Outcome::AlreadyActive)
+    ));
+}
+
 /// **The geometry of the own list — the mock-up's numbers at 96 DPI, scaled with the monitor.**
 #[test]
 fn the_own_list_has_the_size_of_the_mock_up_and_scales() {

@@ -131,14 +131,28 @@ pub struct Circle {
     pub r: f32,
 }
 
+/// A named place of a drawing (T-120-25): an invisible `<rect id="anchor-…">`, in the coordinates of
+/// the drawing, where a window puts an element over the picture (the word and the key of the
+/// example of «Привет»). It is not drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Anchor {
+    /// The name after `anchor-`.
+    pub name: &'static str,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 /// A drawing: its field (`viewBox`, origin at zero), the circle every shape is clipped to, if
-/// any, and its shapes in the order they are drawn.
+/// any, its shapes in the order they are drawn, and its named places.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Drawing {
     pub width: f32,
     pub height: f32,
     pub clip: Option<Circle>,
     pub shapes: &'static [Shape],
+    pub anchors: &'static [Anchor],
 }
 
 const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
@@ -745,6 +759,7 @@ struct Reader<'a> {
     at: usize,
     clips: Vec<(&'a str, Circle)>,
     shapes: Vec<Shape>,
+    anchors: Vec<Anchor>,
     clip: Option<Circle>,
     /// The clipped group is closed: nothing more may be drawn outside it.
     clip_closed: bool,
@@ -885,6 +900,7 @@ impl<'a> Reader<'a> {
                 height: height as f32,
                 clip: self.clip,
                 shapes: leak(std::mem::take(&mut self.shapes)),
+                anchors: leak(std::mem::take(&mut self.anchors)),
             }),
             Tag::Open { at, .. } | Tag::Close { at, .. } => {
                 Err(format!("byte {at}: something after </svg>"))
@@ -1016,6 +1032,46 @@ impl<'a> Reader<'a> {
                 let y = attrs.number("y")?.unwrap_or(0.0);
                 let width = attrs.positive("width")?;
                 let height = attrs.positive("height")?;
+                // The one extension of the subset (T-120-25): a rectangle named `anchor-…` is a named
+                // place, not a shape — invisible, kept in the coordinates of the drawing. An `id` on
+                // anything else still stops the build.
+                if let Some(id) = attrs.take("id") {
+                    let Some(place) = id.strip_prefix("anchor-").filter(|place| !place.is_empty())
+                    else {
+                        return Err(attrs.fail(format!(
+                            "id=\"{id}\" is not in the subset: only a <rect> named anchor-… may carry one"
+                        )));
+                    };
+                    let (fill, stroke) = attrs.paint()?;
+                    if fill.is_some() || stroke.is_some() {
+                        return Err(attrs.fail(format!(
+                            "anchor-{place} is drawn: fill=\"none\" and no stroke"
+                        )));
+                    }
+                    attrs.done()?;
+                    if !empty {
+                        self.close(name)?;
+                    }
+                    let [a, b, c, d, e, f] = matrix.0;
+                    let apply = |px: f64, py: f64| (a * px + c * py + e, b * px + d * py + f);
+                    let corners = [apply(x, y), apply(x + width, y + height)];
+                    let (left, right) = (
+                        corners[0].0.min(corners[1].0),
+                        corners[0].0.max(corners[1].0),
+                    );
+                    let (top, bottom) = (
+                        corners[0].1.min(corners[1].1),
+                        corners[0].1.max(corners[1].1),
+                    );
+                    self.anchors.push(Anchor {
+                        name: Box::leak(place.to_owned().into_boxed_str()),
+                        x: left as f32,
+                        y: top as f32,
+                        width: (right - left) as f32,
+                        height: (bottom - top) as f32,
+                    });
+                    return Ok(());
+                }
                 let rx = match attrs.number("rx")? {
                     None => 0.0,
                     Some(rx) if rx >= 0.0 => rx,
@@ -1202,6 +1258,7 @@ pub fn parse(file: &str, text: &str) -> Result<Drawing, String> {
         at: 0,
         clips: Vec::new(),
         shapes: Vec::new(),
+        anchors: Vec::new(),
         clip: None,
         clip_closed: false,
     }
@@ -1308,8 +1365,18 @@ pub fn to_rust(drawings: &[(String, Drawing)]) -> String {
             }
         };
         out.push_str(&format!(
-            "    ({name:?}, Drawing {{ width: {:?}, height: {:?}, clip: {clip}, shapes: &[\n",
-            drawing.width, drawing.height
+            "    ({name:?}, Drawing {{ width: {:?}, height: {:?}, clip: {clip}, anchors: &[{}], shapes: &[\n",
+            drawing.width,
+            drawing.height,
+            drawing
+                .anchors
+                .iter()
+                .map(|anchor| format!(
+                    "Anchor {{ name: {:?}, x: {:?}, y: {:?}, width: {:?}, height: {:?} }}",
+                    anchor.name, anchor.x, anchor.y, anchor.width, anchor.height
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         for shape in drawing.shapes {
             let fill = shape

@@ -34,7 +34,7 @@ IDS_CORNER_FLAG	window in the corner / menu (drawn by the program)	-	the header 
 IDS_HINT_TITLE	window in the corner / menu (drawn by the program)	-	the title of the hint, 15 px, 272 px wide	-	E119 (T-119-5): the hint when the flag was turned on and stands under the arrow ^ of the taskbar
 IDS_HINT_TEXT	window in the corner / menu (drawn by the program)	-	the text of the hint, 13.5 px, 272 px wide, up to four lines	-	E119 (T-119-5): the names of the pages of Windows Settings as Windows 11 writes them in this language; do not promise dragging the icon
 IDS_HINT_OPEN	window in the corner / menu (drawn by the program)	-	the main button of the hint, two thirds of 332 px, 13.5 px	-	E119 (T-119-5): opens the page of the taskbar in Windows Settings
-IDS_MENU_WHATSNEW	window in the corner / menu (drawn by the program)	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
+IDS_MENU_WHATSNEW	window in the corner / shell_menu	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
 IDS_UPDATES_SWITCH	window in the corner / menu (drawn by the program)	-	the switch of «От автора» in place of the switch of the feed, one line	-	E119 (T-119-10): turns the window «Обновлено» on and off - the same setting as its check box
 IDS_NEWS_OFF_IN_FILE	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	the line under the switch of «От автора», 205 dialog units wide, up to two lines	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
 IDS_FALLBACK_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E119 (T-119-9): the heading of the letter «Обновление», which opens only from the tray menu entry «Доступна версия X…» or from «Последние письма», a week after the release when the program could not update itself; plain and honest, no blame
@@ -94,9 +94,9 @@ IDS_STATE_LAYOUTS	IDD_SETTINGS	IDC_STATE_LAYOUTS	704x19	{0} {1} {2} = code: &sta
 IDS_STATE_AUTOSTART	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	{0} = IDS_AUTOSTART_PRESENT or IDS_AUTOSTART_ABSENT (code: &match autostart_value() { Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command)	a path of Windows: not translated; \\ is one backslash; HKCU\\…\\Run is a path of Windows
 IDS_AUTOSTART_PRESENT	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	{0} = the path of LangSwitcher.exe	the value put into {0} of IDS_STATE_AUTOSTART
 IDS_AUTOSTART_ABSENT	IDD_SETTINGS	IDC_STATE_AUTOSTART	704x19	-	the value put into {0} of IDS_STATE_AUTOSTART
-IDS_STATUS_WORKING	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, one of three states — the program works (in Russian the program is feminine); a dot of the colour of the tray menu stands before it
-IDS_STATUS_SUSPENDED	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, the program is suspended — the word of the menu «Suspend» (IDS_MENU_SUSPEND) and of the tooltip (IDS_TIP_PAUSED)
-IDS_STATUS_RESTART	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, the program needs a restart — as the menu says it (IDS_MENU_RESUME_RESTART)
+IDS_STATUS_WORKING	shell_settings,shell_menu	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, one of three states — the program works (in Russian the program is feminine); a dot of the colour of the tray menu stands before it
+IDS_STATUS_SUSPENDED	shell_settings,shell_menu	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, the program is suspended — the word of the menu «Suspend» (IDS_MENU_SUSPEND) and of the tooltip (IDS_TIP_PAUSED)
+IDS_STATUS_RESTART	shell_settings,shell_menu	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the first line, the program needs a restart — as the menu says it (IDS_MENU_RESUME_RESTART)
 IDS_STATUS_FIXES	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	{0} = the layouts the program fixes, source → target: «English (US) → Russian», or the cycle «English (US) → Russian → Ukrainian» (the arrow is IDS_CYCLE_ARROW)	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the second line — the main action, «исправить» / fix, GLOSSARY-E120 §1
 IDS_STATUS_FIXES_NONE	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the second line when no pair is chosen
 IDS_STATUS_HOTKEY	shell_settings	-	the shell: «Диагностика», the block «Состояние»; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, named as in the settings, «Pause»	E120 (T-120-21): «Состояние» for a person — no word of the developer (registry, HKCU, published, hook, failures, journal): those stay in IDS_STATE_* under IDS_STATUS_DETAILS; GLOSSARY-E120 §5; the third line; «Key» as in the label IDS_HOTKEY_LABEL
@@ -162,13 +162,13 @@ IDS_NEWS_LETTERS	IDD_AUTHOR	IDC_NEWS_LETTERS	110x30	-	-
 IDS_NEWS_FILE_ONLY	IDD_AUTHOR	IDC_NEWS_FILE_ONLY	382x21	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_FEEDBACK_PANEL	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_PANEL	406x17	-	-
 IDS_FEEDBACK_TEXT	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_TEXT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,IDD_SETTINGS,menu,shell_letter	IDC_FEEDBACK_WRITE,IDC_WRITE_AUTHOR	193x30	-	-
+IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,IDD_SETTINGS,shell_menu,shell_letter	IDC_FEEDBACK_WRITE,IDC_WRITE_AUTHOR	193x30	-	-
 IDS_LETTERS_CAPTION	shell_letters_list	caption	window caption: 448 px wide	-	-
 IDS_LETTERS_FOOT	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_LETTERS_OPEN	shell_letters_list,window in the corner / menu (drawn by the program)	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_NEWS_READ_BUTTON	shell_letter,shell_letters_list	-	the shell: a letter and the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
-IDS_MENU_UNREAD	menu	-	menu: grows with the text	-	-
-IDS_MENU_UPDATE	menu	-	menu: grows with the text	{0} = code: version	-
+IDS_MENU_UNREAD	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_UPDATE	shell_menu	-	menu: grows with the text	{0} = code: version	-
 IDS_TOAST_TITLE	window in the corner / menu (drawn by the program)	-	the header of the window in the corner, monospace capitals 12 px (the knock of a letter)	-	-
 IDS_TOAST_NEWS	window in the corner / menu (drawn by the program)	-	the text of the knock of «Новость», 13.5 px, 272 px wide, up to three lines	-	-
 IDS_TOAST_THANKS	window in the corner / menu (drawn by the program)	-	the text of the knock of «Спасибо», 13.5 px, 272 px wide, up to three lines	-	-
@@ -256,10 +256,10 @@ IDS_WIZARD_FAILED_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is
 IDS_WIZARD_FAILED_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the two button names are IDS_WIZARD_RETRY and the letter is IDS_WIZARD_COPY_TEXT and IDS_WIZARD_COPY_ADDRESS
 IDS_WIZARD_SENT_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_SENT_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
-IDS_MENU_SUSPEND	menu	-	menu: grows with the text	-	-
-IDS_MENU_RESUME	menu	-	menu: grows with the text	-	-
-IDS_MENU_RESUME_RESTART	menu	-	menu: grows with the text	-	-
-IDS_MENU_SETTINGS	menu	-	menu: grows with the text	-	-
-IDS_MENU_AUTOSTART	menu	-	menu: grows with the text	-	-
-IDS_MENU_ABOUT	menu	-	menu: grows with the text	-	-
-IDS_MENU_EXIT	menu	-	menu: grows with the text	-	-
+IDS_MENU_SUSPEND	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_RESUME	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_RESUME_RESTART	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_SETTINGS	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_AUTOSTART	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_ABOUT	shell_menu	-	menu: grows with the text	-	-
+IDS_MENU_EXIT	shell_menu	-	menu: grows with the text	-	-

@@ -82,6 +82,20 @@ const MITER_LIMIT: f32 = 8.0;
 /// The folder of the menu icons under `res\art`; their names here go without it.
 const ICONS: &str = "icons/";
 
+/// The named place `place` of the picture `name` (T-120-25: `anchor-screen` and `anchor-key` of
+/// «Привет»), as shares of the field of the picture — left, top, width, height, each 0 to 1: the
+/// window lays it over the circle it draws the picture in.
+pub fn anchor(name: &str, place: &str) -> Option<[f32; 4]> {
+    let (_, drawing) = find(name).ok()?;
+    let found = drawing.anchors.iter().find(|anchor| anchor.name == place)?;
+    Some([
+        found.x / drawing.width,
+        found.y / drawing.height,
+        found.width / drawing.width,
+        found.height / drawing.height,
+    ])
+}
+
 /// The names of the pictures, in the order of `res\art`.
 pub fn names() -> impl Iterator<Item = &'static str> {
     data::DRAWINGS
