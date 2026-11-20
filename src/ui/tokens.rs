@@ -296,6 +296,8 @@ pub enum Role {
     CornerText,
     /// окно в углу — подпись флажка
     CornerCheck,
+    /// меню значка — выделенный пункт: полужирный, `accent`
+    MenuEmphasis,
 }
 
 /// How one role sets its text. `size` is a share of B; `line` is the line height as a multiple of
@@ -377,6 +379,7 @@ impl Role {
             Role::CornerTitle => "corner_title",
             Role::CornerText => "corner_text",
             Role::CornerCheck => "corner_check",
+            Role::MenuEmphasis => "menu_emphasis",
         }
     }
 
@@ -400,6 +403,7 @@ impl Role {
             Role::CornerTitle => RoleStyle::main(0.0, 1.3, 600, Some(Color::Ink)),
             Role::CornerText => RoleStyle::main(0.0, 1.45, 400, Some(Color::Ink2)),
             Role::CornerCheck => RoleStyle::main(0.0, 1.45, 400, Some(Color::Ink)),
+            Role::MenuEmphasis => RoleStyle::main(1.0, 1.5, 600, Some(Color::Accent)),
         }
     }
 }
@@ -730,6 +734,26 @@ pub const MENU_ROW_MIN_HEIGHT: Pt = Pt(36.0);
 pub const MENU_ICON: Pt = Pt(18.0);
 /// Меню значка — линия значка.
 pub const MENU_ICON_LINE: Pt = Pt(1.6);
+/// ◆ Меню значка — поля окна (макет `menu.html`: 6).
+pub const MENU_PAD: Pt = Pt(6.0);
+/// ◆ Меню значка — шапка: поля по вертикали и по горизонтали (8, 10).
+pub const MENU_HEAD_PAD: SizePt = SizePt::pt(10.0, 8.0);
+/// ◆ Меню значка — шапка: точка состояния (7).
+pub const MENU_STATE_DOT: Pt = Pt(7.0);
+/// ◆ Меню значка — шапка: зазор от точки до слов (6).
+pub const MENU_STATE_GAP: Pt = Pt(6.0);
+/// ◆ Меню значка — пункт: поля по горизонтали (10).
+pub const MENU_ITEM_PAD: Pt = Pt(10.0);
+/// ◆ Меню значка — пункт: столбец значка (20).
+pub const MENU_ICON_COLUMN: Pt = Pt(20.0);
+/// ◆ Меню значка — пункт: зазоры между значком, подписью и концом строки (10).
+pub const MENU_ITEM_GAP: Pt = Pt(10.0);
+/// ◆ Меню значка — точка нового у пункта (8).
+pub const MENU_DOT: Pt = Pt(8.0);
+/// ◆ Меню значка — линия между группами: поля по вертикали и по горизонтали (5, 8).
+pub const MENU_RULE_PAD: SizePt = SizePt::pt(8.0, 5.0);
+/// ◆ Меню значка — кегль, от которого считаются его роли (строка — 14 т., §2).
+pub const MENU_B: Pt = Pt(14.0);
 
 // §4. Скругления, линии, тени
 

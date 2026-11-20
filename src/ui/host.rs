@@ -48,11 +48,13 @@ use crate::ui::canvas::{Canvas, POINT_DPI, Rect};
 use crate::ui::elements::{self, Look, State, hit_area, input_fill};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
+use crate::ui::layout::menu_width;
 use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_size};
 use crate::ui::scene::{ButtonKind, Event, Window};
 use crate::ui::scene::{ListItem, Node, WindowKind};
 use crate::ui::text::{Direction, Style, Text};
 use crate::ui::text::{Measure, Wrap};
+use crate::ui::tokens::MENU_MIN_WIDTH;
 use crate::ui::tokens::motion;
 use crate::ui::tokens::{CHECK, CONTROL_GAP, LIST_BAR};
 use crate::ui::tokens::{
@@ -105,6 +107,7 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS, WM_MOVE,
     WM_SYSKEYDOWN,
 };
+use ::windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, WM_NULL};
 use ::windows::core::{BOOL, HSTRING, PCWSTR, Result as WinResult, w};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -183,6 +186,8 @@ trait Handler {
     /// The description again and a new frame: the list of a choice field moved by the keys of its
     /// window.
     fn refresh(&mut self, hwnd: HWND);
+    /// The menu opened from the keyboard: its first available item marked.
+    fn mark_first(&mut self, hwnd: HWND);
 }
 
 /// Where a popup stands.
@@ -200,6 +205,9 @@ enum Place {
         rows: usize,
         width: f32,
     },
+    /// The menu of the icon at the point `at` (where the icon was pressed), as the menus of Windows
+    /// open from a point; `owner` is told when it goes (KB 135788).
+    Menu { at: POINT, owner: Option<HWND> },
 }
 
 /// What a popup keeps: where it stands and how it comes in.
@@ -405,6 +413,86 @@ fn work_of(rect: &RECT) -> RECT {
     // SAFETY: the monitor of a rectangle; the out parameter is a local.
     let _ = unsafe { GetMonitorInfoW(MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST), &mut info) };
     info.rcWork
+}
+
+/// Where the menu of the icon stands, its left-top in screen pixels: from the point `at` as the
+/// menus of Windows open — its corner on the point, turned over to the side the work area `work`
+/// has room on, and inside it.
+pub fn menu_place(at: POINT, work: RECT, size: (i32, i32)) -> (i32, i32) {
+    let (w, h) = size;
+    let x = if at.x + w <= work.right {
+        at.x
+    } else {
+        at.x - w
+    };
+    let y = if at.y + h <= work.bottom {
+        at.y
+    } else {
+        at.y - h
+    };
+    (
+        x.clamp(work.left, (work.right - w).max(work.left)),
+        y.clamp(work.top, (work.bottom - h).max(work.top)),
+    )
+}
+
+/// Opens `content` as the menu of the icon at the point `at` (screen pixels): a popup of the shell
+/// that takes the foreground and the keys — as `TrackPopupMenu` asks of the window it opens from
+/// (KB 135788: `SetForegroundWindow` before, an empty message to `owner` after). From the keyboard
+/// (`keyboard`) its first available item is marked. It goes with Esc, a choice that closes, or when
+/// it loses the foreground (a click beside, Win, Alt+Tab).
+pub fn open_menu<C: Content + 'static>(
+    content: C,
+    owner: Option<HWND>,
+    at: POINT,
+    keyboard: bool,
+) -> WinResult<HWND> {
+    let popup = Popup {
+        place: Place::Menu { at, owner },
+        at: (0, 0),
+        from_right: true,
+        since: None,
+    };
+    let hwnd = make(content, None, Some(popup))?;
+    if keyboard && let Some(mut host) = slot_of(hwnd).and_then(|slot| slot.try_borrow_mut().ok()) {
+        host.mark_first(hwnd);
+    }
+    cloak(hwnd, true);
+    // SAFETY: a live window of this thread; it takes the foreground before it shows (KB 135788).
+    unsafe {
+        let _ = SetForegroundWindow(hwnd);
+        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+        let _ = SetFocus(Some(hwnd));
+    }
+    paint_now(hwnd);
+    cloak(hwnd, false);
+    Ok(hwnd)
+}
+
+/// Makes the menu of `content` at the point `at` and places it, without showing it: the tests send
+/// it messages with nothing on the screen; `keyboard` marks its first available item.
+pub fn create_menu<C: Content + 'static>(
+    content: C,
+    owner: Option<HWND>,
+    at: POINT,
+    keyboard: bool,
+) -> WinResult<HWND> {
+    let popup = Popup {
+        place: Place::Menu { at, owner },
+        at: (0, 0),
+        from_right: true,
+        since: None,
+    };
+    let hwnd = make(content, None, Some(popup))?;
+    if keyboard && let Some(mut host) = slot_of(hwnd).and_then(|slot| slot.try_borrow_mut().ok()) {
+        host.mark_first(hwnd);
+    }
+    Ok(hwnd)
+}
+
+/// Closes a window of the shell from outside — the menu of the icon at a second press of the icon.
+pub fn close(hwnd: HWND) {
+    close_later(hwnd);
 }
 
 /// Whether Windows moves what it shows («Показывать анимацию в Windows»).
@@ -876,6 +964,31 @@ impl<C: Content> Host<C> {
         // The list of a choice field: as wide as the field, as many rows as it shows, at the type
         // size of its window (half a point to spare: the rows are counted by flooring).
         if let Some(Popup {
+            place: Place::Menu { at, .. },
+            ..
+        }) = &self.popup
+            && let Some(text) = self.text.as_ref()
+        {
+            // As wide as its longest line, between its least width and half the work area.
+            let work = work_of(&RECT {
+                left: at.x,
+                top: at.y,
+                right: at.x,
+                bottom: at.y,
+            });
+            let half = (work.right - work.left) as f32 / self.scale / 2.0;
+            let w =
+                menu_width(&self.window, text).clamp(MENU_MIN_WIDTH.0, half.max(MENU_MIN_WIDTH.0));
+            let first = lay_out(
+                &self.window,
+                client_size(w, WINDOW_MIN.h.0),
+                1.0,
+                self.rtl,
+                text,
+            );
+            return (w, (WINDOW_MIN.h.0 + first.shortfall.h).max(1.0));
+        }
+        if let Some(Popup {
             place: Place::Under { b, rows, width, .. },
             ..
         }) = &self.popup
@@ -908,6 +1021,30 @@ impl<C: Content> Host<C> {
             return;
         };
         let size = (px(w), px(h));
+        if let Place::Menu { at, .. } = popup.place {
+            let work = work_of(&RECT {
+                left: at.x,
+                top: at.y,
+                right: at.x,
+                bottom: at.y,
+            });
+            popup.at = menu_place(at, work, size);
+            // SAFETY: a live window of this thread; plain values.
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    popup.at.0,
+                    popup.at.1,
+                    size.0,
+                    size.1,
+                    SWP_NOACTIVATE,
+                )
+            };
+            self.layout = None;
+            self.fit_canvas(hwnd);
+            return;
+        }
         if let Place::Under { field, .. } = popup.place {
             let work = work_of(&field);
             popup.at = under(field, work, size, px(DROPDOWN_GAP.0));
@@ -930,6 +1067,12 @@ impl<C: Content> Host<C> {
         let anchor = match popup.place {
             Place::Corner(anchor) => anchor.unwrap_or_else(notification_area),
             Place::Under { field, .. } => field,
+            Place::Menu { at, .. } => RECT {
+                left: at.x,
+                top: at.y,
+                right: at.x,
+                bottom: at.y,
+            },
         };
         let mut info = MONITORINFO {
             cbSize: size_of::<MONITORINFO>() as u32,
@@ -1002,6 +1145,82 @@ impl<C: Content> Host<C> {
             popup.since = None;
             // SAFETY: the window's own timer.
             let _ = unsafe { KillTimer(Some(hwnd), APPEAR_TIMER) };
+        }
+    }
+
+    /// The window is the menu of the icon.
+    fn is_menu(&self) -> bool {
+        matches!(
+            self.popup,
+            Some(Popup {
+                place: Place::Menu { .. },
+                ..
+            })
+        )
+    }
+
+    /// The keys of the menu: the arrows round the available items, Home, End, Enter and the space
+    /// bar on the marked one, Esc. None — not a key of the menu.
+    fn menu_key(&mut self, hwnd: HWND, key: u16) -> Option<bool> {
+        let order = self.order();
+        let at = self
+            .focus
+            .and_then(|focus| order.iter().position(|id| *id == focus));
+        let n = order.len();
+        let next = match key {
+            k if k == VK_DOWN.0 => at.map_or(0, |at| (at + 1) % n.max(1)),
+            k if k == VK_UP.0 => {
+                at.map_or(n.saturating_sub(1), |at| (at + n.max(1) - 1) % n.max(1))
+            }
+            k if k == VK_HOME.0 => 0,
+            k if k == VK_END.0 => n.saturating_sub(1),
+            k if k == VK_RETURN.0 || k == VK_SPACE.0 => {
+                if let Some(event) = self
+                    .focus
+                    .and_then(|focus| self.index_of(focus))
+                    .and_then(|index| self.activation(index))
+                {
+                    self.deliver(hwnd, event);
+                }
+                return Some(true);
+            }
+            k if k == VK_ESCAPE.0 => {
+                close_later(hwnd);
+                return Some(true);
+            }
+            _ => return None,
+        };
+        if let Some(id) = order.get(next) {
+            self.focus = Some(*id);
+        }
+        invalidate(hwnd);
+        Some(true)
+    }
+
+    /// A letter in the menu: the next available item whose label begins with it, round.
+    fn menu_letter(&mut self, letter: char) {
+        let wanted: String = letter.to_lowercase().collect();
+        let mut items: Vec<(C::Id, String)> = Vec::new();
+        if let Node::Column(parts) = &self.window.body {
+            for part in parts {
+                if let Node::MenuItem { id, label, .. } = part
+                    && !self.window.disabled.contains(id)
+                {
+                    items.push((*id, label.to_lowercase()));
+                }
+            }
+        }
+        let start = self
+            .focus
+            .and_then(|focus| items.iter().position(|(id, _)| *id == focus))
+            .map_or(0, |at| at + 1);
+        let n = items.len();
+        if let Some((id, _)) = (0..n)
+            .map(|step| &items[(start + step) % n])
+            .find(|(_, label)| label.starts_with(&wanted))
+        {
+            self.focus = Some(*id);
+            self.cue = true;
         }
     }
 
@@ -1554,6 +1773,17 @@ impl<C: Content> Host<C> {
             } => Some(Event::RowChecked(id, *index, !on)),
             Part::ListRow { index, .. } => Some(Event::Selected(id, *index)),
             // A field and the frame of a list take the focus and press nothing.
+            // An item of the menu with a switch turns it; any other is pressed.
+            Part::MenuRow => Some(
+                layout
+                    .items
+                    .iter()
+                    .find_map(|other| match (&other.part, other.id == Some(id)) {
+                        (Part::Toggle { on }, true) => Some(Event::Toggled(id, !on)),
+                        _ => None,
+                    })
+                    .unwrap_or(Event::Pressed(id)),
+            ),
             // A field and the frame of a list take the focus and press nothing; a choice field opens
             // its list (`open_drop`).
             Part::Input { .. } | Part::List(_) | Part::Field { .. } => None,
@@ -1610,6 +1840,12 @@ impl<C: Content> Host<C> {
         // A layout dropped by a change waits for the next frame; the keys need it now.
         self.lay_out(hwnd);
         self.cue = true;
+        // The menu takes its own keys.
+        if self.is_menu()
+            && let Some(handled) = self.menu_key(hwnd, key)
+        {
+            return handled;
+        }
         // An open list of a choice field takes the keys first.
         if self.drop.is_some() && self.drop_key(hwnd, key) {
             return true;
@@ -1804,7 +2040,9 @@ impl<C: Content> Handler for Host<C> {
             }
             // A click answers in a popup without taking the focus from the window the person types
             // in (FR-101, as the window in the corner of E119).
-            WM_MOUSEACTIVATE if self.popup.is_some() => Some(LRESULT(MA_NOACTIVATE as isize)),
+            WM_MOUSEACTIVATE if self.popup.is_some() && !self.is_menu() => {
+                Some(LRESULT(MA_NOACTIVATE as isize))
+            }
             WM_PAINT => {
                 let mut paint = PAINTSTRUCT::default();
                 // SAFETY: a live window; the structure is a local, ended below.
@@ -1900,6 +2138,12 @@ impl<C: Content> Handler for Host<C> {
                 if hover != self.hover {
                     self.hover = hover;
                     invalidate(hwnd);
+                }
+                // In the menu the mouse moves the mark the keys go on from, as in the menus of Windows.
+                if self.is_menu()
+                    && let Some(id) = hover.and_then(|index| self.layout.as_ref()?.items[index].id)
+                {
+                    self.focus = Some(id);
                 }
                 Some(LRESULT(0))
             }
@@ -2026,6 +2270,15 @@ impl<C: Content> Handler for Host<C> {
                 Some(LRESULT(0))
             }
             // The first letters typed into an open list.
+            WM_CHAR if self.is_menu() => {
+                if let Some(letter) =
+                    char::from_u32(wparam.0 as u32).filter(|c| c.is_alphanumeric())
+                {
+                    self.menu_letter(letter);
+                    invalidate(hwnd);
+                }
+                Some(LRESULT(0))
+            }
             WM_CHAR if self.drop.is_some() => {
                 if let Some(letter) = char::from_u32(wparam.0 as u32).filter(|c| !c.is_control())
                     && let Some(drop) = self.drop.as_ref()
@@ -2046,10 +2299,26 @@ impl<C: Content> Handler for Host<C> {
             }
             WM_ACTIVATE if wparam.0 as u16 as u32 == WA_INACTIVE => {
                 self.close_drop(hwnd, false);
+                // The menu does not hang about: it goes with the foreground.
+                if self.is_menu() {
+                    close_later(hwnd);
+                }
                 None
             }
             WM_DESTROY => {
                 self.close_drop(hwnd, false);
+                // The window the menu opened from is told it went (KB 135788).
+                if let Some(Popup {
+                    place:
+                        Place::Menu {
+                            owner: Some(owner), ..
+                        },
+                    ..
+                }) = &self.popup
+                {
+                    // SAFETY: an empty message to a window of this thread.
+                    let _ = unsafe { PostMessageW(Some(*owner), WM_NULL, WPARAM(0), LPARAM(0)) };
+                }
                 // The fields first, while they are still the window's children.
                 self.fields.release();
                 // The pictures first: `art.rs` keeps bitmaps with the render target, which holds
@@ -2075,6 +2344,12 @@ impl<C: Content> Handler for Host<C> {
     fn refresh(&mut self, hwnd: HWND) {
         self.rebuild();
         invalidate(hwnd);
+    }
+
+    fn mark_first(&mut self, hwnd: HWND) {
+        self.lay_out(hwnd);
+        self.focus = self.order().first().copied();
+        self.cue = true;
     }
 
     fn appear(&mut self, hwnd: HWND, moves: bool) {

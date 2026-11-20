@@ -263,6 +263,16 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             }
         }
         Part::AppIcon => painter.app_icon(rect),
+        Part::MenuIcon { name, emphasis } => {
+            let colour = if state.disabled {
+                Color::Ink3
+            } else if *emphasis {
+                Color::Accent
+            } else {
+                Color::Ink2
+            };
+            painter.menu_icon(name, rect, c(colour));
+        }
         Part::Taskbar(picture) => crate::ui::picture::draw(painter, look, picture, rect),
         Part::Cross => {
             if let Some(fill) = stepped(None, state) {
