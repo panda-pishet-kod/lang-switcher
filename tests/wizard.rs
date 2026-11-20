@@ -612,3 +612,57 @@ fn the_line_of_the_site_stands_only_on_the_thanks() {
         );
     }
 }
+
+/// **T-120-19, the C3 of the controller: the text of the appeal reads in the direction of its own
+/// language, not of the window.** The appeal is data for the author — «Что случилось:», «Lang
+/// Switcher 1.8.0», the names of programs — in the language it was built in. In a window in Hebrew
+/// a Russian appeal goes left to right (`FieldKind::Code { rtl: false }`); an appeal whose labels
+/// are Hebrew goes right to left.
+///
+/// ⚠ Control: the window itself is mirrored in both cases — the direction of the field is not the
+/// window's.
+#[test]
+fn the_text_of_the_appeal_reads_in_the_direction_of_its_own_language() {
+    use lang_switcher::ui::host::Content;
+
+    let field_of = |wizard: letters::Wizard| -> String {
+        let window = wizard::Page {
+            wizard,
+            language: settings::Language::He,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        }
+        .describe();
+        let body = format!("{:?}", window.body);
+        let at = body
+            .find("kind: Code {")
+            .expect("the last step carries the field of the appeal");
+        body[at..].chars().take(26).collect()
+    };
+    let preview = || {
+        letters::wizard_pages()
+            .into_iter()
+            .find(|(name, _)| *name == "wizard preview")
+            .map(|(_, wizard)| wizard)
+            .expect("the last step")
+    };
+
+    // The pages are built with Russian answers: a Russian appeal in a Hebrew window.
+    let russian = field_of(preview());
+
+    // The same step with the labels of the report in Hebrew.
+    let mut hebrew = preview();
+    hebrew
+        .edit_appeal("Lang Switcher 1.8.0\n==========\n\nמה קרה: התוכנה עשתה משהו אחר".to_owned());
+    let hebrew = field_of(hebrew);
+
+    println!("ru in he: {russian}; he in he: {hebrew}");
+
+    assert!(
+        russian.starts_with("kind: Code { rtl: false }"),
+        "a Russian appeal goes left to right in a Hebrew window: {russian}"
+    );
+    assert!(
+        hebrew.starts_with("kind: Code { rtl: true }"),
+        "an appeal in Hebrew goes right to left: {hebrew}"
+    );
+}

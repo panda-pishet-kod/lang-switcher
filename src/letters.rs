@@ -2487,10 +2487,6 @@ pub struct Wizard {
     /// The nonce of this appeal, drawn at the first «Отправить» and sent again by every
     /// «Повторить» (199.7 (б)): the site answers a repeat with the same 201 and no second record.
     nonce: Option<String>,
-    /// The language the appeal was built in — its labels are the string tables of that language
-    /// ([`report::build`]); the field of the appeal reads in its direction and not in the window's
-    /// (T-120-19, the C3 of the controller).
-    report_language: Language,
     /// Whether the site took the appeal and the window is showing the thanks — задача Т-33-3, and
     /// since T-107-3 set by the answer of the site and not by a press.
     done: bool,
@@ -2597,13 +2593,25 @@ impl Wizard {
             post: Post::Ready,
             nonce: None,
             done: false,
-            report_language: settings::ui_language(),
         }
     }
 
-    /// Whether the appeal reads right to left — the direction of the language it was built in.
+    /// **Whether the appeal reads right to left** — the direction of the language of the text
+    /// itself, not of the window (T-120-19, the C3 of the controller): the appeal is data for the
+    /// author. The first line is the name of the program and its version, Latin in every language;
+    /// the first letter after it is a label of the report in the language it was built in — the
+    /// English stand-ins until the wave included — or what the person wrote over it.
     pub fn appeal_reads_right_to_left(&self) -> bool {
-        self.report_language.is_rtl()
+        self.text
+            .lines()
+            .skip(1)
+            .flat_map(str::chars)
+            .find(|letter| letter.is_alphabetic())
+            .is_some_and(|letter| {
+                // Hebrew, Syriac, Arabic, Thaana, N'Ko and the presentation forms of Hebrew and
+                // Arabic — the letters of the right-to-left languages of the program.
+                matches!(u32::from(letter), 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+            })
     }
 
     /// Where on [`Wizard::road`] the person is: 0 is the first step.
@@ -2677,7 +2685,6 @@ impl Wizard {
         if self.current() == Step::Preview {
             let built = report::build(&self.draft, &self.facts);
             self.text = report::with_contact(&built, "", &self.contact);
-            self.report_language = settings::ui_language();
         }
         Forward::Moved
     }
@@ -2925,7 +2932,6 @@ pub fn wizard_pages() -> Vec<(&'static str, Wizard)> {
         wizard.done = done;
         if wizard.current() == Step::Preview || done {
             wizard.text = report::build(&wizard.draft, &wizard.facts);
-            wizard.report_language = settings::ui_language();
         }
         wizard
     };
