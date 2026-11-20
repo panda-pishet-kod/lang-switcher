@@ -678,3 +678,84 @@ pub fn run_corner() -> std::process::ExitCode {
     mark(format!("foreground_at_end={}", end.0 as usize));
     std::process::ExitCode::SUCCESS
 }
+
+/// The heaps of the tray program in the live road (208.183), testing build only: called by the
+/// canvas each time the last window of the thread let the factory go. With `LANGSW_TESTING_HEAP_LOG`
+/// naming a file, a line is appended to it — the count of releases, the busy bytes and blocks of
+/// every heap of the process (`HeapWalk`), the committed pages by kind; at the releases 20, 100,
+/// 200, 300 … the sizes of the busy blocks go to `<file>.<count>.txt` (size, count), to be compared:
+/// a block kept per opening is a size whose count grows with the openings.
+pub fn note_heaps() {
+    use ::windows::Win32::Foundation::HANDLE;
+    use ::windows::Win32::System::Memory::{
+        GetProcessHeaps, HeapLock, HeapUnlock, HeapWalk, PROCESS_HEAP_ENTRY,
+    };
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `PROCESS_HEAP_ENTRY_BUSY` of `winbase.h`.
+    const BUSY: u16 = 0x0004;
+    static RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    let Some(path) = std::env::var_os("LANGSW_TESTING_HEAP_LOG") else {
+        return;
+    };
+    let count = RELEASES.fetch_add(1, Ordering::Relaxed) + 1;
+    let sizes_now = count == 20 || count.is_multiple_of(100);
+
+    // Walks every heap; `sizes`, when given, takes the size of each busy block (room made before).
+    let walk = |mut sizes: Option<&mut Vec<u32>>| {
+        let mut heaps = [HANDLE::default(); 64];
+        // SAFETY: a buffer of the length given.
+        let found = (unsafe { GetProcessHeaps(&mut heaps) } as usize).min(heaps.len());
+        let (mut busy, mut blocks) = (0u64, 0u64);
+        for &heap in &heaps[..found] {
+            // SAFETY: a heap of this process, locked while it is walked.
+            unsafe {
+                if HeapLock(heap).is_err() {
+                    continue;
+                }
+                let mut entry = PROCESS_HEAP_ENTRY::default();
+                while HeapWalk(heap, &mut entry).is_ok() {
+                    if entry.wFlags & BUSY != 0 {
+                        busy += u64::from(entry.cbData);
+                        blocks += 1;
+                        if let Some(sizes) = sizes.as_deref_mut()
+                            && sizes.len() < sizes.capacity()
+                        {
+                            sizes.push(entry.cbData);
+                        }
+                    }
+                }
+                let _ = HeapUnlock(heap);
+            }
+        }
+        (busy, blocks)
+    };
+
+    let (busy, blocks) = walk(None);
+    let line = format!(
+        "{} release={count} busy={busy} blocks={blocks} {}\r\n",
+        unix_ms(),
+        pages()
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = file.write_all(line.as_bytes());
+    }
+    if sizes_now {
+        let mut sizes = Vec::with_capacity(blocks as usize + 4096);
+        let _ = walk(Some(&mut sizes));
+        sizes.sort_unstable();
+        let mut text = String::new();
+        for run in sizes.chunk_by(|a, b| a == b) {
+            text += &format!("{} {}\r\n", run[0], run.len());
+        }
+        let mut name = path.clone();
+        name.push(format!(".{count}.txt"));
+        let _ = std::fs::write(name, text);
+    }
+}
