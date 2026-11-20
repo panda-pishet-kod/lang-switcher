@@ -35,7 +35,7 @@ pub enum Id {
 
 impl Id {
     /// What the button does — `None` for the switch, which writes a setting.
-    fn action(self) -> Option<Action> {
+    pub fn action(self) -> Option<Action> {
         match self {
             Id::Support => Some(Action::OpenSupport),
             Id::Channel => Some(Action::OpenChannel),
