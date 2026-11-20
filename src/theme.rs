@@ -85,15 +85,14 @@
 use windows::Win32::Foundation::{COLORREF, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CLEARTYPE_QUALITY, COLORONCOLOR,
-    CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, CreatePen,
-    CreateSolidBrush, DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT,
-    DT_RTLREADING, DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, Ellipse,
-    ExcludeClipRect, FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetLayout,
-    GetStockObject, GetTextExtentPoint32W, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
-    IntersectClipRect, LAYOUT_RTL, LOGFONTW, LOGPIXELSY, NULL_PEN, NULLREGION, OBJ_FONT, PS_SOLID,
-    Polyline, RGN_ERROR, RestoreDC, RoundRect, SRCCOPY, SaveDC, SelectObject, SetBkMode,
-    SetStretchBltMode, SetTextColor, SetWindowOrgEx, StretchBlt, TEXTMETRICW, TRANSPARENT,
-    TextOutW,
+    CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, CreatePen, CreateSolidBrush,
+    DIB_RGB_COLORS, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_EXPANDTABS, DT_LEFT, DT_RTLREADING,
+    DT_SINGLELINE, DT_TOP, DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, ExcludeClipRect,
+    FillRect, GdiFlush, GetCurrentObject, GetDeviceCaps, GetLayout, GetTextExtentPoint32W,
+    GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ, IntersectClipRect, LAYOUT_RTL, LOGFONTW,
+    LOGPIXELSY, NULLREGION, OBJ_FONT, PS_SOLID, Polyline, RGN_ERROR, RestoreDC, RoundRect, SRCCOPY,
+    SaveDC, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, SetWindowOrgEx, StretchBlt,
+    TEXTMETRICW, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::{PCWSTR, w};
@@ -1468,18 +1467,6 @@ impl Canvas {
         }
     }
 
-    /// One rectangle of a figure with **no pen** — the dot of a radio button, whose whole edge
-    /// is the fill. A fill has no path to centre anything on, so the plain multiplication is
-    /// the right conversion here and the corrections above would shrink the figure.
-    pub(crate) fn area(&self, area: &RECT) -> RECT {
-        RECT {
-            left: (area.left - self.origin_x) * SUPERSAMPLE,
-            top: (area.top - self.origin_y) * SUPERSAMPLE,
-            right: (area.right - self.origin_x) * SUPERSAMPLE,
-            bottom: (area.bottom - self.origin_y) * SUPERSAMPLE,
-        }
-    }
-
     /// One length of the window on the enlarged surface — a radius, a pen thickness.
     pub(crate) fn length(&self, pixels: i32) -> i32 {
         pixels * SUPERSAMPLE
@@ -2486,110 +2473,6 @@ pub(crate) fn stroke_polyline(dc: HDC, points: &[(i32, i32); 3], ink: COLORREF, 
     let _ = unsafe { DeleteObject(pen.into()) };
 }
 
-/// One ellipse with an explicit outline and interior, smoothed — FR-92а, task T-11-5b,
-/// smoothed whole by task T-11-17.
-///
-/// `outline` is the ink of a transient pen for the circle of a radio button; `None`
-/// selects the stock `NULL_PEN` — no outline, interior only, which is how the dot is
-/// painted. `fill` is a live brush of the dialog's state. `dpi` is the DPI of the window, for
-/// the reason [`paint_rounded`] states.
-///
-/// A circle has no straight part at all, so — unlike a rounded rectangle — it is enlarged
-/// **whole**: both ellipses this dialog draws are a glyph under 24 px a side, which is the
-/// cheap half of the cost rule of this section. A refused surface or a refused blit falls
-/// straight through to [`stroke_ellipse`], the aliased drawing of every task before this one
-/// (NFR-13).
-pub(crate) fn paint_ellipse(
-    dc: HDC,
-    area: &RECT,
-    outline: Option<COLORREF>,
-    fill: HBRUSH,
-    dpi: i32,
-) {
-    // The same frame every other figure of the dialog is outlined with — one pixel at
-    // 96 DPI through [`BORDER_THICKNESS`], and it grows with the DPI like the rest of the
-    // mock-up (п. 3 of task T-11-15; the circle of a radio button is framed exactly as the
-    // square of a check box beside it).
-    let thickness = scaled(BORDER_THICKNESS, dpi).max(1);
-
-    // A figure with no pen — the dot of a radio button — is all fill and takes neither the
-    // path correction nor the far-edge one; a stroked circle takes both. See [`Canvas::area`].
-    let pen = if outline.is_some() { thickness } else { 0 };
-
-    let smoothed = Supersample::for_tile(area.right - area.left, area.bottom - area.top)
-        .is_some_and(|surface| {
-            surface.render(dc, area, pen, |canvas| {
-                let enlarged = if outline.is_some() {
-                    canvas.outline(area)
-                } else {
-                    canvas.area(area)
-                };
-
-                stroke_ellipse(
-                    canvas.dc,
-                    &enlarged,
-                    outline,
-                    fill,
-                    canvas.length(thickness),
-                );
-            })
-        });
-
-    if !smoothed {
-        stroke_ellipse(dc, area, outline, fill, thickness);
-    }
-}
-
-/// The aliased core of [`paint_ellipse`] — one `Ellipse` with a transient pen of `outline`
-/// and the interior of `fill`; the body that function had before task T-11-17, with the pen
-/// thickness handed in for the reason [`stroke_rounded`] states.
-///
-/// The transient pen is owned for exactly this call, as in [`draw_check_mark`]; a refused
-/// `CreatePen` skips the ellipse (NFR-13: examined — better no circle for one paint than a
-/// circle in whatever pen the DC happens to hold).
-fn stroke_ellipse(dc: HDC, area: &RECT, outline: Option<COLORREF>, fill: HBRUSH, thickness: i32) {
-    let pen = match outline {
-        Some(ink) => {
-            // SAFETY: takes plain values, reads no memory of ours, answers a handle owned
-            // by this frame until the `DeleteObject` below.
-            let pen = unsafe { CreatePen(PS_SOLID, thickness, ink) };
-
-            if pen.is_invalid() {
-                return;
-            }
-
-            Some(pen)
-        }
-        None => None,
-    };
-
-    // SAFETY: `dc` is painted into for the length of the send this call is inside of; the
-    // handle selected is either the live pen just made or a stock object, which is owned
-    // by the system and never freed by anybody. The previous pen is restored below.
-    let previous_pen = match pen {
-        Some(pen) => unsafe { SelectObject(dc, pen.into()) },
-        None => unsafe { SelectObject(dc, GetStockObject(NULL_PEN)) },
-    };
-
-    // SAFETY: as above; `fill` is a live brush of the dialog's state.
-    let previous_brush = unsafe { SelectObject(dc, fill.into()) };
-
-    // SAFETY: plain coordinates into a live DC. The answer is dropped for the NFR-13
-    // reason the caller states for all its paint calls.
-    let _ = unsafe { Ellipse(dc, area.left, area.top, area.right, area.bottom) };
-
-    // SAFETY: both handles were in the DC a moment ago; putting them back ends this
-    // function's use of the DC.
-    unsafe { SelectObject(dc, previous_brush) };
-    unsafe { SelectObject(dc, previous_pen) };
-
-    if let Some(pen) = pen {
-        // SAFETY: `pen` was created above, deselected the line before, and freed exactly
-        // once, here. The `BOOL` is dropped — see `draw_check_mark`.
-        let _ = unsafe { DeleteObject(pen.into()) };
-    }
-}
-
 /// Inset of the selection rectangle of a list row from the **left and right** edges of the
 /// row, in mock-up pixels — `FillRectPx $g ($px+2) $ry ($pw-4) $rowH $S.SelBg 3`.
 ///
@@ -2633,50 +2516,6 @@ pub(crate) fn paint_selection_stripe(dc: HDC, row: &RECT, ink: COLORREF, fill: H
         fill,
         dpi,
     );
-}
-
-/// Lays the one-pixel line the mock-ups draw under the title bar along the top row of
-/// `area` — FR-92а, task T-12-1, п. 4.
-///
-/// # Why it is drawn here at all
-///
-/// The line belongs to the non-client frame: `ui.ps1:431-433` draws it with a `WinBorder`
-/// pen along the bottom edge of the caption, and `chrome.ps1` does the same for the about
-/// window. This program does not paint its non-client area and — by the verdict of goal 4 of
-/// the E12 reconnaissance — is not going to: DWM owns those thirty-one rows, and there is no
-/// documented attribute that puts a line under them. So the line is imitated by the first
-/// row of the *client* area, which is ours, touches the caption with no gap, and costs one
-/// `FillRect`.
-///
-/// The colour is [`Palette::field_border`] — 58,64,72 against the mock-ups' `WinBorder`
-/// 58,63,71, one level apart in two channels, a tolerance the stage's ТЗ accepted rather than
-/// let an eighteenth palette field be invented for a difference nobody can see.
-pub(crate) fn paint_caption_underline(dc: HDC, area: &RECT, colour: COLORREF) {
-    // SAFETY: a plain colour in, a handle out, owned by this frame until the `DeleteObject`
-    // below.
-    let brush = unsafe { CreateSolidBrush(colour) };
-
-    // NFR-13: examined — no brush, no line, and the window is short of one row of colour
-    // rather than short of a background.
-    if brush.is_invalid() {
-        return;
-    }
-
-    let line = RECT {
-        left: area.left,
-        top: area.top,
-        right: area.right,
-        bottom: area.top + 1,
-    };
-
-    // SAFETY: `dc` is painted into for the length of the call this is inside of, `line` is a
-    // live rectangle of this frame, and `brush` is the live brush just made. The answer is
-    // dropped for the NFR-13 reason the drawing paths of this file all state: a refused fill
-    // costs one row of colour and nothing else.
-    unsafe { FillRect(dc, &line, brush) };
-
-    // SAFETY: created above, handed to nobody, freed exactly once.
-    let _ = unsafe { DeleteObject(brush.into()) };
 }
 
 /// Half-width of the chevron of a closed combo box, in mock-up pixels — the `±4` by `x` of
@@ -2797,20 +2636,6 @@ pub fn smoothed_logfont(base: LOGFONTW) -> LOGFONTW {
         lfQuality: CLEARTYPE_QUALITY,
         ..base
     }
-}
-
-/// One `HFONT` from a `LOGFONTW`, examined — `None` for a refused `CreateFontIndirectW`.
-pub(crate) fn create_font(logical: LOGFONTW) -> Option<HFONT> {
-    // SAFETY: `logical` is a live local of this frame, read by the call; the handle it answers
-    // is owned by the caller.
-    let created = unsafe { CreateFontIndirectW(&raw const logical) };
-
-    // NFR-13: examined — a refused font is the manager's own face, not a face nobody looked at.
-    if created.is_invalid() {
-        return None;
-    }
-
-    Some(created)
 }
 
 /// Selects a face of ours into `dc` for the length of one piece of drawing — task T-11-17.
@@ -4370,26 +4195,6 @@ pub enum StaticColorRole {
     Field,
 }
 
-/// One [`StaticColorRole`] resolved against the palette — the single place a role of a
-/// **label** becomes an ink, shared by the labels of both windows (§6.2: one body, not two).
-///
-/// The identifier never appears here: which role a control plays is the business of
-/// `settings::static_color_role` and `settings::about_static_color_role`, and this function
-/// only turns the answer into a colour. That split is what keeps task T-11-18 from growing a
-/// second «identifier → colour» list beside the one task T-11-4 wrote.
-///
-/// `Field` is spelled out and not swallowed by a catch-all so the match stays closed over the
-/// shared vocabulary: no label of either template is a field — the one control that answers
-/// `Field` is `IDC_HOTKEY`, an `EDITTEXT`, which draws its own text and is not owner-drawn at
-/// all — and if one ever became one, `text` on `field_bg` is what `WM_CTLCOLORSTATIC` already
-/// answers for it.
-pub(crate) fn label_ink(role: StaticColorRole, palette: &Palette) -> COLORREF {
-    match role {
-        StaticColorRole::Label | StaticColorRole::Field => palette.text,
-        StaticColorRole::Muted => palette.text_muted,
-    }
-}
-
 /// The face of one owner-drawn button, named as the palette field it is filled with —
 /// FR-92а, task T-11-5a.
 ///
@@ -4578,29 +4383,6 @@ impl Drop for HotBrush {
     }
 }
 
-/// The colours of one owner-drawn push button, resolved out of the palette: the ground it
-/// stands on, the face brush, the caption ink and the frame brush. What
-/// [`resolve_button_colors`] answers and the whole of what `settings::paint_push_button` needs.
-///
-/// ⚠ The `face` of the hot state is a brush **this value does not own** — it is the transient
-/// [`HotBrush`] the resolver answers beside these colours, and the caller holds that one alive
-/// for the length of the drawing. See [`resolve_button_colors`].
-#[derive(Clone, Copy)]
-pub(crate) struct ResolvedButtonColors {
-    /// What the whole rectangle is erased with before the face goes on it — the brush
-    /// `WM_CTLCOLORBTN` answers for this control. Not a role but a fact of geometry: the
-    /// caller reads it off the panel map, exactly as `on_ctl_color` does (task T-12-6).
-    pub(crate) ground: HBRUSH,
-    /// What the button face is filled with.
-    pub(crate) face: HBRUSH,
-    /// What the caption is drawn with.
-    pub(crate) ink: COLORREF,
-    /// What the single-pixel frame is drawn with. An ink and not a brush since task
-    /// T-11-13: the frame and the face are one rounded `RoundRect` now, and `RoundRect`
-    /// frames with the selected *pen*.
-    pub(crate) border: COLORREF,
-}
-
 /// The colour one [`ButtonFaceRole`] names in this palette — **the** place a face role becomes a
 /// number, and pure so that a table test can close it.
 ///
@@ -4623,93 +4405,6 @@ pub fn button_face_color(role: ButtonFaceRole, palette: &Palette) -> COLORREF {
         ButtonFaceRole::WindowBg => palette.window_bg,
         ButtonFaceRole::MenuHoverBg => palette.menu_hover_bg,
     }
-}
-
-/// The single place a button role becomes a brush or a colour of the resolved palette —
-/// the drawing never sees a role. One body shared by the settings dialog and the about
-/// dialog (§6.2, task T-11-11), moved out of `on_draw_item` rather than copied.
-///
-/// ⚠ **Two values leave here since task T-12-8**, and the second one is not decoration: the hot
-/// face is filled with a brush made for this one drawing (see [`HotBrush`]), and the colours
-/// only *name* it. The caller must keep the answered [`HotBrush`] alive until the painting is
-/// over — every caller binds it and lets it drop when its own frame ends, which is the length
-/// of the paint. `None` for every other face, and for a refused `CreateSolidBrush`.
-pub(crate) fn resolve_button_colors(
-    colors: ButtonColors,
-    ground: HBRUSH,
-    brushes: &Brushes,
-    palette: &Palette,
-) -> (ResolvedButtonColors, Option<HotBrush>) {
-    // The two faces of this table the window's brush set does not hold — `hover_bg` since task
-    // T-12-8 and `sel_fg` since task T-15-2; see [`HotBrush`] for why they are made here
-    // instead of being owned there. A refused `CreateSolidBrush` leaves `None`, and the face
-    // below falls back to the quiet `button_bg`: the button then looks exactly as it did
-    // before those tasks (NFR-13).
-    let hot = match colors.face {
-        ButtonFaceRole::HoverBg => HotBrush::new(palette.hover_bg),
-        ButtonFaceRole::SelFg => HotBrush::new(palette.sel_fg),
-        // Task T-78-3: the third face the window's brush set does not hold. The set is built
-        // for the fields a window paints itself out of, and the highlight of a menu row was
-        // never one of them until a button came to rest on the ground of the window.
-        ButtonFaceRole::MenuHoverBg => HotBrush::new(palette.menu_hover_bg),
-        ButtonFaceRole::ButtonBg
-        | ButtonFaceRole::AccentBg
-        | ButtonFaceRole::SelBg
-        | ButtonFaceRole::WindowBg => None,
-    };
-
-    let face = match colors.face {
-        ButtonFaceRole::ButtonBg => brushes.button_bg(),
-        ButtonFaceRole::AccentBg => brushes.accent_bg(),
-        ButtonFaceRole::SelBg => brushes.sel_bg(),
-        // The ground of the window, which the set does hold — task T-78-3.
-        ButtonFaceRole::WindowBg => brushes.window_bg(),
-        // ⚠ And its refusal falls back to **the ground of the window**, not to `button_bg` like
-        // the two below: a refused brush must leave the name looking the way it looks at rest
-        // (NFR-13), and a white slab where the highlight should be would be worse than no
-        // highlight at all.
-        ButtonFaceRole::MenuHoverBg => hot
-            .as_ref()
-            .map_or_else(|| brushes.window_bg(), HotBrush::brush),
-        ButtonFaceRole::HoverBg | ButtonFaceRole::SelFg => hot
-            .as_ref()
-            .map_or_else(|| brushes.button_bg(), HotBrush::brush),
-    };
-
-    let ink = match colors.text {
-        ButtonTextRole::Text => palette.text,
-        ButtonTextRole::AccentFg => palette.accent_fg,
-        ButtonTextRole::SelFg => palette.sel_fg,
-        ButtonTextRole::TextMuted => palette.text_muted,
-    };
-
-    // Task T-12-4: «no frame» is the pen taking the colour of the fill, so the single
-    // `RoundRect` of the drawing leaves a face and no outline. The face's own colour and not a
-    // new one — the whole point of [`ButtonBorderRole::FaceItself`].
-    let border = match colors.border {
-        ButtonBorderRole::ButtonBorder => palette.button_border,
-        // ⚠⚠ **Это плечо было вторым списком «роль → цвет», и задача T-78-3 его сняла.** Оно
-        // перечисляло те же роли ещё раз, рука об руку с выбором кистей выше, и две новые роли
-        // пришлось бы вписать в оба; вписанная в одно из них роль молча красит рамку цветом,
-        // которого у лица никогда не было. Теперь оба спрашивают [`button_face_color`].
-        //
-        // ⭐ И одна из этих двух ролей сделала живым то, что прежний комментарий здесь называл
-        // недостижимым: пара «безрамочная кнопка под курсором» не возникала, пока имя «Lang
-        // Switcher» не стало кнопкой без рамки, отвечающей на наведение. Соседнее плечо `SelFg`
-        // было точно так же мертво до задачи T-15-2 — вот почему такие ветви не сливают и не
-        // выбрасывают.
-        ButtonBorderRole::FaceItself => button_face_color(colors.face, palette),
-    };
-
-    (
-        ResolvedButtonColors {
-            ground,
-            face,
-            ink,
-            border,
-        },
-        hot,
-    )
 }
 
 /// The two kinds of owner-drawn glyph element — FR-92а, task T-11-5b.
