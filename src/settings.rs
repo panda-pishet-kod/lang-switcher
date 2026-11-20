@@ -3816,6 +3816,18 @@ pub const IDS_STATUS_DETAILS: u16 = 3288;
 /// «Копировать» — the window of «Подробности для автора» puts its lines on the clipboard (T-120-21,
 /// C6 (а)); 3295, the reserve the controller named.
 pub const IDS_STATUS_COPY: u16 = 3295;
+/// «Запуск, звук, флаг в трее, язык и вид программы» — the subtitle of «Общие» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_GENERAL_SUB: u16 = 3307;
+/// «Одна клавиша исправляет набранный текст и переключает раскладку» — the subtitle of «Горячая клавиша» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_HOTKEY_SUB: u16 = 3308;
+/// «Между какими раскладками переводить текст» — the subtitle of «Раскладки» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_LAYOUTS_SUB: u16 = 3309;
+/// «Программы, в которых Lang Switcher не вмешивается» — the subtitle of «Исключения» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_EXCLUSIONS_SUB: u16 = 3310;
+/// «Журнал помогает автору разобраться, если что-то пошло не так» — the subtitle of «Диагностика» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_DIAGNOSTICS_SUB: u16 = 3311;
+/// «Настройки» — the eyebrow over the title of the window of the settings (T-120-20, C3 of the controller).
+pub const IDS_SETTINGS_EYEBROW: u16 = 3312;
 /// The note about a layout named in the file that this session does not have.
 pub const IDS_LAYOUT_NOTE: u16 = 3052;
 /// The word «источник» inside that note.
@@ -4518,7 +4530,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and sixty-six since task T-120-21** — «Копировать» of the small window of
 /// «Подробности для автора», [`IDS_STATUS_COPY`] (3295). 265 + 1.
-pub const INTERFACE_STRINGS: [u16; 266] = [
+///
+/// ⚠ **Two hundred and seventy-two since the C3 of task T-120-20** — the subtitles of the five
+/// sections (3307…3311) and the eyebrow of the window of the settings (3312). 266 + 6.
+pub const INTERFACE_STRINGS: [u16; 272] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4588,6 +4603,12 @@ pub const INTERFACE_STRINGS: [u16; 266] = [
     IDS_STATUS_AUTOSTART_OFF,
     IDS_STATUS_DETAILS,
     IDS_STATUS_COPY,
+    IDS_SECTION_GENERAL_SUB,
+    IDS_SECTION_HOTKEY_SUB,
+    IDS_SECTION_LAYOUTS_SUB,
+    IDS_SECTION_EXCLUSIONS_SUB,
+    IDS_SECTION_DIAGNOSTICS_SUB,
+    IDS_SETTINGS_EYEBROW,
     IDS_LAYOUT_NOTE,
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,

@@ -20,11 +20,13 @@ use crate::settings::{
     IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
     IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
     IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRAY_FLAG,
-    IDS_UPDATES_SWITCH, IDS_WIZARD_ATTACH_SETTINGS, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder,
-    LayoutMode, LayoutRow, Modifiers, Refusal,
+    IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow,
+    Modifiers, Refusal,
 };
 use crate::settings::{
-    IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_STATE_AUTOSTART, IDS_STATE_HEALTH,
+    IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
+    IDS_SECTION_EXCLUSIONS_SUB, IDS_SECTION_GENERAL_SUB, IDS_SECTION_HOTKEY_SUB,
+    IDS_SECTION_LAYOUTS_SUB, IDS_SETTINGS_EYEBROW, IDS_STATE_AUTOSTART, IDS_STATE_HEALTH,
     IDS_STATE_JOINED, IDS_STATE_LAYOUTS, IDS_STATE_NO_FAILURES, IDS_STATE_PAIR, IDS_STATE_WORKING,
     IDS_STATUS_AUTOSTART_OFF, IDS_STATUS_AUTOSTART_ON, IDS_STATUS_DETAILS, IDS_STATUS_FIXES,
     IDS_STATUS_FIXES_NONE, IDS_STATUS_HOTKEY,
@@ -97,6 +99,17 @@ impl Section {
             Self::Layouts => IDS_GROUP_LAYOUTS,
             Self::Exclusions => IDS_GROUP_EXCLUSIONS,
             Self::Diagnostics => IDS_GROUP_DIAGNOSTICS,
+        }
+    }
+
+    /// The line under the title — the mock-up's `sub` (C3 of T-120-20, решение 208.160).
+    fn subtitle(self) -> u16 {
+        match self {
+            Self::General => IDS_SECTION_GENERAL_SUB,
+            Self::Hotkey => IDS_SECTION_HOTKEY_SUB,
+            Self::Layouts => IDS_SECTION_LAYOUTS_SUB,
+            Self::Exclusions => IDS_SECTION_EXCLUSIONS_SUB,
+            Self::Diagnostics => IDS_SECTION_DIAGNOSTICS_SUB,
         }
     }
 }
@@ -824,9 +837,9 @@ impl Content for Settings {
         }
         let mut body = vec![
             Node::Header {
-                eyebrow: Some(self.line(IDS_WIZARD_ATTACH_SETTINGS)),
+                eyebrow: Some(self.line(IDS_SETTINGS_EYEBROW)),
                 title: self.line(self.section.title()),
-                subtitle: None,
+                subtitle: Some(self.line(self.section.subtitle())),
             },
             Node::Sections {
                 id: Id::Sections,
