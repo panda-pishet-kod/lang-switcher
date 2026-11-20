@@ -2884,6 +2884,21 @@ pub fn default_config_path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|app_data| config_path_in(Path::new(&app_data)))
 }
 
+/// The name of **the last good feed kept on disk** — task T-119-9, решение 208.98: the signed
+/// document exactly as the site gave it, beside the configuration.
+pub const KEPT_FEED_FILE_NAME: &str = "news.toml";
+
+/// Where the last good feed is kept inside an arbitrary application data directory —
+/// `%APPDATA%\Lang_Switcher\news.toml` for the product ([`kept_feed_path`]).
+pub fn kept_feed_path_in(app_data: &Path) -> PathBuf {
+    app_data.join(CONFIG_DIR_NAME).join(KEPT_FEED_FILE_NAME)
+}
+
+/// The standard place of the kept feed — [`kept_feed_path_in`] over `%APPDATA%`, `None` without it.
+pub fn kept_feed_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|app_data| kept_feed_path_in(Path::new(&app_data)))
+}
+
 /// Reads the configuration from `path`.
 ///
 /// A missing file is not a failure: on a first run there is none, and section 7 has
@@ -3197,6 +3212,13 @@ pub fn quarantine(path: &Path) -> Result<Quarantined, ConfigError> {
 pub fn write_to(path: &Path, config: &Config) -> Result<WriteOutcome, ConfigError> {
     let text = config.to_toml_string()?;
 
+    write_bytes_to(path, text.as_bytes())
+}
+
+/// **The body of [`write_to`] for any bytes** — task T-119-9: the last good feed is kept beside the
+/// configuration ([`kept_feed_path_in`]) the same way, temporary file, flush, one rename, so that a
+/// killed process leaves the old copy or the new one and never half of either.
+pub fn write_bytes_to(path: &Path, bytes: &[u8]) -> Result<WriteOutcome, ConfigError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -3204,7 +3226,7 @@ pub fn write_to(path: &Path, config: &Config) -> Result<WriteOutcome, ConfigErro
     }
 
     let temporary = temporary_path_for(path);
-    if let Err(err) = write_and_sync(&temporary, text.as_bytes()) {
+    if let Err(err) = write_and_sync(&temporary, bytes) {
         let _ = fs::remove_file(&temporary);
         return Err(err);
     }
@@ -3879,6 +3901,27 @@ pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
 /// 3264…3279.
 pub const IDS_UPDATES_SWITCH: u16 = 3279;
+/// «Новости автора выключены в файле настроек» — the line under the switch of «От автора» while
+/// `[letters] feed = false`, task T-119-10. The first of 3296… (3293…3295 are stage E120's).
+pub const IDS_NEWS_OFF_IN_FILE: u16 = 3296;
+// ⭐ Task T-119-9 (решения 208.95–208.99): the fallback letter «Обновление» says it honestly —
+// 3297…3302. It opens only from the menu entry «Доступна версия X…» or from «Последние письма», and
+// both come on the seventh day of an update the updater could not put in.
+/// «Обновиться автоматически не получилось» — the heading of «Обновление».
+pub const IDS_FALLBACK_TITLE: u16 = 3297;
+/// «доступна {0} · у вас {1} · выпуск {2}» — the quiet line under it: the version the feed names,
+/// the one installed here, the day of the release.
+pub const IDS_FALLBACK_SUB: u16 = 3298;
+/// «Версия {0} вышла {1}, но программа не смогла поставить её сама…» — the first paragraph: a date
+/// and not a count of days (решение 208.99 п. 3).
+pub const IDS_FALLBACK_NOTICE: u16 = 3299;
+/// «Что нового в {0}» — the label over the author's own words about the release.
+pub const IDS_FALLBACK_WHATS_NEW: u16 = 3300;
+/// «Если так повторяется, напишите автору — это поможет найти причину.» — the last row of the panel,
+/// over the button «Написать автору…» (решение 208.97 п. 2).
+pub const IDS_FALLBACK_REPEATS: u16 = 3301;
+/// «доступна {0} · у вас {1}» — the line under the heading of the row of «Последние письма».
+pub const IDS_ENTRY_FALLBACK_MARK: u16 = 3302;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4004,10 +4047,6 @@ pub const IDS_NEWS_DOWNLOAD: u16 = 3120;
 pub const IDS_NEWS_LETTERS: u16 = 3121;
 /// The quiet line the panel carries before the switch of FR-102 appears.
 pub const IDS_NEWS_FILE_ONLY: u16 = 3122;
-/// The switch itself, once it may be shown.
-pub const IDS_NEWS_SWITCH: u16 = 3123;
-/// The sentence under the switch.
-pub const IDS_NEWS_SWITCH_SUB: u16 = 3124;
 /// The caption of the «Обратная связь» panel.
 pub const IDS_FEEDBACK_PANEL: u16 = 3125;
 /// The text of that panel.
@@ -4032,10 +4071,9 @@ pub const IDS_TOAST_TITLE: u16 = 3134;
 pub const IDS_TOAST_NEWS: u16 = 3135;
 /// The balloon's text before «Спасибо».
 pub const IDS_TOAST_THANKS: u16 = 3136;
-/// The balloon's title before «Обновление», with the version substituted.
-pub const IDS_TOAST_UPDATE_TITLE: u16 = 3137;
-/// The balloon's text before «Обновление».
-pub const IDS_TOAST_UPDATE: u16 = 3138;
+// ⛔⛔ **3137, 3138 — `IDS_TOAST_UPDATE_TITLE`, `IDS_TOAST_UPDATE` (стук письма «Обновление») — сняты
+// задачей T-119-9, решение 208.99 п. 1: уведомления Windows о нём нет.** Номера не занимать.
+
 // ⛔⛔ **3212 — `IDS_TOAST_WHATSNEW` (стук письма «Что нового») — снята задачей T-119-8 вместе с
 // письмом, решение 208.94 п. 4.** Номер не занимать.
 /// «Сохранить журнал» — the button of «Диагностика» that writes the dump of the running
@@ -4190,9 +4228,8 @@ pub const IDS_WIZARD_SENT_TITLE: u16 = 3261;
 pub const IDS_WIZARD_SENT_TEXT: u16 = 3262;
 /// The caption of the button the about window gains — FR-103.
 pub const IDS_ABOUT_AUTHOR: u16 = 3139;
-/// The line under the heading of the update entry of «Последние письма»: the date, the word
-/// «обновление» and the version installed here.
-pub const IDS_ENTRY_UPDATE_MARK: u16 = 3140;
+// ⛔⛔ **3140 — `IDS_ENTRY_UPDATE_MARK` — снята задачей T-119-9: строка «Последних писем» об
+// обновлении говорит словами письма (3297, 3302).** Номер не занимать.
 /// The same line for a news item that has not been read.
 pub const IDS_ENTRY_UNREAD_MARK: u16 = 3141;
 /// And for one that has.
@@ -4201,9 +4238,8 @@ pub const IDS_ENTRY_READ_MARK: u16 = 3142;
 // The ten strings the two letters **out of the feed** need — task Т-32-6, ступень Б. Stage А
 // left both letters with the entry's own words and nothing around them; FR-102 and the mock-up
 // ask for the frame: what version you have, how to update, and what «Позже» actually promises.
-/// «Обновление» — the quiet line under the heading: the version installed here and the day the
-/// entry is dated.
-pub const IDS_UPDATE_SUB: u16 = 3143;
+// ⛔⛔ **3143 — `IDS_UPDATE_SUB` — снята задачей T-119-9: подпись письма — 3298, с версией из
+// ленты.** Номер не занимать.
 /// The caption of its panel — the three steps of updating.
 pub const IDS_UPDATE_HOW: u16 = 3144;
 /// ⚠ The first step names the button below it by name; if that button is ever renamed, this
@@ -4445,7 +4481,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
 /// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
 /// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
-pub const INTERFACE_STRINGS: [u16; 260] = [
+pub const INTERFACE_STRINGS: [u16; 261] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4576,8 +4612,6 @@ pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_NEWS_DOWNLOAD,
     IDS_NEWS_LETTERS,
     IDS_NEWS_FILE_ONLY,
-    IDS_NEWS_SWITCH,
-    IDS_NEWS_SWITCH_SUB,
     IDS_FEEDBACK_PANEL,
     IDS_FEEDBACK_TEXT,
     IDS_WRITE_TO_AUTHOR,
@@ -4590,13 +4624,9 @@ pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_TOAST_TITLE,
     IDS_TOAST_NEWS,
     IDS_TOAST_THANKS,
-    IDS_TOAST_UPDATE_TITLE,
-    IDS_TOAST_UPDATE,
     IDS_ABOUT_AUTHOR,
-    IDS_ENTRY_UPDATE_MARK,
     IDS_ENTRY_UNREAD_MARK,
     IDS_ENTRY_READ_MARK,
-    IDS_UPDATE_SUB,
     IDS_UPDATE_HOW,
     IDS_UPDATE_STEP_1,
     IDS_UPDATE_STEP_2,
@@ -4717,6 +4747,13 @@ pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_HINT_OPEN,
     IDS_MENU_WHATSNEW,
     IDS_UPDATES_SWITCH,
+    IDS_NEWS_OFF_IN_FILE,
+    IDS_FALLBACK_TITLE,
+    IDS_FALLBACK_SUB,
+    IDS_FALLBACK_NOTICE,
+    IDS_FALLBACK_WHATS_NEW,
+    IDS_FALLBACK_REPEATS,
+    IDS_ENTRY_FALLBACK_MARK,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

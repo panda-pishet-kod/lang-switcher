@@ -869,3 +869,51 @@ fn decode(text: &str) -> Vec<u8> {
 
     out
 }
+
+// =========================================================================================
+// The feed kept on disk — task T-119-9, решение 208.98
+// =========================================================================================
+
+/// **The kept feed is no feed unless the author's keys sign it again** — task T-119-9, решение
+/// 208.98 (п. 2 of 208.97): the last good document is kept beside the configuration and read at
+/// the start through the very gate an answer of the site goes through. A copy that is spoilt, cut,
+/// empty or signed by somebody else is **no feed at all**, never half of one.
+#[test]
+fn the_kept_feed_is_no_feed_unless_the_authors_keys_sign_it_again() {
+    let with_the_test_key =
+        |body: &[u8], signature: &[u8]| feed::verify_with(body, signature, &[TEST_KEY]);
+
+    // The control: the document of the vector is good, and good under the key that signed it.
+    assert!(
+        feed::read_document(&signed(), "ru", with_the_test_key).is_ok(),
+        "the document itself must be good, or every refusal below proves nothing"
+    );
+
+    // Foreign: well formed and validly signed — by a key that is not the author's.
+    assert!(
+        lang_switcher::letters::kept_feed(&signed(), "ru").is_none(),
+        "a copy signed by anybody but the author is no feed"
+    );
+
+    // Spoilt: one character of the body changed, so not even its own key passes it.
+    let spoilt = signed().replacen("Третья.", "Третья!", 1);
+
+    assert_ne!(spoilt, signed(), "the spoiling must have changed something");
+    assert!(
+        feed::read_document(&spoilt, "ru", with_the_test_key).is_err(),
+        "a changed byte breaks the signature under its own key"
+    );
+    assert!(lang_switcher::letters::kept_feed(&spoilt, "ru").is_none());
+
+    // Cut, empty, not a feed at all.
+    let whole = signed();
+    let cut: String = whole.chars().take(whole.chars().count() / 2).collect();
+
+    for document in ["", "not a feed", cut.as_str()] {
+        assert!(
+            lang_switcher::letters::kept_feed(document, "ru").is_none(),
+            "{} bytes that are not the author's feed are no feed",
+            document.len()
+        );
+    }
+}

@@ -774,18 +774,21 @@ fn the_own_list_has_the_size_of_the_mock_up_and_scales() {
     let at_100 = flags::own_geometry(2, 96);
 
     assert_eq!(at_100.width, 300, "the mock-up's width");
-    assert_eq!(at_100.row, 40);
+    assert_eq!(
+        at_100.row, 52,
+        "two lines: the language and the keyboard layout"
+    );
     assert_eq!(at_100.code, 44);
     assert_eq!(
         at_100.height,
-        6 + 25 + 2 * 40 + 9 + 32 + 6,
+        6 + 25 + 2 * 52 + 9 + 32 + 6,
         "padding, title, two rows, separator, link, padding"
     );
 
     let at_150 = flags::own_geometry(2, 144);
 
     assert_eq!(at_150.width, 450);
-    assert_eq!(at_150.row, 60);
+    assert_eq!(at_150.row, 78);
     assert!(
         flags::own_geometry(5, 96).height > at_100.height,
         "more layouts, a taller list"
@@ -873,8 +876,8 @@ fn the_arrows_move_the_mark_without_wrapping() {
 fn a_point_of_the_own_list_falls_on_a_row_or_the_link() {
     let geometry = flags::own_geometry(2, 96);
     let first = 6 + 25 + 5;
-    let second = 6 + 25 + 40 + 5;
-    let link = 6 + 25 + 2 * 40 + 9 + 5;
+    let second = 6 + 25 + 52 + 5;
+    let link = 6 + 25 + 2 * 52 + 9 + 5;
 
     assert_eq!(flags::own_hit(2, &geometry, 100, first), Some(0));
     assert_eq!(flags::own_hit(2, &geometry, 100, second), Some(1));
@@ -897,6 +900,7 @@ fn the_rows_of_the_own_list_are_the_layouts_of_the_session() {
             "Русский (Россия)".to_owned(),
         ],
         flags::language_code,
+        |layout| lang_switcher::layouts::display_name(layout).unwrap_or_default(),
     );
 
     assert_eq!(rows.len(), 2);
@@ -904,4 +908,19 @@ fn the_rows_of_the_own_list_are_the_layouts_of_the_session() {
     assert_eq!(rows[0].code, "ENG");
     assert_eq!(rows[1].code, "RUS");
     assert_eq!(rows[1].name, "Русский (Россия)");
+
+    // The second line is the name Windows gives the keyboard layout (решение по вопросу 82,
+    // 2026-11-20): every Windows has US and Russian, in the language of its interface.
+    println!(
+        "keyboard layouts: {:?} / {:?}",
+        rows[0].layout_name, rows[1].layout_name
+    );
+    assert!(
+        !rows[0].layout_name.is_empty() && !rows[1].layout_name.is_empty(),
+        "Windows names both keyboard layouts"
+    );
+    assert_ne!(
+        rows[0].layout_name, rows[1].layout_name,
+        "and tells them apart"
+    );
 }

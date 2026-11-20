@@ -1651,6 +1651,15 @@ END
 #define IDS_HINT_OPEN           3277
 #define IDS_MENU_WHATSNEW       3278
 #define IDS_UPDATES_SWITCH      3279
+// Stage E119, task T-119-10: the line of «От автора» when the feed is off in the file -- the first of 3296.. (3293..3295 are E120's).
+#define IDS_NEWS_OFF_IN_FILE    3296
+// Stage E119, task T-119-9: the fallback letter «Обновление», honest (решения 208.95-208.99) -- 3297..3302.
+#define IDS_FALLBACK_TITLE      3297
+#define IDS_FALLBACK_SUB        3298
+#define IDS_FALLBACK_NOTICE     3299
+#define IDS_FALLBACK_WHATS_NEW  3300
+#define IDS_FALLBACK_REPEATS    3301
+#define IDS_ENTRY_FALLBACK_MARK 3302
 // Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
 // (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
 // button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two
@@ -1728,8 +1737,6 @@ END
 #define IDS_NEWS_DOWNLOAD       3120
 #define IDS_NEWS_LETTERS        3121
 #define IDS_NEWS_FILE_ONLY      3122
-#define IDS_NEWS_SWITCH         3123
-#define IDS_NEWS_SWITCH_SUB     3124
 #define IDS_FEEDBACK_PANEL      3125
 #define IDS_FEEDBACK_TEXT       3126
 #define IDS_WRITE_TO_AUTHOR     3127
@@ -1742,20 +1749,16 @@ END
 #define IDS_TOAST_TITLE         3134
 #define IDS_TOAST_NEWS          3135
 #define IDS_TOAST_THANKS        3136
-#define IDS_TOAST_UPDATE_TITLE  3137
-#define IDS_TOAST_UPDATE        3138
 #define IDS_ABOUT_AUTHOR        3139
 // The three lines under the headings of «Последние письма» — FR-101. Composed rather than
 // written out because two of the three parts are numbers the program knows: the day the author
 // dated the entry and the version installed here.
-#define IDS_ENTRY_UPDATE_MARK   3140
 #define IDS_ENTRY_UNREAD_MARK   3141
 #define IDS_ENTRY_READ_MARK     3142
 
 // The frame around the two letters that come out of the feed — task Т-32-6, ступень Б. The
 // words *inside* them are the author's and travel in the feed; these are the program's own:
 // which version you have, the three steps of updating, and what «Позже» promises.
-#define IDS_UPDATE_SUB          3143
 #define IDS_UPDATE_HOW          3144
 #define IDS_UPDATE_STEP_1       3145
 #define IDS_UPDATE_STEP_2       3146

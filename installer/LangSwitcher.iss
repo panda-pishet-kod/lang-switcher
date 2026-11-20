@@ -415,6 +415,11 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 ; {userappdata} is the profile of the account the uninstaller runs as -- the same caveat as the
 ; HKCU value in CurUninstallStepChanged.
 Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
+; Stage E119, task T-119-9 (decision 208.98): the last good feed the program keeps on disk --
+; settings.rs, KEPT_FEED_FILE_NAME = "news.toml" -- and a temporary of its atomic write.  A copy
+; of the author's file and not a setting of the user's: it goes always, as the journal does.
+Type: files; Name: "{userappdata}\Lang_Switcher\news.toml"
+Type: files; Name: "{userappdata}\Lang_Switcher\news.toml.*.tmp"
 ; Stage E104 (TZ E104 p. 17, SPEC section 13 p. 7): the folder of the updater -- its state, its
 ; journal, the copies of the installer -- goes whole, and the data folder with it when nothing
 ; else is in it. The task of the scheduler goes in [Code] (CurUninstallUpdater), before the files.
