@@ -903,6 +903,10 @@ fn a_button_too_wide_for_its_room_is_named_with_its_key() {
 #[test]
 fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     const LABEL: &str = "നിർമ്മാതാവിനെ പിന്തുണയ്ക്കുക";
+    // The lead and the factor of ml Narrow of that day: the translator shortened the lead and the
+    // table moved since, and the case lives on these (the wave of translations, 20.11).
+    const LEAD: &str = "നമസ്കാരം, ഇത് വീണ്ടും പാണ്ട. ഒരു മാസം മുമ്പ് നിങ്ങൾ Lang Switcher ഇൻസ്റ്റാൾ ചെയ്തു, ഇത് ഉപകാരപ്പെടും എന്ന് കരുതുന്നു: പ്രോഗ്രാമിന്റെ ഭാരം കുറയ്ക്കാനും നന്നായി ഓടാനും ഞാൻ ഏറെ ശ്രമിച്ചു.";
+    const K: f32 = 0.914;
     with_product_strings();
     let names = string_names();
     let support = settings::text_in(Language::Ml, settings::IDS_SUPPORT_OPEN);
@@ -916,6 +920,8 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     window.texts_mut(&mut |role, s| {
         if matches!(role, Role::Button) && *s == support {
             *s = LABEL.to_owned();
+        } else if *s == lead {
+            *s = LEAD.to_owned();
         }
     });
     let face = faces()[0];
@@ -928,14 +934,15 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     .expect("DirectWrite");
     let (class, w, h) = CLASSES[0];
     let size = client_size(w, h);
-    let k = fit::k_for(Language::Ml.tag(), class);
+    let _ = class;
+    let k = K;
     assert!(
         !faults(&window, size, k, false, &text).is_empty(),
         "the label runs over"
     );
     let mut without_lead = window.clone();
     without_lead.texts_mut(&mut |_, s| {
-        if *s == lead {
+        if *s == LEAD {
             s.clear();
         }
     });
