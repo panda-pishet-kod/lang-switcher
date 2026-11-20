@@ -1304,3 +1304,44 @@ fn rows_hand_on_their_room_and_a_field_shares_its_row_with_its_button() {
         "too narrow for the field: the button under it, {field:?} {set:?}"
     );
 }
+
+/// **A list that takes the room left is no shortfall of its own** (T-120-20, stand of `e120-win-b`:
+/// «Исключения», 620×500, ml — four rows shown, everything above the rule, yet a shortfall of 28,9):
+/// what does not fit is measured with the list at its least, one row; the room left it shows.
+#[test]
+fn a_list_that_takes_the_room_left_is_no_shortfall_of_its_own() {
+    use lang_switcher::ui::scene::ListItem;
+
+    let rows: Vec<ListItem> = (0..30)
+        .map(|row| ListItem {
+            label: format!("program{row}.exe"),
+            check: None,
+            mark: false,
+        })
+        .collect();
+    let window = |lines: usize| {
+        let mut column: Vec<Node<Id>> = (0..lines).map(|_| text(Role::Body, "a line")).collect();
+        column.push(Node::Fill(Box::new(Node::List {
+            id: Id::Language,
+            rows: rows.clone(),
+            selected: 0,
+            first: 0,
+        })));
+        bare(Node::Column(column))
+    };
+    // Enough lines that the list's natural six rows would not fit, and its least one row would.
+    let layout = lay(&window(11), usual());
+    let shown = rects_of(&layout, |part| matches!(part, Part::ListRow { .. })).len();
+    assert!(
+        (1..6).contains(&shown),
+        "the list shows what the room holds: {shown} rows"
+    );
+    assert!(
+        layout.shortfall.fits(),
+        "no shortfall for the rows it does not need: {:?}",
+        layout.shortfall
+    );
+    // And a column that does not fit even with one row of the list says so.
+    let tall = lay(&window(40), usual());
+    assert!(!tall.shortfall.fits(), "{:?}", tall.shortfall);
+}
