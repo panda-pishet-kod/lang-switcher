@@ -2780,9 +2780,10 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     );
 }
 
-/// **FR-102, the two states of the «Новости и обновления» panel.** Before the switch may be
-/// shown the panel says what the feed is and that the setting lives in the file; after, the
-/// switch stands in that line's place and the sentence moves under it.
+/// **«Новости и обновления» since task T-119-10 (решение 208.119): the switch is «Сообщать об
+/// обновлениях программы» — `[letters] release_window`, the window «Обновлено» — and it is there from
+/// the first day; the switch of the feed and its rule of ninety days are gone. A feed turned off in
+/// the file stays off, and the panel says so under the switch.**
 #[test]
 fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
     with_product_strings();
@@ -2791,41 +2792,36 @@ fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
     let mut state = settled("0.39.0");
     state.first_run = Some(day(2026, 9, 1));
 
-    let before = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+    let view = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
 
-    assert!(before.switch.is_none(), "no letter from the feed yet");
+    assert_eq!(view.switch, Some(true), "the switch is there, and it is on");
     assert!(
-        !before.file_only.is_empty(),
-        "so the file is the way to say no"
+        view.switch_note.is_empty(),
+        "the feed is on: nothing under it"
     );
     assert!(
-        !before.feed_about.is_empty(),
-        "and the panel says what the feed is"
+        !view.feed_state.is_empty(),
+        "and whether the feed has been read"
     );
-    assert!(before.switch_note.is_empty());
-    assert!(
-        !before.feed_state.is_empty(),
-        "and whether it has been read"
-    );
-    assert!(!before.letters, "and nothing in «Последние письма»");
+    assert!(!view.letters, "and nothing in «Последние письма»");
 
-    state.first_feed_letter = Some(day(2026, 9, 10));
-
-    let after = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
-
-    assert_eq!(after.switch, Some(true), "the switch appears, and it is on");
-    assert!(after.file_only.is_empty(), "and the quiet line goes");
-    assert!(
-        after.feed_about.is_empty(),
-        "the sentence is not said twice"
-    );
-    assert!(!after.switch_note.is_empty(), "it moved under the switch");
-
-    // And it follows the setting rather than being decoration.
-    state.feed = false;
+    state.release_window = false;
     assert_eq!(
         letters::author_view(&state, today, "0.39.0", FeedView::EMPTY).switch,
-        Some(false)
+        Some(false),
+        "it follows the windows of updates"
+    );
+
+    state.feed = false;
+    let off = letters::author_view(&state, today, "0.39.0", FeedView::EMPTY);
+    assert_eq!(
+        off.switch,
+        Some(false),
+        "the feed in the file does not move it"
+    );
+    assert!(
+        !off.switch_note.is_empty(),
+        "and the feed off in the file is said under it"
     );
 }
 
@@ -2850,9 +2846,10 @@ fn the_switch_follows_the_setting_a_click_has_written() {
         "the window opens on a feed that is on"
     );
 
-    // The click writes the setting, and the window's copy follows it.
+    // The click writes the setting, and the window's copy follows it. Since task T-119-10 the
+    // switch is `release_window`.
     let mut view = opened.clone();
-    state.feed = false;
+    state.release_window = false;
     view.follow_feed(&state);
 
     assert_eq!(
@@ -2867,28 +2864,12 @@ fn the_switch_follows_the_setting_a_click_has_written() {
     );
 
     // The second click puts both back together.
-    state.feed = true;
+    state.release_window = true;
     view.follow_feed(&state);
 
     assert_eq!(
         view, opened,
         "the second click brings the tick back with the setting"
-    );
-
-    // A switch FR-102 keeps away stays away, whatever the setting says.
-    let mut early = settled("0.39.0");
-    let mut hidden = letters::author_view(&early, today, "0.39.0", FeedView::EMPTY);
-    assert!(
-        hidden.switch.is_none(),
-        "no letter from the feed yet — no switch"
-    );
-
-    early.feed = false;
-    hidden.follow_feed(&early);
-
-    assert!(
-        hidden.switch.is_none(),
-        "and a changed setting does not make one appear"
     );
 }
 
@@ -2949,9 +2930,10 @@ fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
     );
 
     assert!(
-        branch.contains("update_state(|state| state.feed = wanted)")
+        // Since task T-119-10 the switch writes `release_window` — the windows of updates.
+        branch.contains("update_state(|state| state.release_window = wanted)")
             && branch.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)"),
-        "the branch found is not the one that writes the feed and repaints the switch:\n{branch}"
+        "the branch found is not the one that writes the setting and repaints the switch:\n{branch}"
     );
 
     assert!(

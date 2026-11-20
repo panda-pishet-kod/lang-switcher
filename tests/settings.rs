@@ -7740,10 +7740,14 @@ impl AuthorWords {
     fn fed(switch: bool, feed: &PublishedFeed) -> Self {
         let mut words = Self::of(fed_view(switch, 10, BEHIND_THE_FEED, feed));
 
-        assert_eq!(
+        assert!(
             words.view.switch.is_some(),
+            "since task T-119-10 the switch of «От автора» is always there"
+        );
+        assert_eq!(
+            !words.view.switch_note.is_empty(),
             switch,
-            "the switch of FR-102 must be what was asked for"
+            "the line under the switch (the feed off in the file) must be what was asked for"
         );
         assert!(
             words.view.letters,
@@ -8699,12 +8703,13 @@ impl PublishedFeed {
     }
 }
 
-/// The `[letters]` of a machine whose feed is live and was read on `read` — FR-102: the feed on, a
-/// letter out of it shown, and the program on the machine for ninety days when `switch` (the
-/// switch is shown) or since `read` (the quiet line). Nothing marked read.
+/// The `[letters]` of a machine whose feed is live and was read on `read` — FR-102: a letter out of
+/// it shown, the program on the machine for ninety days when `switch` or since `read`. Nothing
+/// marked read. ⭐ Since task T-119-10 the switch of «От автора» is always there (the windows of
+/// updates), and `switch` asks for **the line under it**: the feed turned off in the file.
 fn fed_letters(switch: bool, read: letters::Date) -> settings::Letters {
     settings::Letters {
-        feed: true,
+        feed: !switch,
         first_run: Some(if switch {
             read.plus_days(-letters::SWITCH_AFTER_DAYS)
         } else {
@@ -9613,7 +9618,9 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         } else if settings::has_own_tallest_table(*language) {
             for (face, units) in faces {
                 let table = settings::tallest_window_units_in(*language, face);
-                if table != units {
+                // Task T-119-10, until T-120-24 — delete with the tables: the table holds the window with no
+                // more than the slack of 64 units to spare (see `SLACK` below).
+                if table < units || table > units + 64 {
                     group_a_wrong.push(format!(
                         "{language:?} face {face}: measured {units}, its table {table}"
                     ));
@@ -9634,12 +9641,20 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         group_a_wrong.join("\n")
     );
 
-    // Where a table and the measurement part: a face at which the table is not the least number
-    // of units that holds the tallest window.
+    // Where a table and the measurement part: a face at which the table does not hold the tallest
+    // window, or holds it with more than `SLACK` units to spare.
+    //
+    // ⭐ **Task T-119-10, решение контролёра (2026-11-20, вариант б): until T-120-24 — delete with the
+    // table.** The switch of the feed and its long line left «От автора», and the tallest window is
+    // now «настройки» (380 units at every face) while the table keeps the 407 / 389 / 399 / 390 of
+    // the old «От автора». The old windows go onto the shell of E120 in 1.8.0, and the table of the
+    // rule and this test go with them (T-120-24), so the table is not moved for a few hours of life
+    // — it may stand above the tallest window, by no more than `SLACK`.
+    const SLACK: i32 = 64;
     let disagreements = |table: &dyn Fn(i32) -> i32| -> Vec<String> {
         measured
             .iter()
-            .filter(|(face, units, _)| table(*face) != *units)
+            .filter(|(face, units, _)| table(*face) < *units || table(*face) > *units + SLACK)
             .map(|(face, units, _)| {
                 format!("face {face}: measured {units}, table {}", table(*face))
             })
@@ -9659,18 +9674,37 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
         .max()
         .expect("faces");
 
-    assert_eq!(
-        settings::tallest_window_units_in(Language::Ru, RULE_FACES.end() + 1),
-        most,
-        "beyond the table the rule must count with the table's own maximum"
+    let beyond = settings::tallest_window_units_in(Language::Ru, RULE_FACES.end() + 1);
+    assert!(
+        beyond >= most && beyond <= most + SLACK,
+        "beyond the table the rule must count with a maximum that holds the tallest window ({most}) \
+         with no more than {SLACK} to spare: {beyond}"
     );
 
-    // ⚠ Отрицательный контроль: the table one unit short — at every face at once, and at the one
-    // face the 150 % of a 1080p screen turns on — must be caught, and one unit short must really
-    // be a smaller window there.
-    let short = |face: i32| settings::tallest_window_units_in(Language::Ru, face) - 1;
-    let short_at_14 =
-        |face: i32| settings::tallest_window_units_in(Language::Ru, face) - i32::from(face == 14);
+    // ⚠ Отрицательный контроль: a table one unit short of the window — at every face at once, and
+    // at the one face the 150 % of a 1080p screen turns on — and a table past the window by more
+    // than the slack must be caught, and one unit short must really be a smaller window there.
+    let units_at = |face: i32| {
+        measured
+            .iter()
+            .find(|(at, _, _)| *at == face)
+            .map_or(0, |(_, units, _)| *units)
+    };
+    let short = |face: i32| units_at(face) - 1;
+    let short_at_14 = |face: i32| {
+        if face == 14 {
+            units_at(face) - 1
+        } else {
+            settings::tallest_window_units_in(Language::Ru, face)
+        }
+    };
+    let past = |face: i32| units_at(face) + SLACK + 1;
+
+    assert_eq!(
+        disagreements(&past).len(),
+        measured.len(),
+        "the control past the slack must be caught at every face"
+    );
 
     assert_eq!(
         disagreements(&short).len(),
@@ -10884,13 +10918,20 @@ fn a_grown_window_moves_only_when_it_would_leave_the_air() {
     // The two screens are the two cases: at 100 % the greek window keeps the air where it stands,
     // at 150 % it would not — the shape of `e82`, where the top was kept and the bottom went under
     // the task bar.
-    let at_150 = (
-        (1008 - (mul_div(345, cell_of(14), 8) + 56)) / 2,
-        author_client_by_model(14, 100, &words) + 56,
-    );
+    //
+    // ⭐ **Task T-119-10, until T-120-24 — delete with the table:** «От автора» lost the switch of
+    // the feed and its long line, and the greek window at 150 % (878 px) no longer leaves the air.
+    // The rule is held on a window of the height of `e82` itself — 961 px from 66, ending at 1027
+    // in a work area of 1008 — so the control still proves something.
+    let at_150 = ((1008 - (mul_div(345, cell_of(14), 8) + 56)) / 2, 961);
     assert!(
         1008 - (at_150.0 + at_150.1) < AIR,
         "the control: at 150 % the window of e82 must leave the air — else this test proves nothing"
+    );
+    assert_eq!(
+        settings::grown_window_top(at_150.0, at_150.1, 0, 1008),
+        (1008 - at_150.1) / 2,
+        "the window of e82 goes to the middle"
     );
 
     // A window taller than the work area goes to its top, never above it.
@@ -18452,7 +18493,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 260] = [
+const FR_94_STRINGS: [(u16, &str, &str); 259] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18985,20 +19026,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 260] = [
         "Отключается в файле настроек: [letters] feed = false.",
         "Can be turned off in the settings file: [letters] feed = false.",
     ),
-    (
-        settings::IDS_NEWS_SWITCH,
-        "Сообщать об обновлениях и новостях автора",
-        "Tell me about the author's updates and news",
-    ),
-    (
-        // Решение 189.12 (TZ E104 §0 п. 12): the switch turns off the letters and the news only —
-        // the updates are read always (189.4), and the line says nothing about them (189.12).
-        settings::IDS_NEWS_SWITCH_SUB,
-        "Раз в сутки программа читает один файл с сайта автора. Выключатель отключает письма и \
-         новости из этого файла.",
-        "Once a day, the program reads one file from the author's site. This switch turns off \
-         the letters and news from that file.",
-    ),
+    // ⛔ Task T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124)
+    // left «От автора»; the switch there is «Сообщать об обновлениях программы» (3279).
     (settings::IDS_FEEDBACK_PANEL, "Обратная связь", "Feedback"),
     (
         settings::IDS_FEEDBACK_TEXT,
@@ -19603,6 +19632,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 260] = [
         settings::IDS_UPDATES_SWITCH,
         "Сообщать об обновлениях программы",
         "Tell me about updates of the program",
+    ),
+    // Task T-119-10: under the switch of «От автора» while the feed is off in the file.
+    (
+        settings::IDS_NEWS_OFF_IN_FILE,
+        "Новости автора выключены в файле настроек",
+        "News from the author is off in the settings file",
     ),
 ];
 
@@ -27150,9 +27185,10 @@ fn every_locale_carries_every_interface_string() {
 #[test]
 fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     const RETIRED: u16 = 3004;
-    // Stage E119, task T-119-8 (решение 208.94 п. 4): «Что нового» and «обновлён до X».
-    const RETIRED_E119: [u16; 11] = [
-        3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250,
+    // Stage E119, task T-119-8 (решение 208.94 п. 4): «Что нового» and «обновлён до X»; task
+    // T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124).
+    const RETIRED_E119: [u16; 13] = [
+        3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124,
     ];
 
     assert!(
@@ -27187,19 +27223,23 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     // ⛔ **Eleven more holes since stage E119, task T-119-8** — решение 208.94 п. 4: the letter
     // «Что нового» with its eight words (3102…3109) and its balloon (3212), and the balloon
-    // «обновлён до X» with its two (3249, 3250). Held by the same three checks.
+    // «обновлён до X» with its two (3249, 3250). Two more since task T-119-10 (решение 208.119):
+    // the switch of the feed in «От автора» and the line under it (3123, 3124). Held by the same
+    // three checks.
     for hole in RETIRED_E119 {
         assert!(
             !settings::INTERFACE_STRINGS.contains(&hole),
-            "{hole} left the vocabulary with task T-119-8 and must not come back into it"
+            "{hole} left the vocabulary with task T-119-8 or T-119-10 and must not come back into it"
         );
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        260,
-        "two hundred and SIXTY identifiers in use since tasks T-119-5, -6, -7 and -10: the window \
-         in the corner, the entry «Что нового в X…» and the switch of «От автора» (3267…3279). \
-         Two hundred and forty-seven since task T-119-3, part Б (решение \
+        259,
+        "two hundred and FIFTY-NINE identifiers in use since task T-119-10 (решение 208.119): the \
+         switch of the news in «От автора» left with its two strings (3123, 3124), the note «Новости \
+         автора выключены в файле настроек» came (3296). Two hundred and sixty since tasks \
+         T-119-5, -6, -7: the window in the corner, the entry «Что нового в X…» and the switch of \
+         «От автора» (3267…3279). Two hundred and forty-seven since task T-119-3, part Б (решение \
          208.88): the title and the link of the list of the program's own (3265, 3266). Two \
          hundred and forty-five since stage E120, tasks T-120-21 and \
          T-120-22 (решение 208.169): «Состояние» for a person, nine (3280…3288), and «Нашли \
@@ -27272,10 +27312,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         // The two neighbours of each hole and the last row of each sixteen-string block — 3041
         // (task T-93-2) sits in the block 3040..3055.
         // Since task T-119-8: 3101 before the run 3102…3109, 3213 and 3215 round 3212, 3248, 3251
-        // and 3263 round 3249…3250 (3110 after the run is read above).
+        // and 3263 round 3249…3250 (3110 after the run is read above). Since task T-119-10: 3122
+        // and 3125 round 3123…3124 and 3135, the last row of the block 3120…3135.
         for id in [
             3003_u16, 3005, 3015, 3110, 3112, 3119, 3040, 3042, 3055, 3101, 3213, 3215, 3248, 3251,
-            3263,
+            3263, 3122, 3125, 3135,
         ] {
             let string = product.string_of_langid(langid, id);
             read += 1;
@@ -27300,8 +27341,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        shipped_locales().len() * 15,
-        "fifteen rows in each locale — six round the holes of task T-119-8, and nine, three round each of the first three holes (the \
+        shipped_locales().len() * 18,
+        "eighteen rows in each locale — three round the holes of task T-119-10, six round the holes of task T-119-8, and nine, three round each of the first three holes (the \
          third, 3041, since task T-93-2); «no holes» out of no readings is the cheapest lie such \
          a sweep tells"
     );

@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Åbn downloadsiden"
     IDS_NEWS_LETTERS        "Seneste breve"
     IDS_NEWS_FILE_ONLY      "Kan slås fra i indstillingsfilen: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Giv mig besked om udviklerens opdateringer og nyheder"
-    IDS_NEWS_SWITCH_SUB     "Én gang om dagen læser programmet en fil fra udviklerens websted. Denne indstilling deaktiverer brevene og nyhederne fra filen."
     IDS_FEEDBACK_PANEL      "Feedback"
     IDS_FEEDBACK_TEXT       "Fundet en fejl eller fået en idé? Guiden samler en henvendelse og sender den til udvikleren, først når du trykker på »Send«."
     IDS_WRITE_TO_AUTHOR     "Skriv til udvikleren…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x06, 0x01

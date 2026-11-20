@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Opna niðurhalssíðuna"
     IDS_NEWS_LETTERS        "Nýleg bréf"
     IDS_NEWS_FILE_ONLY      "Hægt að slökkva á í stillingaskránni: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Láta mig vita af uppfærslum og fréttum frá höfundi"
-    IDS_NEWS_SWITCH_SUB     "Einu sinni á dag les forritið eina skrá af vef höfundar. Þessi rofi slekkur á bréfunum og fréttunum úr þeirri skrá."
     IDS_FEEDBACK_PANEL      "Ábendingar"
     IDS_FEEDBACK_TEXT       "Fannstu villu eða áttu hugmynd? Leiðarvísirinn setur saman erindi og sendir það til höfundar aðeins þegar þú ýtir á „Senda“."
     IDS_WRITE_TO_AUTHOR     "Skrifa höfundi…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x0F, 0x01

@@ -5357,9 +5357,10 @@ unsafe extern "system" fn letter_proc(
                 && widgets::glyph::answer(widgets::glyph::Kind::Check, notification)
                     == widgets::glyph::Answer::Toggle
             {
-                let wanted = !state_now().feed;
+                // Task T-119-10: the switch is the windows of updates, `[letters] release_window`.
+                let wanted = !state_now().release_window;
 
-                update_state(|state| state.feed = wanted);
+                update_state(|state| state.release_window = wanted);
 
                 // ⭐ **Задача T-70-1 (находка Э69-Б-1): галка идёт за записанным.** Выключатель
                 // рисует `draw_switch` по копии `WindowState::author.switch`, которую
@@ -5659,7 +5660,7 @@ impl AuthorView {
     /// changed must not make one appear.
     pub fn follow_feed(&mut self, state: &Letters) {
         if let Some(on) = self.switch.as_mut() {
-            *on = state.feed;
+            *on = state.release_window;
         }
     }
 }
@@ -5669,10 +5670,15 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
     use crate::settings::{
         IDS_ABOUT_LINE_1, IDS_ABOUT_LINE_2, IDS_ABOUT_VERSION, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT,
         IDS_NEWS_ABOUT_FEED, IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST,
-        IDS_NEWS_NEVER_READ, IDS_NEWS_READ_ON, IDS_NEWS_SWITCH_SUB, format_text, text,
+        IDS_NEWS_NEVER_READ, IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON, format_text, text,
     };
 
-    let switch = switch_is_shown(state, today).then_some(state.feed);
+    // ⭐ Task T-119-10 (решение 208.119): the switch of the panel is «Сообщать об обновлениях
+    // программы» — `[letters] release_window`, the window «Обновлено» — and it is always there; the
+    // switch of the feed and its rule of ninety days (T-69-5) are gone. `[letters] feed` stays in the
+    // file, and a feed turned off there is said under the switch.
+    let _ = today;
+    let switch = Some(state.release_window);
     let update = update_is_pending(version, feed);
 
     AuthorView {
@@ -5691,10 +5697,10 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
         } else {
             text(IDS_NEWS_ABOUT_FEED)
         },
-        switch_note: if switch.is_some() {
-            text(IDS_NEWS_SWITCH_SUB)
-        } else {
+        switch_note: if state.feed {
             String::new()
+        } else {
+            text(IDS_NEWS_OFF_IN_FILE)
         },
         feed_state: match state.feed_last_read {
             None => text(IDS_NEWS_NEVER_READ),
@@ -6147,7 +6153,7 @@ unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
 fn fill_author(hwnd: HWND, state: &WindowState) {
     use crate::settings::{
         IDS_AUTHOR_CAPTION, IDS_AUTHOR_PANEL, IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_FEEDBACK_PANEL,
-        IDS_NEWS_DOWNLOAD, IDS_NEWS_LETTERS, IDS_NEWS_PANEL, IDS_NEWS_SWITCH, IDS_SUPPORT_OPEN,
+        IDS_NEWS_DOWNLOAD, IDS_NEWS_LETTERS, IDS_NEWS_PANEL, IDS_SUPPORT_OPEN, IDS_UPDATES_SWITCH,
         IDS_WRITE_TO_AUTHOR, text,
     };
 
@@ -6171,7 +6177,7 @@ fn fill_author(hwnd: HWND, state: &WindowState) {
         (IDC_AUTHOR_CHANNEL, text(IDS_CHANNEL_OPEN)),
         (IDC_NEWS_PANEL, text(IDS_NEWS_PANEL)),
         (IDC_NEWS_ABOUT, view.feed_about.clone()),
-        (IDC_NEWS_SWITCH, text(IDS_NEWS_SWITCH)),
+        (IDC_NEWS_SWITCH, text(IDS_UPDATES_SWITCH)),
         (IDC_NEWS_SWITCH_SUB, view.switch_note.clone()),
         (IDC_NEWS_STATE, view.feed_state.clone()),
         (IDC_NEWS_VERSION, view.version_state.clone()),
@@ -6357,25 +6363,32 @@ unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
             );
             y += metrics.y(11);
 
-            // SAFETY: as above.
-            let height = unsafe {
-                measure(
-                    dc,
-                    faces.body,
+            // Task T-119-10: the line under the switch is there only while `[letters] feed = false`
+            // — «Новости автора выключены в файле настроек».
+            if view.switch_note.is_empty() {
+                hide(hwnd, IDC_NEWS_SWITCH_SUB);
+                y += tight;
+            } else {
+                // SAFETY: as above.
+                let height = unsafe {
+                    measure(
+                        dc,
+                        faces.body,
+                        inner_width - metrics.x(air::ROW_TEXT),
+                        &view.switch_note,
+                        pitch,
+                    )
+                };
+                place(
+                    hwnd,
+                    IDC_NEWS_SWITCH_SUB,
+                    inner_x + metrics.x(air::ROW_TEXT),
+                    y,
                     inner_width - metrics.x(air::ROW_TEXT),
-                    &view.switch_note,
-                    pitch,
-                )
-            };
-            place(
-                hwnd,
-                IDC_NEWS_SWITCH_SUB,
-                inner_x + metrics.x(air::ROW_TEXT),
-                y,
-                inner_width - metrics.x(air::ROW_TEXT),
-                height,
-            );
-            y += height + tight;
+                    height,
+                );
+                y += height + tight;
+            }
         }
     }
 

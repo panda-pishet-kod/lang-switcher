@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Otvoriť stránku na stiahnutie"
     IDS_NEWS_LETTERS        "Posledné listy"
     IDS_NEWS_FILE_ONLY      "Vypnúť to možno v súbore nastavení: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Informovať ma o aktualizáciách a novinkách autora"
-    IDS_NEWS_SWITCH_SUB     "Raz denne program prečíta jeden súbor zo stránky autora. Tento vypínač vypne listy a novinky z tohto súboru."
     IDS_FEEDBACK_PANEL      "Spätná väzba"
     IDS_FEEDBACK_TEXT       "Našli ste chybu alebo máte nápad? Sprievodca zostaví správu a odošle ju autorovi, až keď stlačíte „Odoslať“."
     IDS_WRITE_TO_AUTHOR     "Napísať autorovi…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x1B, 0x01

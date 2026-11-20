@@ -157,8 +157,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "چۈشۈرۈش بېتىنى ئېچىش"
     IDS_NEWS_LETTERS        "يېقىنقى خەتلەر"
     IDS_NEWS_FILE_ONLY      "تەڭشەك ھۆججىتىدە تاقىغىلى بولىدۇ: [letters] feed = false."
-    IDS_NEWS_SWITCH         "ئاپتورنىڭ يېڭىلانما ۋە خەۋەرلىرىنى ماڭا ئۇقتۇرۇش"
-    IDS_NEWS_SWITCH_SUB     "پروگرامما كۈنىگە بىر قېتىم ئاپتورنىڭ تور بېكىتىدىن بىر ھۆججەت ئوقۇيدۇ. بۇ ئالماشتۇرغۇچ شۇ ھۆججەتتىكى خەتلەر ۋە خەۋەرلەرنى تاقايدۇ."
     IDS_FEEDBACK_PANEL      "ئىنكاس"
     IDS_FEEDBACK_TEXT       "خاتالىق تاپتىڭىزمۇ ياكى پىكرىڭىز بارمۇ؟ يېتەكچى ئۇچۇرنى تەييارلايدۇ، پەقەت سىز «ئەۋەتىش» نى بېسىڭىزلا ئۇنى ئاپتورغا ئەۋەتىدۇ."
     IDS_WRITE_TO_AUTHOR     "ئاپتورغا يېزىش…"
@@ -275,6 +273,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x80, 0x01

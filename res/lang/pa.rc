@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ਡਾਊਨਲੋਡ ਪੰਨਾ ਖੋਲ੍ਹੋ"
     IDS_NEWS_LETTERS        "ਹਾਲੀਆ ਚਿੱਠੀਆਂ"
     IDS_NEWS_FILE_ONLY      "ਸੈਟਿੰਗਾਂ ਫ਼ਾਈਲ ਵਿੱਚ ਬੰਦ ਕੀਤਾ ਜਾ ਸਕਦਾ ਹੈ: [letters] feed = false।"
-    IDS_NEWS_SWITCH         "ਲੇਖਕ ਦੇ ਅੱਪਡੇਟਾਂ ਅਤੇ ਖ਼ਬਰਾਂ ਬਾਰੇ ਦੱਸੋ"
-    IDS_NEWS_SWITCH_SUB     "ਦਿਨ ਵਿੱਚ ਇੱਕ ਵਾਰ ਪ੍ਰੋਗਰਾਮ ਲੇਖਕ ਦੀ ਸਾਈਟ ਤੋਂ ਇੱਕ ਫ਼ਾਈਲ ਪੜ੍ਹਦਾ ਹੈ। ਇਹ ਸਵਿੱਚ ਉਸ ਫ਼ਾਈਲ ਦੀਆਂ ਚਿੱਠੀਆਂ ਅਤੇ ਖ਼ਬਰਾਂ ਬੰਦ ਕਰ ਦਿੰਦਾ ਹੈ।"
     IDS_FEEDBACK_PANEL      "ਫ਼ੀਡਬੈਕ"
     IDS_FEEDBACK_TEXT       "ਕੋਈ ਗਲਤੀ ਮਿਲੀ ਜਾਂ ਕੋਈ ਵਿਚਾਰ ਹੈ? ਵਿਜ਼ਰਡ ਸੁਨੇਹਾ ਤਿਆਰ ਕਰ ਦਿੰਦਾ ਹੈ ਅਤੇ “ਭੇਜੋ” ਦਬਾਉਣ ਤੇ ਹੀ ਇਸਨੂੰ ਲੇਖਕ ਨੂੰ ਭੇਜਦਾ ਹੈ।"
     IDS_WRITE_TO_AUTHOR     "ਲੇਖਕ ਨੂੰ ਲਿਖੋ…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x46, 0x01

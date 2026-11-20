@@ -153,8 +153,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Otvori stranicu za preuzimanje"
     IDS_NEWS_LETTERS        "Posljednja pisma"
     IDS_NEWS_FILE_ONLY      "Može se isključiti u datoteci postavki: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Obavještavaj me o ažuriranjima i vijestima autora"
-    IDS_NEWS_SWITCH_SUB     "Jednom dnevno program čita jednu datoteku sa sajta autora. Ovaj prekidač isključuje pisma i vijesti iz te datoteke."
     IDS_FEEDBACK_PANEL      "Povratne informacije"
     IDS_FEEDBACK_TEXT       "Našli ste grešku ili imate ideju? Čarobnjak će sastaviti poruku i poslati je autoru tek kad pritisnete „Pošalji”."
     IDS_WRITE_TO_AUTHOR     "Napiši autoru…"
@@ -271,6 +269,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x1A, 0x05

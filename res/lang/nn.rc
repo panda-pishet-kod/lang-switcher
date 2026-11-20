@@ -156,8 +156,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Opne nedlastingssida"
     IDS_NEWS_LETTERS        "Siste brev"
     IDS_NEWS_FILE_ONLY      "Kan slåast av i innstillingsfila: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Gi meg beskjed om oppdateringar og nyheiter frå utviklaren"
-    IDS_NEWS_SWITCH_SUB     "Éin gong i døgnet les programmet éi fil frå nettstaden til utviklaren. Denne brytaren slår av brev og nyheiter frå den fila."
     IDS_FEEDBACK_PANEL      "Tilbakemelding"
     IDS_FEEDBACK_TEXT       "Har du funne ein feil, eller har du ein idé? Vegvisaren set saman ei melding og sender ho til utviklaren først når du trykkjer «Send»."
     IDS_WRITE_TO_AUTHOR     "Skriv til utviklaren…"
@@ -274,6 +272,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x14, 0x02

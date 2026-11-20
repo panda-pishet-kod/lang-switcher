@@ -156,8 +156,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Avaa lataussivu"
     IDS_NEWS_LETTERS        "Uusimmat kirjeet"
     IDS_NEWS_FILE_ONLY      "Voi poistaa käytöstä asetustiedostossa: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Kerro minulle tekijän päivityksistä ja uutisista"
-    IDS_NEWS_SWITCH_SUB     "Kerran päivässä ohjelma lukee yhden tiedoston tekijän sivustolta. Tämä kytkin poistaa kyseisen tiedoston kirjeet ja uutiset käytöstä."
     IDS_FEEDBACK_PANEL      "Palaute"
     IDS_FEEDBACK_TEXT       "Löysitkö virheen tai onko sinulla idea? Ohjattu toiminto kokoaa yhteydenoton ja lähettää sen tekijälle vasta, kun painat painiketta ”Lähetä”."
     IDS_WRITE_TO_AUTHOR     "Kirjoita tekijälle…"
@@ -274,6 +272,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x0B, 0x01

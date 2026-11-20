@@ -3879,6 +3879,9 @@ pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
 /// 3264…3279.
 pub const IDS_UPDATES_SWITCH: u16 = 3279;
+/// «Новости автора выключены в файле настроек» — the line under the switch of «От автора» while
+/// `[letters] feed = false`, task T-119-10. The first of 3296… (3293…3295 are stage E120's).
+pub const IDS_NEWS_OFF_IN_FILE: u16 = 3296;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4004,10 +4007,6 @@ pub const IDS_NEWS_DOWNLOAD: u16 = 3120;
 pub const IDS_NEWS_LETTERS: u16 = 3121;
 /// The quiet line the panel carries before the switch of FR-102 appears.
 pub const IDS_NEWS_FILE_ONLY: u16 = 3122;
-/// The switch itself, once it may be shown.
-pub const IDS_NEWS_SWITCH: u16 = 3123;
-/// The sentence under the switch.
-pub const IDS_NEWS_SWITCH_SUB: u16 = 3124;
 /// The caption of the «Обратная связь» panel.
 pub const IDS_FEEDBACK_PANEL: u16 = 3125;
 /// The text of that panel.
@@ -4445,7 +4444,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
 /// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
 /// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
-pub const INTERFACE_STRINGS: [u16; 260] = [
+pub const INTERFACE_STRINGS: [u16; 259] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4576,8 +4575,6 @@ pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_NEWS_DOWNLOAD,
     IDS_NEWS_LETTERS,
     IDS_NEWS_FILE_ONLY,
-    IDS_NEWS_SWITCH,
-    IDS_NEWS_SWITCH_SUB,
     IDS_FEEDBACK_PANEL,
     IDS_FEEDBACK_TEXT,
     IDS_WRITE_TO_AUTHOR,
@@ -4717,6 +4714,7 @@ pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_HINT_OPEN,
     IDS_MENU_WHATSNEW,
     IDS_UPDATES_SWITCH,
+    IDS_NEWS_OFF_IN_FILE,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.

@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Жүктеп алу бетін ашу"
     IDS_NEWS_LETTERS        "Соңғы хаттар"
     IDS_NEWS_FILE_ONLY      "Параметрлер файлында өшіріледі: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Автор жаңартулары мен жаңалықтарын хабарлау"
-    IDS_NEWS_SWITCH_SUB     "Тәулігіне бір рет бағдарлама автордың сайтынан бір файлды оқиды. Бұл ауыстырғыш сол файлдағы хаттар мен жаңалықтарды өшіреді."
     IDS_FEEDBACK_PANEL      "Кері байланыс"
     IDS_FEEDBACK_TEXT       "Қате таптыңыз ба немесе идеяңыз бар ма? Шебер өтінішті жинап, «Жіберу» түймесін басқанда ғана авторға жібереді."
     IDS_WRITE_TO_AUTHOR     "Авторға жазу…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x3F, 0x01

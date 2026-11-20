@@ -157,8 +157,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Բացել ներբեռնման էջը"
     IDS_NEWS_LETTERS        "Վերջին նամակները"
     IDS_NEWS_FILE_ONLY      "Անջատվում է կարգավորումների ֆայլում: [letters] feed = false։"
-    IDS_NEWS_SWITCH         "Ծանուցել հեղինակի թարմացումների և լուրերի մասին"
-    IDS_NEWS_SWITCH_SUB     "Օրը մեկ անգամ ծրագիրը կարդում է մեկ ֆայլ հեղինակի կայքից։ Այս անջատիչն անջատում է այդ ֆայլի նամակներն ու լուրերը։"
     IDS_FEEDBACK_PANEL      "Հետադարձ կապ"
     IDS_FEEDBACK_TEXT       "Սխա՞լ եք գտել, թե՞ գաղափար ունեք։ Օգնականը կկազմի դիմումը և հեղինակին կուղարկի միայն այն ժամանակ, երբ սեղմեք «Ուղարկել»։"
     IDS_WRITE_TO_AUTHOR     "Գրել հեղինակին…"
@@ -275,6 +273,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x2B, 0x01

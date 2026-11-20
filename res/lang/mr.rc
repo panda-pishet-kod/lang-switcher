@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "डाउनलोड पृष्ठ उघडा"
     IDS_NEWS_LETTERS        "अलीकडील पत्रे"
     IDS_NEWS_FILE_ONLY      "सेटिंग्ज फाइलमध्ये बंद करता येते: [letters] feed = false."
-    IDS_NEWS_SWITCH         "लेखकाच्या अद्यतनांबद्दल व बातम्यांबद्दल सांगा"
-    IDS_NEWS_SWITCH_SUB     "दिवसातून एकदा प्रोग्राम लेखकाच्या साइटवरील एक फाइल वाचतो. हा स्विच त्या फाइलमधील पत्रे आणि बातम्या बंद करतो."
     IDS_FEEDBACK_PANEL      "अभिप्राय"
     IDS_FEEDBACK_TEXT       "त्रुटी सापडली किंवा कल्पना आहे? विझार्ड संदेश तयार करतो आणि तुम्ही “पाठवा” दाबल्यावरच तो लेखकाला पाठवतो."
     IDS_WRITE_TO_AUTHOR     "लेखकाला लिहा…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x4E, 0x01

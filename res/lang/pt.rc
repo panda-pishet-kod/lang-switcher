@@ -153,8 +153,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Abrir a página de download"
     IDS_NEWS_LETTERS        "Últimas cartas"
     IDS_NEWS_FILE_ONLY      "Desliga-se no arquivo de configurações: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Avisar sobre atualizações e novidades do autor"
-    IDS_NEWS_SWITCH_SUB     "Uma vez por dia o programa lê um arquivo do site do autor. Este interruptor desliga as cartas e as notícias desse arquivo."
     IDS_FEEDBACK_PANEL      "Retorno"
     IDS_FEEDBACK_TEXT       "Achou um erro ou tem uma ideia? O assistente monta a mensagem e só a envia ao autor quando você clicar em “Enviar”."
     IDS_WRITE_TO_AUTHOR     "Escrever para o autor…"
@@ -271,6 +269,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x16, 0x01

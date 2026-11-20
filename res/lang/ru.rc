@@ -157,8 +157,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Открыть страницу загрузки"
     IDS_NEWS_LETTERS        "Последние письма"
     IDS_NEWS_FILE_ONLY      "Отключается в файле настроек: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Сообщать об обновлениях и новостях автора"
-    IDS_NEWS_SWITCH_SUB     "Раз в сутки программа читает один файл с сайта автора. Выключатель отключает письма и новости из этого файла."
     IDS_FEEDBACK_PANEL      "Обратная связь"
     IDS_FEEDBACK_TEXT       "Нашли ошибку или есть идея? Мастер соберёт обращение и отправит его автору, только когда вы нажмёте «Отправить»."
     IDS_WRITE_TO_AUTHOR     "Написать автору…"
@@ -275,6 +273,7 @@ BEGIN
     IDS_HINT_OPEN           "Открыть Параметры Windows"
     IDS_MENU_WHATSNEW       "Что нового в {0}…"
     IDS_UPDATES_SWITCH      "Сообщать об обновлениях программы"
+    IDS_NEWS_OFF_IN_FILE    "Новости автора выключены в файле настроек"
 END
 
 LANGUAGE 0x19, 0x01

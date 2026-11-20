@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "เปิดหน้าดาวน์โหลด"
     IDS_NEWS_LETTERS        "จดหมายล่าสุด"
     IDS_NEWS_FILE_ONLY      "ปิดได้ในไฟล์การตั้งค่า: [letters] feed = false"
-    IDS_NEWS_SWITCH         "แจ้งการอัปเดตและข่าวจากผู้พัฒนา"
-    IDS_NEWS_SWITCH_SUB     "วันละครั้งโปรแกรมจะอ่านไฟล์เดียวจากเว็บไซต์ของผู้พัฒนา สวิตช์นี้ปิดจดหมายและข่าวจากไฟล์นั้น"
     IDS_FEEDBACK_PANEL      "คำติชม"
     IDS_FEEDBACK_TEXT       "พบข้อผิดพลาดหรือมีไอเดียหรือไม่ ตัวช่วยจะเรียบเรียงเรื่องที่จะส่งให้ และส่งถึงผู้พัฒนาก็ต่อเมื่อคุณกด “ส่ง”"
     IDS_WRITE_TO_AUTHOR     "เขียนถึงผู้พัฒนา…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x1E, 0x01

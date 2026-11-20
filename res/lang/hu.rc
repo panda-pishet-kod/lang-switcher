@@ -156,8 +156,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Letöltési oldal megnyitása"
     IDS_NEWS_LETTERS        "Legutóbbi levelek"
     IDS_NEWS_FILE_ONLY      "A beállításfájlban kikapcsolható: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Értesítés a szerző frissítéseiről és híreiről"
-    IDS_NEWS_SWITCH_SUB     "A program naponta egyszer beolvas egy fájlt a szerző webhelyéről. Ez a kapcsoló kikapcsolja az ebből a fájlból származó leveleket és híreket."
     IDS_FEEDBACK_PANEL      "Visszajelzés"
     IDS_FEEDBACK_TEXT       "Hibát talált, vagy van egy ötlete? A varázsló összeállítja a bejelentést, és csak akkor küldi el a szerzőnek, ha megnyomja a „Küldés” gombot."
     IDS_WRITE_TO_AUTHOR     "Írjon a szerzőnek…"
@@ -274,6 +272,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x0E, 0x01

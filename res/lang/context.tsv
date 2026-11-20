@@ -36,6 +36,7 @@ IDS_HINT_TEXT	window in the corner / menu (drawn by the program)	-	the text of t
 IDS_HINT_OPEN	window in the corner / menu (drawn by the program)	-	the main button of the hint, two thirds of 332 px, 13.5 px	-	E119 (T-119-5): opens the page of the taskbar in Windows Settings
 IDS_MENU_WHATSNEW	window in the corner / menu (drawn by the program)	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
 IDS_UPDATES_SWITCH	window in the corner / menu (drawn by the program)	-	the switch of «От автора» in place of the switch of the feed, one line	-	E119 (T-119-10): turns the window «Обновлено» on and off - the same setting as its check box
+IDS_NEWS_OFF_IN_FILE	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	the line under the switch of «От автора», 205 dialog units wide, up to two lines	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
 IDS_GROUP_EXCLUSIONS	IDD_SETTINGS	IDC_GROUP_EXCLUSIONS	350x17	-	-
 IDS_EXCLUSION_REMOVE	IDD_SETTINGS	IDC_EXCLUSION_REMOVE	105x30	-	-
 IDS_EXCLUSION_ADD	IDD_SETTINGS	IDC_EXCLUSION_ADD	105x30	-	-
@@ -153,8 +154,6 @@ IDS_NEWS_AVAILABLE	IDD_AUTHOR	IDC_NEWS_VERSION	382x21	{0} = the installed versio
 IDS_NEWS_DOWNLOAD	IDD_LETTER,IDD_AUTHOR	IDC_NEWS_DOWNLOAD	193x30	-	-
 IDS_NEWS_LETTERS	IDD_AUTHOR	IDC_NEWS_LETTERS	110x30	-	-
 IDS_NEWS_FILE_ONLY	IDD_AUTHOR	IDC_NEWS_FILE_ONLY	382x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_SWITCH	IDD_AUTHOR	IDC_NEWS_SWITCH	382x21	-	-
-IDS_NEWS_SWITCH_SUB	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	359x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_FEEDBACK_PANEL	IDD_AUTHOR	IDC_FEEDBACK_PANEL	406x17	-	-
 IDS_FEEDBACK_TEXT	IDD_AUTHOR	IDC_FEEDBACK_TEXT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,IDD_SETTINGS,menu	IDC_FEEDBACK_WRITE,IDC_WRITE_AUTHOR	193x30	-	-

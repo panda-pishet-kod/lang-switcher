@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Whakatuwhera i te whārangi tikiake"
     IDS_NEWS_LETTERS        "Ngā reta tata nei"
     IDS_NEWS_FILE_ONLY      "Ka taea te whakaweto i roto i te kōnae tautuhinga: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Kōrerotia mai ngā whakahou me ngā pūrongo a te kaituhi"
-    IDS_NEWS_SWITCH_SUB     "Kotahi te wā i ia rā ka pānui te hōtaka i tētahi kōnae mai i te pae tukutuku a te kaituhi. Mā tēnei pana e whakaweto ngā reta me ngā pūrongo mai i taua kōnae."
     IDS_FEEDBACK_PANEL      "Urupare"
     IDS_FEEDBACK_TEXT       "Kua kite i tētahi hapa, he whakaaro rānei? Mā te kaiārahi e whakarite tētahi karere, ā, ka tukuna ki te kaituhi ina pēhia anake “Tukua”."
     IDS_WRITE_TO_AUTHOR     "Tuhi ki te kaituhi…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x81, 0x01

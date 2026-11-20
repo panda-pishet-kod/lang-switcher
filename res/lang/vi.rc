@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Mở trang tải xuống"
     IDS_NEWS_LETTERS        "Thư gần đây"
     IDS_NEWS_FILE_ONLY      "Có thể tắt trong tệp cấu hình: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Thông báo cho tôi về cập nhật và tin tức của tác giả"
-    IDS_NEWS_SWITCH_SUB     "Mỗi ngày một lần, chương trình đọc một tệp từ trang web của tác giả. Công tắc này tắt thư và tin tức từ tệp đó."
     IDS_FEEDBACK_PANEL      "Phản hồi"
     IDS_FEEDBACK_TEXT       "Phát hiện lỗi hoặc có ý tưởng? Trình hướng dẫn sẽ soạn tin nhắn và chỉ gửi cho tác giả khi bạn nhấn “Gửi”."
     IDS_WRITE_TO_AUTHOR     "Viết cho tác giả…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x2A, 0x01

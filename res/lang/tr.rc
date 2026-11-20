@@ -157,8 +157,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "İndirme sayfasını aç"
     IDS_NEWS_LETTERS        "Son mektuplar"
     IDS_NEWS_FILE_ONLY      "Ayar dosyasından kapatılır: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Yazarın güncelleme ve haberlerini bildir"
-    IDS_NEWS_SWITCH_SUB     "Program günde bir kez yazarın sitesinden tek bir dosya okur. Bu anahtar, o dosyadaki mektupları ve haberleri kapatır."
     IDS_FEEDBACK_PANEL      "Geri bildirim"
     IDS_FEEDBACK_TEXT       "Bir hata mı buldunuz, bir fikriniz mi var? Sihirbaz bildirimi hazırlar ve yazara yalnızca “Gönder” düğmesine bastığınızda gönderir."
     IDS_WRITE_TO_AUTHOR     "Yazara yaz…"
@@ -275,6 +273,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x1F, 0x01

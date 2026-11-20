@@ -161,8 +161,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Άνοιγμα της σελίδας λήψης"
     IDS_NEWS_LETTERS        "Τελευταία γράμματα"
     IDS_NEWS_FILE_ONLY      "Απενεργοποιείται στο αρχείο ρυθμίσεων: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Ειδοποιήσεις για ενημερώσεις και ειδήσεις του δημιουργού"
-    IDS_NEWS_SWITCH_SUB     "Μία φορά την ημέρα το πρόγραμμα διαβάζει ένα αρχείο από τον ιστότοπο του δημιουργού. Ο διακόπτης απενεργοποιεί τα γράμματα και τις ειδήσεις αυτού του αρχείου."
     IDS_FEEDBACK_PANEL      "Επικοινωνία"
     IDS_FEEDBACK_TEXT       "Βρήκατε σφάλμα ή έχετε ιδέα; Ο οδηγός συνθέτει το μήνυμα και το στέλνει στον δημιουργό μόνο όταν πατήσετε «Αποστολή»."
     IDS_WRITE_TO_AUTHOR     "Γράψτε στον δημιουργό"
@@ -279,6 +277,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x08, 0x01

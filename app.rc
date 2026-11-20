@@ -1651,6 +1651,8 @@ END
 #define IDS_HINT_OPEN           3277
 #define IDS_MENU_WHATSNEW       3278
 #define IDS_UPDATES_SWITCH      3279
+// Stage E119, task T-119-10: the line of «От автора» when the feed is off in the file -- the first of 3296.. (3293..3295 are E120's).
+#define IDS_NEWS_OFF_IN_FILE    3296
 // Stage E120, tasks T-120-21 and T-120-22, part A — the block 3280..3295. «Состояние» for a person
 // (3280..3288): the three states, what the program fixes, the key, the start with Windows and the
 // button «Подробности для автора». «Нашли ошибку в переводе?» (3289..3292): the button, the two
@@ -1728,8 +1730,6 @@ END
 #define IDS_NEWS_DOWNLOAD       3120
 #define IDS_NEWS_LETTERS        3121
 #define IDS_NEWS_FILE_ONLY      3122
-#define IDS_NEWS_SWITCH         3123
-#define IDS_NEWS_SWITCH_SUB     3124
 #define IDS_FEEDBACK_PANEL      3125
 #define IDS_FEEDBACK_TEXT       3126
 #define IDS_WRITE_TO_AUTHOR     3127

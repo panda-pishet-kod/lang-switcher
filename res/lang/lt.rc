@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Atidaryti atsisiuntimo puslapį"
     IDS_NEWS_LETTERS        "Naujausi laiškai"
     IDS_NEWS_FILE_ONLY      "Išjungiama parametrų faile: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Pranešti apie autoriaus atnaujinimus ir naujienas"
-    IDS_NEWS_SWITCH_SUB     "Kartą per parą programa nuskaito vieną failą iš autoriaus svetainės. Šis jungiklis išjungia laiškus ir naujienas iš to failo."
     IDS_FEEDBACK_PANEL      "Grįžtamasis ryšys"
     IDS_FEEDBACK_TEXT       "Radote klaidą ar turite idėją? Vedlys sudarys kreipimąsi ir išsiųs jį autoriui tik tada, kai paspausite „Siųsti“."
     IDS_WRITE_TO_AUTHOR     "Rašyti autoriui…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x27, 0x01

@@ -157,8 +157,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Ava allalaadimisleht"
     IDS_NEWS_LETTERS        "Viimased kirjad"
     IDS_NEWS_FILE_ONLY      "Saab välja lülitada sätete failis: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Teavita mind autori värskendustest ja uudistest"
-    IDS_NEWS_SWITCH_SUB     "Kord päevas loeb programm autori saidilt ühe faili. See lüliti keelab selle faili kirjad ja uudised."
     IDS_FEEDBACK_PANEL      "Tagasiside"
     IDS_FEEDBACK_TEXT       "Leidsite vea või on teil idee? Viisard koostab pöördumise ja saadab selle autorile alles siis, kui vajutate nuppu „Saada“."
     IDS_WRITE_TO_AUTHOR     "Kirjuta autorile…"
@@ -275,6 +273,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x25, 0x01

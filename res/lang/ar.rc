@@ -153,8 +153,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "فتح صفحة التنزيل"
     IDS_NEWS_LETTERS        "آخر الرسائل"
     IDS_NEWS_FILE_ONLY      "يُعطَّل في ملف الإعدادات: [letters] feed = false."
-    IDS_NEWS_SWITCH         "أبلغني بتحديثات المؤلف وأخباره"
-    IDS_NEWS_SWITCH_SUB     "مرة كل يوم يقرأ البرنامج ملفًا واحدًا من موقع المؤلف. يوقف هذا المفتاح الرسائل والأخبار الواردة في هذا الملف."
     IDS_FEEDBACK_PANEL      "ملاحظات"
     IDS_FEEDBACK_TEXT       "وجدت خللًا أو لديك فكرة؟ يجمع المعالج الرسالة ولا يرسلها إلى المؤلف إلا عندما تضغط «إرسال»."
     IDS_WRITE_TO_AUTHOR     "الكتابة إلى المؤلف…"
@@ -271,6 +269,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x01, 0x01

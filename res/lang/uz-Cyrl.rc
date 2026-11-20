@@ -153,8 +153,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Юклаб олиш саҳифасини очиш"
     IDS_NEWS_LETTERS        "Сўнгги хатлар"
     IDS_NEWS_FILE_ONLY      "Созламалар файлида ўчириб қўйиш мумкин: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Янгиланишлар ва янгиликлар ҳақида хабар бериш"
-    IDS_NEWS_SWITCH_SUB     "Дастур кунига бир марта муаллиф сайтидаги битта файлни ўқийди. Бу созлама шу файлдаги хатлар ва янгиликларни ўчиради."
     IDS_FEEDBACK_PANEL      "Фикр-мулоҳаза"
     IDS_FEEDBACK_TEXT       "Хато топдингизми ёки ғоянгиз борми? Уста мурожаатни тайёрлайди ва фақат «Юбориш» тугмасини босганингиздагина муаллифга жўнатади."
     IDS_WRITE_TO_AUTHOR     "Муаллифга ёзиш…"
@@ -271,6 +269,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x43, 0x02

@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ডাউনলোড পৃষ্ঠা খুলুন"
     IDS_NEWS_LETTERS        "সাম্প্রতিক চিঠি"
     IDS_NEWS_FILE_ONLY      "সেটিংস ফাইলে বন্ধ করা যায়: [letters] feed = false।"
-    IDS_NEWS_SWITCH         "নির্মাতার আপডেট ও খবর জানান"
-    IDS_NEWS_SWITCH_SUB     "দিনে একবার প্রোগ্রামটি নির্মাতার সাইট থেকে একটি ফাইল পড়ে। এই সুইচ ওই ফাইলের চিঠি ও খবর বন্ধ করে দেয়।"
     IDS_FEEDBACK_PANEL      "মতামত"
     IDS_FEEDBACK_TEXT       "ভুল পেয়েছেন, না কোনো ধারণা আছে? উইজার্ড একটি বার্তা তৈরি করে দেবে, আর আপনি “পাঠান” চাপলেই কেবল তা নির্মাতার কাছে যাবে।"
     IDS_WRITE_TO_AUTHOR     "নির্মাতাকে লিখুন…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x45, 0x01

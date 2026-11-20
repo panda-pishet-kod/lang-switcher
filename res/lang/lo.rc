@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ເປີດໜ້າດາວໂຫຼດ"
     IDS_NEWS_LETTERS        "ຈົດໝາຍຫຼ້າສຸດ"
     IDS_NEWS_FILE_ONLY      "ປິດໄດ້ໃນໄຟລ໌ການຕັ້ງຄ່າ: [letters] feed = false"
-    IDS_NEWS_SWITCH         "ແຈ້ງການອັບເດດ ແລະຂ່າວຈາກຜູ້ພັດທະນາ"
-    IDS_NEWS_SWITCH_SUB     "ມື້ລະເທື່ອໂປຣແກຣມຈະອ່ານໄຟລ໌ດຽວຈາກເວັບໄຊຂອງຜູ້ພັດທະນາ ສະວິດນີ້ປິດຈົດໝາຍ ແລະຂ່າວຈາກໄຟລ໌ນັ້ນ"
     IDS_FEEDBACK_PANEL      "ຄຳຕິຊົມ"
     IDS_FEEDBACK_TEXT       "ພົບຂໍ້ຜິດພາດ ຫຼືມີໄອເດຍບໍ? ຕົວຊ່ວຍຈະຮຽບຮຽງເລື່ອງທີ່ຈະສົ່ງໃຫ້ ແລະສົ່ງຫາຜູ້ພັດທະນາກໍຕໍ່ເມື່ອທ່ານກົດ “ສົ່ງ”"
     IDS_WRITE_TO_AUTHOR     "ຂຽນຫາຜູ້ພັດທະນາ…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x54, 0x01

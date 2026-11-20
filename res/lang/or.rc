@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ଡାଉନଲୋଡ୍ ପୃଷ୍ଠା ଖୋଲନ୍ତୁ"
     IDS_NEWS_LETTERS        "ସାମ୍ପ୍ରତିକ ଚିଠି"
     IDS_NEWS_FILE_ONLY      "ସେଟିଂସ୍ ଫାଇଲରେ ବନ୍ଦ କରାଯାଇପାରିବ: [letters] feed = false।"
-    IDS_NEWS_SWITCH         "ଲେଖକଙ୍କ ଅପଡେଟ୍ ଓ ଖବର ବିଷୟରେ ଜଣାନ୍ତୁ"
-    IDS_NEWS_SWITCH_SUB     "ଦିନକୁ ଥରେ ପ୍ରୋଗ୍ରାମ ଲେଖକଙ୍କ ସାଇଟରୁ ଗୋଟିଏ ଫାଇଲ ପଢ଼େ। ଏହି ସୁଇଚ୍ ସେହି ଫାଇଲର ଚିଠି ଓ ଖବର ବନ୍ଦ କରିଦିଏ।"
     IDS_FEEDBACK_PANEL      "ମତାମତ"
     IDS_FEEDBACK_TEXT       "କୌଣସି ତ୍ରୁଟି ମିଳିଲା ବା କିଛି ଆଇଡିଆ ଅଛି? ୱିଜାର୍ଡ ବାର୍ତ୍ତା ପ୍ରସ୍ତୁତ କରେ ଏବଂ ଆପଣ “ପଠାନ୍ତୁ” ଦବାଇଲେ ହିଁ ଲେଖକଙ୍କୁ ପଠାଏ।"
     IDS_WRITE_TO_AUTHOR     "ଲେଖକଙ୍କୁ ଲେଖନ୍ତୁ…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x48, 0x01

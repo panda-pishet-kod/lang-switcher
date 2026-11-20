@@ -154,8 +154,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ჩამოტვირთვის გვერდი"
     IDS_NEWS_LETTERS        "ბოლო წერილები"
     IDS_NEWS_FILE_ONLY      "გამოირთვება პარამეტრების ფაილში: [letters] feed = false."
-    IDS_NEWS_SWITCH         "შემატყობინეთ ავტორის სიახლეების შესახებ"
-    IDS_NEWS_SWITCH_SUB     "დღეში ერთხელ პროგრამა კითხულობს ერთ ფაილს ავტორის საიტიდან. ეს გადამრთველი ამ ფაილიდან წერილებსა და სიახლეებს გამორთავს."
     IDS_FEEDBACK_PANEL      "უკუკავშირი"
     IDS_FEEDBACK_TEXT       "იპოვეთ შეცდომა ან გაქვთ იდეა? ოსტატი მიმართვას შეადგენს და ავტორს მხოლოდ მაშინ გაუგზავნის, როცა დააჭერთ ღილაკს „გაგზავნა“."
     IDS_WRITE_TO_AUTHOR     "მისწერეთ ავტორს…"
@@ -272,6 +270,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x37, 0x01

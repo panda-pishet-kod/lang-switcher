@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Iftaħ il-paġna tat-tniżżil"
     IDS_NEWS_LETTERS        "L-aħħar ittri"
     IDS_NEWS_FILE_ONLY      "Jista' jintefa fil-fajl tal-issettjar: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Għarrafni bl-aġġornamenti u l-aħbarijiet tal-awtur"
-    IDS_NEWS_SWITCH_SUB     "Darba kuljum, il-programm jaqra fajl wieħed mis-sit tal-awtur. Dan l-iswiċċ jitfi l-ittri u l-aħbarijiet minn dak il-fajl."
     IDS_FEEDBACK_PANEL      "Feedback"
     IDS_FEEDBACK_TEXT       "Sibt bug jew għandek idea? Il-wizard jiġbor messaġġ u jibgħatu lill-awtur biss meta tagħfas “Ibgħat”."
     IDS_WRITE_TO_AUTHOR     "Ikteb lill-awtur…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x3A, 0x01

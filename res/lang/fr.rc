@@ -158,8 +158,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Ouvrir la page de téléchargement"
     IDS_NEWS_LETTERS        "Dernières lettres"
     IDS_NEWS_FILE_ONLY      "Se désactive dans le fichier de paramètres : [letters] feed = false."
-    IDS_NEWS_SWITCH         "M'informer des mises à jour et des nouvelles de l'auteur"
-    IDS_NEWS_SWITCH_SUB     "Une fois par jour, le programme lit un fichier sur le site de l'auteur. Cet interrupteur désactive les lettres et les nouvelles de ce fichier."
     IDS_FEEDBACK_PANEL      "Retour"
     IDS_FEEDBACK_TEXT       "Vous avez trouvé une erreur ou vous avez une idée ? L'assistant compose le message et ne l'envoie à l'auteur que lorsque vous appuyez sur « Envoyer »."
     IDS_WRITE_TO_AUTHOR     "Écrire à l'auteur…"
@@ -276,6 +274,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x0C, 0x01

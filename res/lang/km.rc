@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "បើកទំព័រទាញយក"
     IDS_NEWS_LETTERS        "សំបុត្រថ្មីៗ"
     IDS_NEWS_FILE_ONLY      "អាចបិទបានក្នុងឯកសារការកំណត់: [letters] feed = false។"
-    IDS_NEWS_SWITCH         "ជូនដំណឹងអំពីបច្ចុប្បន្នភាព និងព័ត៌មានរបស់អ្នកបង្កើត"
-    IDS_NEWS_SWITCH_SUB     "ម្ដងក្នុងមួយថ្ងៃ កម្មវិធីអានឯកសារមួយពីគេហទំព័ររបស់អ្នកបង្កើត។ កុងតាក់នេះបិទសំបុត្រ និងព័ត៌មានពីឯកសារនោះ។"
     IDS_FEEDBACK_PANEL      "មតិកែលម្អ"
     IDS_FEEDBACK_TEXT       "រកឃើញកំហុស ឬមានគំនិត? អ្នកជំនួយប្រមូលសារ ហើយផ្ញើទៅអ្នកបង្កើតតែនៅពេលអ្នកចុច «ផ្ញើ»។"
     IDS_WRITE_TO_AUTHOR     "សរសេរទៅអ្នកបង្កើត…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x53, 0x01

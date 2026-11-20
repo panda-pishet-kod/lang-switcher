@@ -151,8 +151,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Отвори ја страницата за преземање"
     IDS_NEWS_LETTERS        "Последни писма"
     IDS_NEWS_FILE_ONLY      "Се исклучува во датотеката со поставки: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Извести ме за ажурирања и вести од авторот"
-    IDS_NEWS_SWITCH_SUB     "Еднаш дневно програмата чита една датотека од сајтот на авторот. Овој прекинувач ги исклучува писмата и вестите од таа датотека."
     IDS_FEEDBACK_PANEL      "Повратни информации"
     IDS_FEEDBACK_TEXT       "Најдовте грешка или имате идеја? Волшебникот ќе состави порака и ќе ја испрати до авторот само кога ќе притиснете „Испрати“."
     IDS_WRITE_TO_AUTHOR     "Пишување до авторот…"
@@ -269,6 +267,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x2F, 0x01

@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Downloadsäit opmaachen"
     IDS_NEWS_LETTERS        "Rezent Bréiwer"
     IDS_NEWS_FILE_ONLY      "Kann an der Astellungsdatei ausgeschalt ginn: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Iwwer Updates an Neiegkeete vum Auteur informéieren"
-    IDS_NEWS_SWITCH_SUB     "Eemol am Dag liest de Programm eng Datei vum Site vum Auteur. Dëse Schalter schalt d'Bréiwer an d'Neiegkeeten aus där Datei of."
     IDS_FEEDBACK_PANEL      "Réckmeldung"
     IDS_FEEDBACK_TEXT       "E Feeler fonnt oder eng Iddi? Den Assistent stellt eng Noriicht zesummen a schéckt se nëmmen un den Auteur, wann Dir op „Schécken“ dréckt."
     IDS_WRITE_TO_AUTHOR     "Dem Auteur schreiwen…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x6E, 0x01

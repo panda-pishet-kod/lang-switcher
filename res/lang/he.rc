@@ -154,8 +154,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "פתיחת עמוד ההורדה"
     IDS_NEWS_LETTERS        "מכתבים אחרונים"
     IDS_NEWS_FILE_ONLY      "ניתן לכבות בקובץ ההגדרות: [letters] feed = false."
-    IDS_NEWS_SWITCH         "לדווח על עדכונים וחדשות של המפתח"
-    IDS_NEWS_SWITCH_SUB     "פעם ביום התוכנה קוראת קובץ אחד מאתר המפתח. המתג מכבה את המכתבים והחדשות מהקובץ הזה."
     IDS_FEEDBACK_PANEL      "משוב"
     IDS_FEEDBACK_TEXT       "מצאתם תקלה או שיש לכם רעיון? האשף יחבר פנייה וישלח אותה למפתח רק כשתלחצו «שליחה»."
     IDS_WRITE_TO_AUTHOR     "כתיבה למפתח…"
@@ -272,6 +270,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x0D, 0x01

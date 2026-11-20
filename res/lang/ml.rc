@@ -155,8 +155,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ഡൗൺലോഡ് പേജ് തുറക്കുക"
     IDS_NEWS_LETTERS        "കത്തുകൾ"
     IDS_NEWS_FILE_ONLY      "ക്രമീകരണ ഫയലിൽ ഓഫാക്കാം: [letters] feed = false."
-    IDS_NEWS_SWITCH         "അപ്ഡേറ്റുകളും വാർത്തകളും അറിയിക്കുക"
-    IDS_NEWS_SWITCH_SUB     "ദിവസത്തിൽ ഒരിക്കൽ പ്രോഗ്രാം നിർമ്മാതാവിന്റെ സൈറ്റിൽ നിന്ന് ഒരു ഫയൽ വായിക്കുന്നു. ഈ സ്വിച്ച് ആ ഫയലിലെ കത്തുകളും വാർത്തകളും ഓഫാക്കുന്നു."
     IDS_FEEDBACK_PANEL      "ഫീഡ്ബാക്ക്"
     IDS_FEEDBACK_TEXT       "പിശക് കണ്ടെത്തിയോ, അല്ലെങ്കിൽ ആശയമുണ്ടോ? നിങ്ങൾ “അയയ്ക്കുക” അമർത്തുമ്പോൾ മാത്രമേ വിസാർഡ് സന്ദേശം തയ്യാറാക്കി നിർമ്മാതാവിന് അയയ്ക്കൂ."
     IDS_WRITE_TO_AUTHOR     "ഫീഡ്ബാക്ക്…"
@@ -273,6 +271,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x4C, 0x01

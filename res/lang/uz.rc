@@ -153,8 +153,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Yuklab olish sahifasini ochish"
     IDS_NEWS_LETTERS        "Soʻnggi xatlar"
     IDS_NEWS_FILE_ONLY      "Sozlamalar faylida oʻchirib qoʻyish mumkin: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Yangilanishlar va yangiliklar haqida xabar berish"
-    IDS_NEWS_SWITCH_SUB     "Dastur kuniga bir marta muallif saytidagi bitta faylni oʻqiydi. Bu sozlama shu fayldagi xatlar va yangiliklarni oʻchiradi."
     IDS_FEEDBACK_PANEL      "Fikr-mulohaza"
     IDS_FEEDBACK_TEXT       "Xato topdingizmi yoki gʻoyangiz bormi? Usta murojaatni tayyorlaydi va faqat «Yuborish» tugmasini bosganingizdagina muallifga joʻnatadi."
     IDS_WRITE_TO_AUTHOR     "Muallifga yozish…"
@@ -271,6 +269,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x43, 0x01

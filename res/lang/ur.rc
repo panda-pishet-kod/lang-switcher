@@ -154,8 +154,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "ڈاؤن لوڈ کا صفحہ کھولیں"
     IDS_NEWS_LETTERS        "حالیہ خطوط"
     IDS_NEWS_FILE_ONLY      "ترتیبات کی فائل میں بند کیا جا سکتا ہے: [letters] feed = false۔"
-    IDS_NEWS_SWITCH         "ڈویلپر کی اپ ڈیٹس اور خبروں سے آگاہ کریں"
-    IDS_NEWS_SWITCH_SUB     "دن میں ایک بار پروگرام ڈویلپر کی سائٹ سے ایک فائل پڑھتا ہے۔ یہ سوئچ اس فائل کے خطوط اور خبریں بند کر دیتا ہے۔"
     IDS_FEEDBACK_PANEL      "تاثرات"
     IDS_FEEDBACK_TEXT       "کوئی خرابی ملی یا کوئی خیال ہے؟ وزرڈ آپ کا پیغام تیار کرتا ہے اور ڈویلپر کو تبھی بھیجتا ہے جب آپ «بھیجیں» دبائیں۔"
     IDS_WRITE_TO_AUTHOR     "ڈویلپر کو لکھیں…"
@@ -272,6 +270,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x20, 0x01

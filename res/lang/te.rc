@@ -154,8 +154,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "డౌన్‌లోడ్ పేజీని తెరవండి"
     IDS_NEWS_LETTERS        "ఇటీవలి లేఖలు"
     IDS_NEWS_FILE_ONLY      "సెట్టింగ్‌ల ఫైల్‌లో ఆపివేయవచ్చు: [letters] feed = false."
-    IDS_NEWS_SWITCH         "రచయిత నవీకరణలు, వార్తల గురించి తెలియజేయండి"
-    IDS_NEWS_SWITCH_SUB     "రోజుకు ఒకసారి ప్రోగ్రామ్ రచయిత సైట్ నుండి ఒక ఫైల్‌ను చదువుతుంది. ఈ స్విచ్ ఆ ఫైల్‌లోని లేఖలను, వార్తలను ఆపివేస్తుంది."
     IDS_FEEDBACK_PANEL      "అభిప్రాయం"
     IDS_FEEDBACK_TEXT       "లోపం కనిపించిందా లేదా ఆలోచన ఉందా? విజార్డ్ సందేశాన్ని సిద్ధం చేస్తుంది; మీరు “పంపండి” నొక్కినప్పుడు మాత్రమే అది రచయితకు వెళుతుంది."
     IDS_WRITE_TO_AUTHOR     "రచయితకు రాయండి…"
@@ -272,6 +270,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x4A, 0x01

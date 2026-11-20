@@ -154,8 +154,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "பதிவிறக்கப் பக்கத்தைத் திற"
     IDS_NEWS_LETTERS        "சமீபத்திய கடிதங்கள்"
     IDS_NEWS_FILE_ONLY      "அமைப்புகள் கோப்பில் அணைக்கலாம்: [letters] feed = false."
-    IDS_NEWS_SWITCH         "புதுப்பிப்புகளையும் செய்திகளையும் தெரிவி"
-    IDS_NEWS_SWITCH_SUB     "நாளுக்கு ஒருமுறை நிரல் உருவாக்குநரின் தளத்திலிருந்து ஒரு கோப்பைப் படிக்கிறது. இந்த விருப்பம் அந்தக் கோப்பிலுள்ள கடிதங்களையும் செய்திகளையும் அணைக்கிறது."
     IDS_FEEDBACK_PANEL      "கருத்துகள்"
     IDS_FEEDBACK_TEXT       "பிழை கண்டீர்களா அல்லது யோசனை உள்ளதா? “அனுப்பு” என்பதை நீங்கள் அழுத்தும்போது மட்டுமே வழிகாட்டி அறிக்கையைத் தொகுத்து உருவாக்குநருக்கு அனுப்பும்."
     IDS_WRITE_TO_AUTHOR     "கருத்து அனுப்பு…"
@@ -272,6 +270,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x49, 0x01

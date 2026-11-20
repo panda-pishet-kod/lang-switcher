@@ -150,8 +150,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Atvērt lejupielādes lapu"
     IDS_NEWS_LETTERS        "Pēdējās vēstules"
     IDS_NEWS_FILE_ONLY      "Var izslēgt iestatījumu failā: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Ziņot par autora atjauninājumiem un ziņām"
-    IDS_NEWS_SWITCH_SUB     "Reizi diennaktī programma nolasa vienu failu no autora vietnes. Šis slēdzis izslēdz vēstules un ziņas no šī faila."
     IDS_FEEDBACK_PANEL      "Atsauksmes"
     IDS_FEEDBACK_TEXT       "Atradāt kļūdu vai jums ir ideja? Vednis sagatavos ziņojumu un nosūtīs to autoram tikai tad, kad nospiedīsiet «Sūtīt»."
     IDS_WRITE_TO_AUTHOR     "Rakstīt autoram…"
@@ -268,6 +266,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x26, 0x01

@@ -152,8 +152,6 @@ BEGIN
     IDS_NEWS_DOWNLOAD       "Відкрити сторінку завантаження"
     IDS_NEWS_LETTERS        "Останні листи"
     IDS_NEWS_FILE_ONLY      "Вимикається у файлі налаштувань: [letters] feed = false."
-    IDS_NEWS_SWITCH         "Повідомляти про оновлення та новини автора"
-    IDS_NEWS_SWITCH_SUB     "Раз на добу програма читає один файл із сайту автора. Перемикач вимикає листи й новини з цього файлу."
     IDS_FEEDBACK_PANEL      "Зворотний зв’язок"
     IDS_FEEDBACK_TEXT       "Знайшли помилку або маєте ідею? Майстер збере звернення й надішле його авторові, лише коли ви натиснете «Надіслати»."
     IDS_WRITE_TO_AUTHOR     "Написати автору…"
@@ -270,6 +268,7 @@ BEGIN
     IDS_HINT_OPEN           "Open Windows Settings"
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
+    IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
 END
 
 LANGUAGE 0x22, 0x01

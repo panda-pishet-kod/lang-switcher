@@ -22,6 +22,9 @@ page. Dates are the days the releases were published (UTC).
   it does not take the focus. «Do not show update windows again» turns it off.
 - When the flag is turned on but stands under the arrow ^ of the taskbar, a hint tells where to pin it.
 - For a week after an update the menu of the icon has «What's new in X…».
+- In «From the author» the switch «Tell me about the author’s updates and news» gave way to «Tell me about updates
+  of the program»: it turns the window «Updated» on and off, the same setting as its tick. Letters and news are turned
+  off in the settings file (`[letters] feed = false`); whoever has done that keeps it, and the window says so in a line.
 
 ## 1.6.1 — 2026-11-16
 
