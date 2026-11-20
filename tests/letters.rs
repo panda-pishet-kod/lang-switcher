@@ -37,9 +37,17 @@ use windows::core::PCWSTR;
 /// lifetime, and the tests of one binary run on parallel threads.
 static PRODUCT: OnceLock<usize> = OnceLock::new();
 
-/// Points the string tables at the product binary. Every test that reads a word of a letter
-/// calls this first; calling it twice is calling it once.
-fn with_product_strings() {
+/// The language of the interface is one for the whole process, and a test that moves it must not
+/// move it under another: every test that reads a word of a letter holds this lock.
+static LOCALE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Points the string tables at the product binary and the language at Russian, and answers the
+/// lock of the language. Every test that reads a word of a letter calls this first and keeps the
+/// guard to its end.
+fn with_product_strings() -> std::sync::MutexGuard<'static, ()> {
+    let guard = LOCALE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let raw = *PRODUCT.get_or_init(|| {
         // `cargo test` puts the test executables in `<target>\debug\deps` and the binary
         // target one level up.
@@ -74,6 +82,7 @@ fn with_product_strings() {
 
     settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
     settings::set_ui_language(settings::Language::Ru);
+    guard
 }
 
 /// The day the stage was built, and the «today» of most of the tests below.
@@ -2196,7 +2205,7 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
 fn the_line_of_the_contact_follows_the_field() {
     use letters::report::{Draft, Facts, build, contact_line, with_contact};
 
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let built = build(
         &Draft {
@@ -2571,7 +2580,7 @@ fn the_demonstration_types_as_many_frames_as_the_word_has_letters() {
 /// letters out of the feed refuse to be built without an entry behind them.
 #[test]
 fn each_letter_fills_the_slots_of_its_own_shape() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
@@ -2647,7 +2656,7 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
 /// carried.
 #[test]
 fn a_letter_out_of_the_feed_says_what_the_entry_said() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut item = news(12);
     // ⚠ **Task T-41-1: this address used to be `https://example.com/post`**, and task T-88-1
@@ -2844,7 +2853,7 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 /// the file stays off, and the panel says so under the switch.**
 #[test]
 fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let today = day(2027, 1, 1);
     let mut state = settled("0.39.0");
@@ -2891,7 +2900,7 @@ fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
 /// click the copy has to be the one the window would build afresh on the setting now in force.
 #[test]
 fn the_switch_follows_the_setting_a_click_has_written() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let today = day(2027, 1, 1);
     let mut state = settled("0.39.0");
@@ -3294,7 +3303,7 @@ fn the_switch_is_drawn_by_the_one_glyph_body_in_one_frame() {
 /// names something newer.
 #[test]
 fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let state = settled("0.39.0");
     let today = day(2026, 9, 3);
@@ -3452,7 +3461,7 @@ fn the_download_button_stands_there_whatever_the_feed_says() {
 /// not.
 #[test]
 fn the_list_shows_the_update_and_the_three_news_newest_first() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut state = settled("0.39.0");
     let announced = update("0.40.0");
@@ -3529,7 +3538,7 @@ fn the_list_shows_the_update_and_the_three_news_newest_first() {
 /// walks the same road the rebuild does: publish a feed, then ask for the entry by letter.
 #[test]
 fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let announced = update("0.41.0");
     let items = [news(11), news(12), news(13)];
@@ -3580,7 +3589,7 @@ fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
 /// feed rather than out of the build — полномочия П5.
 #[test]
 fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut announced = update("0.41.0");
     announced.link = "https://example.invalid/download".to_owned();
@@ -4131,7 +4140,7 @@ impl Drop for HiddenOwner {
 #[cfg(feature = "testing")]
 #[test]
 fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
         .expect("app.rc must be readable");
@@ -4140,19 +4149,18 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
         .filter(|template| script.contains(template))
         .collect();
 
-    let module = HMODULE(std::ptr::without_provenance_mut(
-        *PRODUCT.get().expect("the product is mapped"),
-    ));
     let mut not_shell = Vec::new();
     for letter in [Letter::Welcome, Letter::Thanks] {
         let owner = HiddenOwner::new();
-        let window = letters::testing::open_letter_activated_hidden(owner.0, module, letter)
+        let window = letters::testing::open_letter_hidden(owner.0, letter, None)
             .unwrap_or_else(|| panic!("{letter:?} must open"));
         let mut class = [0u16; 64];
         // SAFETY: a live window this test opened; the buffer is a local of this frame.
-        let length = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
+        let length =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
         let class = String::from_utf16_lossy(&class[..usize::try_from(length).unwrap_or(0)]);
-        let shell = class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
+        let shell =
+            class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
         if !shell {
             not_shell.push(format!("{letter:?} ({class})"));
         }
@@ -4211,7 +4219,7 @@ fn a_button_carries_the_arrow_exactly_when_it_opens_the_browser() {
     use lang_switcher::letters::Action;
     use lang_switcher::ui::windows::{letter, letters_list};
 
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let to_the_browser = |action: Action| {
         matches!(
@@ -4290,7 +4298,7 @@ fn thanks_keeps_its_pair_side_by_side_in_the_narrowest_window() {
     use lang_switcher::ui::text::{Direction, Text};
     use lang_switcher::ui::windows::letter;
 
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut faults = Vec::new();
     for language in Language::ALL {
@@ -4351,7 +4359,7 @@ fn thanks_keeps_its_pair_side_by_side_in_the_narrowest_window() {
 /// the icon is no longer asked by `letters.rs`.
 #[test]
 fn the_knock_of_a_letter_is_the_window_in_the_corner() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     for (letter, title) in [
         (Letter::Thanks, settings::IDS_THANKS_TITLE),
@@ -4407,7 +4415,7 @@ fn the_line_over_the_heading_of_a_letter_has_no_version() {
     use lang_switcher::ui::scene::Node;
     use lang_switcher::ui::windows::letter;
 
-    with_product_strings();
+    let _guard = with_product_strings();
 
     for language in [Language::Ru, Language::En, Language::Ar] {
         for (name, window) in letter::states(language) {
@@ -4431,4 +4439,78 @@ fn the_line_over_the_heading_of_a_letter_has_no_version() {
             );
         }
     }
+}
+
+/// **Задача T-103-2, сторож (4), решение 181.1 — «Спасибо» sends a person to write in the language of
+/// its window, and a change of language on the fly moves it** (moved here from `tests\settings.rs`
+/// with the window, T-120-16). «Спасибо» opened hidden by the product's own `letters::show_letter`
+/// and asked by the door where its link «Открыть группу» would take them — the very language
+/// `letters::act` reads the address by. Built in Russian, the group; the language moved and
+/// `letters::language_changed` told the windows — the letter is built again in English, a new window
+/// whose caption is English — GitHub Issues; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
+    let _guard = with_product_strings();
+
+    let caption = |window| {
+        let mut buffer = [0u16; 128];
+        // SAFETY: a live window of this thread; the buffer is a local of this frame.
+        let length =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(window, &mut buffer) };
+        String::from_utf16_lossy(&buffer[..usize::try_from(length).unwrap_or(0)])
+    };
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_letter_hidden(owner.0, Letter::Thanks, None)
+        .expect("«Спасибо» must open");
+    let now = || {
+        let window = letters::testing::letter_window().expect("«Спасибо» is open");
+        let address = letters::testing::feedback_url(window).expect("a window of `letters`");
+        (window, address)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    // The road of FR-94.
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, address) = now();
+    seen.push(("En, told", address));
+    let english_caption = caption(english);
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    let group = links::GROUP_URL;
+    let issues = links::ISSUES_URL;
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "the letter is built again in the new language"
+    );
+    assert_eq!(
+        english_caption,
+        settings::text_in(Language::En, settings::IDS_LETTER_CAPTION),
+        "and the new window speaks English"
+    );
 }

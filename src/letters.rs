@@ -1884,9 +1884,9 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
         IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION,
         IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
         IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL,
-        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE,
-        IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2,
-        IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR,
+        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE,
+        IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3,
+        IDS_WRITE_TO_AUTHOR,
     };
 
     let text = |id| settings::text_in(language, id);
@@ -6312,11 +6312,8 @@ pub mod testing {
     /// with `entries` by the product's own road, and never shows it. A test binary reads no feed,
     /// so the entries are those of [`super::list_entries`] the caller builds.
     ///
-    /// `_module` is not read: the window of the shell has no template (T-120-16). The parameter
-    /// stays while the callers that named a module of templates are moved.
-    ///
     /// The window answered is the caller's to destroy.
-    pub fn open_list_hidden(owner: HWND, _module: HMODULE, entries: Vec<Entry>) -> Option<HWND> {
+    pub fn open_list_hidden(owner: HWND, entries: Vec<Entry>) -> Option<HWND> {
         hidden_while(|| super::open_list_with(owner, entries, false))
     }
 
@@ -6336,16 +6333,16 @@ pub mod testing {
             .flatten()
     }
 
-    /// [`open_letter_hidden`] for a letter with no entry of the feed.
-    ///
-    /// `_module` is not read: the window of the shell has no template (T-120-16). The parameter
-    /// stays while the callers that named a module of templates are moved.
-    pub fn open_letter_activated_hidden(
-        owner: HWND,
-        _module: HMODULE,
-        letter: Letter,
-    ) -> Option<HWND> {
-        open_letter_hidden(owner, letter, None)
+    /// The letter open on this thread now — a new window after a change of language, which builds
+    /// the letter again.
+    pub fn letter_window() -> Option<HWND> {
+        window_of(Kind::Letter)
+    }
+
+    /// [`super::language_changed`] with the windows of this module left hidden: the letter and the
+    /// list it opens again in the new language are not shown on the screen of a test.
+    pub fn language_changed_hidden(owner: HWND) {
+        hidden_while(|| super::language_changed(owner));
     }
 
     /// **The door of task T-102-3** — gives the open window `hwnd` the theme setting `setting`, the
