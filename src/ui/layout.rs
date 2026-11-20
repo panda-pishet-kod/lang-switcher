@@ -371,6 +371,44 @@ impl Shortfall {
     }
 }
 
+/// A step of the order of giving way (passport §3а), in its order: taken one after another, each
+/// only while the window does not fit at the type size of its table, the same for every window.
+/// After the last there is none: the window scrolls and the instrument of fitting fails it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Concession {
+    /// A row of buttons that does not fit stands in two rows, the main one in the lower at its
+    /// edge; not fitting so either — in a column across the width, the main one on top.
+    Buttons,
+    /// A pair stands in a column when a half is narrower than its widest unbreakable content (a
+    /// button, a word), even when the half is not narrower than its least.
+    Pair,
+    /// In a pair standing side by side, the buttons of a card stand beside its text — when this
+    /// makes it lower.
+    Card,
+    /// A narrow window loses the circle with the panda in its header.
+    Circle,
+    /// The label of a button wider than its place goes on to a second line; the button grows.
+    Wrap,
+}
+
+impl Concession {
+    /// The steps, in their order.
+    pub const ALL: &'static [Concession] = &[
+        Concession::Buttons,
+        Concession::Pair,
+        Concession::Card,
+        Concession::Circle,
+        Concession::Wrap,
+    ];
+    /// The steps the factor of the table is measured with (T-120-11): the one that was there
+    /// before the order of §3а. The others give way only at the factor of the table.
+    pub const TABLE: &'static [Concession] = &[Concession::Card];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
 /// A laid-out window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layout<I> {
@@ -381,6 +419,9 @@ pub struct Layout<I> {
     pub mirrored: bool,
     pub items: Vec<Placed<I>>,
     pub shortfall: Shortfall,
+    /// The last step of the order of giving way the window came to (§3а); none — it fitted as it
+    /// was.
+    pub step: Option<Concession>,
 }
 
 impl<I: Copy + PartialEq> Layout<I> {
@@ -428,6 +469,19 @@ pub fn lay_out<I: Copy>(
     rtl: bool,
     measure: &dyn Measure,
 ) -> Layout<I> {
+    lay_out_with(window, size, k, rtl, measure, Concession::ALL)
+}
+
+/// [`lay_out`] with only the steps `allowed` of the order of giving way (§3а) — the instrument of
+/// fitting measures the factor of its table with [`Concession::TABLE`].
+pub fn lay_out_with<I: Copy>(
+    window: &Window<I>,
+    size: WindowSize,
+    k: f32,
+    rtl: bool,
+    measure: &dyn Measure,
+    allowed: &[Concession],
+) -> Layout<I> {
     // The window in the corner keeps its sizes (§2): its buttons' role at their 13,5 points.
     let b = if window.kind == WindowKind::Corner {
         CORNER_BUTTON.0 / Role::Button.style().size.0
@@ -444,7 +498,8 @@ pub fn lay_out<I: Copy>(
         art: window.art,
         picture: None,
         sections_at: None,
-        tight: false,
+        given: 0,
+        in_pair: false,
         measure,
         out: Vec::new(),
         rtl,
@@ -452,13 +507,25 @@ pub fn lay_out<I: Copy>(
     };
 
     let mut shortfall = place.window(window, size);
-    if shortfall.h > 0.0 {
-        // The second step of the rule of the pair: the buttons of the action cards move beside
-        // their text.
-        place.tight = true;
+    // The order of giving way (§3а): the big windows only — the window in the corner and the menu
+    // take the height they need, the list of a choice field is the list.
+    let mut step = None;
+    let gives_way = !matches!(
+        window.kind,
+        WindowKind::Corner | WindowKind::Menu | WindowKind::Bare
+    );
+    for concession in Concession::ALL {
+        if shortfall.fits() || !gives_way {
+            break;
+        }
+        if !allowed.contains(concession) {
+            continue;
+        }
+        place.given |= concession.bit();
         place.out.clear();
         place.over = 0.0;
         shortfall = place.window(window, size);
+        step = Some(*concession);
     }
 
     let mut items = place.out;
@@ -473,6 +540,7 @@ pub fn lay_out<I: Copy>(
         mirrored: rtl,
         items,
         shortfall,
+        step,
     }
 }
 
@@ -487,7 +555,8 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         art: None,
         picture: None,
         sections_at: None,
-        tight: false,
+        given: 0,
+        in_pair: false,
         measure,
         out: Vec::new(),
         rtl: false,
@@ -549,7 +618,10 @@ struct Placer<'m, I> {
     /// The column under the picture of the panel of the settings — left, top, width: where their
     /// sections stand in a wide window.
     sections_at: Option<(f32, f32, f32)>,
-    tight: bool,
+    /// The steps of the order of giving way taken (`Concession::bit`).
+    given: u8,
+    /// The node is placed in a pair standing side by side (§3а, step 3).
+    in_pair: bool,
     measure: &'m dyn Measure,
     out: Vec<Placed<I>>,
     /// The widest overflow met: a run of text wider than its room.
@@ -559,6 +631,31 @@ struct Placer<'m, I> {
 impl<I: Copy> Placer<'_, I> {
     fn em(&self, value: Em) -> f32 {
         value.at(self.b)
+    }
+
+    /// Whether the step `concession` of the order of giving way is taken.
+    fn gives(&self, concession: Concession) -> bool {
+        self.given & concession.bit() != 0
+    }
+
+    /// Whether `node` placed `w` wide runs over its room: a word or a button wider than it.
+    fn overflows_at(&mut self, node: &Node<I>, w: f32) -> bool {
+        let (kept, over) = (self.out.len(), self.over);
+        self.over = 0.0;
+        self.node(node, 0.0, 0.0, w, None);
+        let overflows = self.over > 0.0;
+        self.out.truncate(kept);
+        self.over = over;
+        overflows
+    }
+
+    /// The height `place` takes, placed and taken away again.
+    fn trial(&mut self, place: impl FnOnce(&mut Self) -> f32) -> f32 {
+        let (kept, over) = (self.out.len(), self.over);
+        let h = place(self);
+        self.out.truncate(kept);
+        self.over = over;
+        h
     }
 
     fn style(&self, role: Role) -> Style {
@@ -763,8 +860,8 @@ impl<I: Copy> Placer<'_, I> {
             Node::Text(role, text) => self.text(*role, text, x, y, w, Wrap::Words),
             Node::Line(role, text) => self.text(*role, text, x, y, w, Wrap::OneLine),
             Node::Button { .. } => {
-                let (bw, bh) = self.button_size(node);
-                self.button(node, Rect::new(x, y, bw.min(w), bh));
+                let (bw, bh) = self.fitted_button(node, w);
+                self.button(node, Rect::new(x, y, bw, bh));
                 bh
             }
             Node::Buttons(buttons) => self.buttons(buttons, x, y, w),
@@ -1578,7 +1675,11 @@ impl<I: Copy> Placer<'_, I> {
         let count = nodes.len() as f32;
         let each = (w - gap * (count - 1.0)) / count;
 
-        if !columns_fit(nodes.len(), w, self.b) {
+        // Step 2: a half narrower than its widest unbreakable content stands in a column too.
+        let beside = columns_fit(nodes.len(), w, self.b)
+            && !(self.gives(Concession::Pair)
+                && nodes.iter().any(|node| self.overflows_at(node, each)));
+        if !beside {
             let mut top = y;
             for (index, node) in nodes.iter().enumerate() {
                 if index > 0 {
@@ -1589,6 +1690,7 @@ impl<I: Copy> Placer<'_, I> {
             return top - y;
         }
 
+        let in_pair = std::mem::replace(&mut self.in_pair, true);
         let tallest = nodes
             .iter()
             .map(|node| self.height(node, each, None))
@@ -1597,6 +1699,7 @@ impl<I: Copy> Placer<'_, I> {
         for (index, node) in nodes.iter().enumerate() {
             self.node(node, x + (each + gap) * index as f32, y, each, Some(h));
         }
+        self.in_pair = in_pair;
         h
     }
 
@@ -1631,7 +1734,11 @@ impl<I: Copy> Placer<'_, I> {
         y: f32,
         w: f32,
     ) -> f32 {
-        let circle = self.one_column && self.art.is_some() && self.kind != WindowKind::Settings;
+        // Step 4 of §3а takes the circle away.
+        let circle = self.one_column
+            && self.art.is_some()
+            && self.kind != WindowKind::Settings
+            && !self.gives(Concession::Circle);
         let side = if circle { self.em(NARROW_ART) } else { 0.0 };
         let beside = if circle {
             side + self.em(BLOCK_GAP)
@@ -1704,15 +1811,68 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
-    fn button_size(&self, node: &Node<I>) -> (f32, f32) {
-        let mut style = self.style(Role::Button);
-        if let Node::Button {
-            kind: ButtonKind::Primary,
-            ..
-        } = node
-        {
-            style = style.with_weight(BUTTON_PRIMARY_WEIGHT);
+    fn button_style(&self, node: &Node<I>) -> Style {
+        let style = self.style(Role::Button);
+        match node {
+            Node::Button {
+                kind: ButtonKind::Primary,
+                ..
+            } => style.with_weight(BUTTON_PRIMARY_WEIGHT),
+            _ => style,
         }
+    }
+
+    /// A button in a place `w` wide: its own size while it fits; wider — the width of the place,
+    /// its label on a second line once the order of giving way has come to step 5, cut and counted
+    /// as running over before.
+    fn fitted_button(&mut self, node: &Node<I>, w: f32) -> (f32, f32) {
+        let (bw, bh) = self.button_size(node);
+        if bw <= w {
+            return (bw, bh);
+        }
+        if !self.gives(Concession::Wrap) {
+            self.over = self.over.max(bw - w);
+            return (w, bh);
+        }
+        let (v, h) = (self.em(BUTTON_PAD.v), self.em(BUTTON_PAD.h));
+        let inner = (w - h * 2.0).max(0.0);
+        let label = self.measure.measure(
+            &Self::label(node),
+            self.button_style(node),
+            Wrap::Words,
+            inner,
+        );
+        self.over = self.over.max(label.width - inner);
+        (w, (label.height + v * 2.0).max(bh))
+    }
+
+    /// The width of `nodes` side by side.
+    fn row_width(&self, nodes: &[&Node<I>]) -> f32 {
+        nodes
+            .iter()
+            .map(|node| self.button_size(node).0)
+            .sum::<f32>()
+            + self.em(BUTTON_GAP) * nodes.len().saturating_sub(1) as f32
+    }
+
+    /// `nodes` side by side, pressed to the right of `w`; what runs over is counted.
+    fn button_row(&mut self, nodes: &[&Node<I>], x: f32, y: f32, w: f32) -> f32 {
+        let gap = self.em(BUTTON_GAP);
+        let total = self.row_width(nodes);
+        self.over = self.over.max(total - w);
+        let mut left = x + w - total;
+        let mut h = 0.0_f32;
+        for node in nodes {
+            let (bw, bh) = self.button_size(node);
+            self.button(node, Rect::new(left, y, bw, bh));
+            left += bw + gap;
+            h = h.max(bh);
+        }
+        h
+    }
+
+    fn button_size(&self, node: &Node<I>) -> (f32, f32) {
+        let style = self.button_style(node);
         let (v, h) = (self.em(BUTTON_PAD.v), self.em(BUTTON_PAD.h));
         let width = self.width_of(style, &Self::label(node)) + h * 2.0;
         let height = (style.line_height() + v * 2.0).max(self.em(BUTTON_MIN_HEIGHT));
@@ -1729,8 +1889,9 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
-    /// A row of buttons pressed to the right, the main one the rightmost; when they do not fit —
-    /// one under another across the width, the main one on top.
+    /// A row of buttons pressed to the right, the main one the rightmost. When it does not fit —
+    /// §3а, step 1 — two rows, the main one in the lower at its edge; then one under another across
+    /// the width, the main one on top, a label wider than the width on two lines (step 5).
     fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
         if self.kind == WindowKind::Corner {
             return self.corner_buttons(buttons, x, y, w);
@@ -1748,33 +1909,33 @@ impl<I: Copy> Placer<'_, I> {
         let mut order: Vec<&Node<I>> = buttons.iter().filter(|node| !is_primary(node)).collect();
         order.extend(buttons.iter().filter(is_primary));
 
-        let sizes: Vec<(f32, f32)> = order.iter().map(|node| self.button_size(node)).collect();
-        let total = sizes.iter().map(|size| size.0).sum::<f32>()
-            + gap * sizes.len().saturating_sub(1) as f32;
-
-        if total <= w {
-            let mut left = x + w - total;
-            let h = sizes.iter().map(|size| size.1).fold(0.0, f32::max);
-            for (node, (bw, bh)) in order.iter().zip(&sizes) {
-                self.button(node, Rect::new(left, y, *bw, *bh));
-                left += bw + gap;
-            }
-            return h;
+        if self.row_width(&order) <= w || !self.gives(Concession::Buttons) {
+            return self.button_row(&order, x, y, w);
+        }
+        if let Some((main, rest)) = order.split_last()
+            && !rest.is_empty()
+            && self.row_width(rest) <= w
+            && self.row_width(&[*main]) <= w
+        {
+            let upper = self.button_row(rest, x, y, w);
+            let lower = self.button_row(&[*main], x, y + upper + gap, w);
+            return upper + gap + lower;
         }
 
         let mut top = y;
-        for (index, (node, (_, bh))) in order.iter().zip(&sizes).rev().enumerate() {
+        for (index, node) in order.iter().rev().enumerate() {
             if index > 0 {
                 top += gap;
             }
-            self.button(node, Rect::new(x, top, w, *bh));
+            let (_, bh) = self.fitted_button(node, w);
+            self.button(node, Rect::new(x, top, w, bh));
             top += bh;
         }
         top - y
     }
 
-    /// An action card: the title and the text, the buttons under them — or beside them when the
-    /// window is tight.
+    /// An action card: the title and the text, the buttons under them — or beside them, §3а step 3,
+    /// in a pair standing side by side when this makes the card lower.
     fn action(
         &mut self,
         title: &str,
@@ -1785,8 +1946,21 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
     ) -> f32 {
         let gap = self.em(BLOCK_ROW_GAP);
+        let under = |this: &mut Self| {
+            let mut top = y + this.text(Role::Strong, title, x, y, w, Wrap::Words);
+            top += gap + this.text(Role::Body, text, x, top + gap, w, Wrap::Words);
+            if !buttons.is_empty() {
+                top += gap + this.buttons(buttons, x, top + gap, w);
+            }
+            top - y
+        };
+        let beside_lowers = self.gives(Concession::Card)
+            && self.in_pair
+            && !buttons.is_empty()
+            && self.trial(|this| this.action_beside(title, text, buttons, x, y, w))
+                < self.trial(under);
 
-        if !self.tight {
+        if !beside_lowers {
             let mut top = y + self.text(Role::Strong, title, x, y, w, Wrap::Words);
             top += gap + self.text(Role::Body, text, x, top + gap, w, Wrap::Words);
             if !buttons.is_empty() {
@@ -1794,7 +1968,20 @@ impl<I: Copy> Placer<'_, I> {
             }
             return top - y;
         }
+        self.action_beside(title, text, buttons, x, y, w)
+    }
 
+    /// The card with its buttons beside the title and the text.
+    fn action_beside(
+        &mut self,
+        title: &str,
+        text: &str,
+        buttons: &[Node<I>],
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let gap = self.em(BLOCK_ROW_GAP);
         let widest = buttons
             .iter()
             .map(|node| self.button_size(node).0)
@@ -2279,7 +2466,8 @@ pub fn place_node<I: Copy>(
         art: None,
         picture: None,
         sections_at: None,
-        tight: false,
+        given: 0,
+        in_pair: false,
         measure,
         out: Vec::new(),
         rtl: false,
