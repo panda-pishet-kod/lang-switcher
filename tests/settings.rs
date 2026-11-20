@@ -2240,12 +2240,13 @@ fn the_syntax_recovery_takes_only_the_line_of_a_soft_key_in_its_own_section() {
 ///    again.
 #[test]
 fn the_capture_no_longer_promises_to_stop_the_typing_buffer() {
+    // The capture lives in `src\hotkey_capture.rs` since task T-120-23.
     let source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("settings.rs"),
+            .join("hotkey_capture.rs"),
     )
-    .expect("src\\settings.rs must be readable")
+    .expect("src\\hotkey_capture.rs must be readable")
     .replace("\r\n", "\n");
 
     // Контроль прибора: он умеет найти то, что ищет. Без этой строки «ничего не нашлось» могло
@@ -2307,12 +2308,13 @@ fn the_capture_no_longer_promises_to_stop_the_typing_buffer() {
 
 #[test]
 fn exactly_the_five_numbers_of_section_7_are_soft() {
+    // The model of section 7 lives in `src\config.rs` since task T-120-23.
     let source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("settings.rs"),
+            .join("config.rs"),
     )
-    .expect("src\\settings.rs must be readable")
+    .expect("src\\config.rs must be readable")
     .replace("\r\n", "\n");
 
     let needle = "deserialize_with = \"soft_";
@@ -2324,7 +2326,7 @@ fn exactly_the_five_numbers_of_section_7_are_soft() {
         })
         .collect();
 
-    println!("soft fields in src\\settings.rs: {soft:?}");
+    println!("soft fields in src\\config.rs: {soft:?}");
 
     assert_eq!(
         soft,
@@ -5262,14 +5264,20 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
 // screen is the controller's, on the real window: the product is not started by any test.
 
 /// The module source, with the line endings normalised — the sweeps below match on it.
+///
+/// ⚠ **Three files since task T-120-23**: `settings.rs` and its two children, `config.rs` (the
+/// file of the settings) and `hotkey_capture.rs` (the capture of FR-94). A sweep that read
+/// `settings.rs` alone would go green on whatever moved out of it — the danger that task names.
 fn settings_module_source() -> String {
-    fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("settings.rs"),
-    )
-    .expect("the module source must be readable")
-    .replace("\r\n", "\n")
+    ["settings.rs", "config.rs", "hotkey_capture.rs"]
+        .iter()
+        .map(|file| {
+            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file))
+                .unwrap_or_else(|_| panic!("src\\{file} must be readable"))
+                .replace("\r\n", "\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The source of `theme`, the same way — task **T-14-3**.
@@ -5509,7 +5517,8 @@ fn the_settings_module_names_no_system_theme_and_reads_no_item_data() {
     ] {
         assert!(
             !source.contains(forbidden),
-            "`{forbidden}` is in src\\settings.rs — FR-92а forbids exactly this"
+            "`{forbidden}` is in the module settings (settings.rs, config.rs, hotkey_capture.rs) — \
+             FR-92а forbids exactly this"
         );
     }
 
