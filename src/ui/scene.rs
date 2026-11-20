@@ -47,6 +47,12 @@ pub enum Art {
     About,
     /// The panda of the windows in the corner and of the letters.
     Avatar,
+    /// The pictures of the letters (T-120-16) and of the wizard (T-120-19).
+    Hello,
+    Thanks,
+    News,
+    Update,
+    Wizard,
 }
 
 impl Art {
@@ -55,6 +61,11 @@ impl Art {
         match self {
             Art::About => "about",
             Art::Avatar => "avatar",
+            Art::Hello => "hello",
+            Art::Thanks => "thanks",
+            Art::News => "news",
+            Art::Update => "update",
+            Art::Wizard => "wizard",
         }
     }
 }
@@ -226,6 +237,19 @@ pub enum Node<I> {
     },
     /// The line between the groups of the menu.
     MenuRule,
+    /// The example with a key (passport §6 «Клавиша»): the word typed, the key, the word fixed.
+    Example {
+        typed: String,
+        key: String,
+        fixed: String,
+    },
+    /// The card of a letter (passport §6): its label, title, one line of its text, its buttons.
+    LetterCard {
+        label: String,
+        title: String,
+        text: String,
+        buttons: Vec<Node<I>>,
+    },
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
@@ -413,6 +437,18 @@ impl<I> Node<I> {
                 emphasis,
             },
             Node::MenuRule => Node::MenuRule,
+            Node::Example { typed, key, fixed } => Node::Example { typed, key, fixed },
+            Node::LetterCard {
+                label,
+                title,
+                text,
+                buttons,
+            } => Node::LetterCard {
+                label,
+                title,
+                text,
+                buttons: buttons.into_iter().map(|node| node.map(f)).collect(),
+            },
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -514,6 +550,21 @@ impl<I> Node<I> {
                 }
             }
             Node::MenuRule => {}
+            Node::Example { typed, fixed, .. } => {
+                f(Role::Code, typed);
+                f(Role::Code, fixed);
+            }
+            Node::LetterCard {
+                label,
+                title,
+                text,
+                buttons,
+            } => {
+                f(Role::Label, label);
+                f(Role::Strong, title);
+                f(Role::Body, text);
+                buttons.iter_mut().for_each(|node| node.texts_mut(f));
+            }
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }
@@ -599,6 +650,8 @@ pub enum Event<I> {
     RowChecked(I, usize, bool),
     /// A list was scrolled to show row `usize` first.
     Scrolled(I, usize),
+    /// The tick the window asked for (`host::Content::tick`, T-120-25).
+    Tick,
 }
 
 impl<I: PartialEq> Node<I> {

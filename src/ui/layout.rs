@@ -40,6 +40,7 @@ use crate::ui::tokens::{
     CORNER_HEADER_ROW, CORNER_ICON, CORNER_ICON_GAP, CORNER_MAIN_SHARE, CORNER_PAD, CORNER_PICTURE,
     CORNER_SECOND_SHARE, CORNER_TITLE_GAP,
 };
+use crate::ui::tokens::{KEY_BOTTOM, KEY_PAD};
 use crate::ui::tokens::{
     MENU_B, MENU_DOT, MENU_HEAD_PAD, MENU_ICON, MENU_ICON_COLUMN, MENU_ITEM_GAP, MENU_ITEM_PAD,
     MENU_PAD, MENU_ROW_MIN_HEIGHT, MENU_RULE_PAD, MENU_STATE_DOT, MENU_STATE_GAP,
@@ -392,6 +393,7 @@ pub fn lay_out<I: Copy>(
         tight: false,
         measure,
         out: Vec::new(),
+        rtl,
         over: 0.0,
     };
 
@@ -432,6 +434,7 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         tight: false,
         measure,
         out: Vec::new(),
+        rtl: false,
         over: 0.0,
     };
     let parts: Vec<&Node<I>> = match &window.body {
@@ -475,6 +478,9 @@ pub fn mirror<I>(items: &mut [Placed<I>], width: f32) {
 /// What places the nodes of one window.
 struct Placer<'m, I> {
     b: f32,
+    /// The language reads right to left: the window is mirrored at the end (the arrow of an example
+    /// points the way it reads).
+    rtl: bool,
     /// The window's height: the brand line is sized by it.
     h: f32,
     /// The window stands in one column: the circle beside the header, the sections as tabs.
@@ -782,6 +788,13 @@ impl<I: Copy> Placer<'_, I> {
                 trailing,
                 emphasis,
             } => self.menu_item(*id, icon, label, trailing, *emphasis, x, y, w),
+            Node::Example { typed, key, fixed } => self.example(typed, key, fixed, x, y, w),
+            Node::LetterCard {
+                label,
+                title,
+                text,
+                buttons,
+            } => self.letter_card(label, title, text, buttons, x, y, w),
             Node::MenuRule => {
                 let (pad_h, pad_v) = (MENU_RULE_PAD.w.0, MENU_RULE_PAD.h.0);
                 self.push(
@@ -1182,6 +1195,118 @@ impl<I: Copy> Placer<'_, I> {
         row
     }
 
+    /// The example with a key (passport §6 «Клавиша»): the word typed, the key in its frame, an
+    /// arrow, the word fixed — the words in the monospace face, each in its own direction; the row
+    /// mirrors with the window, and the arrow points the way the language reads.
+    fn example(&mut self, typed: &str, key: &str, fixed: &str, x: f32, y: f32, w: f32) -> f32 {
+        let code = self.style(Role::Code);
+        let body = self.style(Role::Body);
+        let key_w = self.width_of(code, key) + self.em(KEY_PAD.h) * 2.0;
+        let key_h = code.line_height() + self.em(KEY_PAD.v) * 2.0 + KEY_BOTTOM.0;
+        let row = key_h.max(code.line_height()).max(body.line_height());
+        let middle = |h: f32| y + (row - h) / 2.0;
+        let gap = self.em(CONTROL_GAP);
+        let arrow = if self.rtl { "←" } else { "→" };
+        let mut at = x;
+        let word = |this: &mut Self, role: Role, text: &str, at: &mut f32| {
+            let style = this.style(role);
+            let width = this.width_of(style, text).min((x + w - *at).max(0.0));
+            this.push(
+                Part::Text {
+                    role,
+                    text: text.to_owned(),
+                    wrap: Wrap::OneLine,
+                    align: Align::Start,
+                },
+                Rect::new(*at, middle(style.line_height()), width, style.line_height()),
+                None,
+            );
+            *at += width + gap;
+        };
+        word(self, Role::Code, typed, &mut at);
+        self.push(
+            Part::Key {
+                label: key.to_owned(),
+            },
+            Rect::new(at, middle(key_h), key_w, key_h),
+            None,
+        );
+        at += key_w + gap;
+        word(self, Role::Body, arrow, &mut at);
+        word(self, Role::Code, fixed, &mut at);
+        row
+    }
+
+    /// The card of a letter (passport §6): a nested surface; the label, the title and one line of
+    /// the text cut with an ellipsis at the start; the buttons at the end, in the middle of its
+    /// height.
+    #[allow(clippy::too_many_arguments)]
+    fn letter_card(
+        &mut self,
+        label: &str,
+        title: &str,
+        text: &str,
+        buttons: &[Node<I>],
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let (pad_v, pad_h) = (self.em(NESTED_PAD.v), self.em(NESTED_PAD.h));
+        let card = self.push(
+            Part::Surface(Surface::Nested),
+            Rect::new(x, y, w, 0.0),
+            None,
+        );
+        let gap = self.em(BUTTON_GAP);
+        let sizes: Vec<(f32, f32)> = buttons.iter().map(|node| self.button_size(node)).collect();
+        let row_w = sizes.iter().map(|(bw, _)| bw).sum::<f32>()
+            + gap * sizes.len().saturating_sub(1) as f32;
+        let row_h = sizes.iter().map(|(_, bh)| *bh).fold(0.0, f32::max);
+        let inner_w = w - pad_h * 2.0;
+        let column_w = if sizes.is_empty() {
+            inner_w
+        } else {
+            (inner_w - row_w - gap).max(0.0)
+        };
+        let column_x = x + pad_h;
+        let mut h = self.text(
+            Role::Label,
+            label,
+            column_x,
+            y + pad_v,
+            column_w,
+            Wrap::OneLine,
+        );
+        h += self.text(
+            Role::Strong,
+            title,
+            column_x,
+            y + pad_v + h,
+            column_w,
+            Wrap::Words,
+        );
+        h += self.text(
+            Role::Body,
+            text,
+            column_x,
+            y + pad_v + h,
+            column_w,
+            Wrap::Ellipsis,
+        );
+        let inner_h = h.max(row_h);
+        let mut at = x + w - pad_h - row_w;
+        for (node, (bw, bh)) in buttons.iter().zip(sizes) {
+            self.button(
+                node,
+                Rect::new(at, y + pad_v + (inner_h - bh) / 2.0, bw, bh),
+            );
+            at += bw + gap;
+        }
+        let total = inner_h + pad_v * 2.0;
+        self.out[card].rect.h = total;
+        total
+    }
+
     fn column(
         &mut self,
         children: &[Node<I>],
@@ -1355,7 +1480,7 @@ impl<I: Copy> Placer<'_, I> {
     fn text(&mut self, role: Role, text: &str, x: f32, y: f32, w: f32, wrap: Wrap) -> f32 {
         let style = self.style(role);
         let h = match wrap {
-            Wrap::OneLine => style.line_height(),
+            Wrap::OneLine | Wrap::Ellipsis => style.line_height(),
             Wrap::Words => {
                 let size = self.measure.measure(text, style, wrap, w);
                 self.over = self.over.max(size.width - w);
@@ -1929,6 +2054,7 @@ pub fn place_node<I: Copy>(
         tight: false,
         measure,
         out: Vec::new(),
+        rtl: false,
         over: 0.0,
     };
     let height = place.node(node, 0.0, 0.0, width, None);

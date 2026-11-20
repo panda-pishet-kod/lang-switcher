@@ -1466,7 +1466,7 @@ mod gdi {
         let mut flags = DT_NOPREFIX | DT_NOCLIP;
         flags |= match laid.wrap() {
             Wrap::Words => DT_WORDBREAK,
-            Wrap::OneLine => DT_SINGLELINE | DT_END_ELLIPSIS,
+            Wrap::OneLine | Wrap::Ellipsis => DT_SINGLELINE | DT_END_ELLIPSIS,
         };
         flags |= match (laid.align(), rtl) {
             (Align::Centre, _) => DT_CENTER,
