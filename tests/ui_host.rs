@@ -343,3 +343,61 @@ fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
         );
     }
 }
+
+/// **A content that asks for it opens at the least size** (`Content::least`, T-120-21 Б): the client
+/// area is 620 × 500 points at the scale of the screen, not two thirds of the work area.
+#[test]
+fn a_small_window_opens_at_620_by_500_points() {
+    struct Small;
+
+    impl Content for Small {
+        type Id = u8;
+
+        fn describe(&self) -> Window<u8> {
+            Window {
+                kind: WindowKind::Ordinary,
+                art: None,
+                brand: None,
+                body: Node::Text(Role::Body, "Five lines for the author".to_owned()),
+                buttons: Vec::new(),
+                disabled: Vec::new(),
+            }
+        }
+
+        fn event(&mut self, _: Event<u8>) -> Reply {
+            Reply::Stay
+        }
+
+        fn title(&self) -> String {
+            "Small".to_owned()
+        }
+
+        fn language(&self) -> (String, bool) {
+            ("en-US".to_owned(), false)
+        }
+
+        fn theme(&self) -> ThemeSetting {
+            ThemeSetting::Light
+        }
+
+        fn least(&self) -> bool {
+            true
+        }
+    }
+
+    let hwnd = host::create(Small, None).expect("the window of the shell");
+    // SAFETY: a window of this thread; the message goes straight to its procedure.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let scale = host::probe(hwnd).expect("alive").scale;
+    let mut client = windows::Win32::Foundation::RECT::default();
+    // SAFETY: the out parameter is a local.
+    unsafe { GetClientRect(hwnd, &mut client) }.expect("the client rectangle");
+    // SAFETY: as above.
+    unsafe { SendMessageW(hwnd, WM_CLOSE, None, None) };
+
+    let points = (client.right as f32 / scale, client.bottom as f32 / scale);
+    assert!(
+        (points.0 - 620.0).abs() <= 1.0 && (points.1 - 500.0).abs() <= 1.0,
+        "the least window: {points:?} points at {scale}"
+    );
+}
