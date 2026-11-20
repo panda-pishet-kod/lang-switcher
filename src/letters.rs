@@ -6154,8 +6154,20 @@ fn open_shell<C: crate::ui::host::Content + 'static>(
 /// caller must then not record the letter as shown. One letter at a time: while one is open it is
 /// raised instead.
 pub fn show_letter(owner: HWND, letter: Letter, item: Option<&FeedItem>, activate: bool) -> bool {
+    show_letter_in(settings::ui_language(), owner, letter, item, activate)
+}
+
+/// [`show_letter`] in `language` — the language of the program, or the one the stand of the letters
+/// names (`testing::run_probe`): the window is given its language, and the language of the process
+/// is published in one place only (решение 99, `tests\tray.rs`).
+fn show_letter_in(
+    language: Language,
+    owner: HWND,
+    letter: Letter,
+    item: Option<&FeedItem>,
+    activate: bool,
+) -> bool {
     let stored = state_now();
-    let language = settings::ui_language();
 
     let plan = plan_in(
         language,
@@ -6330,7 +6342,9 @@ pub mod testing {
     ///
     /// The window answered is the caller's to destroy.
     pub fn open_list_hidden(owner: HWND, entries: Vec<Entry>) -> Option<HWND> {
-        hidden_while(|| super::open_list_with(owner, entries, false))
+        hidden_while(|| {
+            super::open_list_with(owner, super::settings::ui_language(), entries, false)
+        })
     }
 
     /// **The door of the tests of the letters** — opens `letter` on `owner`, about `item` when it
@@ -6493,7 +6507,6 @@ pub mod testing {
             .into_iter()
             .find(|language| language.tag() == var("LANGSW_TESTING_UI_PROBE_LANG"))
             .unwrap_or_else(super::settings::ui_language);
-        super::settings::set_ui_language(language);
         let theme = match var("LANGSW_TESTING_UI_PROBE_THEME").as_str() {
             "light" => Some(ThemeSetting::Light),
             "dark" => Some(ThemeSetting::Dark),
@@ -6532,7 +6545,9 @@ pub mod testing {
 
         let item = super::sample_entry();
         let window = match what.as_str() {
-            "list" => super::open_list_with(owner, super::sample_entries(language), !by_itself),
+            "list" => {
+                super::open_list_with(owner, language, super::sample_entries(language), !by_itself)
+            }
             "knock-thanks" | "knock-news" => {
                 let letter = if what == "knock-thanks" {
                     Letter::Thanks
@@ -6552,7 +6567,7 @@ pub mod testing {
                     "update" => Letter::Update,
                     _ => Letter::Welcome,
                 };
-                show_letter(owner, letter, Some(&item), !by_itself)
+                super::show_letter_in(language, owner, letter, Some(&item), !by_itself)
                     .then(|| window_of(Kind::Letter))
                     .flatten()
             }
@@ -6671,17 +6686,21 @@ pub fn sample_entries(language: Language) -> Vec<Entry> {
 /// **Shows «Последние письма»** — FR-101, a window of the shell (`ui::windows::letters_list`,
 /// T-120-16); the one that is open is raised instead.
 pub fn open_list(owner: HWND) {
-    open_list_with(owner, list_entries_now(), true);
+    open_list_with(owner, settings::ui_language(), list_entries_now(), true);
 }
 
 /// [`open_list`] with the entries named — the product's road and the door of the tests.
-fn open_list_with(owner: HWND, entries: Vec<Entry>, activate: bool) -> Option<HWND> {
+fn open_list_with(
+    owner: HWND,
+    language: Language,
+    entries: Vec<Entry>,
+    activate: bool,
+) -> Option<HWND> {
     if let Some(hwnd) = window_of(Kind::List) {
         raise(hwnd, activate);
         return Some(hwnd);
     }
 
-    let language = settings::ui_language();
     let (theme, _) = look();
     let product = crate::ui::windows::letters_list::Product {
         list: crate::ui::windows::letters_list::LettersList {
@@ -7225,7 +7244,7 @@ pub fn language_changed(owner: HWND) {
                 show_letter(owner, letter, item.as_ref(), false);
             }
             (Kind::List, _) => {
-                open_list_with(owner, list_entries_now(), false);
+                open_list_with(owner, settings::ui_language(), list_entries_now(), false);
             }
             _ => {}
         }
