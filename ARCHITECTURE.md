@@ -14,7 +14,7 @@ The specification is `SPEC.md` (in Russian); section numbers below are its secti
 
 They never talk to each other (SEC-04). What the updater knows of the program is its file, the
 version resource of that file and whether its process runs. The feed — the read, the signature, the
-parse, the one `GET` — is one body in [`src/letters.rs`](src/letters.rs) (`letters::feed`), used by
+parse, the one `GET` — is one body in [`src/feed.rs`](src/feed.rs) (`feed`; the old path `letters::feed` stays), used by
 both. Everything is in the library ([`src/lib.rs`](src/lib.rs)), so the integration tests in
 [`tests/`](tests) link against the same code.
 
@@ -33,8 +33,8 @@ brings them down in order.
 | **UI** (`app.rs`, hidden top-level window) | The tray icon and menu ([`src/tray.rs`](src/tray.rs)), the settings window and the configuration file ([`src/settings.rs`](src/settings.rs)), the theme and drawing ([`src/theme.rs`](src/theme.rs), [`src/widgets.rs`](src/widgets.rs)), the letters and the "From the author" window ([`src/letters.rs`](src/letters.rs)) | The hook |
 | **Watcher** (`app.rs`, message-only window, COM STA) | `SetWinEventHook` for the foreground window, the focus and the desktop switch; the password-field check through UI Automation and the exclusion list ([`src/guard.rs`](src/guard.rs)) | The hook, input |
 | **Focus events** (`app.rs`, COM MTA, since 1.5.0) | UI Automation focus-changed handler; it only posts a message to the watcher window (FR-71а) | The hook, input, UI, file I/O |
-| **Feed** (`letters.rs`, short-lived) | One WinHTTP request, the TOML parse, the signature check; puts the result into a mailbox and posts "look into the mailbox" to the UI thread | UI, input, the hook |
-| **Appeal** (`letters.rs`, short-lived) | The one `POST` of the "Write to the author…" wizard, after **Send** or **Retry** | UI, input, the hook |
+| **Feed** (`feed.rs`, short-lived) | One WinHTTP request, the TOML parse, the signature check; puts the result into a mailbox and posts "look into the mailbox" to the UI thread | UI, input, the hook |
+| **Appeal** (`appeal.rs`, short-lived) | The one `POST` of the "Write to the author…" wizard, after **Send** or **Retry** | UI, input, the hook |
 
 A small thread of [`src/hook.rs`](src/hook.rs) waits for the emergency chord `Ctrl+Alt+Shift+F12`
 (FR-96): the callback returns at once, and that thread removes the hooks and ends the process.
