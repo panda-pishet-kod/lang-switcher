@@ -178,11 +178,24 @@ pub struct Art {
     /// `testing`, absent from the Release configuration (SEC-04a).
     #[cfg(feature = "testing")]
     drawn_afresh: usize,
+    /// The frame of the window is being dragged: the last bitmap of a picture is stretched to a
+    /// new size rather than drawn afresh at it ([`Art::hold`]).
+    holding: bool,
 }
 
 impl Art {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// ⭐ While the frame of the window is dragged, a picture is not drawn afresh at every size in
+    /// pixels: its last bitmap is stretched into the circle (a little softer for the while), and it
+    /// is drawn afresh at its size once the frame is let go. The memory of 2026-11-20: every new size
+    /// drawn afresh left buffers of Direct2D of its size to the heap of the process — 200 sizes of
+    /// one «О программе», +17 MB that stayed after the window closed (busy blocks level, free heap
+    /// growing: a scattered heap, not objects alive).
+    pub fn hold(&mut self, holding: bool) {
+        self.holding = holding;
     }
 
     /// How many times this `Art` drew a picture into a new bitmap: once per picture, and again
@@ -211,7 +224,19 @@ impl Art {
                 && finished.pixels == pixels
                 && finished.target.as_raw() == target.as_raw()
         };
-        let bitmap = match self.finished.iter().find(|finished| fresh(finished)) {
+        let held = |finished: &Finished| {
+            finished.name == name && finished.target.as_raw() == target.as_raw()
+        };
+        let found = self
+            .finished
+            .iter()
+            .find(|finished| fresh(finished))
+            .or_else(|| {
+                self.holding
+                    .then(|| self.finished.iter().find(|finished| held(finished)))
+                    .flatten()
+            });
+        let bitmap = match found {
             Some(finished) => finished.bitmap.clone(),
             None => {
                 let bitmap = finish(target, drawing, pixels, scale)?;

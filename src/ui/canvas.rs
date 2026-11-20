@@ -806,6 +806,16 @@ pub trait Pictures {
         centre: (f32, f32),
         radius: f32,
     ) -> WinResult<()>;
+
+    /// The frame of the window is being dragged (or no longer): pictures may stretch what they
+    /// have rather than draw afresh at every size.
+    fn hold(&mut self, _holding: bool) {}
+
+    /// How many times a picture was drawn afresh (the testing build; the probe of the host).
+    #[cfg(feature = "testing")]
+    fn drawn_afresh(&self) -> usize {
+        0
+    }
 }
 
 /// The pictures of `resrt`, kept finished by `art.rs` at their size and scale.
@@ -818,6 +828,15 @@ impl Pictures for crate::ui::art::Art {
         radius: f32,
     ) -> WinResult<()> {
         crate::ui::art::Art::draw(self, target, name, centre, radius)
+    }
+
+    fn hold(&mut self, holding: bool) {
+        crate::ui::art::Art::hold(self, holding);
+    }
+
+    #[cfg(feature = "testing")]
+    fn drawn_afresh(&self) -> usize {
+        crate::ui::art::Art::drawn_afresh(self)
     }
 }
 

@@ -99,12 +99,12 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     SPI_GETCLIENTAREAANIMATION, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE,
     SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursor, SetTimer, SetWindowLongPtrW,
     SetWindowPos, ShowWindow, SystemParametersInfoW, WHEEL_DELTA, WM_CLOSE, WM_COMMAND,
-    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE,
-    WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
-    WS_THICKFRAME,
+    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS,
+    WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
+    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP,
+    WS_SYSMENU, WS_THICKFRAME,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS,
@@ -187,6 +187,9 @@ pub struct Probe {
     pub items: Vec<(String, Option<String>, Rect)>,
     /// The list of a choice field open under the window.
     pub dropdown: Option<HWND>,
+    /// How many times the pictures of the window were drawn afresh.
+    #[cfg(feature = "testing")]
+    pub pictures_drawn: usize,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -2291,6 +2294,21 @@ impl<C: Content> Handler for Host<C> {
                 let _ = unsafe { EndPaint(hwnd, &paint) };
                 Some(LRESULT(0))
             }
+            // The frame is dragged: the pictures stretch what they have (art::Art::hold); let go — they
+            // are drawn afresh at the size, once.
+            WM_ENTERSIZEMOVE => {
+                if let Some(pictures) = self.pictures.as_deref_mut() {
+                    pictures.hold(true);
+                }
+                None
+            }
+            WM_EXITSIZEMOVE => {
+                if let Some(pictures) = self.pictures.as_deref_mut() {
+                    pictures.hold(false);
+                }
+                invalidate(hwnd);
+                None
+            }
             WM_SIZE => {
                 self.close_drop(hwnd, false);
                 // Minimised or brought back: the tick stops or goes on.
@@ -2663,6 +2681,11 @@ impl<C: Content> Handler for Host<C> {
                 .map(|(id, hwnd)| (format!("{id:?}"), hwnd))
                 .collect(),
             dropdown: self.drop.as_ref().map(|drop| drop.hwnd),
+            #[cfg(feature = "testing")]
+            pictures_drawn: self
+                .pictures
+                .as_deref()
+                .map_or(0, |pictures| pictures.drawn_afresh()),
             items: self
                 .layout
                 .iter()

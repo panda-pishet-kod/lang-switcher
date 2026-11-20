@@ -401,3 +401,61 @@ fn a_small_window_opens_at_620_by_500_points() {
         "the least window: {points:?} points at {scale}"
     );
 }
+
+/// ⭐ **The host holds the pictures while the frame is dragged** (the memory of 2026-11-20): three new
+/// sizes between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE draw the picture of the panel afresh not once;
+/// let go, it is drawn afresh once at its size.
+#[cfg(feature = "testing")]
+#[test]
+fn the_host_holds_the_pictures_while_the_frame_is_dragged() {
+    use lang_switcher::settings::Language;
+    use lang_switcher::ui::windows::about::About;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    };
+
+    let hwnd = host::create(
+        About {
+            language: Language::Ru,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        },
+        None,
+    )
+    .expect("the window of the shell");
+    let send = |message: u32| {
+        // SAFETY: a window of this thread; the message goes straight to its procedure.
+        unsafe { SendMessageW(hwnd, message, None, None) };
+    };
+    let size = |w: i32, h: i32| {
+        // SAFETY: a window of this thread; plain values.
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                w,
+                h,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+        send(WM_PAINT);
+    };
+    let drawn = || host::probe(hwnd).expect("alive").pictures_drawn;
+
+    size(1100, 700);
+    let first = drawn();
+    assert!(first >= 1, "the picture of the panel is drawn");
+
+    send(WM_ENTERSIZEMOVE);
+    for (w, h) in [(1150, 720), (1200, 740), (1250, 760)] {
+        size(w, h);
+    }
+    assert_eq!(drawn(), first, "held while the frame is dragged");
+
+    send(WM_EXITSIZEMOVE);
+    send(WM_PAINT);
+    assert_eq!(drawn(), first + 1, "let go: drawn afresh once");
+    send(WM_CLOSE);
+}

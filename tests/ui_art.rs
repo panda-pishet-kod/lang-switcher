@@ -606,3 +606,40 @@ fn a_repeated_frame_does_not_draw_the_picture_again() {
     frame(&mut art, &Canvas::new(520, 96.0), 260.0);
     assert_eq!(art.drawn_afresh(), 3, "a new render target");
 }
+
+/// ⭐ While the frame is dragged the picture is not drawn afresh at every size (the memory of
+/// 2026-11-20: each new size drawn afresh left buffers of Direct2D to a scattered heap): held, three
+/// new sizes stretch the bitmap there is; let go, the picture is drawn afresh once at its size.
+#[cfg(feature = "testing")]
+#[test]
+fn a_dragged_frame_does_not_draw_the_picture_afresh_at_every_size() {
+    fn frame(art: &mut Art, canvas: &Canvas, radius: f32) {
+        canvas.frame(|target| {
+            art.draw(target, "hello", (radius, radius), radius)
+                .expect("the picture")
+        });
+    }
+    let canvas = Canvas::new(520, 96.0);
+    let mut art = Art::new();
+    frame(&mut art, &canvas, 120.0);
+    assert_eq!(art.drawn_afresh(), 1);
+
+    art.hold(true);
+    for radius in [140.0, 180.0, 220.0] {
+        frame(&mut art, &canvas, radius);
+    }
+    assert_eq!(
+        art.drawn_afresh(),
+        1,
+        "held: the bitmap there is, stretched"
+    );
+
+    art.hold(false);
+    frame(&mut art, &canvas, 220.0);
+    frame(&mut art, &canvas, 220.0);
+    assert_eq!(
+        art.drawn_afresh(),
+        2,
+        "let go: drawn afresh once at its size"
+    );
+}

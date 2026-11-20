@@ -109,8 +109,10 @@ fn the_memory_after_thirty_openings_of_the_about_window() {
         pump();
         let (private, working) = memory();
         let (gdi, user) = objects();
+        let refs =
+            lang_switcher::ui::canvas::FACTORY_REFS_LEFT.load(std::sync::atomic::Ordering::Relaxed);
         lines.push(format!(
-            "{round:2}: private {private:.2} MB (+{:.2}), working set {working:.2} MB, gdi {gdi}, user {user}",
+            "{round:2}: private {private:.2} MB (+{:.2}), working set {working:.2} MB, gdi {gdi}, user {user}, factory refs left {refs}",
             private - before
         ));
     }
@@ -449,4 +451,250 @@ fn the_debug_layer_names_what_the_picture_leaves() {
         words.iter().any(|line| line.contains("the catch hears")),
         "the catch heard nothing, not even itself"
     );
+}
+
+/// **The memory while one «О программе» is made larger and smaller** (Fable's first measure): the
+/// picture of the panel is drawn afresh at each new size in pixels — a line that rises with every
+/// size would make dragging the frame cost megabytes; a level one ties the growth to the life of a
+/// window. 200 sizes, each new.
+#[test]
+#[ignore = "an instrument: run on purpose with --ignored --nocapture"]
+fn the_memory_while_the_about_window_is_resized() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let rounds: usize = std::env::var("LANGSW_UI_MEMORY_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(200);
+    let strip = std::env::var("LANGSW_UI_MEMORY_STRIP").unwrap_or_default();
+    let hwnd = host::create(
+        Without(
+            About {
+                language: Language::Ru,
+                key: "Pause".to_owned(),
+                theme: ThemeSetting::Light,
+            },
+            strip,
+        ),
+        None,
+    )
+    .expect("the window of the shell");
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0))) };
+    let (before, _) = memory();
+    let mut lines = vec![format!("resize: before private {before:.2} MB")];
+    for round in 1..=rounds {
+        let (w, h) = (960 + round as i32 * 3, 600 + (round as i32 % 40) * 2);
+        // SAFETY: a window of this thread; plain values.
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                w,
+                h,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+        let (private, _) = memory();
+        lines.push(format!(
+            "{round:3}: {w}x{h} private {private:.2} MB (+{:.2})",
+            private - before
+        ));
+    }
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0))) };
+    pump();
+    let (closed, _) = memory();
+    lines.push(format!(
+        "closed: private {closed:.2} MB (+{:.2})",
+        closed - before
+    ));
+    let text = lines.join("\r\n");
+    println!("{text}");
+    if let Some(path) = std::env::var_os("LANGSW_UI_MEMORY") {
+        std::fs::write(path, text + "\r\n").expect("the series written");
+    }
+}
+
+/// «О программе» without parts (`LANGSW_UI_MEMORY_STRIP`), for the series of sizes.
+struct Without(About, String);
+
+impl lang_switcher::ui::host::Content for Without {
+    type Id = <About as lang_switcher::ui::host::Content>::Id;
+
+    fn describe(&self) -> lang_switcher::ui::scene::Window<Self::Id> {
+        let mut window = self.0.describe();
+        if self.1.contains("art") {
+            window.art = None;
+        }
+        if self.1.contains("brand") {
+            window.brand = None;
+        }
+        if self.1.contains("body") {
+            window.body = lang_switcher::ui::scene::Node::Text(
+                lang_switcher::ui::tokens::Role::Body,
+                "body taken away".to_owned(),
+            );
+        }
+        if self.1.contains("buttons") {
+            window.buttons.clear();
+        }
+        window
+    }
+
+    fn event(
+        &mut self,
+        event: lang_switcher::ui::scene::Event<Self::Id>,
+    ) -> lang_switcher::ui::host::Reply {
+        self.0.event(event)
+    }
+
+    fn title(&self) -> String {
+        self.0.title()
+    }
+
+    fn language(&self) -> (String, bool) {
+        self.0.language()
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        self.0.theme()
+    }
+}
+
+/// The heaps of the process walked (Fable's fourth measure): busy bytes and blocks, free bytes — a
+/// leak adds busy blocks, a scattered heap adds free bytes.
+mod heaps {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct Entry {
+        data: *mut c_void,
+        size: u32,
+        overhead: u8,
+        region: u8,
+        flags: u16,
+        rest: [u64; 3],
+    }
+
+    #[link(name = "kernel32")]
+    // SAFETY: the documented exports of kernel32, same signatures.
+    unsafe extern "system" {
+        fn GetProcessHeaps(count: u32, heaps: *mut *mut c_void) -> u32;
+        fn HeapWalk(heap: *mut c_void, entry: *mut Entry) -> i32;
+        fn HeapLock(heap: *mut c_void) -> i32;
+        fn HeapUnlock(heap: *mut c_void) -> i32;
+    }
+
+    const BUSY: u16 = 0x0004;
+    const REGION: u16 = 0x0001;
+    const UNCOMMITTED: u16 = 0x0002;
+
+    /// Busy bytes, busy blocks, free bytes, over every heap of the process.
+    pub fn walk() -> (u64, u64, u64) {
+        let mut handles = vec![std::ptr::null_mut(); 256];
+        // SAFETY: a buffer of the length given.
+        let count = unsafe { GetProcessHeaps(handles.len() as u32, handles.as_mut_ptr()) } as usize;
+        let (mut busy, mut blocks, mut free) = (0u64, 0u64, 0u64);
+        for &heap in handles.iter().take(count.min(handles.len())) {
+            // SAFETY: a heap of this process, locked while it is walked.
+            unsafe {
+                if HeapLock(heap) == 0 {
+                    continue;
+                }
+                let mut entry: Entry = std::mem::zeroed();
+                while HeapWalk(heap, &mut entry) != 0 {
+                    if entry.flags & BUSY != 0 {
+                        busy += u64::from(entry.size);
+                        blocks += 1;
+                    } else if entry.flags & (REGION | UNCOMMITTED) == 0 {
+                        free += u64::from(entry.size);
+                    }
+                }
+                HeapUnlock(heap);
+            }
+        }
+        (busy, blocks, free)
+    }
+}
+
+/// The series of sizes with the heaps walked at its start, its 100th and 200th size and after the
+/// window closed (`LANGSW_UI_MEMORY_STRIP` as for the series of sizes).
+#[test]
+#[ignore = "an instrument: run on purpose with --ignored --nocapture"]
+fn the_heaps_while_the_about_window_is_resized() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    };
+
+    let strip = std::env::var("LANGSW_UI_MEMORY_STRIP").unwrap_or_default();
+    let show = |label: &str| {
+        let (busy, blocks, free) = heaps::walk();
+        let (private, _) = memory();
+        println!(
+            "{label}: private {private:.2} MB, busy {:.2} MB in {blocks} blocks, free {:.2} MB",
+            busy as f64 / 1_048_576.0,
+            free as f64 / 1_048_576.0
+        );
+    };
+    let hwnd = host::create(
+        Without(
+            About {
+                language: Language::Ru,
+                key: "Pause".to_owned(),
+                theme: ThemeSetting::Light,
+            },
+            strip,
+        ),
+        None,
+    )
+    .expect("the window of the shell");
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0))) };
+    // `LANGSW_UI_MEMORY_DRAG`: the sizes come as a drag of the frame (WM_ENTERSIZEMOVE … WM_EXITSIZEMOVE).
+    let drag = std::env::var_os("LANGSW_UI_MEMORY_DRAG").is_some();
+    if drag {
+        // SAFETY: a window of this thread.
+        unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, Some(WPARAM(0)), Some(LPARAM(0))) };
+    }
+    show("start");
+    for round in 1..=200 {
+        let (w, h) = (960 + round * 3, 600 + (round % 40) * 2);
+        // SAFETY: a window of this thread; plain values.
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                w,
+                h,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+        if round == 100 || round == 200 {
+            show(&format!("size {round}"));
+        }
+    }
+    if drag {
+        // SAFETY: a window of this thread.
+        unsafe {
+            SendMessageW(hwnd, WM_EXITSIZEMOVE, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+        show("let go");
+    }
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0))) };
+    pump();
+    show("closed");
 }
