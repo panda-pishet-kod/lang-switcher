@@ -65,14 +65,10 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use windows::Win32::Foundation::{
-    COLORREF, ERROR_FILE_NOT_FOUND, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM,
-};
+use windows::Win32::Foundation::{COLORREF, ERROR_FILE_NOT_FOUND, HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateSolidBrush, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-    DrawFocusRect, DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW,
-    HBRUSH, HDC, HFONT, InvalidateRect, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromWindow, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+    CreateSolidBrush, DeleteObject, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW, HDC,
+    LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, ReleaseDC,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -81,22 +77,18 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE,
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
-use windows::Win32::UI::Controls::{LVIS_STATEIMAGEMASK, WM_MOUSELEAVE};
+use windows::Win32::UI::Controls::LVIS_STATEIMAGEMASK;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetFocus, GetKeyState, IsWindowEnabled, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-    VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
-    VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE,
-    VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT,
+    GetKeyState, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE, VK_F1,
+    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK,
+    VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    VK_SNAPSHOT,
 };
-use windows::Win32::UI::Shell::{
-    DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
-};
+use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, GetClientRect, GetDlgCtrlID, GetDlgItem,
-    GetDlgItemTextW, GetParent, GetWindowRect, IDOK, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
-    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SW_SHOWNORMAL,
-    SendDlgItemMessageW, UISF_HIDEFOCUS, WM_APP, WM_ERASEBKGND, WM_GETFONT, WM_MOUSEMOVE,
-    WM_NCDESTROY, WM_PAINT, WM_QUERYUISTATE, WNDPROC,
+    GetClientRect, GetDlgItemTextW, GetWindowRect, IDOK, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
+    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SW_SHOWNORMAL, WM_APP,
+    WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -113,11 +105,9 @@ use crate::letters;
 // called as `theme::…` — so that the change of address stayed a change of address: every call
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
-    self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CORNER_RADIUS, CheckMark,
-    ComboBorderRole, ComboChevronRole, ComboFillRole, HotBrush, ThemeSetting, check_frame_colors,
-    combo_chevron_points, combo_closed_color_roles, combo_fill_brush, combo_text_ink, dc_dpi,
-    draw_check_mark, draw_combo_chevron, drawing_dpi, paint_rounded, paint_selection_stripe,
-    scaled, smoothed_logfont,
+    self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CheckMark, ThemeSetting,
+    check_frame_colors, dc_dpi, draw_check_mark, paint_rounded, paint_selection_stripe, scaled,
+    smoothed_logfont,
 };
 
 // The file of the settings — its schema, its model, its reading and writing: `config.rs` since task
@@ -3216,11 +3206,6 @@ pub fn screen_of(owner: HWND, template: &[u8]) -> Option<Screen> {
     })
 }
 
-const IDC_LANGUAGE: i32 = 1002;
-const IDC_THEME: i32 = 1003;
-
-const IDC_PAIR_SOURCE: i32 = 1022;
-const IDC_PAIR_TARGET: i32 = 1023;
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
 ///
 /// The appearance combo of the dialog is filled with the three strings [`IDS_THEME_SYSTEM`],
@@ -3917,15 +3902,6 @@ pub fn controls_on_panels(panels: &[RECT], controls: &[(i32, RECT)]) -> Vec<i32>
         .collect()
 }
 
-/// The four owner-drawn combo boxes of FR-92 — FR-92а, task T-11-6.
-///
-/// The single place the four are listed: both handlers of the owner-draw pair —
-/// [`on_measure_item`] and the combo branch of [`on_draw_item`] — check the incoming
-/// `CtlID` against this list **before any work**, and answer «not handled» for anything
-/// else. SEC-05 words the allowance around the identifier, and this list is that
-/// identifier check written down once.
-const COMBO_BOXES: [i32; 4] = [IDC_LANGUAGE, IDC_THEME, IDC_PAIR_SOURCE, IDC_PAIR_TARGET];
-
 // =========================================================================================
 // FR-92а, task T-12-1 — the icon of the caption
 // =========================================================================================
@@ -3934,60 +3910,6 @@ const COMBO_BOXES: [i32; 4] = [IDC_LANGUAGE, IDC_THEME, IDC_PAIR_SOURCE, IDC_PAI
 // менялось; здесь стояла `repaint_whole_window`. Названа она была за то, что делает, а не за
 // первый повод, ради которого написана: до появления второго вызывающего это была
 // `repaint_after_palette_change`.
-
-/// Air added to the dialog font's height to make one item of a **dropped-down list**, in the
-/// pixels of the mock-ups — the number task T-11-15 wrote, kept here for the list alone.
-///
-/// ⚠ **This number is not a length of the mock-ups and never was.** It was derived by measuring
-/// the picture — the closed part of a combo was read off `ui-02-graphite.png` as a box of its
-/// own pixels and the font subtracted from it — and the measurement was wrong: the generator
-/// states the whole box as `h = 12` dialog units (`scratchpad\ui.ps1`, lines 103, 116 and 118),
-/// which is 22,5 px at 96 DPI, and carries no literal for «air» at all. Task T-12-2 corrected
-/// the closed part to that literal in [`COMBO_CLOSED_ITEM_EXTRA`]; the height of the **items of
-/// the dropped-down list** was never measured against the mock-ups by anyone, and T-12-2 is
-/// forbidden to move what it has not measured — so the list keeps exactly the height it has
-/// had since T-11-15, and this constant is what keeps it: 15 + [`scaled`]`(12)` = 15 + 9 =
-/// **24 px** at 96 DPI, the very number `CB_GETITEMHEIGHT(0)` answered before that task.
-///
-/// The rows of the exclusion list are **not** measured by it — they have had
-/// [`EXCLUSION_ROW_HEIGHT_DLU`] of their own since task T-11-16.
-// ⚠ **Значение уехало в `widgets::combo::LIST_ITEM_EXTRA` — задача Т-45-2.** Здесь осталось
-// прежнее имя, чтобы вызовы и тесты этого окна читались как читались; число одно и живёт в слое.
-pub use crate::widgets::combo::LIST_ITEM_EXTRA as COMBO_LIST_ITEM_EXTRA;
-
-/// Air added to the dialog font's height to make the **closed part** of a combo box — the
-/// selection field — in the pixels of the mock-ups; task T-12-2, finding F3/R-04 of the
-/// Э12 protocol.
-///
-/// # Where the 2 comes from — the literal of the generator, not the picture
-///
-/// `scratchpad\ui.ps1` gives every combo box `h = 12` dialog units (lines 103, 116, 118) and
-/// its `'combo'` arm draws the box exactly that tall. Twelve vertical dialog units are
-/// 12 × 1,875 = **22,5 px at 96 DPI** — the whole closed part of the mock-up, frame included.
-///
-/// Six of those pixels are not ours to spend. The system lays the selection field inside the
-/// control with two pixels of its own edge above and below it (4 px), and the frame this
-/// dialog draws takes the top and the bottom row of the client area (2 px) — measured on the
-/// stand and not assumed: window 30 px = `CB_GETITEMHEIGHT(-1)` 24 + 6, with 28 px of fill.
-/// So the selection field itself must stand 22,5 − 6 = **16,5 px**, and the dialog font is
-/// 15 px there: the air is **1,5 px at 96 DPI**, which is 1,5 × 1,4 = **2,1 pixels of the
-/// mock-ups**, and 2 is that number written whole.
-///
-/// Through [`scaled`] the 2 comes back as 1 px at 96 DPI (2 × 5/7 = 1,43 → 1), so the field
-/// stands 15 + 1 = 16 px and the closed part 16 + 6 = **22 px** against the mock-up's 22,5 —
-/// half a pixel below it, where the whole number above would have put it half a pixel above.
-/// The air travels with the DPI of the window because it goes through [`scaled`], which is the
-/// only road a mock-up length takes into this file.
-///
-/// **Why a second constant and not a smaller [`COMBO_LIST_ITEM_EXTRA`].** `WM_MEASUREITEM`
-/// arrives **once** for a `CBS_OWNERDRAWFIXED` combo and sets one height for both the closed
-/// part and the items of the dropped-down list — measured, not read: before this task
-/// `CB_GETITEMHEIGHT(-1)` and `CB_GETITEMHEIGHT(0)` both answered 24 on all four combo boxes.
-/// The height of the list items is not the subject of T-12-2, so the two are set apart by the
-/// documented lever instead — [`set_combo_closed_height`] sends `CB_SETITEMHEIGHT` with
-/// `wParam = -1`, which names the selection field alone.
-// ⚠ Как и соседняя: значение уехало в `widgets::combo::CLOSED_ITEM_EXTRA` задачей Т-45-2.
-pub use crate::widgets::combo::CLOSED_ITEM_EXTRA as COMBO_CLOSED_ITEM_EXTRA;
 
 // ⚠ **`CB_SELECTION_FIELD` уехала в `widgets::combo` — задача Т-45-2.** Документированная −1,
 // названная беззнаковым словом, каким и бывает параметр сообщения; шлёт её теперь слой.
@@ -4208,23 +4130,6 @@ pub const LIST_CHECK_MARK: CheckMark = CheckMark {
 // module `theme` with the drawing library (task Т-14-3); what stays here is `dialog_units`,
 // which asks the dialog itself through `MapDialogRect`.
 // =========================================================================================
-
-/// A rectangle given in the dialog's own units, in pixels — the *other* half of «числа
-/// масштабируются по DPI окна», and the way this dialog has scaled since task T-11-6.
-///
-/// `MapDialogRect` is the documented conversion, and it is already the dialog's own: the
-/// vertical dialog base unit is the height of the dialog font, and the dialog manager
-/// creates that font at the DPI of the window — so a dialog unit is a DPI-scaled length by
-/// construction, with no arithmetic of ours in the middle. [`on_measure_item`] has measured
-/// the combo item height this way since T-11-6; the body was extracted here rather than
-/// copied (§6.2), and that function now calls this one.
-///
-/// `None` for a refused call (NFR-13: examined; every caller then keeps the default it had).
-// ⚠ **Тело уехало в `widgets::dialog_units` — задача Т-45-2.** Единица диалога есть мера
-// ЭЛЕМЕНТОВ окна, и на ней стоит вся геометрия общего слоя; здесь она осталась только именем,
-// внесённым `use` в шапке файла, — чтобы все три десятка вызовов этого файла читались так же,
-// как читались.
-use crate::widgets::dialog_units;
 
 /// Corner radius of the check-box square, in the pixels of the mock-ups — `FillRectPx $g $px
 /// $by $bs $bs $S.Mark 3` of the `'check'` arm.
@@ -4489,16 +4394,6 @@ pub const DIALOG_FONT_POINTS_TENTHS: i32 = 90;
 /// exactly one font height in the pixels of the window, whatever face and DPI the manager
 /// gave the dialog. It is the one way this file learns the size of a font it never creates.
 pub const DIALOG_FONT_HEIGHT_DLU: i32 = 8;
-
-/// Air between the dotted focus cue and the figure it goes around, in **screen pixels** —
-/// tasks T-11-5a and T-11-5b, written down as a name by task T-11-16.
-///
-/// ⚠ Not a length of the mock-ups, and the only length of this file that is not: the pictures
-/// draw no focused control at all, so there is nothing in them to take it from. Deliberately
-/// **not** scaled either — `DrawFocusRect` paints a hairline of alternating pixels that stays
-/// one pixel wide at every DPI, and an inset that grew with the window would pull the cue away
-/// from the frame it is supposed to sit just inside of.
-const FOCUS_CUE_INSET: i32 = 2;
 
 /// Letter spacing of a panel caption, in **tenths** of a mock-up pixel — п. 2.1, «≈ 1,1 px».
 ///
@@ -4773,167 +4668,6 @@ pub fn about_body_line_pitch(em: i32) -> i32 {
 // of `comctl32.dll` with its own MSDN page, and painting one's own control is what
 // `WM_PAINT` is for. Nothing here reads a private ordinal, a theme name or a theme handle.
 
-/// Which of the two documented ways of putting a procedure in front of a control's own was
-/// chosen, and why — the reasoning behind [`subclass_combo_boxes`], written where the code is.
-///
-/// `SetWindowLongPtrW(GWLP_WNDPROC)` is already used in this file, by
-/// [`subclass_hotkey_field`], and would have worked. `SetWindowSubclass` was chosen for the
-/// four combo boxes for three reasons, all of which the hotkey field does not have:
-///
-/// 1. **Four windows, one procedure.** The `GWLP_WNDPROC` road has to store the displaced
-///    procedure of each window somewhere; with one window that is one thread-local `Cell`
-///    ([`HOTKEY_FIELD_PROC`]), with four it is a table keyed by window handle. The subclass
-///    API keeps that association itself, per window, and hands it back through
-///    [`DefSubclassProc`].
-/// 2. **The removal is documented and exact.** `RemoveWindowSubclass` takes the window, the
-///    procedure and the identifier and unhooks *that* subclass wherever it sits in the chain.
-///    Putting a `GWLP_WNDPROC` back is only correct while nothing else has subclassed the
-///    control after us — and `comctl32` does subclass its own controls.
-/// 3. **The pair is visible.** One call installs, one call removes, and the two are named for
-///    each other, which is what criterion 9 of the task asks to be shown.
-///
-/// The identifier is a constant of this file and not a handle or an address: the pair
-/// (procedure, identifier) is what names our subclass, and one number for all four windows is
-/// enough because the key is per window.
-const COMBO_SUBCLASS_ID: usize = 1;
-
-/// The reference datum of a subclass installed on a combo box that is **not** on this window.
-///
-/// Task Т-32-8, and it is what lets the wizard of FR-104 wear the same closed face as the four
-/// combo boxes here without a second copy of the two hundred lines that draw it (§6.2, «шов
-/// один»). The whole difference between the two cases is where the colours come from:
-///
-/// * `0` — the combo is one of [`COMBO_BOXES`] on **this** dialog, and the look is read out of
-///   its [`DialogState`] as it always was;
-/// * [`COMBO_FOREIGN`] — the combo belongs to another window of this program, and the look is
-///   built on the spot out of the palette the configuration resolves to. That is the very
-///   palette the other window built itself from (`theme::resolve` of the same setting), so the
-///   two cannot disagree.
-///
-/// ⛔ The datum is **not** a pointer and never becomes one: a subclass reference that outlived
-/// the thing it named would be a use-after-free reachable from a window message.
-pub(crate) const COMBO_FOREIGN: usize = 1;
-
-/// Draws the closed part of one combo box the way the mock-ups draw it — FR-92а, task T-11-14.
-///
-/// # What is drawn
-///
-/// 1. the client area as a rounded rectangle of [`CORNER_RADIUS`]: `field_bg` under a
-///    single-pixel `field_border` frame — the same figure the five input fields and the two
-///    lists wear since task T-11-13, so a combo box is a field to the eye like the rest;
-/// 2. the chevron at the right edge, [`combo_chevron_points`] wide and stroked in
-///    `text_muted` — the flat «⌄» of the mock-ups, in place of the system button;
-/// 3. the text of the chosen item, read from the control by identifier, behind
-///    [`FIELD_TEXT_INSET_DLU`] dialog units of air and clipped short of the chevron; `text`
-///    normally, `text_muted`
-///    when the mode has disabled this combo ([`combo_closed_color_roles`]);
-/// 4. the dotted `DrawFocusRect` inside the frame while the control holds the focus and the
-///    keyboard cues are not hidden — the same cue, the same inset of two pixels, as the
-///    owner-drawn push buttons of task T-11-5a.
-///
-/// # The font
-///
-/// Unlike a `WM_DRAWITEM`, a `WM_PAINT` hands over a DC with the *stock* font in it — the
-/// dialog manager selects a control's font only into the DC it makes for an owner-draw
-/// message. So the control's own font is asked for (`WM_GETFONT`), selected for the length of
-/// the drawing and put back. No face name and no point size appear in this file; the font is
-/// the one the manager already created at the window's DPI.
-///
-/// Nothing is drawn at all when the state is unreachable or `theme::Brushes::new` was refused
-/// at initialisation — the reason [`on_draw_item`] gives for its own zeroes.
-///
-/// # Safety
-///
-/// Called from [`paint_combo_closed_part`] alone, with the DC of the paint it is inside of.
-/// Everything the closed face of a combo box is drawn with — the one place the colour table is
-/// turned into handles and inks, so that this dialog's four and the wizard's one cannot come
-/// out different (§6.2).
-///
-/// The second element of the tuple is the fill brush and the third **owns** it when the fill is
-/// the transient hover colour: a `_` there would free the brush before the first pixel.
-type ComboLook = (
-    HBRUSH,
-    HBRUSH,
-    Option<HotBrush>,
-    COLORREF,
-    COLORREF,
-    COLORREF,
-    Option<HFONT>,
-);
-
-/// Builds that look out of the roles, the palette, a brush set and the ground the corners stand
-/// on.
-fn combo_look(
-    roles: theme::ComboClosedColors,
-    palette: &theme::Palette,
-    brushes: &theme::Brushes,
-    ground: HBRUSH,
-    face: Option<HFONT>,
-) -> ComboLook {
-    // The hot fill is the one colour of the table a window's brush set does not hold — see
-    // [`HotBrush`]. `None` for every other role, and also for a refused `CreateSolidBrush`, in
-    // which case the fill falls back to the quiet `field_bg` and the closed part simply does
-    // not light up (NFR-13).
-    let hot = match roles.fill {
-        ComboFillRole::HoverBg => HotBrush::new(palette.hover_bg),
-        ComboFillRole::FieldBg | ComboFillRole::SelBg => None,
-    };
-
-    let fill = hot
-        .as_ref()
-        .map_or_else(|| combo_fill_brush(roles.fill, brushes), HotBrush::brush);
-
-    (
-        ground,
-        fill,
-        hot,
-        match roles.border {
-            ComboBorderRole::FieldBorder => palette.field_border,
-        },
-        combo_text_ink(roles.text, palette),
-        match roles.chevron {
-            ComboChevronRole::TextMuted => palette.text_muted,
-        },
-        face,
-    )
-}
-
-/// The text of the item a combo box currently shows, as UTF-16 without the terminator — read
-/// from the dialog's own control by identifier, the one road this file reads a control's
-/// content by.
-///
-/// Empty for a combo with nothing chosen (`CB_ERR`), for a refused length, and for a refused
-/// copy — the closed face then shows its ground and its chevron and no word, which is the
-/// degraded-but-alive answer of NFR-13.
-fn combo_selected_text(dialog: HWND, control: i32) -> Vec<u16> {
-    let Ok(index) = usize::try_from(send_to(dialog, control, CB_GETCURSEL, 0, 0)) else {
-        return Vec::new();
-    };
-
-    let Ok(length) = usize::try_from(send_to(dialog, control, CB_GETLBTEXTLEN, index, 0)) else {
-        return Vec::new();
-    };
-
-    // One for the terminator the control writes and never counts.
-    let mut buffer = vec![0u16; length + 1];
-
-    // SAFETY: `buffer` is owned by this frame and holds the length the combo has just
-    // reported plus the terminator, which is exactly what `CB_GETLBTEXT` writes; the pointer
-    // is not retained by the call.
-    let copied = send_to(
-        dialog,
-        control,
-        CB_GETLBTEXT,
-        index,
-        buffer.as_mut_ptr() as isize,
-    );
-
-    let copied = usize::try_from(copied).unwrap_or(0).min(length);
-
-    buffer.truncate(copied);
-    buffer
-}
-
 // =========================================================================================
 // Отклик наведения: «когда наводишь — должно быть видно» — FR-92а, task T-12-8
 // =========================================================================================
@@ -4969,99 +4703,6 @@ thread_local! {
     /// A thread-local because the windows of this program live on the UI thread and on no other
     /// (section 6.1).
     static HOT_CONTROL: Cell<isize> = const { Cell::new(0) };
-}
-
-/// Whether the cursor stands on this control — the question the drawing halves ask.
-///
-/// The zero check is not redundant: an invalid handle must not match the «nothing is hot»
-/// record.
-pub(crate) fn is_hot(window: HWND) -> bool {
-    let hot = HOT_CONTROL.with(Cell::get);
-
-    hot != 0 && hot == window.0 as isize
-}
-
-/// The cursor has arrived on `window`: arm the leave notification, remember the control and ask
-/// for the one repaint — task T-12-8.
-///
-/// **Nothing happens on a move that changes nothing.** The flag is looked at first, and a
-/// control that is already the hot one leaves this function without a single call — which is
-/// what keeps a window that the cursor is resting on from repainting itself for ever.
-///
-/// The order is deliberate: the tracking is armed **before** the flag is set, so a refused
-/// `TrackMouseEvent` — the one call here that can leave the state stuck — leaves the control
-/// cold instead of leaving it lit with no way back. A control that never lights up is the
-/// picture every task before this one drew; a control that lights up and never goes out would
-/// be a new defect (NFR-13).
-fn enter_hot(window: HWND) {
-    if is_hot(window) {
-        return;
-    }
-
-    let mut tracking = TRACKMOUSEEVENT {
-        cbSize: u32::try_from(size_of::<TRACKMOUSEEVENT>()).unwrap_or(0),
-        dwFlags: TME_LEAVE,
-        hwndTrack: window,
-        dwHoverTime: 0,
-    };
-
-    // SAFETY: `tracking` is a live local of this frame, filled in whole above, and the call
-    // reads it and keeps no pointer to it; `window` is the control this procedure is installed
-    // on. NFR-13: the answer is examined right here — a refusal means no `WM_MOUSELEAVE` will
-    // ever come, so the flag is left alone and this control simply has no response. Nothing is
-    // journaled, for the reason `subclass_combo_boxes` writes down at its own dropped answer:
-    // the closed operation vocabulary of `diag` has no row for this call, the consequence is
-    // cosmetic, and the dialog works either way.
-    if unsafe { TrackMouseEvent(&mut tracking) }.is_err() {
-        return;
-    }
-
-    HOT_CONTROL.with(|hot| hot.set(window.0 as isize));
-
-    invalidate_hot(window);
-}
-
-/// The cursor has left `window`: forget it and ask for the repaint back to the quiet face.
-///
-/// The record is cleared **only when it still names this control**. The two messages are not
-/// ordered against each other by anything: a `WM_MOUSELEAVE` for the control the cursor came
-/// from can arrive after the `WM_MOUSEMOVE` of the one it went to, and a clear that did not
-/// look would then put out the light of the control the cursor is actually on. The repaint is
-/// asked for either way — this control has to stop showing the hot face whichever of the two
-/// orders happened.
-fn leave_hot(window: HWND) {
-    if is_hot(window) {
-        HOT_CONTROL.with(|hot| hot.set(0));
-    }
-
-    invalidate_hot(window);
-}
-
-/// The control is being destroyed: drop the record if it names it — task T-12-8.
-///
-/// Not a repaint and not a message: a window inside `WM_NCDESTROY` has nothing left to paint.
-/// This exists so that the record cannot outlive the window it names — see [`HOT_CONTROL`].
-fn forget_hot(window: HWND) {
-    if is_hot(window) {
-        HOT_CONTROL.with(|hot| hot.set(0));
-    }
-}
-
-/// The one repaint of the response — the whole rectangle of the control, without an erase.
-///
-/// `false` for the erase because every drawing this repaint reaches grounds its own rectangle
-/// before it draws: an owner-drawn push button since task T-12-6, the closed face of a combo
-/// box since T-11-14. An erase on top of that would be the two-step repaint that flickers.
-fn invalidate_hot(window: HWND) {
-    // SAFETY: `window` is the control this procedure is installed on; the call marks a
-    // rectangle of it and touches no memory of ours.
-    //
-    // NFR-13: examined in words and deliberately dropped. A refusal — a window already gone —
-    // means the control keeps the face it last drew until something else invalidates it, which
-    // is a cosmetic nothing on a window that is being taken down anyway; there is no journal
-    // row for it (reviews\T-11-1.md) and no `debug_assert`, because a window closing under the
-    // cursor is a legal state and not a violation of ownership.
-    let _ = unsafe { InvalidateRect(Some(window), None, false) };
 }
 
 // =========================================================================================
@@ -6136,29 +5777,6 @@ pub(crate) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Sends one message to one control of the dialog.
-///
-/// NFR-13 asks that the result of a Win32 call be examined, and what comes back here is an
-/// `LRESULT` — not a `BOOL`, a handle or a pointer, and for most messages not a success flag at
-/// all. Where it *is* one it is examined at the call site: [`selected_row`] and
-/// [`selected_layout`] both treat the "nothing is selected" answer as such. The insertions —
-/// `CB_ADDSTRING`, `LB_ADDSTRING`, `LVM_INSERTITEMW` — answer an index or an error, and an error
-/// there shows up as a row missing from a list the user is looking at, which is visible in a way
-/// no journal entry would improve on.
-pub(crate) fn send_to(
-    hwnd: HWND,
-    control: i32,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
-    // SAFETY: `hwnd` is the live dialog and `control` is one of the identifiers of its
-    // template; a message to a control that does not exist answers zero rather than doing
-    // anything. Where `lparam` is a pointer, the value it points at is owned by the caller's
-    // frame for the whole call — every such call site says so.
-    unsafe { SendDlgItemMessageW(hwnd, control, message, WPARAM(wparam), LPARAM(lparam)) }.0
-}
-
 /// Reads the text of one control.
 /// The text of one control of a window of this program — the reader the stand of Э32 uses to
 /// check that the appeal of FR-104 reaches the field whole.
@@ -6231,355 +5849,3 @@ pub(crate) fn get_text(hwnd: HWND, control: i32) -> String {
 // another the tools it already had. A test that wants any of it goes through the window using
 // it. (A `pub(crate) use` re-export was tried first and refused by the compiler — E0364/E0365:
 // a private item cannot be re-exported at a wider visibility, it has to *be* wider.)
-
-/// Puts [`combo_box_proc`] in front of one combo box of **another** window of this program —
-/// task Т-32-8, the wizard of FR-104.
-///
-/// The far half is [`unsubclass_foreign_combo`], and the procedure additionally takes itself
-/// off on `WM_NCDESTROY`, exactly as it does for the four of this dialog.
-pub(crate) fn subclass_foreign_combo(hwnd: HWND, control: i32) {
-    // SAFETY: `hwnd` is a live window of this thread; the crate turns a missing control into
-    // an error.
-    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // SAFETY: `combo` is a live control created by the dialog manager on this thread, and
-    // `combo_box_proc` has exactly the signature `SUBCLASSPROC` names. The reference datum is a
-    // plain number. ⚠ NFR-13: the `BOOL` is dropped for the reason `subclass_combo_boxes`
-    // gives at its own — a refusal leaves that one combo box painted by the system, which is
-    // visible rather than silent.
-    let _ = unsafe {
-        SetWindowSubclass(
-            combo,
-            Some(combo_box_proc),
-            COMBO_SUBCLASS_ID,
-            COMBO_FOREIGN,
-        )
-    };
-}
-
-/// Takes [`combo_box_proc`] back off a combo box of another window — the far half of the pair.
-pub(crate) fn unsubclass_foreign_combo(hwnd: HWND, control: i32) {
-    // SAFETY: as above.
-    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        return;
-    };
-
-    // SAFETY: the procedure and the identifier are the pair the subclass was installed with;
-    // a window that no longer carries it answers `FALSE` and nothing happens.
-    let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
-}
-
-/// The procedure that stands in front of each combo box while this dialog is up — FR-92а,
-/// task T-11-14.
-///
-/// Three messages are its own; everything else goes straight on to [`DefSubclassProc`], so a
-/// combo box behaves in every other way exactly as it did before the subclass — the list still
-/// drops down, the keyboard still chooses, `CB_*` still works, and the dropped-down list is
-/// still coloured by `WM_CTLCOLORLISTBOX` and drawn item by item by `WM_DRAWITEM`.
-///
-/// ⚠ **`WM_PAINT` does not reach the original procedure.** The arm ends in `return`, not in a
-/// fall-through: the control's own painting — the frame and the pale system button with the
-/// arrow — never runs. The one road back to it is a refused `BeginPaint`, and then nothing of
-/// ours could have been drawn either; letting the message through is what keeps the window
-/// validated instead of asking for a paint for ever (NFR-13).
-///
-/// # Safety
-///
-/// Called by the window manager with the arguments of a window message, on one of the four
-/// controls [`subclass_combo_boxes`] installed it on.
-unsafe extern "system" fn combo_box_proc(
-    combo: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _subclass_id: usize,
-    reference_data: usize,
-) -> LRESULT {
-    match message {
-        // The whole reason this procedure exists — see the ⚠ above.
-        //
-        // SAFETY: `combo` is the control this procedure is installed on, and the call is
-        // inside the window's own `WM_PAINT`, which is where `BeginPaint` may be used.
-        WM_PAINT => {
-            if unsafe { paint_combo_closed_part(combo, reference_data) } {
-                return LRESULT(0);
-            }
-        }
-
-        // «Erased» without erasing anything: the closed face is repainted whole by the arm
-        // above, and an erase before it is exactly the two-step repaint that flickers.
-        WM_ERASEBKGND => return LRESULT(1),
-
-        // ⚠ Task T-12-8, the response of the cursor — the two arms the same procedure of the
-        // buttons has, and for the same reason. Neither *answers* the message: both fall
-        // through to `DefSubclassProc` below, so the control's own hot-tracking, its click and
-        // its keyboard are untouched — in particular **the list does not drop down**, which is
-        // what a swallowed `WM_MOUSEMOVE` would have been the shortest road to breaking. The
-        // repaint the flag asks for goes through `WM_PAINT` and the arm above it, and the
-        // colour is chosen by `combo_closed_color_roles`.
-        WM_MOUSEMOVE => enter_hot(combo),
-
-        WM_MOUSELEAVE => leave_hot(combo),
-
-        // The belt to the braces of the pair — see `subclass_combo_boxes`. Forwarded on
-        // afterwards: `WM_NCDESTROY` must reach every procedure of the chain.
-        //
-        // SAFETY: `combo` is that control, and the procedure and identifier are the pair the
-        // subclass was installed with.
-        WM_NCDESTROY => {
-            // Task T-12-8: the record cannot outlive the window it names — see `HOT_CONTROL`.
-            forget_hot(combo);
-            let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
-        }
-
-        _ => {}
-    }
-
-    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
-    // unchanged; this is what `DefSubclassProc` exists for.
-    unsafe { DefSubclassProc(combo, message, wparam, lparam) }
-}
-
-/// Answers one `WM_PAINT` of a combo box; `false` when `BeginPaint` refused and the message
-/// has to go on to the control's own procedure — see [`combo_box_proc`].
-///
-/// # Safety
-///
-/// Called from [`combo_box_proc`] alone, inside the `WM_PAINT` of the window it names.
-unsafe fn paint_combo_closed_part(combo: HWND, reference_data: usize) -> bool {
-    let mut paint = PAINTSTRUCT::default();
-
-    // SAFETY: `combo` is the live control inside its own `WM_PAINT`, and `paint` is a live
-    // local of this frame that the call fills in.
-    let dc = unsafe { BeginPaint(combo, &mut paint) };
-
-    if dc.is_invalid() {
-        // NFR-13: examined. Nothing of ours can be drawn without a DC, and the window still
-        // has to be validated — which the control's own procedure will do.
-        return false;
-    }
-
-    // SAFETY: `dc` is the DC `BeginPaint` has just answered, owned until `EndPaint` below.
-    unsafe { draw_combo_closed_part(combo, dc, reference_data) };
-
-    // SAFETY: the same window and the very `PAINTSTRUCT` `BeginPaint` filled in. The `BOOL`
-    // is dropped for the reason the paint calls of this file drop theirs.
-    let _ = unsafe { EndPaint(combo, &paint) };
-
-    true
-}
-
-unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC, reference_data: usize) {
-    // The dialog is the parent of its own control; everything below is read through it, by
-    // identifier, exactly as every other drawing of this file reads what it draws.
-    //
-    // SAFETY: `combo` is the live control; a window with no parent answers an error.
-    let Ok(dialog) = (unsafe { GetParent(combo) }) else {
-        return;
-    };
-
-    // SAFETY: reading a window's identifier reads a field of that window and no memory of
-    // ours.
-    let control = unsafe { GetDlgCtrlID(combo) };
-
-    let foreign = reference_data == COMBO_FOREIGN;
-
-    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
-    // be reached on a window it was installed on: one list of four, checked before any work.
-    //
-    // ⛔ A combo of **another** window of this program is exempt from the list and from
-    // nothing else — and the exemption is the reference datum the subclass was installed with,
-    // which no message can forge: `SetWindowSubclass` is the only thing that writes it.
-    if !foreign && !COMBO_BOXES.contains(&control) {
-        return;
-    }
-
-    let mut area = RECT::default();
-
-    // SAFETY: `combo` is the live control and `area` is a live local the call fills.
-    if unsafe { GetClientRect(combo, &mut area) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `combo` is the live control; the call reads a window style and answers a flag.
-    let disabled = !unsafe { IsWindowEnabled(combo) }.as_bool();
-
-    // The focus cue on the same terms as the buttons of task T-11-5a: shown while the control
-    // holds the focus, hidden while the window manager says the keyboard cues are hidden —
-    // which is what `ODS_NOFOCUSRECT` carries into an owner-draw message and what
-    // `WM_QUERYUISTATE` answers outside one.
-    //
-    // SAFETY: the call reads the focus of this thread and touches no memory of ours.
-    let has_focus = unsafe { GetFocus() } == combo;
-    let cues_hidden =
-        send_to(dialog, control, WM_QUERYUISTATE, 0, 0) & (UISF_HIDEFOCUS as isize) != 0;
-    let focused = has_focus && !cues_hidden;
-
-    // Task T-12-8: the cursor standing on the closed part, out of this program's own record —
-    // the very question the push buttons ask, asked here about the control that is painting
-    // itself rather than about the window of a message.
-    let roles = combo_closed_color_roles(is_hot(combo), disabled);
-
-    // Every combo box this draws belongs to a window of the letters — the settings window of FR-92
-    // is a window of the shell since T-120-20: its look is built out of the palette the
-    // configuration resolves to — the very palette that window built itself from — and the
-    // brushes are owned for the length of this paint.
-    let setting = crate::tray::with_tray(|tray| tray.config().general.theme)
-        .unwrap_or(theme::ThemeSetting::System);
-    let palette = theme::resolve(setting, theme::system_is_light());
-    let brushes = theme::Brushes::new(palette);
-    let choice = brushes
-        .as_ref()
-        .map(|brushes| combo_look(roles, palette, brushes, brushes.window_bg(), None));
-
-    // `_hot` is named and not discarded on purpose: it owns the transient brush `fill` may name,
-    // and a `_` would have freed it before the first pixel was drawn.
-    let Some((ground, fill, _hot, border, ink, chevron_ink, face)) = choice else {
-        return;
-    };
-
-    let dpi = drawing_dpi(dc);
-
-    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
-    // and the same cure task T-15-1 gave the push buttons: a string of separate GDI calls
-    // straight into the DC of a control is not atomic, and DWM samples the surface of a window
-    // sixty times a second. Measured on the стенд against the closed part of `IDC_THEME`, thirty
-    // hover transitions in each palette: an intermediate state reached the screen in **30 of 30**,
-    // its bounding box exactly this control's rectangle, holding the hot fill, the frame ink and
-    // **100 px of the ground of the panel** — the four 5×5 corner squares of raw ground standing
-    // where the smoothed arcs were not yet drawn. Off-screen there is no screen for that state to
-    // appear on, and the finished field crosses over in the single blit at the foot of this body.
-    //
-    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of this paint itself and
-    // every step below paints where it painted before this task, flicker and all: the honest
-    // degradation [`BackgroundCache`] answers a refusal with.
-    //
-    // ⚠ `dpi` is taken one line above off the DC of **this paint** and never off the buffer.
-    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and a
-    // radius scaled off the buffer would be wrong at every scale but 100 % with no test going red.
-    //
-    // SAFETY: `dc` is the DC `BeginPaint` answered for this window, owned until `EndPaint`; the
-    // buffer reads it for its colour depth and its face, writes to it only in the blit below, and
-    // frees its own DC and bitmap when this frame ends.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &area) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // 1. The ground, then the field on top of it. `WM_ERASEBKGND` deliberately erases
-    // nothing (see `combo_box_proc`), so this is the one erase of the closed part — and it
-    // is what the four corners the rounding cuts away are filled with. Without it those
-    // corners would hold whatever the parent last painted there, which is right only for as
-    // long as the dialog carries no `WS_CLIPCHILDREN`.
-    //
-    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
-    // The corner smoothing reads the ground of each corner back **out of** the DC it draws into,
-    // and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill, standing
-    // exactly where it stood, is what makes the buffer hold under the corners the same colour the
-    // screen held there, and the halftones of the arcs come out unmoved.
-    //
-    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of this paint;
-    // `area` is a live local of this frame; `ground` is a live brush of the dialog's state.
-    unsafe { FillRect(target, &area, ground) };
-
-    paint_rounded(target, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
-
-    // 2. The chevron, in place of the system button.
-    let chevron = combo_chevron_points(&area, dpi);
-    draw_combo_chevron(target, chevron, chevron_ink, dpi);
-
-    // 3. The chosen value, from the control by identifier — never from anywhere else.
-    let mut value = combo_selected_text(dialog, control);
-
-    if !value.is_empty() {
-        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that DC
-        // and touch no memory of this process.
-        unsafe { SetBkMode(target, TRANSPARENT) };
-        // SAFETY: as above.
-        unsafe { SetTextColor(target, ink) };
-
-        // The face for the length of the drawing — see the doc comment. Since task T-11-17 it
-        // is the dialog's own grey-antialiased face; the control's own font, which the manager
-        // created and renders with ClearType, is the fallback for a window whose faces could
-        // not be made (NFR-13).
-        let font = match face {
-            Some(face) => face,
-            None => HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void),
-        };
-
-        // NFR-13: examined. A control with no font of its own answers zero, and the stock
-        // font of the DC is then the degraded-but-alive answer.
-        let previous_font = if font.is_invalid() {
-            None
-        } else {
-            // SAFETY: `target` is the buffer or the DC of this paint, and `font` is either a live
-            // face the dialog's state owns for longer than this call or the live font of the
-            // control, owned by the manager; the previous handle is put back below.
-            Some(unsafe { SelectObject(target, font.into()) })
-        };
-
-        // Three dialog units from the left edge — the `($c.x + 3)` of the `'combo'` arm of the
-        // generator (task T-11-16). The dialog is the window the units belong to; a refused
-        // `MapDialogRect` keeps the bare unit count, as everywhere else (NFR-13).
-        let inset = dialog_units(dialog, FIELD_TEXT_INSET_DLU, 0)
-            .map(|(horizontal, _)| horizontal)
-            .unwrap_or(FIELD_TEXT_INSET_DLU);
-
-        let mut text_rect = RECT {
-            left: area.left + inset,
-            top: area.top,
-            right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
-            bottom: area.bottom,
-        };
-
-        // SAFETY: `value` and `text_rect` are live locals of this frame; the format has no
-        // `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text and writes only
-        // pixels of the DC.
-        unsafe {
-            DrawTextW(
-                target,
-                &mut value,
-                &mut text_rect,
-                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-            )
-        };
-
-        if let Some(previous) = previous_font {
-            // SAFETY: `previous` is the font that was in the DC a moment ago; putting it back
-            // ends this function's use of it.
-            unsafe { SelectObject(target, previous) };
-        }
-    }
-
-    // 4. The focus cue, on the terms of task T-11-5a.
-    if focused {
-        let focus_rect = RECT {
-            left: area.left + FOCUS_CUE_INSET,
-            top: area.top + FOCUS_CUE_INSET,
-            right: area.right - FOCUS_CUE_INSET,
-            bottom: area.bottom - FOCUS_CUE_INSET,
-        };
-
-        // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
-        //
-        // SAFETY: `target` is the buffer or the DC of this paint and `focus_rect` is a live local
-        // of this frame; the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(target, &focus_rect) };
-    }
-
-    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
-    // erase has touched the window, so what DWM can sample is the closed part as it was or as it
-    // now is, and there is no third state for the eye to catch.
-    //
-    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
-    // gives for its own blit. A refused blit leaves the control showing the picture the window
-    // already had there — its previous state and never a hole — and painting the body a second
-    // time into the DC of the paint is the very flicker this task removes.
-    //
-    // SAFETY: `dc` is the DC of this paint, owned until `EndPaint`; `buffer` is this frame's own,
-    // and its DC and bitmap are freed as it goes out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-}
