@@ -700,6 +700,44 @@ fn print_the_table_and_the_report() {
     }
 }
 
+/// **The instrument fails where it must** — FR-92's positive control, from the test of the dialog
+/// templates that left with them (T-120-19): English with every string 40 % longer no longer fits
+/// at its factor of the table, in some window and class. Without it the green of
+/// [`every_window_fits_every_language_at_the_factor_of_the_table`] says nothing.
+#[test]
+fn english_forty_percent_longer_does_not_fit_at_its_factor() {
+    with_product_strings();
+    let (mut windows, _) = windows_of(Language::En);
+    for (_, window) in &mut windows {
+        window.texts_mut(&mut |_, text| {
+            let length = (text.chars().count() as f32 * 1.4).ceil() as usize;
+            *text = text.chars().cycle().take(length).collect();
+        });
+    }
+    let face = faces()[0];
+    let text = Text::with_faces(
+        face,
+        MONO_FACES[1],
+        Language::En.tag(),
+        Direction::LeftToRight,
+    )
+    .expect("DirectWrite");
+    let mut red = Vec::new();
+    for (class, w, h) in CLASSES {
+        let size = client_size(w, h);
+        let k = fit::k_for(Language::En.tag(), class);
+        for (name, window) in &windows {
+            if !faults(window, size, k, false, &text).is_empty() {
+                red.push(format!("{name}, {class:?}"));
+            }
+        }
+    }
+    assert!(
+        !red.is_empty(),
+        "English 40 % longer fits everywhere at its factor: the instrument cannot fail"
+    );
+}
+
 /// **Every excuse has a category and a term** (208.175): a record without one is refused.
 #[test]
 fn every_excuse_has_a_category_and_a_term() {
