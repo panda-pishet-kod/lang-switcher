@@ -837,3 +837,114 @@ fn the_memory_does_not_grow_with_every_opening() {
         "(б) the letter grows with every opening: {report}"
     );
 }
+
+/// **The series of the stand, in the test process** (the growth of 20.11 on the stand, 208.183): each
+/// round opens the menu of the icon over a hidden owner that is no window of the shell — as the
+/// hidden window of the program — paints it and closes it, then opens «О программе», paints it and
+/// closes it. The rounds of the stand job, without the hook. `LANGSW_UI_MEMORY_ROUNDS` (600);
+/// `LANGSW_UI_MEMORY_NO_MENU` leaves the menu out (the series of the gate, for comparison).
+#[test]
+#[ignore = "an instrument: run on purpose with --ignored --nocapture"]
+fn the_memory_with_the_menu_of_the_icon() {
+    use lang_switcher::tray::{Menu, MenuNow, Pending};
+    use lang_switcher::ui::windows::tray_menu::TrayMenu;
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WINDOW_STYLE,
+    };
+    use windows::core::w;
+
+    with_product_strings();
+    let rounds: usize = std::env::var("LANGSW_UI_MEMORY_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(600);
+    let with_menu = std::env::var_os("LANGSW_UI_MEMORY_NO_MENU").is_none();
+    // SAFETY: a system class, a hidden window of this thread with no parent; destroyed below.
+    let owner = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!(""),
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("the hidden owner");
+    let menu = || TrayMenu {
+        now: MenuNow {
+            menu: Menu::build_in(
+                Language::Ru,
+                true,
+                true,
+                false,
+                false,
+                false,
+                &Pending::default(),
+            ),
+            enabled: true,
+            fail_safe: false,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        },
+        language: Language::Ru,
+    };
+
+    let objects_before = objects();
+    let mut after = Vec::with_capacity(rounds);
+    for _ in 0..rounds {
+        if with_menu {
+            let hwnd = host::create_menu(menu(), Some(owner), POINT { x: 800, y: 600 }, false)
+                .expect("the menu of the icon");
+            // SAFETY: a window of this thread; the message goes straight to its procedure.
+            unsafe { SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0))) };
+            host::close(hwnd);
+            pump();
+        }
+        let about = host::create(
+            About {
+                language: Language::Ru,
+                key: "Pause".to_owned(),
+                theme: ThemeSetting::Light,
+            },
+            None,
+        )
+        .expect("the window of the shell");
+        // SAFETY: as above.
+        unsafe {
+            SendMessageW(about, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(about, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+        after.push(memory().0);
+    }
+    let objects_after = objects();
+    // SAFETY: the window made above, of this thread.
+    let _ = unsafe { DestroyWindow(owner) };
+
+    let at = |n: usize| {
+        after
+            .get(n.min(after.len()) - 1)
+            .copied()
+            .unwrap_or_default()
+    };
+    println!(
+        "menu {with_menu}: 1st {:.2}, 20th {:.2}, 100th {:.2}, 300th {:.2}, 600th {:.2} MB; 20->300 {:+.2}, 300->600 {:+.2}; gdi/user {:?} -> {:?}",
+        at(1),
+        at(20),
+        at(100),
+        at(300),
+        at(600),
+        at(300) - at(20),
+        at(600) - at(300),
+        objects_before,
+        objects_after
+    );
+}
