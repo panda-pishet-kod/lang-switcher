@@ -10,7 +10,7 @@ use crate::settings::{
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
-use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Surface, Window, WindowKind};
+use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Window, WindowKind};
 use ::windows::Win32::Foundation::HWND;
 
 /// The elements of the window: the two buttons of each card by the card's place in the list.
@@ -73,17 +73,12 @@ impl LettersList {
                 browser: false,
             });
         }
-        // ⚠ A stand-in until the element «карточка письма» is in the scene (a line to
-        // `e120-core`): a block with the three lines and the buttons under them.
-        Node::Surface(
-            Surface::Block,
-            Box::new(Node::Rows(vec![
-                Node::Line(Role::Label, entry.meta.clone()),
-                Node::Line(Role::Strong, entry.title.clone()),
-                Node::Line(Role::Body, entry.excerpt.clone()),
-                Node::Buttons(buttons),
-            ])),
-        )
+        Node::LetterCard {
+            label: entry.meta.clone(),
+            title: entry.title.clone(),
+            words: entry.excerpt.clone(),
+            buttons,
+        }
     }
 }
 
@@ -105,9 +100,8 @@ impl Content for LettersList {
         body.push(Node::Text(Role::Small, self.line(IDS_LETTERS_FOOT)));
         Window {
             kind: WindowKind::Ordinary,
-            // ⚠ The panda of the news, as in the mock-up, once the drawings of the letters are in
-            // `scene::Art` (a line to `e120-core`).
-            art: Some(Art::Avatar),
+            // The panda of the news, as in the mock-up.
+            art: Some(Art::News),
             brand: Some(Brand {
                 name: "Panda Koder".to_owned(),
                 address: site(),

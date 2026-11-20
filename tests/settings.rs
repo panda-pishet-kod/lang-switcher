@@ -28695,7 +28695,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
     };
 
     // «О программе» shared it until FR-92а moved it to the shell, «Письмо» until T-120-16 did.
-    for name in ["IDD_WIZARD"] {
+    {
+        let name = "IDD_WIZARD";
         println!("{name}: {} units tall", height(name));
 
         assert_eq!(
@@ -28706,7 +28707,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
     }
 
     // «Последние письма» counted its own until T-120-16 moved it to the shell.
-    for name in ["IDD_AUTHOR"] {
+    {
+        let name = "IDD_AUTHOR";
         println!("{name}: {} units tall — by its content", height(name));
 
         assert_ne!(
@@ -28738,7 +28740,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
         rest[..end].to_owned()
     };
 
-    for what in ["unsafe fn layout_author("] {
+    {
+        let what = "unsafe fn layout_author(";
         assert!(
             body_of(what).contains("resize_client("),
             "«{what}» must give its window the height its content asks for"

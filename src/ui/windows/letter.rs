@@ -53,10 +53,12 @@ pub struct LetterView {
 
 /// The picture of each letter: its own drawing of the panda.
 fn art_of(letter: Letter) -> Art {
-    // ⚠ Until the drawings of the letters are in `scene::Art` (a line to `e120-core`), every
-    // letter shows the panda of the windows in the corner.
-    let _ = letter;
-    Art::Avatar
+    match letter {
+        Letter::Welcome => Art::Hello,
+        Letter::Thanks => Art::Thanks,
+        Letter::News(_) => Art::News,
+        Letter::Update => Art::Update,
+    }
 }
 
 /// The name of the author's site under the panda — as in «О программе»: the host of the page of
@@ -93,16 +95,15 @@ impl LetterView {
     }
 
     /// The example of «Привет»: the word typed in the wrong layout, the key, the word it becomes.
+    /// The line stands in the text at every width of the window; its words come into the picture
+    /// when the picture has its anchors (T-120-25).
     fn example(&self) -> Node<Id> {
         let pair = self.plan.demo_pair;
-        // ⚠ A stand-in until the element «пример с клавишей» is in the scene (a line to
-        // `e120-core`): the three words in a row.
-        Node::Row(vec![
-            Node::Line(Role::Code, pair.typed.to_owned()),
-            Node::Line(Role::Code, self.key.clone()),
-            Node::Line(Role::Body, "→".to_owned()),
-            Node::Line(Role::Code, pair.fixed.to_owned()),
-        ])
+        Node::Example {
+            typed: pair.typed.to_owned(),
+            key: self.key.clone(),
+            fixed: pair.fixed.to_owned(),
+        }
     }
 
     /// The body of the letter, part by part.

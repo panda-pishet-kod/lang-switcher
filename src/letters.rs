@@ -2976,27 +2976,6 @@ impl WindowState {
         }
     }
 
-    /// Where a person writes to the author from this window — [`links::feedback_url`] of the
-    /// language the window is built in (решение 181.1).
-    ///
-    /// The language of the **window** and not the one asked of `settings` at the click: it is the
-    /// language its words are in, and [`language_changed`] moves it together with them.
-    fn feedback_url(&self) -> &'static str {
-        links::feedback_url(self.language)
-    }
-
-    /// The download page this window's «Открыть страницу загрузки» opens — [`links::download_url`]
-    /// of the language of the window (решение 181.33), for the reason [`Self::feedback_url`] gives.
-    fn download_url(&self) -> &'static str {
-        links::download_url(self.language)
-    }
-
-    /// The page the name of the program in this window opens — [`links::program_url`] of the
-    /// language of the window (решение 181.33).
-    fn program_url(&self) -> &'static str {
-        links::program_url(self.language)
-    }
-
     /// The `SS_ICON` static this window's logo goes into: «От автора» has one, the wizard none.
     fn icon_control(&self) -> Option<i32> {
         (self.kind == Kind::Author).then_some(IDC_AUTHOR_ICON)
@@ -6111,7 +6090,25 @@ fn open_shell<C: crate::ui::host::Content + 'static>(
     content: C,
     activate: bool,
 ) -> Option<HWND> {
-    match crate::ui::host::create(content, Some(owner)) {
+    use crate::ui::host;
+
+    // The door of the tests keeps the window hidden (`testing`): made, never shown.
+    #[cfg(feature = "testing")]
+    let made = if testing::hidden() {
+        host::create(content, Some(owner))
+    } else if activate {
+        host::open(content, Some(owner))
+    } else {
+        host::open_inactive(content, Some(owner))
+    };
+    #[cfg(not(feature = "testing"))]
+    let made = if activate {
+        host::open(content, Some(owner))
+    } else {
+        host::open_inactive(content, Some(owner))
+    };
+
+    match made {
         Ok(hwnd) => {
             SHELL.with_borrow_mut(|open| {
                 open.push(ShellWindow {
@@ -6121,7 +6118,10 @@ fn open_shell<C: crate::ui::host::Content + 'static>(
                     language,
                 });
             });
-            raise(hwnd, activate);
+            // A window the person asked for comes to the front, as the old one did.
+            if activate {
+                raise(hwnd, true);
+            }
             Some(hwnd)
         }
         Err(error) => {
@@ -6391,7 +6391,7 @@ pub mod testing {
         }
         // SAFETY: `hwnd` is a live dialog of this module on the caller's thread — the contract of
         // this door — and the borrow of its state ends with the call.
-        unsafe { with_state(hwnd, |state| state.feedback_url()) }
+        unsafe { with_state(hwnd, |state| super::links::feedback_url(state.language)) }
     }
 
     /// The language a window of the shell of this module was built in — what its pages are
@@ -6418,7 +6418,14 @@ pub mod testing {
             ));
         }
         // SAFETY: as for `feedback_url` above — a dialog of this module, not a window of the shell.
-        unsafe { with_state(hwnd, |state| (state.download_url(), state.program_url())) }
+        unsafe {
+            with_state(hwnd, |state| {
+                (
+                    super::links::download_url(state.language),
+                    super::links::program_url(state.language),
+                )
+            })
+        }
     }
 }
 
@@ -6431,9 +6438,10 @@ pub fn list_entries_now() -> Vec<Entry> {
 }
 
 /// The entry of the feed the instrument of fitting (`ui::windows::catalogue`) puts into
-/// «Новость» and «Обновление»: the longest the order of the feed allows — the first line of the
-/// text 150 characters (`sign-news.ps1`), and the line «Подробности…» under it. In the words of
-/// the feed, which come in the language of the site whatever the language of the program.
+/// «Новость» and «Обновление»: near the longest the order of the feed allows — the first line of
+/// the text 145 characters of the 150 (`sign-news.ps1`), and the line «Подробности…» under it.
+/// In the words of the feed, which come in the language of the site whatever the language of the
+/// program.
 pub fn sample_entry() -> FeedItem {
     FeedItem {
         id: 7,

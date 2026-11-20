@@ -4514,3 +4514,84 @@ fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
         "and the new window speaks English"
     );
 }
+
+/// **The pictures of C3 of T-120-16** — the four letters and «Последние письма» drawn in memory by
+/// the drawing of the shell itself (the layout and `elements::draw`, as a live window draws them):
+/// Russian straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
+/// screen (1280 × 720) and the narrowest one (620 × 500), at the factor of the table. Printed only
+/// when `LANGSW_LETTERS_DIR` names a folder.
+#[cfg(feature = "testing")]
+#[test]
+fn print_the_letters() {
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::{Color, Theme};
+    use lang_switcher::ui::windows::{letter, letters_list};
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    let Some(folder) = std::env::var_os("LANGSW_LETTERS_DIR") else {
+        return;
+    };
+    let _guard = with_product_strings();
+    // SAFETY: the apartment of this test's thread, for the whole test (`Art` outlives each canvas).
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut art = lang_switcher::ui::art::Art::new();
+    let folder = Path::new(&folder);
+    std::fs::create_dir_all(folder).expect("the folder of the pictures");
+
+    for language in [Language::Ru, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("the text of the language");
+        let windows: Vec<(String, lang_switcher::ui::scene::Window<u16>)> =
+            letter::states(language)
+                .into_iter()
+                .map(|(name, window)| (name, window.map(&letter::Id::number)))
+                .chain(
+                    letters_list::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+                )
+                .collect();
+        for (name, window) in &windows {
+            for (w, h) in [(1280.0_f32, 720.0_f32), (620.0, 500.0)] {
+                let size = client_size(w, h);
+                let k = fit::k_for(language.tag(), size.class);
+                let layout = lay_out(window, size, k, rtl, &text);
+                for theme in [Theme::Light, Theme::Dark] {
+                    let look = Look {
+                        theme,
+                        rtl,
+                        b: layout.b,
+                        h: size.h,
+                        text: &text,
+                    };
+                    let mut canvas =
+                        Canvas::in_memory(size.w, size.h, 1.0, Mode::Direct2D).expect("a canvas");
+                    canvas.frame_with(Some(&mut art), |painter| {
+                        painter.clear(Color::Bg.get(theme));
+                        for item in &layout.items {
+                            elements::draw(painter, &look, &item.part, item.rect, State::NORMAL);
+                        }
+                    });
+                    let file = folder.join(format!(
+                        "{}-{}-{}x{}-{}.png",
+                        name.replace(' ', "-"),
+                        language.tag(),
+                        w as u32,
+                        h as u32,
+                        if theme == Theme::Dark { "dark" } else { "light" },
+                    ));
+                    canvas.save_png(&file).expect("the picture is written");
+                }
+            }
+        }
+    }
+}
