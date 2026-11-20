@@ -404,7 +404,11 @@ fn pass() -> &'static Pass {
                 .collect();
 
             let mut ks = [1.0_f32; 3];
-            for (slot, (class, w, h)) in CLASSES.iter().enumerate() {
+            // 208.200: the factor of the narrow class is the ordinary one — of the reference window —
+            // no higher than the width allows: the type does not jump with the size of the screen,
+            // and on a small screen the height is the scroll's. So the ordinary class goes first.
+            for slot in [1, 0, 2] {
+                let (class, w, h) = &CLASSES[slot];
                 let size = client_size(*w, *h);
                 assert_eq!(size.class, *class, "the class of {w}×{h}");
                 let mut least: Option<(f32, String)> = None;
@@ -434,8 +438,12 @@ fn pass() -> &'static Pass {
                         }
                     }
                 }
-                let (k, tightest) = least.unwrap_or((1.0, "—".to_owned()));
+                let (k, mut tightest) = least.unwrap_or((1.0, "—".to_owned()));
                 let mut k = (k * 1000.0).floor() / 1000.0;
+                if *class == Class::Narrow && ks[1] < k {
+                    k = ks[1];
+                    tightest = format!("the ceiling of Ordinary (208.200); across: {tightest}");
+                }
                 // Each window was measured alone, and the rule of the pair is not monotone in k: at a
                 // smaller type a pair may stand side by side and come out taller. The factor of the
                 // table goes down further while any window does not fit at it.
@@ -615,7 +623,8 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
 }
 
 /// The guard of the table: computed again on this machine, no factor comes out smaller than the
-/// table says — or the strings have grown and the table is to be printed again.
+/// table says — or the strings have grown and the table is to be printed again. What the narrow
+/// class needs is the ordinary factor at most (208.200): a narrow factor above it is red here too.
 #[test]
 fn the_table_is_not_above_what_the_windows_need_on_this_machine() {
     let pass = pass();
@@ -648,6 +657,22 @@ fn the_table_is_not_above_what_the_windows_need_on_this_machine() {
         pass.failures.is_empty(),
         "languages that do not fit even at 12 points (C6):\n{}",
         pass.failures.join("\n")
+    );
+}
+
+/// 208.200: the type does not jump with the size of the screen — no language has a factor of the
+/// narrow class above the one of the ordinary class, the reference window.
+#[test]
+fn the_narrow_factor_is_not_above_the_ordinary_one() {
+    let found: Vec<String> = fit::TABLE
+        .iter()
+        .filter(|(_, k)| k.narrow > k.ordinary)
+        .map(|(tag, k)| format!("{tag}: narrow {} above ordinary {}", k.narrow, k.ordinary))
+        .collect();
+    assert!(
+        found.is_empty(),
+        "208.200, k Narrow ≤ k Ordinary:\n{}",
+        found.join("\n")
     );
 }
 
