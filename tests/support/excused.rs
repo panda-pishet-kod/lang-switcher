@@ -47,16 +47,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letters list",
         class: Class::Ordinary,
-        languages: &["el", "ka", "mi"],
-        category: Some(Category::Owner),
-        until: "утро 2026-11-20",
-        decision: None,
-        why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
-    },
-    Excuse {
-        window: "letters list",
-        class: Class::Large,
-        languages: &["mi"],
+        languages: &["el", "ka"],
         category: Some(Category::Owner),
         until: "утро 2026-11-20",
         decision: None,
