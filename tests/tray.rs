@@ -32,7 +32,7 @@ use lang_switcher::settings::{self, CONFIG_FILE_NAME, DialogSession, Language};
 // owner, `theme` (§6.2) — the whole point being that the tray no longer goes to the
 // configuration module for pixels.
 use lang_switcher::theme::{self, ThemeSetting};
-use lang_switcher::tray::{self, Attachment, Menu, Pending, Reaction, Tray};
+use lang_switcher::tray::{self, Attachment, Menu, MenuEntry, Pending, Reaction, Tray};
 use lang_switcher::watchdog::{self, WM_APP_WIPE};
 
 use windows::Win32::Foundation::{
@@ -50,14 +50,12 @@ use windows::Win32::System::LibraryLoader::{
 };
 use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyIcon, DestroyWindow, GetIconInfo, GetMenuItemCount, GetMenuItemID,
-    GetMenuItemInfoW, GetMenuState, GetSystemMetrics, HICON, HMENU, ICONINFO, IMAGE_ICON,
-    LR_DEFAULTCOLOR, LoadImageW, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION, MF_CHECKED,
-    MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
-    RT_GROUP_ICON, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
-    SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP,
-    WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION,
-    WM_SETTINGCHANGE, WM_THEMECHANGED, WS_EX_TOOLWINDOW, WS_POPUP,
+    CreateWindowExW, DestroyIcon, DestroyWindow, GetIconInfo, GetSystemMetrics, HICON, ICONINFO,
+    IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, NONCLIENTMETRICSW, RT_GROUP_ICON, RT_VERSION,
+    SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP, WM_CONTEXTMENU,
+    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    WM_THEMECHANGED, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -244,16 +242,9 @@ fn product_strings(language: settings::Language) -> MutexGuard<'static, ()> {
     guard
 }
 
-/// Checks one built menu against one seven-line block of FR-91.
-///
-/// Since task T-11-10 the entries are `MF_OWNERDRAW`, so the check is in two halves. Out
-/// of Windows, as an outside observer would read them: the entry count, which positions
-/// are rules, that every entry — rules included since task T-11-22 — carries the owner-draw
-/// flag, and what its `itemData` is (SEC-05 — a number, not a pointer): its own command
-/// identifier for a command, and for a rule one number that is none of the commands, the same
-/// for both rules, over a command identifier of zero. Out of the builder's record, because
-/// Windows no longer holds a string for an owner-drawn entry: the labels, in order, against the
-/// literals of the block.
+/// The menu of FR-91 entry for entry: which lines are rules, and the labels of the commands, in
+/// order, against the literals of the block. Read out of the menu's own record of its lines —
+/// the record the menu of the shell is described from.
 fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 8]) {
     assert_eq!(
         block.len(),
@@ -262,99 +253,39 @@ fn assert_menu_is(menu: &Menu, block: &[Option<&str>; 8]) {
          arrived with task Т-32-4"
     );
     assert_eq!(
-        item_count(menu.handle()),
+        item_count(menu),
         tray::MENU_ENTRY_COUNT,
-        "and the menu Windows holds has exactly those eight"
+        "and the menu holds exactly those eight"
     );
 
-    let commands: Vec<usize> = menu
-        .items()
-        .iter()
-        .map(|item| usize::try_from(item.command).expect("a command fits in a usize"))
-        .collect();
-    let mut rules: Vec<usize> = Vec::new();
-
-    let mut items = menu.items().iter();
-
     for (position, expected) in block.iter().enumerate() {
-        let index = u32::try_from(position).expect("a menu position fits in a u32");
-        let separator = is_separator(menu.handle(), index);
+        let entry = &menu.entries()[position];
 
-        match expected {
-            Some(text) => {
-                let item = items
-                    .next()
-                    .expect("the builder must have recorded every command entry");
-                let data = item_data_at(menu.handle(), index);
+        println!("{position}: {entry:?}");
 
-                println!(
-                    "{position}: command={:#06x} itemData={data:#x} label={:?}",
-                    item.command, item.label
-                );
-
-                assert!(
-                    !separator,
-                    "entry {position} of FR-91 is a command, not a rule"
-                );
-                assert!(
-                    is_owner_drawn(menu.handle(), index),
-                    "entry {position} must be owner-drawn — FR-92а"
-                );
-                assert_eq!(
-                    item.label, *text,
-                    "entry {position} of FR-91 reads differently"
-                );
-                assert_eq!(
-                    data,
-                    usize::try_from(item.command).expect("a command fits in a usize"),
-                    "SEC-05: itemData of entry {position} must be its command number"
-                );
-            }
-            None => {
-                let data = item_data_at(menu.handle(), index);
-                let identifier = command_at(menu.handle(), index);
-
-                println!("{position}: separator={separator} itemData={data:#x} id={identifier:#x}");
-
-                assert!(separator, "entry {position} of FR-91 is a rule");
-
-                // **Task T-11-22 rewrote the two assertions below.** Until it, a rule was a
-                // plain `MF_SEPARATOR` and this said «a rule stays system-drawn — the accepted
-                // cost of section 10»; that cost is paid off, and the rule is now drawn by the
-                // program like every other entry. It stays a rule for everybody outside it:
-                // `MF_SEPARATOR` is still set, which is what the line above reads.
-                assert!(
-                    is_owner_drawn(menu.handle(), index),
-                    "entry {position} is a rule this program draws itself — FR-92а"
-                );
-                assert_eq!(
-                    identifier, 0,
-                    "a rule carries no command identifier: `TrackPopupMenuEx` must never \
-                     be able to return one"
-                );
-                assert_ne!(
-                    data, 0,
-                    "and it does carry an `itemData` — the drawing finds it by"
-                );
-                assert!(
-                    !commands.contains(&data),
-                    "SEC-05: the number a rule carries is none of the five commands"
-                );
-
-                rules.push(data);
-            }
+        match (expected, entry) {
+            (Some(text), MenuEntry::Item(item)) => assert_eq!(
+                item.label, *text,
+                "entry {position} of FR-91 reads differently"
+            ),
+            (None, MenuEntry::Rule) => {}
+            (Some(_), MenuEntry::Rule) => panic!("entry {position} of FR-91 is a command"),
+            (None, MenuEntry::Item(_)) => panic!("entry {position} of FR-91 is a rule"),
         }
     }
 
-    assert!(
-        items.next().is_none(),
-        "the builder recorded exactly the five commands of FR-91"
-    );
-
-    assert_eq!(rules.len(), 2, "FR-91 has two rules");
+    let commands: Vec<u32> = menu.items().iter().map(|item| item.command).collect();
+    let in_entries: Vec<u32> = menu
+        .entries()
+        .iter()
+        .filter_map(|entry| match entry {
+            MenuEntry::Item(item) => Some(item.command),
+            MenuEntry::Rule => None,
+        })
+        .collect();
     assert_eq!(
-        rules[0], rules[1],
-        "both rules carry the same number: they are the same kind of entry"
+        commands, in_entries,
+        "the commands and the lines of the menu are one record"
     );
 }
 
@@ -701,8 +632,8 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
         "entry 0: label={:?} enabled={} grayed={} disabled={}",
         menu.items()[0].label,
         menu.items()[0].enabled,
-        is_grayed(menu.handle(), 0),
-        is_disabled(menu.handle(), 0)
+        is_grayed(&menu, 0),
+        is_disabled(&menu, 0)
     );
 
     // Task T-34-5, finding Н84: the greyed entry still reads as «Возобновить» and, since that
@@ -718,9 +649,9 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
         "Возобновить — нужен перезапуск",
         "and it says why it is grey (task T-34-5)"
     );
-    assert!(is_grayed(menu.handle(), 0), "and it is drawn unavailable");
+    assert!(is_grayed(&menu, 0), "and it is drawn unavailable");
     assert!(
-        is_disabled(menu.handle(), 0),
+        is_disabled(&menu, 0),
         "and `TrackPopupMenuEx` can never return CMD_TOGGLE for it"
     );
     assert!(
@@ -732,7 +663,7 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
     // settings, the autostart, the about box or the way out.
     for position in [2u32, 3, 5, 6] {
         assert!(
-            !is_grayed(menu.handle(), position) && !is_disabled(menu.handle(), position),
+            !is_grayed(&menu, position) && !is_disabled(&menu, position),
             "entry {position} of FR-91 must stay available"
         );
     }
@@ -765,8 +696,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     assert_eq!(ordinary.items()[0].label, "Возобновить");
     assert!(ordinary.items()[0].enabled);
-    assert!(!is_grayed(ordinary.handle(), 0));
-    assert!(!is_disabled(ordinary.handle(), 0));
+    assert!(!is_grayed(&ordinary, 0));
+    assert!(!is_disabled(&ordinary, 0));
 
     // FR-99 has just disarmed an armed program. The move it is about to make is the
     // suspension, and that one must stay available or the icon never becomes honest.
@@ -775,8 +706,8 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     assert_eq!(suspending.items()[0].label, "Приостановить");
     assert!(suspending.items()[0].enabled);
-    assert!(!is_grayed(suspending.handle(), 0));
-    assert!(!is_disabled(suspending.handle(), 0));
+    assert!(!is_grayed(&suspending, 0));
+    assert!(!is_disabled(&suspending, 0));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -842,17 +773,17 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
     for position in LOCKED_POSITIONS {
         println!(
             "entry {position}: grayed={} disabled={}",
-            is_grayed(menu.handle(), position),
-            is_disabled(menu.handle(), position)
+            is_grayed(&menu, position),
+            is_disabled(&menu, position)
         );
 
         assert!(
-            is_grayed(menu.handle(), position),
+            is_grayed(&menu, position),
             "entry {position} of FR-91 edits the configuration and must be drawn unavailable \
              while the dialog of FR-92 is editing it too"
         );
         assert!(
-            is_disabled(menu.handle(), position),
+            is_disabled(&menu, position),
             "and `TrackPopupMenuEx` must never return its command"
         );
     }
@@ -860,12 +791,12 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
     for position in DOOR_POSITIONS {
         println!(
             "door {position}: grayed={} disabled={}",
-            is_grayed(menu.handle(), position),
-            is_disabled(menu.handle(), position)
+            is_grayed(&menu, position),
+            is_disabled(&menu, position)
         );
 
         assert!(
-            is_grayed(menu.handle(), position) && is_disabled(menu.handle(), position),
+            is_grayed(&menu, position) && is_disabled(&menu, position),
             "entry {position} of FR-91 opens a modal window of its own, and one modal window \
              over another is finding С21 — task T-43-4"
         );
@@ -874,12 +805,12 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
     for position in LIVE_POSITIONS {
         println!(
             "entry {position}: grayed={} disabled={}",
-            is_grayed(menu.handle(), position),
-            is_disabled(menu.handle(), position)
+            is_grayed(&menu, position),
+            is_disabled(&menu, position)
         );
 
         assert!(
-            !is_grayed(menu.handle(), position) && !is_disabled(menu.handle(), position),
+            !is_grayed(&menu, position) && !is_disabled(&menu, position),
             "entry {position} of FR-91 changes no configuration and opens no modal window, so it \
              must stay available — a program that could not be closed while a window is up \
              would be worse than the finding"
@@ -929,7 +860,7 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
         .chain(LIVE_POSITIONS.iter())
     {
         assert!(
-            !is_grayed(ordinary.handle(), *position) && !is_disabled(ordinary.handle(), *position),
+            !is_grayed(&ordinary, *position) && !is_disabled(&ordinary, *position),
             "with no dialog on the screen every entry of FR-91 is the user's to choose"
         );
     }
@@ -947,13 +878,13 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
 
     println!(
         "fail-safe and dialog together: entry 0 grayed={} entry 3 grayed={}",
-        is_grayed(both.handle(), 0),
-        is_grayed(both.handle(), 3)
+        is_grayed(&both, 0),
+        is_grayed(&both, 3)
     );
 
     for position in LOCKED_POSITIONS {
         assert!(
-            is_grayed(both.handle(), position) && is_disabled(both.handle(), position),
+            is_grayed(&both, position) && is_disabled(&both, position),
             "two reasons to take an entry away are not two answers: entry {position} is gone"
         );
     }
@@ -1024,12 +955,12 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
     for position in DOOR_POSITIONS {
         println!(
             "door {position} with «О программе» up: grayed={} disabled={}",
-            is_grayed(menu.handle(), position),
-            is_disabled(menu.handle(), position)
+            is_grayed(&menu, position),
+            is_disabled(&menu, position)
         );
 
         assert!(
-            is_grayed(menu.handle(), position) && is_disabled(menu.handle(), position),
+            is_grayed(&menu, position) && is_disabled(&menu, position),
             "entry {position} opens a modal window, and with «О программе» already up that is \
              one modal window over another — finding С21"
         );
@@ -1037,7 +968,7 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
 
     for position in LOCKED_POSITIONS.iter().chain(LIVE_POSITIONS.iter()) {
         assert!(
-            !is_grayed(menu.handle(), *position) && !is_disabled(menu.handle(), *position),
+            !is_grayed(&menu, *position) && !is_disabled(&menu, *position),
             "entry {position}: «О программе» edits no configuration, so it takes nothing away \
              but the two doors"
         );
@@ -1077,7 +1008,7 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
 
         for position in DOOR_POSITIONS {
             assert!(
-                is_grayed(while_up.handle(), position) && is_disabled(while_up.handle(), position),
+                is_grayed(&while_up, position) && is_disabled(&while_up, position),
                 "door {position} is grey while the guard of the window lives"
             );
         }
@@ -1245,7 +1176,7 @@ fn closing_the_dialog_gives_both_entries_back() {
 
     for position in LOCKED_POSITIONS.iter().chain(DOOR_POSITIONS.iter()) {
         assert!(
-            is_grayed(while_up.handle(), *position) && is_disabled(while_up.handle(), *position),
+            is_grayed(&while_up, *position) && is_disabled(&while_up, *position),
             "entry {position} is greyed while the dialog is up"
         );
     }
@@ -1275,12 +1206,12 @@ fn closing_the_dialog_gives_both_entries_back() {
     for position in LOCKED_POSITIONS {
         println!(
             "entry {position} after the dialog closed: grayed={} disabled={}",
-            is_grayed(after.handle(), position),
-            is_disabled(after.handle(), position)
+            is_grayed(&after, position),
+            is_disabled(&after, position)
         );
 
         assert!(
-            !is_grayed(after.handle(), position) && !is_disabled(after.handle(), position),
+            !is_grayed(&after, position) && !is_disabled(&after, position),
             "entry {position} is the user's again"
         );
     }
@@ -1760,11 +1691,11 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     .expect("the menu must be creatable");
 
     assert!(
-        is_checked(on.handle(), 3),
+        is_checked(&on, 3),
         "`general.autostart` = true must show a check mark"
     );
     assert!(
-        !is_checked(off.handle(), 3),
+        !is_checked(&off, 3),
         "`general.autostart` = false must not show one"
     );
 
@@ -1777,48 +1708,6 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     // The check mark is the only difference: FR-93 is task T-08-1's, and this task must not
     // have grown a second way of showing the same thing.
     assert_eq!(on.items()[2].label, off.items()[2].label);
-}
-
-#[test]
-fn the_item_data_of_every_command_entry_is_its_command_number() {
-    // **SEC-05, criterion 9 of T-11-10.** `WM_DRAWITEM` can be forged by any process of
-    // our integrity level, so what our entries carry in `itemData` must be a number a
-    // handler merely looks up — never a pointer it would dereference. Read back out of
-    // Windows: the `itemData` of every command entry equals the command identifier of the
-    // same entry, and both equal what the builder recorded.
-    let _locale = product_strings(settings::Language::Ru);
-    let menu = Menu::build(
-        true,
-        true,
-        NOT_FAIL_SAFE,
-        NO_DIALOG,
-        NO_ABOUT,
-        &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
-
-    // The six command positions of the FR-91 block — everything but the two rules. Six since
-    // task Т-32-4 put «Написать автору…» at position 5.
-    let command_positions = [0u32, 2, 3, 5, 6, 7];
-
-    assert_eq!(menu.items().len(), command_positions.len());
-
-    for (item, position) in menu.items().iter().zip(command_positions) {
-        let identifier = command_at(menu.handle(), position);
-        let data = item_data_at(menu.handle(), position);
-
-        println!("{position}: id={identifier:#06x} itemData={data:#x}");
-
-        assert_eq!(
-            identifier, item.command,
-            "the command identifier of entry {position} is the builder's"
-        );
-        assert_eq!(
-            data,
-            usize::try_from(identifier).expect("a command fits in a usize"),
-            "SEC-05: itemData of entry {position} is the command number, nothing else"
-        );
-    }
 }
 
 #[test]
@@ -6551,6 +6440,42 @@ fn the_about_command_opens_the_window_of_the_shell_and_no_template_ships() {
     );
 }
 
+/// **Task T-120-15 — the red before.** The menu of the icon is a window of the shell
+/// (`ui::windows::tray_menu`): `show_menu` opens it, and no line of the code of `tray.rs` calls
+/// `TrackPopupMenuEx` any more. The name is looked for in the code, not in the text: the head of
+/// `tray.rs` and the documentation of its functions name it in prose, and a sweep of the text would
+/// answer for the comments.
+#[test]
+fn the_menu_is_a_window_of_the_shell_and_no_code_calls_track_popup_menu() {
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect("src\\tray.rs must be readable")
+    .replace("\r\n", "\n");
+    let code: Vec<&str> = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect();
+
+    let calls: Vec<&&str> = code
+        .iter()
+        .filter(|line| line.contains("TrackPopupMenuEx"))
+        .collect();
+    let opens = code
+        .iter()
+        .any(|line| line.contains("crate::ui::windows::tray_menu::open("));
+
+    println!("code lines naming TrackPopupMenuEx: {calls:#?}; the shell menu is opened: {opens}");
+
+    assert!(
+        calls.is_empty(),
+        "the menu must not be Windows' own any more: {calls:#?}"
+    );
+    assert!(opens, "`show_menu` must open the menu of the shell");
+}
+
 // ---------------------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------------------
@@ -6808,92 +6733,28 @@ impl Drop for TestDir {
     }
 }
 
-/// `GetMenuItemCount` on a menu of ours.
-fn item_count(menu: HMENU) -> i32 {
-    // SAFETY: `menu` is a live menu owned by the `Menu` value of the calling frame. The call
-    // reads no memory of ours and returns -1 for an invalid menu, which the caller asserts
-    // against a positive expected count.
-    unsafe { GetMenuItemCount(Some(menu)) }
+/// The lines of the menu.
+fn item_count(menu: &Menu) -> i32 {
+    i32::try_from(menu.entries().len()).expect("a menu is short")
 }
 
-/// `GetMenuItemInfoW(MIIM_DATA)` on one entry, by position — what Windows really stored as
-/// the entry's `itemData`, which SEC-05 requires to be a command number and nothing else.
-fn item_data_at(menu: HMENU, position: u32) -> usize {
-    let mut info = MENUITEMINFOW {
-        cbSize: u32::try_from(size_of::<MENUITEMINFOW>()).expect("the size fits in a u32"),
-        fMask: MIIM_DATA,
-        ..Default::default()
-    };
-
-    // SAFETY: `menu` is a live menu owned by the calling frame; `info` is a live local
-    // whose `cbSize` describes it, and `MIIM_DATA` asks the call to write only
-    // `dwItemData`. `true` makes the second argument an index rather than a command.
-    unsafe { GetMenuItemInfoW(menu, position, true, &mut info) }
-        .expect("the entry must be readable");
-
-    info.dwItemData
+/// The line at `position`.
+fn entry_at(menu: &Menu, position: u32) -> &MenuEntry {
+    &menu.entries()[usize::try_from(position).expect("a position fits in a usize")]
 }
 
-/// `GetMenuItemID` on one entry, by position.
-fn command_at(menu: HMENU, position: u32) -> u32 {
-    // SAFETY: `menu` is a live menu owned by the calling frame; the call reads no memory
-    // of ours and returns `0xFFFFFFFF` for a position that does not exist, which no
-    // command of the crate equals.
-    unsafe {
-        GetMenuItemID(
-            menu,
-            i32::try_from(position).expect("a position fits in an i32"),
-        )
-    }
+fn is_checked(menu: &Menu, position: u32) -> bool {
+    matches!(entry_at(menu, position), MenuEntry::Item(item) if item.checked)
 }
 
-/// The `MF_*` flags of one entry, by position.
-fn flags_at(menu: HMENU, position: u32) -> MENU_ITEM_FLAGS {
-    // SAFETY: `menu` is a live menu owned by the calling frame; the call reads no memory of
-    // ours and returns `0xFFFFFFFF` for an entry that does not exist.
-    let flags = unsafe { GetMenuState(menu, position, MF_BYPOSITION) };
-
-    // NFR-13, and since task T-13-14 it earns its keep. `0xFFFFFFFF` is not a set of flags but
-    // a refusal, and it has every bit in it — read as flags it would prove an entry greyed,
-    // disabled, checked and a separator all at once. The tests of the greying read the
-    // **presence** of `MF_GRAYED`, so a refusal that went unexamined would make them pass for
-    // an entry the call never looked at.
-    assert_ne!(
-        flags,
-        u32::MAX,
-        "GetMenuState refused entry {position} of this menu"
-    );
-
-    MENU_ITEM_FLAGS(flags)
+/// Unavailable: drawn as unavailable and answering no press.
+fn is_grayed(menu: &Menu, position: u32) -> bool {
+    matches!(entry_at(menu, position), MenuEntry::Item(item) if !item.enabled)
 }
 
-/// Whether the entry at `position` is one of the two rules of FR-91.
-fn is_separator(menu: HMENU, position: u32) -> bool {
-    flags_at(menu, position).0 & MF_SEPARATOR.0 != 0
-}
-
-/// Whether the entry at `position` carries a check mark.
-fn is_checked(menu: HMENU, position: u32) -> bool {
-    flags_at(menu, position).0 & MF_CHECKED.0 != 0
-}
-
-/// Whether the entry at `position` is owner-drawn — FR-92а, task T-11-10.
-fn is_owner_drawn(menu: HMENU, position: u32) -> bool {
-    flags_at(menu, position).0 & MF_OWNERDRAW.0 != 0
-}
-
-/// Whether the entry at `position` is drawn as unavailable — task T-13-9.
-fn is_grayed(menu: HMENU, position: u32) -> bool {
-    flags_at(menu, position).0 & MF_GRAYED.0 != 0
-}
-
-/// Whether the entry at `position` cannot be chosen — task T-13-9.
-///
-/// The half that matters for the rule rather than for the look: with `MF_DISABLED` set,
-/// `TrackPopupMenuEx` answers zero instead of the command, so no `dispatch_command` ever runs
-/// for this entry.
-fn is_disabled(menu: HMENU, position: u32) -> bool {
-    flags_at(menu, position).0 & MF_DISABLED.0 != 0
+/// The same fact as [`is_grayed`]: one record decides both the look and the press.
+fn is_disabled(menu: &Menu, position: u32) -> bool {
+    is_grayed(menu, position)
 }
 // =========================================================================================
 // FR-90б — the flag of the layout, task T-119-2

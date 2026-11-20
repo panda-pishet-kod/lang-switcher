@@ -2960,6 +2960,15 @@ pub struct Menu {
     /// The command entries in menu order — the builder's own record of what it appended,
     /// and since task T-11-10 the only place the labels exist at all.
     items: Vec<MenuItem>,
+    /// The whole menu in order, rules included — what the menu of the shell is described from.
+    entries: Vec<MenuEntry>,
+}
+
+/// One line of the menu of FR-91: a command or a rule between two groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuEntry {
+    Item(MenuItem),
+    Rule,
 }
 
 impl Menu {
@@ -3020,6 +3029,7 @@ impl Menu {
         let mut menu = Self {
             handle,
             items: Vec::with_capacity(8),
+            entries: Vec::with_capacity(12),
         };
 
         // FR-91, task Т-32-4 — the two temporary entries of FR-101, in the top group and above
@@ -3133,6 +3143,11 @@ impl Menu {
         &self.items
     }
 
+    /// The whole menu in order, rules included.
+    pub fn entries(&self) -> &[MenuEntry] {
+        &self.entries
+    }
+
     /// Appends one command entry as `MF_OWNERDRAW` — FR-92а, task T-11-10.
     ///
     /// The label no longer travels through `AppendMenuW`: it is recorded in [`Menu::items`],
@@ -3187,12 +3202,14 @@ impl Menu {
             )
         }?;
 
-        self.items.push(MenuItem {
+        let item = MenuItem {
             command,
             label: label.to_owned(),
             checked,
             enabled,
-        });
+        };
+        self.entries.push(MenuEntry::Item(item.clone()));
+        self.items.push(item);
 
         Ok(())
     }
@@ -3218,7 +3235,8 @@ impl Menu {
     /// The identifier is zero — a rule is not a command and `TrackPopupMenuEx` must never
     /// return one — and the `itemData` is [`MENU_SEPARATOR_DATA`], which is what the drawing
     /// recognises the entry by.
-    fn append_separator(&self) -> WinResult<()> {
+    fn append_separator(&mut self) -> WinResult<()> {
+        self.entries.push(MenuEntry::Rule);
         // SAFETY: as above. `self.handle` is a live menu owned by this value. Under
         // `MF_OWNERDRAW` the last argument is not read as a string: it is carried verbatim as
         // the entry's `itemData`, and what is placed there is a number with no allocation
