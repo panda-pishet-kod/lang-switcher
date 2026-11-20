@@ -540,6 +540,8 @@ struct ListSession {
     /// Whether the list is the program's own (РУС/ENG hidden at the clock — part Б): its choice
     /// never reaches the window by itself, the program's switch gives it, a console included.
     own: bool,
+    /// The looks of the gift left for a person's window not yet in front — `flags::gift_step`.
+    gift_left: u8,
 }
 
 /// What the flag of FR-90б shows and the icon drawn for it — task T-119-2.
@@ -2369,6 +2371,7 @@ fn open_list() {
             before: tray.flag_layout().unwrap_or_default(),
             chosen: LayoutId::default(),
             own: false,
+            gift_left: crate::flags::GIFT_RETRIES,
         });
 
         Some(tray.hwnd)
@@ -2561,9 +2564,40 @@ fn list_timer(timer: usize) {
         return;
     }
 
+    let reading = crate::switch::read();
+
+    // ⭐ Defect 3 of the stand (2026-11-20, Edge under ^): the gift waits for the person's window.
+    match crate::flags::gift_step(reading.window.raw() == session.target, session.gift_left) {
+        crate::flags::GiftStep::Wait { left } => {
+            crate::diag::record(
+                crate::diag::Operation::from_name("list gift skipped"),
+                crate::diag::OsCode::NONE,
+            );
+
+            with_tray(|tray| {
+                if let Some(open) = tray.list_session.as_mut() {
+                    open.gift_left = left;
+                }
+            });
+
+            arm_list_timer(hwnd, 2);
+            return;
+        }
+        crate::flags::GiftStep::GiveUp => {
+            crate::diag::record(
+                crate::diag::Operation::from_name("list gift given up"),
+                crate::diag::OsCode::NONE,
+            );
+
+            with_tray(|tray| tray.list_session = None);
+            refresh_flag();
+            return;
+        }
+        crate::flags::GiftStep::Now => {}
+    }
+
     with_tray(|tray| tray.list_session = None);
 
-    let reading = crate::switch::read();
     let give = if session.own {
         crate::flags::own_layout_to_give(session.chosen, reading.layout, reading.blind)
     } else {

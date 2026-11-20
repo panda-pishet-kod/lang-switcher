@@ -46,23 +46,11 @@ const MARGIN: f32 = 1.03;
 const STAND_IN: f32 = 1.3;
 /// Halvings of the search for k.
 const STEPS: u32 = 10;
-/// **The windows excused from fitting, each with its reason** — printed by the instrument, never
-/// skipped in silence. A window, its class, why.
-const EXCUSED: &[(&str, Class, &str)] = &[(
-    "letters list",
-    Class::Narrow,
-    "«Последние письма» в 620×500 не помещаются ни на одном языке и после уступок §3а; ждёт слова \
-     владельца — 208.166 («без прокрутки»), утренний отчёт: меньше карточек, прокрутка в узком окне \
-     или иное",
-)];
-
-/// The reason `window` at `class` is excused from fitting, if it is.
-fn excused(window: &str, class: Class) -> Option<&'static str> {
-    EXCUSED
-        .iter()
-        .find(|(name, excused_class, _)| *name == window && *excused_class == class)
-        .map(|(_, _, why)| *why)
-}
+/// The step down of a factor of the table at which not every window fits.
+const DOWN: f32 = 0.005;
+#[path = "support/excused.rs"]
+mod excused;
+use excused::{Category, EXCUSED, excuse_line, excused, uncategorised, unsettled};
 
 /// The number of a step of the order of giving way in the passport (§3а).
 fn step_number(step: Concession) -> usize {
@@ -339,6 +327,9 @@ struct Pass {
     /// The windows that gave way (§3а) at the factor of the table: language, window, class, face,
     /// the step they came to.
     steps: Vec<String>,
+    /// The windows of the wave of translations (208.175): what is short at 12 points, and which
+    /// string — the list for the translator.
+    wave: Vec<String>,
     /// The failures excused, each with its reason.
     excused: Vec<String>,
     stand_ins: usize,
@@ -350,7 +341,7 @@ fn pass() -> &'static Pass {
         with_product_strings();
         let names = string_names();
         let faces = faces();
-        let mut pass = Pass { table: Vec::new(), failures: Vec::new(), borders: Vec::new(), tightest: Vec::new(), steps: Vec::new(), excused: Vec::new(), stand_ins: 0 };
+        let mut pass = Pass { table: Vec::new(), failures: Vec::new(), borders: Vec::new(), tightest: Vec::new(), steps: Vec::new(), wave: Vec::new(), excused: Vec::new(), stand_ins: 0 };
 
         for language in Language::ALL {
             let (windows, stand_ins) = windows_of(language);
@@ -367,6 +358,9 @@ fn pass() -> &'static Pass {
                 let size = client_size(*w, *h);
                 assert_eq!(size.class, *class, "the class of {w}×{h}");
                 let mut least: Option<(f32, String)> = None;
+                // The windows that do not fit even at 12 points, and the excused: they do not hold the
+                // factor down.
+                let mut beyond: Vec<&str> = Vec::new();
                 for (name, window) in &windows {
                     for (face, text) in &texts {
                         match k_needed(window, size, rtl, text) {
@@ -381,8 +375,9 @@ fn pass() -> &'static Pass {
                                     language.tag(),
                                     culprit(language, window, size, TYPE_FLOOR.0 / window_b(*w, *h, 1.0), rtl, text, &names)
                                 );
-                                match excused(name, *class) {
-                                    Some(why) => pass.excused.push(format!("{line} — ИСКЛЮЧЕНИЕ: {why}")),
+                                beyond.push(name);
+                                match excused(name, *class, language.tag()) {
+                                    Some(excuse) => pass.excused.push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse))),
                                     None => pass.failures.push(line),
                                 }
                             }
@@ -390,7 +385,20 @@ fn pass() -> &'static Pass {
                     }
                 }
                 let (k, tightest) = least.unwrap_or((1.0, "—".to_owned()));
-                ks[slot] = (k * 1000.0).floor() / 1000.0;
+                let mut k = (k * 1000.0).floor() / 1000.0;
+                // Each window was measured alone, and the rule of the pair is not monotone in k: at a
+                // smaller type a pair may stand side by side and come out taller. The factor of the
+                // table goes down further while any window does not fit at it.
+                let floor = (TYPE_FLOOR.0 / window_b(*w, *h, 1.0)).min(1.0);
+                let all_fit = |k: f32| {
+                    windows.iter().filter(|(name, _)| !beyond.contains(&name.as_str()) && excused(name, *class, language.tag()).is_none()).all(|(_, window)| {
+                        texts.iter().all(|(_, text)| faults(window, size, k, rtl, text).is_empty())
+                    })
+                };
+                while k > floor && !all_fit(k) {
+                    k = ((k - DOWN) * 1000.0).floor() / 1000.0;
+                }
+                ks[slot] = k;
                 if k < 1.0 {
                     pass.tightest.push(format!("{} {class:?}: k {:.3} — {tightest}", language.tag(), ks[slot]));
                 }
@@ -409,6 +417,23 @@ fn pass() -> &'static Pass {
                                 language.tag(),
                                 step_number(step)
                             ));
+                        }
+                        let wave = excused(name, class, language.tag())
+                            .is_some_and(|excuse| excuse.category == Some(Category::Wave));
+                        if wave {
+                            // At 12 points: the emergency road of the window goes down to there.
+                            let floor = (TYPE_FLOOR.0 / window_b(w, h, 1.0)).min(1.0);
+                            let short = lay_out(window, size, floor, rtl, text).shortfall;
+                            // Only what is short: a window that fits at 12 asks nothing of the translator.
+                            if !short.fits() {
+                                pass.wave.push(format!(
+                                    "| {name} | {} | {class:?} {w}×{h} | {face} | {:.1} | {:.1} | {} |",
+                                    language.tag(),
+                                    short.w.max(0.0),
+                                    short.h.max(0.0),
+                                    culprit(language, window, size, floor, rtl, text, &names)
+                                ));
+                            }
                         }
                     }
                 }
@@ -439,6 +464,7 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     let faces = faces();
     let mut found = Vec::new();
     let mut excused_found = Vec::new();
+    let mut matched: Vec<(String, Class, String)> = Vec::new();
 
     for language in Language::ALL {
         let (windows, _) = windows_of(language);
@@ -463,8 +489,12 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                             language.tag(),
                             faults.join("; ")
                         );
-                        match excused(name, class) {
-                            Some(why) => excused_found.push(format!("{line} — ИСКЛЮЧЕНИЕ: {why}")),
+                        match excused(name, class, language.tag()) {
+                            Some(excuse) => {
+                                excused_found
+                                    .push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse)));
+                                matched.push((name.clone(), class, language.tag().to_owned()));
+                            }
                             None => found.push(line),
                         }
                     }
@@ -477,6 +507,12 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                 }
             }
         }
+    }
+
+    // An excuse that excused nothing is taken away (208.175): it would hide a fault to come.
+    let stale = excused::stale(&matched);
+    for line in &stale {
+        found.push(format!("an excuse no longer needed — take it away: {line}"));
     }
 
     // The excused, each with its reason — seen in the output, not counted.
@@ -492,8 +528,8 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
         excused_found.len(),
         excused_windows.len()
     );
-    for (name, class, why) in EXCUSED {
-        println!("- {name}, {class:?}: {why}");
+    for excuse in EXCUSED {
+        println!("- {}", excuse_line(excuse));
     }
     // How far the windows gave way (§3а) at the factors of the table.
     let steps = &pass().steps;
@@ -551,10 +587,34 @@ fn the_table_is_not_above_what_the_windows_need_on_this_machine() {
 fn print_the_table_and_the_report() {
     let write = std::env::var_os("LANGSW_UI_FIT_WRITE").is_some();
     let report = std::env::var_os("LANGSW_UI_FIT_REPORT");
-    if !write && report.is_none() {
+    let wave = std::env::var_os("LANGSW_UI_FIT_WAVE");
+    if !write && report.is_none() && wave.is_none() {
         return;
     }
     let pass = pass();
+
+    // The list for the translator (208.175): `l10n\E120-fit-wave.md`.
+    if let Some(wave) = wave {
+        let mut text = String::new();
+        text.push_str(
+            "# E120-fit-wave — что укоротить в волне переводов (T-120-24, 208.175)\r\n\r\n",
+        );
+        text.push_str(
+            "Окна, которые не помещаются даже при кегле 12 после всех уступок §3а, — по языкам. \
+             «Поперёк» и «вниз» — сколько точек не хватает при 12; «строка» — та, без которой окно \
+             помещается (временный образец ×1,3 — помечен как строка без идентификатора). Печатает \
+             прибор `tests\\ui_fit.rs` (`LANGSW_UI_FIT_WAVE`).\r\n\r\n",
+        );
+        text.push_str("| Окно | Язык | Класс | Гарнитура | Поперёк, т. | Вниз, т. | Строка |\r\n|---|---|---|---|---|---|---|\r\n");
+        for line in &pass.wave {
+            text.push_str(line);
+            text.push_str("\r\n");
+        }
+        if pass.wave.is_empty() {
+            text.push_str("\r\nПусто: окон волны нет.\r\n");
+        }
+        std::fs::write(wave, text).expect("the list of the wave written");
+    }
     let rows: Vec<String> = pass
         .table
         .iter()
@@ -616,8 +676,8 @@ fn print_the_table_and_the_report() {
             text.push_str("Нет: все окна помещаются без уступок.\r\n");
         }
         text.push_str("\r\n## Исключения прибора (с причиной)\r\n\r\n");
-        for (name, class, why) in EXCUSED {
-            text.push_str(&format!("- {name}, {class:?}: {why}\r\n"));
+        for excuse in EXCUSED {
+            text.push_str(&format!("- {}\r\n", excuse_line(excuse)));
         }
         for line in &pass.excused {
             text.push_str(&format!("  - {line}\r\n"));
@@ -637,6 +697,37 @@ fn print_the_table_and_the_report() {
             text.push_str("Помещаются все.\r\n");
         }
         std::fs::write(report, text).expect("the report written");
+    }
+}
+
+/// **Every excuse has a category and a term** (208.175): a record without one is refused.
+#[test]
+fn every_excuse_has_a_category_and_a_term() {
+    let refused = uncategorised(EXCUSED);
+    assert!(
+        refused.is_empty(),
+        "excuses without a category or a term (208.175):\n{}",
+        refused.join("\n")
+    );
+}
+
+/// **The gate of a release** (208.175, T-120-24): with `LANGSW_UI_FIT_RELEASE` set, as the build of
+/// a release sets it, no excuse of the wave of translations is left and every excuse of the owner
+/// names its decision. Before a release the instrument prints what is still open.
+#[test]
+fn at_a_release_every_excuse_is_settled() {
+    let open = unsettled(EXCUSED);
+    if std::env::var_os("LANGSW_UI_FIT_RELEASE").is_some() {
+        assert!(
+            open.is_empty(),
+            "a release with excuses not settled (208.175):\n{}",
+            open.join("\n")
+        );
+    } else {
+        println!("excuses to settle before a release: {}", open.len());
+        for line in &open {
+            println!("- {line}");
+        }
     }
 }
 

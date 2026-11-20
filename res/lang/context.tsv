@@ -32,18 +32,19 @@ IDS_RELEASE_HOWTO	window in the corner / menu (drawn by the program)	-	the secon
 IDS_CORNER_OK	window in the corner / menu (drawn by the program)	-	a button of the window in the corner, 13.5 px	-	E119 (T-119-5, T-119-6): closes the window in the corner
 IDS_RELEASE_NEVER	window in the corner / menu (drawn by the program)	-	the label of the check box at the bottom of the window «Обновлено», 13 px, 308 px wide	-	E119 (T-119-6): the same setting as the switch «Сообщать об обновлениях программы» of «От автора»
 IDS_CORNER_FLAG	window in the corner / menu (drawn by the program)	-	the header of the window in the corner, monospace capitals 12 px	-	E119 (T-119-5): what the hint is about, after «Lang Switcher ·»; written in capitals by the program
+IDS_CORNER_LETTER	window in the corner / menu (drawn by the program)	-	the header of the window in the corner, monospace capitals 12 px (the knock of a letter); with «LANG SWITCHER · » within 276 px	-	E120 (T-120-16): what the window is about — a letter from the author; one short word in the case of IDS_CORNER_UPDATE and IDS_CORNER_FLAG, the shell writes it in capitals
 IDS_HINT_TITLE	window in the corner / menu (drawn by the program)	-	the title of the hint, 15 px, 272 px wide	-	E119 (T-119-5): the hint when the flag was turned on and stands under the arrow ^ of the taskbar
 IDS_HINT_TEXT	window in the corner / menu (drawn by the program)	-	the text of the hint, 13.5 px, 272 px wide, up to four lines	-	E119 (T-119-5): the names of the pages of Windows Settings as Windows 11 writes them in this language; do not promise dragging the icon
 IDS_HINT_OPEN	window in the corner / menu (drawn by the program)	-	the main button of the hint, two thirds of 332 px, 13.5 px	-	E119 (T-119-5): opens the page of the taskbar in Windows Settings
 IDS_MENU_WHATSNEW	window in the corner / shell_menu	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
 IDS_UPDATES_SWITCH	window in the corner / menu (drawn by the program)	-	the switch of «От автора» in place of the switch of the feed, one line	-	E119 (T-119-10): turns the window «Обновлено» on and off - the same setting as its check box
 IDS_NEWS_OFF_IN_FILE	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	the line under the switch of «От автора», 205 dialog units wide, up to two lines	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
-IDS_FALLBACK_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x19	-	E119 (T-119-9): the heading of the letter «Обновление», which opens only from the tray menu entry «Доступна версия X…» or from «Последние письма», a week after the release when the program could not update itself; plain and honest, no blame
-IDS_FALLBACK_SUB	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	{0} = the new version, «1.8.0»; {1} = the installed version, «1.6.1»; {2} = the day of the release, «16 ноября» (code: &announced, &context.version, &released)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_FALLBACK_NOTICE	IDD_LETTER	IDC_LETTER_PARA	406x19	{0} = the new version; {1} = the day of the release, «16 ноября» (code: &announced, &released)	the first paragraph of the letter; a date and not a count of days; the window is laid out when shown: the height grows with the text, the width does not
-IDS_FALLBACK_WHATS_NEW	IDD_LETTER	IDC_LETTER_PARA	406x19	{0} = the new version (code: &announced)	a label over the author's own text about the release, in the same paragraph
-IDS_FALLBACK_REPEATS	IDD_LETTER	IDC_LETTER_ROW_4	362x19	-	the last row of the panel «Как обновиться», over the button «Написать автору…»; the height grows with the text
-IDS_ENTRY_FALLBACK_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = the new version; {1} = the installed version (code: &announced, version)	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
+IDS_FALLBACK_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E119 (T-119-9): the heading of the letter «Обновление», which opens only from the tray menu entry «Доступна версия X…» or from «Последние письма», a week after the release when the program could not update itself; plain and honest, no blame
+IDS_FALLBACK_SUB	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version, «1.8.0»; {1} = the installed version, «1.6.1»; {2} = the day of the release, «16 ноября» (code: &announced, &context.version, &released)	-
+IDS_FALLBACK_NOTICE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version; {1} = the day of the release, «16 ноября» (code: &announced, &released)	the first paragraph of the letter; a date and not a count of days; the window is laid out when shown: the height grows with the text, the width does not
+IDS_FALLBACK_WHATS_NEW	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version (code: &announced)	a label over the author's own text about the release, in the same paragraph
+IDS_FALLBACK_REPEATS	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	the last row of the panel «Как обновиться», over the button «Написать автору…»; the height grows with the text
+IDS_ENTRY_FALLBACK_MARK	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version; {1} = the installed version (code: &announced, version)	-
 IDS_GROUP_EXCLUSIONS	shell_settings	-	350x17	-	-
 IDS_EXCLUSION_REMOVE	shell_settings	-	105x30	-	-
 IDS_EXCLUSION_ADD	shell_settings	-	105x30	-	-
@@ -129,27 +130,28 @@ IDS_ABOUT_HELP_6	shell_about	-	362x62 (3 lines)	{0}	the name of the hotkey, draw
 IDS_CAPTURE_HINT	shell_settings	-	343x34 (2 lines)	-	key names as on the keyboards of the country
 IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
-IDS_LETTER_CAPTION	IDD_LETTER	caption	window caption: 448 px wide	-	-
-IDS_CLOSE	IDD_LETTER,IDD_LETTERS_LIST,IDD_AUTHOR,IDD_WIZARD	IDC_LETTERS_CLOSE,IDC_AUTHOR_CLOSE	89x30	-	-
-IDS_CHANNEL_OPEN	IDD_LETTER,IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CHANNEL,IDC_WZ_CHANNEL	110x30	-	-
-IDS_FEEDBACK_OPEN	IDD_LETTER	IDC_LETTER_PANEL_BTN_1	151x30	-	-
-IDS_SUPPORT_OPEN	IDD_LETTER,IDD_AUTHOR	IDC_AUTHOR_SUPPORT	193x30	-	-
-IDS_HELLO_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; «Panda» is the author's name in the letters (decision 155.2); voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
-IDS_HELLO_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
-IDS_HELLO_DEMO_CAP	IDD_LETTER	IDC_LETTER_DEMO_CAP	406x43 (2 lines)	{0} = the hotkey, «Pause»	the window is laid out when shown: the height grows with the text, the width does not
-IDS_HELLO_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_HELLO_ROW_1	IDD_LETTER	IDC_LETTER_ROW_1	362x19	{0} = the hotkey, «Pause»	the window is laid out when shown: the height grows with the text, the width does not; E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
-IDS_HELLO_ROW_2	IDD_LETTER	IDC_LETTER_ROW_2	362x19	{0} = the hotkey, «Pause»	the window is laid out when shown: the height grows with the text, the width does not
-IDS_HELLO_ROW_3	IDD_LETTER	IDC_LETTER_ROW_3	362x19	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_HELLO_SETTINGS	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	-
-IDS_HELLO_OK	IDD_LETTER	IDC_LETTER_ACCENT	72x30	-	-
-IDS_THANKS_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKS_LEAD	IDD_LETTER	IDC_LETTER_LEAD	354x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
-IDS_THANKS_PARA	IDD_LETTER	IDC_LETTER_PARA	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
-IDS_SUPPORT_PANEL	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_SUPPORT_TEXT	IDD_LETTER	IDC_LETTER_PANEL_TEXT	382x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_THANKS_SNOOZE	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	voice: the user — «I» is the person using the program, no gender (RULES 14); E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
-IDS_THANKS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not; E120 (T-120-10): says when the letter comes back — the button no longer does, GLOSSARY-E120 §3
+IDS_LETTER_CAPTION	shell_letter	caption	window caption: 448 px wide	-	-
+IDS_CLOSE	shell_letter,shell_letters_list,IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CLOSE	89x30	-	-
+IDS_CHANNEL_OPEN	IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CHANNEL,IDC_WZ_CHANNEL	110x30	-	-
+IDS_FEEDBACK_OPEN	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_SUPPORT_OPEN	shell_letter,IDD_AUTHOR	IDC_AUTHOR_SUPPORT	193x30	-	-
+IDS_HELLO_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	«Panda» is the author's name in the letters (decision 155.2); voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); greeting without formality: «Привет», not «Здравствуйте» (208.107) — the informal greeting of the language; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_HELLO_LEAD	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_HELLO_DEMO_CAP	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, «Pause»	-
+IDS_HELLO_PANEL	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_HELLO_ROW_1	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, «Pause»	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_HELLO_ROW_2	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, «Pause»	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_HELLO_ROW_3	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, «Pause»	E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_HELLO_FOOT	shell_letter	-	the shell: a letter, the line under the body; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-16): new text, 208.106 п. 3 — pause and settings are a right-click on the tray icon (in both modes of the icon), the flag of the layout is turned on in the settings; voice: the author (RULES 14)
+IDS_HELLO_SETTINGS	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_HELLO_OK	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_THANKS_TITLE	shell_letter,window in the corner / menu (drawn by the program)	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_THANKS_LEAD	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); greeting without formality: «Привет», not «Здравствуйте» (208.107) — the informal greeting of the language; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
+IDS_THANKS_PARA	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
+IDS_SUPPORT_PANEL	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_SUPPORT_TEXT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_THANKS_SNOOZE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the user — «I» is the person using the program, no gender (RULES 14); E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
+IDS_THANKS_FOOT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): says when the letter comes back — the button no longer does, GLOSSARY-E120 §3
 IDS_AUTHOR_CAPTION	IDD_AUTHOR	caption	window caption: 448 px wide	-	-
 IDS_AUTHOR_PANEL	IDD_AUTHOR	IDC_AUTHOR_PANEL	406x17	-	-
 IDS_AUTHOR_TEXT	IDD_AUTHOR	IDC_AUTHOR_TEXT	382x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
@@ -159,33 +161,33 @@ IDS_NEWS_NEVER_READ	IDD_AUTHOR	IDC_NEWS_STATE	382x43 (2 lines)	-	the window is l
 IDS_NEWS_READ_ON	IDD_AUTHOR	IDC_NEWS_STATE	382x43 (2 lines)	{0} = a date, «27.10.2026» (code: &format_date(day), &days_until_feed_read(state, today).to_string(),)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_NEWS_LATEST	IDD_AUTHOR	IDC_NEWS_VERSION	382x21	{0} = the installed version (code: version)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_NEWS_AVAILABLE	IDD_AUTHOR	IDC_NEWS_VERSION	382x21	{0} = the installed version; {1} = the new one (code: version, newer)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_DOWNLOAD	IDD_LETTER,IDD_AUTHOR	IDC_NEWS_DOWNLOAD	193x30	-	-
+IDS_NEWS_DOWNLOAD	shell_letter,IDD_AUTHOR	IDC_NEWS_DOWNLOAD	193x30	-	-
 IDS_NEWS_LETTERS	IDD_AUTHOR	IDC_NEWS_LETTERS	110x30	-	-
 IDS_NEWS_FILE_ONLY	IDD_AUTHOR	IDC_NEWS_FILE_ONLY	382x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_FEEDBACK_PANEL	IDD_AUTHOR	IDC_FEEDBACK_PANEL	406x17	-	-
-IDS_FEEDBACK_TEXT	IDD_AUTHOR	IDC_FEEDBACK_TEXT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,shell_settings,shell_menu	IDC_FEEDBACK_WRITE	193x30	-	-
-IDS_LETTERS_CAPTION	IDD_LETTERS_LIST	caption	window caption: 448 px wide	-	-
-IDS_LETTERS_FOOT	IDD_LETTERS_LIST	IDC_LETTERS_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_LETTERS_OPEN	IDD_LETTERS_LIST	IDC_LETTERS_B1	105x28	-	rows 1..4 alike: IDC_LETTERS_B1..B4
-IDS_NEWS_READ_BUTTON	IDD_LETTER,IDD_LETTERS_LIST	IDC_LETTER_ACCENT,IDC_LETTERS_R1	72x30	-	-
+IDS_FEEDBACK_PANEL	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_PANEL	406x17	-	-
+IDS_FEEDBACK_TEXT	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_TEXT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,shell_settings,shell_menu,shell_letter	IDC_FEEDBACK_WRITE	193x30	-	-
+IDS_LETTERS_CAPTION	shell_letters_list	caption	window caption: 448 px wide	-	-
+IDS_LETTERS_FOOT	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_LETTERS_OPEN	shell_letters_list,window in the corner / menu (drawn by the program)	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_NEWS_READ_BUTTON	shell_letter,shell_letters_list	-	the shell: a letter and the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_MENU_UNREAD	shell_menu	-	menu: grows with the text	-	-
 IDS_MENU_UPDATE	shell_menu	-	menu: grows with the text	{0} = code: version	-
-IDS_TOAST_TITLE	toast	title	balloon title: 63 characters	-	-
-IDS_TOAST_NEWS	toast	text	balloon text: 255 characters	-	-
-IDS_TOAST_THANKS	toast	text	balloon text: 255 characters	-	-
+IDS_TOAST_TITLE	window in the corner / menu (drawn by the program)	-	the header of the window in the corner, monospace capitals 12 px (the knock of a letter)	-	-
+IDS_TOAST_NEWS	window in the corner / menu (drawn by the program)	-	the text of the knock of «Новость», 13.5 px, 272 px wide, up to three lines	-	-
+IDS_TOAST_THANKS	window in the corner / menu (drawn by the program)	-	the text of the knock of «Спасибо», 13.5 px, 272 px wide, up to three lines	-	-
 IDS_ABOUT_AUTHOR	shell_about	-	161x30	-	the button takes it since 1.1.0 (stage E106, T-106-2); in 1.0.0 it showed the Russian literal of the template
-IDS_ENTRY_UNREAD_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
-IDS_ENTRY_READ_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
-IDS_UPDATE_HOW	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_UPDATE_STEP_1	IDD_LETTER	IDC_LETTER_ROW_1	362x19	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_UPDATE_STEP_2	IDD_LETTER	IDC_LETTER_ROW_2	362x19	-	the window is laid out when shown: the height grows with the text, the width does not; LangSwitcher-setup.exe is a file name: not translated
-IDS_UPDATE_STEP_3	IDD_LETTER	IDC_LETTER_ROW_3	362x19	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_UPDATE_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	{0} = the new version (code: &announced)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_LETTER_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x47 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_LATER	IDD_LETTER	IDC_LETTER_LEFT	130x30	-	E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
-IDS_NEWS_OPEN_LINK	IDD_LETTER	IDC_LETTER_PANEL_BTN_1	151x30	-	E120 (T-120-10): named by where it leads, the site; no arrow ↗ in the string — the shell draws it, GLOSSARY-E120 §4
-IDS_NEWS_FOOT	IDD_LETTER	IDC_LETTER_FOOT	406x21	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): quotes IDS_NEWS_LATER exactly as it is translated, GLOSSARY-E120 §3
+IDS_ENTRY_UNREAD_MARK	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	{0} = a date, «27.10.2026»	-
+IDS_ENTRY_READ_MARK	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	{0} = a date, «27.10.2026»	-
+IDS_UPDATE_HOW	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_UPDATE_STEP_1	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_UPDATE_STEP_2	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	LangSwitcher-setup.exe is a file name: not translated
+IDS_UPDATE_STEP_3	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_UPDATE_FOOT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version (code: &announced)	-
+IDS_NEWS_LETTER_TITLE	shell_letter,window in the corner / menu (drawn by the program)	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_NEWS_LATER	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
+IDS_NEWS_OPEN_LINK	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): named by where it leads, the site; no arrow ↗ in the string — the shell draws it, GLOSSARY-E120 §4
+IDS_NEWS_FOOT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): quotes IDS_NEWS_LATER exactly as it is translated, GLOSSARY-E120 §3
 IDS_WIZARD_CAPTION	IDD_WIZARD	caption	window caption: 448 px wide	-	-
 IDS_WIZARD_STEP	IDD_WIZARD	IDC_WZ_STEP	406x19	{0} = this step, «2»; {1} = the number of steps, «5» (code: &(wizard.step + 1).to_string(), &road.len().to_string())	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_CANCEL	IDD_WIZARD	IDC_WZ_CANCEL	98x30	-	-

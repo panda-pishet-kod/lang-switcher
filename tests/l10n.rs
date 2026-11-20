@@ -685,7 +685,7 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        263,
+        265,
         "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
@@ -695,7 +695,9 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
          (part Б): the title and the link of the list of the program's own, and tasks T-119-5, \
          -6, -7, -10: thirteen of the window in the corner, the menu and «От автора», and task \
          T-119-9: four that left with the balloon and the old words of «Обновление», six of its \
-         honest letter"
+         honest letter, and task T-120-16: the header of the window in the corner of a letter \
+         and the line under «Привет», and task T-120-20: the note of a refused write of the \
+         settings and the badge «новое»"
     );
 
     let mut refused = Vec::new();

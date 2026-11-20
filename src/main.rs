@@ -24,17 +24,21 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     // The probes of the interface shell (stage Э120), opened alone, in the testing build only: the
     // window «О программе» (T-120-9), the fields and the list (T-120-18), the popup and the window
-    // in the corner (T-120-14).
+    // in the corner (T-120-14), the letters (T-120-16).
     // A table behind `black_box`: a comparison with one literal may be folded into numbers, and
     // then the name is not in the file as text — the positive control of criterion 8 reads it there.
     #[cfg(feature = "testing")]
     {
         type Probe = (&'static str, fn() -> ExitCode);
-        static PROBES: [Probe; 4] = [
+        static PROBES: [Probe; 5] = [
             ("--ui-probe-about", lang_switcher::ui::probe::run_about),
             ("--ui-probe-fields", lang_switcher::ui::probe::run_fields),
             ("--ui-probe-popup", lang_switcher::ui::probe::run_popup),
             ("--ui-probe-corner", lang_switcher::ui::probe::run_corner),
+            (
+                "--ui-probe-letters",
+                lang_switcher::letters::testing::run_probe,
+            ),
         ];
         for argument in std::env::args() {
             if let Some((_, run)) = std::hint::black_box(&PROBES)

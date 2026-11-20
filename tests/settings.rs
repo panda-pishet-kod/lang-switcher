@@ -4206,13 +4206,6 @@ impl HiddenWindow {
         })
     }
 
-    /// «Последние письма» with `entries` — the door of задача T-98-1.
-    fn list(entries: Vec<letters::Entry>) -> Self {
-        Self::on_owner(|owner| {
-            letters::testing::open_list_hidden(owner, ProductImage::shared().module, entries)
-        })
-    }
-
     /// An owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never shown —
     /// and the window `open` makes on it.
     fn on_owner(
@@ -4309,49 +4302,28 @@ impl HiddenWindow {
         unsafe { GetClientRect(self.window, &mut client) }.expect("the client rectangle");
         client.bottom - client.top
     }
-
-    /// The text of one control of the window, read at the length the control says it holds.
-    fn control_text(&self, control: i32) -> String {
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GetDlgItem, GetWindowTextLengthW, GetWindowTextW,
-        };
-
-        // SAFETY: the window is live until `Drop`; the buffer is a local as long as the text.
-        unsafe {
-            let child = GetDlgItem(Some(self.window), control).expect("the control must exist");
-            let length = usize::try_from(GetWindowTextLengthW(child)).unwrap_or(0);
-            let mut buffer = vec![0_u16; length + 1];
-            let read = usize::try_from(GetWindowTextW(child, &mut buffer)).unwrap_or(0);
-            String::from_utf16_lossy(&buffer[..read])
-        }
-    }
 }
 
 /// **Задача T-103-2, сторож (4), решение 181.1 — a change of language on the fly moves where a
-/// person is sent to write, together with the words that say where.**
+/// person is sent to write.**
 ///
-/// The two windows that send a person to write — «Спасибо» and the wizard of FR-104 — opened hidden
-/// out of the templates of the built product, and asked by the door of the task where their button
-/// would take them: the very call «Открыть группу» and «Скопировать и открыть…» read the address
-/// by. Built in Russian, the group; the language moved and [`letters::language_changed`] told the
-/// windows, GitHub Issues — and the button of «Спасибо» says so; Ukrainian, the group again.
+/// The wizard of FR-104, opened hidden out of the templates of the built product, and asked by the
+/// door of the task where its address would take them. Built in Russian, the group; the language
+/// moved and [`letters::language_changed`] told the window, GitHub Issues; Ukrainian, the group
+/// again. «Спасибо», the other window of the rule, is a window of the shell since T-120-16 — its
+/// half of the guard is in `tests\letters.rs`.
 ///
-/// ⚠ Control: the language moved and **nobody told the windows** — the address stays with the words
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
 /// the window shows. Without it a test that read the language in force at the click would pass for
 /// one that follows the window.
 #[cfg(feature = "testing")]
 #[test]
 fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
-    const IDC_LETTER_PANEL_BTN_2: i32 = 1219;
-
     let _guard = with_product_strings();
     let module = ProductImage::shared().module;
 
     settings::set_ui_language(Language::Ru);
 
-    let thanks = HiddenWindow::on_owner(|owner| {
-        letters::testing::open_letter_activated_hidden(owner, module, letters::Letter::Thanks)
-    });
     let wizard =
         HiddenWindow::on_owner(|owner| letters::testing::open_wizard_hidden(owner, module));
     let address = |window: &HiddenWindow| {
@@ -4360,26 +4332,23 @@ fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
 
     let mut seen = Vec::new();
 
-    seen.push(("built in Ru", address(&thanks), address(&wizard)));
+    seen.push(("built in Ru", address(&wizard)));
 
-    // The control: the language moved and nobody told the windows.
+    // The control: the language moved and nobody told the window.
     settings::set_ui_language(Language::En);
-    seen.push(("En, not told", address(&thanks), address(&wizard)));
+    seen.push(("En, not told", address(&wizard)));
 
-    // The road of FR-94: the language changed while the windows were open.
-    letters::language_changed(thanks.owner);
-    seen.push(("En, told", address(&thanks), address(&wizard)));
-    let english_button = thanks.control_text(IDC_LETTER_PANEL_BTN_2);
+    // The road of FR-94: the language changed while the window was open.
+    letters::language_changed(wizard.owner);
+    seen.push(("En, told", address(&wizard)));
 
     settings::set_ui_language(Language::Uk);
-    letters::language_changed(thanks.owner);
-    seen.push(("Uk, told", address(&thanks), address(&wizard)));
+    letters::language_changed(wizard.owner);
+    seen.push(("Uk, told", address(&wizard)));
 
-    settings::set_ui_language(Language::En);
-    let english_word = settings::text(settings::IDS_FEEDBACK_OPEN);
     settings::set_ui_language(Language::Ru);
 
-    println!("{seen:#?}\nthe button of «Спасибо» in English: «{english_button}»");
+    println!("{seen:#?}");
 
     let group = letters::links::GROUP_URL;
     let issues = letters::links::ISSUES_URL;
@@ -4387,16 +4356,12 @@ fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
     assert_eq!(
         seen,
         [
-            ("built in Ru", group, group),
-            ("En, not told", group, group),
-            ("En, told", issues, issues),
-            ("Uk, told", group, group),
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
         ],
         "181.1: the address follows the language of the window, and moves when it moves"
-    );
-    assert_eq!(
-        english_button, english_word,
-        "and the button of «Спасибо» says where it now sends a person"
     );
 }
 
@@ -6096,66 +6061,6 @@ fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
     );
 }
 
-/// **The model of «Последние письма» at full capacity IS the live window — задача T-98-2**
-/// (Э83-Б-1, решение 166.2): the update and three unread news items of the published feed, in
-/// fourteen languages, at every face a test can reach (the debug substitution of the step, as for
-/// «От автора» above). The window grows by its entries, so its template's 296 units say nothing of
-/// how tall it is; the known answer is the window itself.
-///
-/// ⚠ Мутант: a model that answers the template's 296 units instead of laying out the entries is
-/// caught here.
-#[cfg(feature = "testing")]
-#[test]
-fn the_model_of_the_full_list_is_the_live_window_at_every_reachable_face() {
-    let _guard = with_product_strings();
-    let mut differences = Vec::new();
-    let mut measured = 0;
-
-    for language in Language::shipped() {
-        settings::set_ui_language(language);
-
-        let entries = full_list(&PublishedFeed::now());
-
-        for step in 8..=15_u16 {
-            let face = theme::face_at(step, 96);
-            let (live, font) = settings::testing::with_font_step(step, || {
-                let window = HiddenWindow::list(entries.clone());
-                (window.client_height(), window.dialog_font_height())
-            });
-            let model = list_client_by_model(face, theme::drawing_dpi_at(96, step), &entries);
-            measured += 1;
-
-            if step == 10 {
-                println!("{language:?} 10 pt ({face} px): live {live} px, model {model} px");
-            }
-
-            if font != -face {
-                differences.push(format!(
-                    "{language:?} {step} pt: the window got lfHeight {font}, not -{face} (C7)"
-                ));
-            } else if live != model {
-                differences.push(format!(
-                    "{language:?} {step} pt ({face} px): live {live}, model {model}"
-                ));
-            }
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    println!("{measured} windows measured, differences: {differences:?}");
-
-    assert_eq!(
-        measured,
-        Language::shipped().count() * 8,
-        "every language the build offers, eight faces"
-    );
-    assert!(
-        differences.is_empty(),
-        "the model of layout_list is not the window: {differences:?}"
-    );
-}
-
 /// The faces the rule may answer with, at the least — every face from the floor up to the 40 px
 /// of ten points at 300 % (задача T-83-2; the ТЗ names 11…20 «как минимум»). Custom scaling makes
 /// any DPI, so every whole face in between is one some screen can ask for.
@@ -6541,8 +6446,10 @@ fn the_rule_keeps_its_floor_and_its_ceiling() {
 
 /// The dialog templates of the program — `IDD_LETTER` … `IDD_WIZARD` — with the offset of
 /// their `pointsize`, measured by the probe of the stage (`scratchpad-E83\probe-premises-e83.log`).
-/// Six then; `IDD_ABOUT` (201) and `IDD_SETTINGS` (200) went when their windows moved to the shell.
-const TEMPLATES: [(u16, usize); 4] = [(202, 64), (203, 64), (204, 50), (205, 62)];
+/// Six then; `IDD_ABOUT` (201) went when «О программе» moved to the shell (FR-92а), `IDD_LETTER` and
+/// `IDD_LETTERS_LIST` (202, 203) when the letters did (T-120-16), `IDD_SETTINGS` (200) when the
+/// settings did (T-120-20).
+const TEMPLATES: [(u16, usize); 2] = [(204, 50), (205, 62)];
 
 /// **The font block of the six templates is found where the dialog manager reads it — задача
 /// T-83-3.**
@@ -6955,12 +6862,14 @@ fn all_our_drawing_goes_by_the_step() {
     // makes, so that a drawing asking it of the surface gets the window's step. Its use inside the
     // function itself is none — the body asks `dc_dpi`.
     //
-    // FR-92а and FR-92: the places of the old «О программе» and of the old settings dialog —
-    // the box of T-118-1 among them — went with those windows to the shell; 20 are left.
+    // FR-92а: four of the 28 were the drawing of the old «О программе», which went to the shell;
+    // T-120-16: two more were the drawing of the old letters; T-120-20: the old settings dialog went
+    // with its places, the box of T-118-1 (`repaint_capture`) and the pictures of its check boxes
+    // among them. 16 are left (counted on the merge of stage/e120-shell into stage/e120-win-b).
     assert_eq!(
         calls,
-        20 + 1 + 1,
-        "the 20 places of П4 left, the definition and the buffer's carry"
+        16 + 1 + 1,
+        "the 16 places of П4 left, the definition and the buffer's carry"
     );
 
     // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
@@ -6992,8 +6901,8 @@ fn all_our_drawing_goes_by_the_step() {
         .sum();
     assert_eq!(
         caught,
-        20 + 1,
-        "the text of e82 must be caught at all 20 places left and at the buffer's carry"
+        16 + 1,
+        "the text of e82 must be caught at all 16 places left and at the buffer's carry"
     );
 
     // ⚠ Контроль «мутант задачи»: one place of `letters.rs` put back.
@@ -8906,10 +8815,10 @@ fn every_dialog_of_the_program_asks_for_the_same_font() {
 
     assert_eq!(
         fonts.len(),
-        4,
-        "четыре окна — письмо, «Последние письма», «От автора», мастер («О программе» и \
-         настройки ушли на оболочку); если шаблонов стало больше, этот сторож обязан узнать об \
-         этом первым"
+        2,
+        "два окна — «От автора» и мастер («О программе» ушло на оболочку с FR-92а, письма и \
+         «Последние письма» — с T-120-16, настройки — с T-120-20); если шаблонов стало больше, \
+         об этом первым"
     );
 
     let first = fonts[0];
@@ -11724,7 +11633,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 263] = [
+const FR_94_STRINGS: [(u16, &str, &str); 265] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -12105,15 +12014,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 263] = [
     ),
     (
         settings::IDS_HELLO_TITLE,
-        "Здравствуйте! Меня зовут Панда.",
+        "Привет! Меня зовут Панда.",
         "Hello! My name is Panda.",
     ),
     (
         settings::IDS_HELLO_LEAD,
-        "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: исправляет \
-         слово, набранное не в той раскладке. Вот как это выглядит:",
-        "I made Lang Switcher and I am glad you installed it. The program does one thing: it \
-         fixes a word typed in the wrong layout. Here is what that looks like:",
+        "Я сделал Lang Switcher и рад, что вы его поставили. Главное, что он делает, — \
+         исправляет текст, набранный не в той раскладке.",
+        "I made Lang Switcher and I am glad you installed it. Its main job is to fix text typed \
+         in the wrong layout.",
     ),
     (
         settings::IDS_HELLO_DEMO_CAP,
@@ -12129,19 +12038,29 @@ const FR_94_STRINGS: [(u16, &str, &str); 263] = [
     ),
     (
         settings::IDS_HELLO_ROW_1,
-        "{0} исправляет последнее набранное слово и переключает раскладку. Работает в любом \
-         окне.",
-        "{0} fixes the last word you typed and switches the layout. It works in any window.",
+        "Набрали слово не в той раскладке — нажмите {0}: слово исправится, раскладка \
+         переключится.",
+        "Typed a word in the wrong layout — press {0}: the word is fixed and the layout switches.",
     ),
     (
         settings::IDS_HELLO_ROW_2,
-        "Ещё раз {0}: слово вернётся к исходному, буква в букву.",
-        "Press {0} again and the word comes back exactly as it was, letter for letter.",
+        "Выделили текст — {0} исправит выделенное. Ничего не набрано — просто переключит \
+         раскладку.",
+        "Selected some text — {0} fixes the selection. Nothing typed — it just switches the \
+         layout.",
     ),
     (
         settings::IDS_HELLO_ROW_3,
-        "Значок в трее: пауза, настройки и «О программе», где есть раздел «Как пользоваться».",
-        "The tray icon: pause, settings and “About”, which has a “How to use it” section.",
+        "Ещё раз {0} — всё вернётся как было, буква в букву.",
+        "Press {0} again and everything comes back as it was, letter for letter.",
+    ),
+    // T-120-16 (208.106 п. 3): the line under the body of «Привет».
+    (
+        settings::IDS_HELLO_FOOT,
+        "Пауза и настройки — правым щелчком по значку в трее. В настройках можно включить флаг \
+         раскладки в трее.",
+        "Pause and settings are a right-click on the tray icon. In the settings you can turn on \
+         the layout flag in the tray.",
     ),
     (
         settings::IDS_HELLO_SETTINGS,
@@ -12156,7 +12075,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 263] = [
     ),
     (
         settings::IDS_THANKS_LEAD,
-        "Здравствуйте, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, \
+        "Привет, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, \
          что вам с ним удобно: я потратил много сил, чтобы программа была лёгкой и просто \
          работала.",
         "Hello, it is Panda again. You installed Lang Switcher a month ago, and I hope it suits \
@@ -12828,6 +12747,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 263] = [
         "Do not show update windows again",
     ),
     (settings::IDS_CORNER_FLAG, "флаг раскладки", "layout flag"),
+    // Task T-120-16: the header of the window in the corner that knocks with a letter.
+    (settings::IDS_CORNER_LETTER, "письмо", "letter"),
     (
         settings::IDS_HINT_TITLE,
         "Флаг раскладки включён",
@@ -17336,13 +17257,13 @@ fn extent_of(sheet: &Sheet, face: &Face, text: &str) -> SIZE {
 /// The dialog font of the settings template and a sheet to measure it on.
 fn template_font_and_sheet() -> (TemplateFont, Sheet) {
     let product = ProductImage::open();
-    // Every template of the program declares the one face, FONT 10 «Segoe UI»; the letter's is read.
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, letters::IDD_LETTER));
+    // Every template of the program declares the one face, FONT 10 «Segoe UI»; «От автора»'s is read.
+    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, letters::IDD_AUTHOR));
 
     let font = template
         .font
         .clone()
-        .expect("the letter template declares DS_SETFONT");
+        .expect("the template of «От автора» declares DS_SETFONT");
 
     (font, Sheet::new(64))
 }
@@ -18177,8 +18098,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        263,
-        "two hundred and SIXTY-THREE identifiers in use since task T-120-20 (the note of a refused write of the settings, 3303, and the badge «новое», 3304); SIXTY-ONE since task T-119-9 (решения 208.95–208.99): \
+        265,
+        "two hundred and SIXTY-FIVE identifiers in use since task T-120-20: the note of a refused \
+         write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
+         body (3294). Two hundred and sixty-two since the header of the window in the corner \
+         that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \
          the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \
          changed (3140, 3143); the honest letter came with six (3297…3302). Two hundred and \
          fifty-nine since task T-119-10 (решение 208.119): the \
@@ -20793,12 +20717,13 @@ fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
 }
 
 /// The windows of the old kind that became one family in stage Э81 — решение 142.2 п. 2 и п. 3.
-/// Five then; «О программе» has left the templates for the shell (FR-92а).
+/// Five then; «О программе» has left the templates for the shell (FR-92а), the letters and «Последние
+/// письма» too (T-120-16).
 ///
 /// The settings dialog is deliberately absent: it is 430 units wide by the owner's word and its
 /// controls keep their own columns. Its width is held below all the same, so that «the four came
 /// to 256» cannot quietly become «all six did».
-const FAMILY_OF_E81: [&str; 4] = ["IDD_LETTER", "IDD_LETTERS_LIST", "IDD_AUTHOR", "IDD_WIZARD"];
+const FAMILY_OF_E81: [&str; 2] = ["IDD_AUTHOR", "IDD_WIZARD"];
 
 /// One `DIALOGEX` of `app.rc`: its name, its `(cx, cy)`, and every control statement inside it
 /// as `(statement, x, y, cx, cy)`.
@@ -20937,10 +20862,11 @@ fn what_breaks_the_family_of_e81(text: &str) -> Vec<String> {
     let dialogs = dialogs_of_the_resource(text);
     let mut broken = Vec::new();
 
-    // Six in stage Э81; four since «О программе» and the settings moved to the shell.
-    if dialogs.len() != 4 {
+    // Six in stage Э81; five since «О программе» moved to the shell (FR-92а); three since the letters
+    // and «Последние письма» did (T-120-16); two since the settings did (T-120-20).
+    if dialogs.len() != 2 {
         broken.push(format!(
-            "app.rc declares {} dialogs, not four",
+            "app.rc declares {} dialogs, not two",
             dialogs.len()
         ));
     }
@@ -21050,8 +20976,8 @@ fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
 
     // Контроль прибора, второй — **мутант**: one window put back and the sweep must name it.
     let mutant = text.replace(
-        "IDD_LETTER DIALOGEX 0, 0, 256,",
-        "IDD_LETTER DIALOGEX 0, 0, 191,",
+        "IDD_WIZARD DIALOGEX 0, 0, 256,",
+        "IDD_WIZARD DIALOGEX 0, 0, 191,",
     );
 
     assert_ne!(
@@ -21064,7 +20990,7 @@ fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
     assert!(
         names
             .iter()
-            .any(|fault| fault.starts_with("IDD_LETTER is 191")),
+            .any(|fault| fault.starts_with("IDD_WIZARD is 191")),
         "the sweep must name the window that was put back: {names:#?}"
     );
 
@@ -21197,9 +21123,9 @@ fn every_window_of_the_program_carries_the_same_bottom_row() {
 
     let mut broken = Vec::new();
 
-    // «О программе» has left the templates for the shell (FR-92а), whose row of buttons is the
-    // passport's.
-    for name in ["IDD_LETTER", "IDD_LETTERS_LIST", "IDD_AUTHOR", "IDD_WIZARD"] {
+    // «О программе» has left the templates for the shell (FR-92а), and the letters and «Последние
+    // письма» too (T-120-16), and the settings (T-120-20): their row of buttons is the passport's.
+    for name in ["IDD_AUTHOR", "IDD_WIZARD"] {
         let dialog = dialogs
             .iter()
             .find(|dialog| dialog.name == name)
@@ -21347,13 +21273,13 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
     let button_min = 40;
 
     let product = ProductImage::open();
-    let letter = DialogTemplate::parse(&product.resource(RT_DIALOG, letters::IDD_LETTER));
+    let letter = DialogTemplate::parse(&product.resource(RT_DIALOG, letters::IDD_AUTHOR));
 
     // Every template of the program declares the one face, FONT 10 «Segoe UI».
     let font = letter
         .font
         .clone()
-        .expect("the letter template declares DS_SETFONT");
+        .expect("the template of «От автора» declares DS_SETFONT");
 
     let sheet = Sheet::new(64);
 
@@ -21708,8 +21634,9 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
             .1
     };
 
-    // «О программе» shared it until FR-92а moved it to the shell.
-    for name in ["IDD_LETTER", "IDD_WIZARD"] {
+    // «О программе» shared it until FR-92а moved it to the shell, «Письмо» until T-120-16 did.
+    {
+        let name = "IDD_WIZARD";
         println!("{name}: {} units tall", height(name));
 
         assert_eq!(
@@ -21719,7 +21646,9 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
         );
     }
 
-    for name in ["IDD_AUTHOR", "IDD_LETTERS_LIST"] {
+    // «Последние письма» counted its own until T-120-16 moved it to the shell.
+    {
+        let name = "IDD_AUTHOR";
         println!("{name}: {} units tall — by its content", height(name));
 
         assert_ne!(
@@ -21730,9 +21659,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
         );
     }
 
-    // ⭐⭐ **And both of them really do count it** — решение 142.3. «Последние письма» did not
-    // until this task: `resize_client` was called once in the whole module, from `layout_author`.
-    // The count is the guard: two callers, one per window, and no third.
+    // ⭐⭐ **And it really does count it** — решение 142.3. The count is the guard: one caller,
+    // «От автора», and no second (the second, `layout_list`, went with its window in T-120-16).
     let letters = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
@@ -21752,7 +21680,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
         rest[..end].to_owned()
     };
 
-    for what in ["unsafe fn layout_author(", "unsafe fn layout_list("] {
+    {
+        let what = "unsafe fn layout_author(";
         assert!(
             body_of(what).contains("resize_client("),
             "«{what}» must give its window the height its content asks for"
@@ -21760,29 +21689,25 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
     }
 
     assert!(
-        !body_of("unsafe fn layout_letter(").contains("resize_client("),
-        "«Письмо» keeps the typical height and must not resize itself"
-    );
-    assert!(
         !body_of("unsafe fn layout_wizard(").contains("resize_client("),
-        "and neither must the wizard — a window that grew under the mouse as «Далее» was \
+        "the wizard must not resize itself — a window that grew under the mouse as «Далее» was \
          pressed is the very thing its template forbids"
     );
 
     // Контроль прибора: the reading must refuse a body that lost the call, or the three
     // assertions above hold of nothing.
-    let without = body_of("unsafe fn layout_list(").replace("resize_client(", "let _ = (");
+    let without = body_of("unsafe fn layout_author(").replace("resize_client(", "let _ = (");
 
     assert!(
         !without.contains("resize_client("),
         "the control must differ from the body in exactly the way the assertions look at"
     );
 
-    // ⚠ **Мутант:** one of the three moved by a single unit, which is the smallest thing this
-    // rule forbids. A guard that passes it is measuring nothing.
+    // ⚠ **Мутант:** the typical one moved by a single unit, which is the smallest thing this rule
+    // forbids. A guard that passes it is measuring nothing.
     let mutant = text.replace(
-        "IDD_LETTER DIALOGEX 0, 0, 256, 276",
-        "IDD_LETTER DIALOGEX 0, 0, 256, 277",
+        "IDD_WIZARD DIALOGEX 0, 0, 256, 276",
+        "IDD_WIZARD DIALOGEX 0, 0, 256, 277",
     );
 
     assert_ne!(
@@ -21792,8 +21717,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
 
     let moved = dialogs_of_the_resource(&mutant)
         .into_iter()
-        .find(|dialog| dialog.name == "IDD_LETTER")
-        .expect("app.rc must declare IDD_LETTER");
+        .find(|dialog| dialog.name == "IDD_WIZARD")
+        .expect("app.rc must declare IDD_WIZARD");
 
     assert_ne!(
         moved.size.1, TYPICAL,
