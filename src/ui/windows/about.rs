@@ -42,9 +42,10 @@ impl About {
     }
 }
 
-/// The name of the author's site under the panda: the host of the program's page. Read out of
-/// `letters::links`, because every network address of the program is declared there and the
-/// acceptance of the release (criterion 4) looks for them in that one place.
+/// The name of the author's site under the panda — the host of the program's page, and the link
+/// to that page ([`Id::Site`]). Read out of `letters::links`, because every network address of the
+/// program is declared there and the acceptance of the release (criterion 4) looks for them in
+/// that one place.
 fn site() -> String {
     let page = crate::letters::links::PROGRAM_URL;
     let rest = page.strip_prefix("https://").unwrap_or(page);
@@ -111,9 +112,11 @@ impl Content for About {
     fn event(&mut self, event: Event<Id>) -> Reply {
         match event {
             Event::Pressed(Id::Close) => Reply::Close,
+            // The address under the panda opens the page of the program in the language of the
+            // window (139.2 п. 4, 181.33) — through the gate of `letters::open_link`, which
+            // refuses an address `letters::links` does not allow, and not past it.
             Event::Pressed(Id::Site) => {
-                let page = crate::letters::links::program_url(self.language);
-                let _ = crate::settings::open_in_the_shell(page);
+                crate::letters::open_link(crate::letters::links::program_url(self.language));
                 Reply::Stay
             }
             _ => Reply::Stay,
