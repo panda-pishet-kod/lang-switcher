@@ -178,8 +178,8 @@ fn faults(window: &Window<u16>, size: WindowSize, k: f32, rtl: bool, text: &Text
     found
 }
 
-/// Whether the mirrored layout is the exact reflection of the straight one; the first part that is
-/// not.
+/// Whether the mirrored layout is the exact reflection of the straight one (what lies over the
+/// picture of the panel moves with the picture, T-120-25); the first part that is not.
 fn mirror_fault(window: &Window<u16>, size: WindowSize, k: f32, text: &Text) -> Option<String> {
     let straight = lay_out(window, size, k, false, text);
     let mirrored = lay_out(window, size, k, true, text);
@@ -188,7 +188,7 @@ fn mirror_fault(window: &Window<u16>, size: WindowSize, k: f32, text: &Text) -> 
         .iter()
         .zip(&mirrored.items)
         .find_map(|(left, right)| {
-            let x = size.w - left.rect.x - left.rect.w;
+            let x = mirrored.reflection_of(&straight, left).x;
             ((right.rect.x - x).abs() > 0.01 || (right.rect.y - left.rect.y).abs() > 0.01)
                 .then(|| format!("not mirrored: {}", left.part.name()))
         })

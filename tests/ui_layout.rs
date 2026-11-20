@@ -683,8 +683,9 @@ fn every_window() -> Vec<Window<Id>> {
 }
 
 /// **The mirror is an exact reflection**: every rectangle of the right-to-left layout equals the
-/// left-to-right one reflected in the vertical axis of the window — for every description, at a
-/// wide and a narrow size — and the order of Tab does not change.
+/// left-to-right one reflected in the vertical axis of the window (what lies over the picture of the
+/// panel moves with the picture instead, T-120-25) — for every description, at a wide and a narrow
+/// size — and the order of Tab does not change.
 #[test]
 fn the_mirror_reflects_every_rectangle_and_keeps_the_order_of_tab() {
     let narrow = WindowSize {
@@ -707,8 +708,8 @@ fn the_mirror_reflects_every_rectangle_and_keeps_the_order_of_tab() {
             );
 
             for (left, right) in straight.items.iter().zip(&mirrored.items) {
-                let Placed { part, rect, .. } = left;
-                let reflected = Rect::new(size.w - rect.x - rect.w, rect.y, rect.w, rect.h);
+                let Placed { part, .. } = left;
+                let reflected = mirrored.reflection_of(&straight, left);
                 if right.part != *part
                     || !(close(right.rect.x, reflected.x)
                         && close(right.rect.y, reflected.y)
@@ -759,7 +760,7 @@ fn the_mirror_reflects_the_window_descriptions_of_the_shell() {
             let mirrored = lay_out(&window, size, 1.0, true, &MEASURE);
             assert_eq!(straight.focus_order(), mirrored.focus_order());
             for (left, right) in straight.items.iter().zip(&mirrored.items) {
-                let reflected = size.w - left.rect.x - left.rect.w;
+                let reflected = mirrored.reflection_of(&straight, left).x;
                 assert!(
                     close(right.rect.x, reflected) && close(right.rect.y, left.rect.y),
                     "{language:?} {} at {}",

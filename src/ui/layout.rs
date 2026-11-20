@@ -21,7 +21,7 @@
 
 use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
-use crate::ui::scene::{MenuState, Trailing};
+use crate::ui::scene::{MenuState, OnPicture, Trailing};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::shape::CHEVRON;
 use crate::ui::tokens::{
@@ -34,6 +34,7 @@ use crate::ui::tokens::{
     SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN,
     WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
+use crate::ui::tokens::{ART_RING, TYPE_FLOOR};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
@@ -44,6 +45,10 @@ use crate::ui::tokens::{KEY_BOTTOM, KEY_PAD};
 use crate::ui::tokens::{
     MENU_B, MENU_DOT, MENU_HEAD_PAD, MENU_ICON, MENU_ICON_COLUMN, MENU_ITEM_GAP, MENU_ITEM_PAD,
     MENU_PAD, MENU_ROW_MIN_HEIGHT, MENU_RULE_PAD, MENU_STATE_DOT, MENU_STATE_GAP,
+};
+use crate::ui::tokens::{
+    ON_PICTURE_KEY, ON_PICTURE_KEY_GAP, ON_PICTURE_KEY_LABEL, ON_PICTURE_KEY_MIN,
+    ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
@@ -246,6 +251,20 @@ pub enum Part {
     Number {
         text: String,
     },
+    /// A word over the picture of the panel (T-120-25): the monospace face at `size` points, in the
+    /// colours of the picture; `fixed` — the word after the press.
+    PictureWord {
+        word: String,
+        size: f32,
+        fixed: bool,
+    },
+    /// A key over the picture of the panel: its name at `size` points in the colours of the
+    /// picture; `pressed` — lit.
+    PictureKey {
+        label: String,
+        size: f32,
+        pressed: bool,
+    },
 }
 
 /// What the keys and the wheel of a list need of it: the selected row, the first row shown, how many
@@ -279,6 +298,12 @@ impl ListView {
 }
 
 impl Part {
+    /// Whether the part lies over the picture of the panel (T-120-25): it moves with the picture
+    /// and is not mirrored.
+    pub fn lies_over_picture(&self) -> bool {
+        matches!(self, Part::PictureWord { .. } | Part::PictureKey { .. })
+    }
+
     /// The name of the kind, for the messages of the tests.
     pub fn name(&self) -> &'static str {
         match self {
@@ -315,6 +340,8 @@ impl Part {
             Part::MenuRow => "menu row",
             Part::BrandName { .. } => "brand name",
             Part::Number { .. } => "list number",
+            Part::PictureWord { .. } => "word over the picture",
+            Part::PictureKey { .. } => "key over the picture",
         }
     }
 }
@@ -365,6 +392,28 @@ impl<I: Copy + PartialEq> Layout<I> {
         }
         order
     }
+
+    /// Where `straight`'s element `item` stands in this layout when it is mirrored (passport §7):
+    /// reflected in the vertical axis of the window — or, for what lies over the picture of the
+    /// panel (T-120-25), moved with the picture and not reflected in it.
+    pub fn reflection_of(&self, straight: &Layout<I>, item: &Placed<I>) -> Rect {
+        let r = item.rect;
+        let picture = |layout: &Layout<I>| {
+            layout
+                .items
+                .iter()
+                .find(|placed| matches!(placed.part, Part::Art(_)))
+                .map(|placed| placed.rect)
+        };
+        match (
+            item.part.lies_over_picture(),
+            picture(straight),
+            picture(self),
+        ) {
+            (true, Some(from), Some(to)) => Rect::new(r.x + to.x - from.x, r.y, r.w, r.h),
+            _ => Rect::new(self.size.w - r.x - r.w, r.y, r.w, r.h),
+        }
+    }
 }
 
 /// `window` at `size` and the factor `k`, its text measured by `measure`; `rtl` — the language of
@@ -390,6 +439,7 @@ pub fn lay_out<I: Copy>(
         one_column: size.w < TWO_COLUMNS_FROM.0,
         kind: window.kind,
         art: window.art,
+        picture: None,
         tight: false,
         measure,
         out: Vec::new(),
@@ -431,6 +481,7 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         one_column: true,
         kind: window.kind,
         art: None,
+        picture: None,
         tight: false,
         measure,
         out: Vec::new(),
@@ -487,6 +538,9 @@ struct Placer<'m, I> {
     one_column: bool,
     kind: WindowKind,
     art: Option<Art>,
+    /// The circle the picture of the panel is drawn in, once it is placed: what lies over the
+    /// picture is placed by it.
+    picture: Option<Rect>,
     tight: bool,
     measure: &'m dyn Measure,
     out: Vec<Placed<I>>,
@@ -555,6 +609,7 @@ impl<I: Copy> Placer<'_, I> {
             let d = circle.at(size.w, size.h);
             let at = Rect::new((panel - d) / 2.0, (size.h - d) / 2.0, d, d);
             self.push(Part::Art(art), at, None);
+            self.picture = Some(at);
 
             if let Some(brand) = &window.brand {
                 let style = self.style(Role::Brand);
@@ -789,6 +844,15 @@ impl<I: Copy> Placer<'_, I> {
                 emphasis,
             } => self.menu_item(*id, icon, label, trailing, *emphasis, x, y, w),
             Node::Example { typed, key, fixed } => self.example(typed, key, fixed, x, y, w),
+            Node::OverPicture { over, otherwise } => match (self.art, self.picture) {
+                (Some(art), Some(circle)) => {
+                    for (anchor, element) in over {
+                        self.over_picture(art, circle, anchor, element);
+                    }
+                    0.0
+                }
+                _ => self.node(otherwise, x, y, w, slot),
+            },
             Node::LetterCard {
                 label,
                 title,
@@ -1237,6 +1301,90 @@ impl<I: Copy> Placer<'_, I> {
         row
     }
 
+    /// Whether `node` lies over the picture of the panel rather than in the flow.
+    fn lies_over_picture(&self, node: &Node<I>) -> bool {
+        matches!(node, Node::OverPicture { .. }) && self.art.is_some() && self.picture.is_some()
+    }
+
+    /// `element` in the named place `anchor` of the picture `art` drawn in `circle` (T-120-25): the
+    /// place is taken from the coordinates of the picture into the window's by the fitting the
+    /// canvas draws the picture with — its field fitted to the square around the circle inside the
+    /// ring. Neither the picture nor what lies on it is mirrored: in a window that reads right to
+    /// left each rectangle is reflected here in the circle's own axis, so the mirror of the whole
+    /// window puts it back in its place on the picture.
+    fn over_picture(&mut self, art: Art, circle: Rect, anchor: &str, element: &OnPicture) {
+        let Some([left, top, width, height]) = crate::ui::art::anchor(art.name(), anchor) else {
+            return;
+        };
+        let radius = circle.w / 2.0 - ART_RING.0;
+        let side = radius * 2.0;
+        let place = Rect::new(
+            circle.x + circle.w / 2.0 - radius + left * side,
+            circle.y + circle.h / 2.0 - radius + top * side,
+            width * side,
+            height * side,
+        );
+        let style = |size: f32| Style {
+            size: size.max(TYPE_FLOOR.0),
+            ..self.style(Role::Code).with_weight(ON_PICTURE_WEIGHT)
+        };
+        let mut placed: Vec<(Part, Rect)> = Vec::new();
+
+        match element {
+            OnPicture::Word { word, fixed } => {
+                let style = style(place.h * ON_PICTURE_WORD.0);
+                let inset = place.h * ON_PICTURE_WORD_INSET.0;
+                let line = style.line_height();
+                placed.push((
+                    Part::PictureWord {
+                        word: word.clone(),
+                        size: style.size,
+                        fixed: *fixed,
+                    },
+                    Rect::new(
+                        place.x + inset,
+                        place.y + (place.h - line) / 2.0,
+                        (place.w - inset * 2.0).max(0.0),
+                        line,
+                    ),
+                ));
+            }
+            OnPicture::Keys { labels, pressed } => {
+                let style = style(place.h * ON_PICTURE_KEY_LABEL.0);
+                let (pad, least) = (
+                    place.h * ON_PICTURE_KEY_PAD.0,
+                    place.h * ON_PICTURE_KEY_MIN.0,
+                );
+                let (key_h, gap) = (place.h * ON_PICTURE_KEY.0, place.h * ON_PICTURE_KEY_GAP.0);
+                let widths: Vec<f32> = labels
+                    .iter()
+                    .map(|label| (self.width_of(style, label) + pad * 2.0).max(least))
+                    .collect();
+                let total =
+                    widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
+                let mut at = place.x + (place.w - total) / 2.0;
+                for (label, width) in labels.iter().zip(widths) {
+                    placed.push((
+                        Part::PictureKey {
+                            label: label.clone(),
+                            size: style.size,
+                            pressed: *pressed,
+                        },
+                        Rect::new(at, place.y + (place.h - key_h) / 2.0, width, key_h),
+                    ));
+                    at += width + gap;
+                }
+            }
+        }
+
+        for (part, mut rect) in placed {
+            if self.rtl {
+                rect.x = circle.x * 2.0 + circle.w - rect.x - rect.w;
+            }
+            self.push(part, rect, None);
+        }
+    }
+
     /// The card of a letter (passport §6): a nested surface; the label, the title and one line of
     /// the text cut with an ellipsis at the start; the buttons at the end, in the middle of its
     /// height.
@@ -1327,17 +1475,28 @@ impl<I: Copy> Placer<'_, I> {
                     .filter(|child| !matches!(child, Node::Fill(_)))
                     .map(|child| self.height(child, w, None))
                     .sum();
-                let gaps = gap * children.len().saturating_sub(1) as f32;
+                let flowing = children
+                    .iter()
+                    .filter(|child| !self.lies_over_picture(child))
+                    .count();
+                let gaps = gap * flowing.saturating_sub(1) as f32;
                 Some(((total - fixed - gaps) / fills as f32).max(0.0))
             }
             _ => None,
         };
 
+        // What lies over the picture takes no room in the flow, and no gap either.
         let mut top = y;
-        for (index, child) in children.iter().enumerate() {
-            if index > 0 {
+        let mut first = true;
+        for child in children {
+            if self.lies_over_picture(child) {
+                self.node(child, x, top, w, None);
+                continue;
+            }
+            if !first {
                 top += gap;
             }
+            first = false;
             let slot = if matches!(child, Node::Fill(_)) {
                 fill
             } else {
@@ -2051,6 +2210,7 @@ pub fn place_node<I: Copy>(
         one_column: class == Class::Narrow,
         kind: WindowKind::Ordinary,
         art: None,
+        picture: None,
         tight: false,
         measure,
         out: Vec::new(),

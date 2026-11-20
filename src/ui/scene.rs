@@ -243,6 +243,14 @@ pub enum Node<I> {
         key: String,
         fixed: String,
     },
+    /// What lies over the picture of the panel, each element in a named place of the picture
+    /// (`anchor-…` of `resrt`, T-120-25) — when the window has the panel; `otherwise` in the flow
+    /// when it stands in one column. Over the picture it takes no room in the flow, and neither the
+    /// picture nor it is mirrored.
+    OverPicture {
+        over: Vec<(&'static str, OnPicture)>,
+        otherwise: Box<Node<I>>,
+    },
     /// The card of a letter (passport §6): its label, title, one line of its text, its buttons.
     LetterCard {
         label: String,
@@ -279,6 +287,16 @@ pub struct Brand<I> {
     /// The address is a link to the page of the program (decision of the controller on C3 of
     /// T-120-13, as the name of the old «О программе», 139.2 п. 4): pressed, it is this element.
     pub link: I,
+}
+
+/// An element over the picture of the panel (T-120-25), in the colours of the picture.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OnPicture {
+    /// A word on the little screen, as much of it as is typed; `fixed` — the word after the press.
+    /// It starts at the left of its place in any language and reads as it is typed.
+    Word { word: String, fixed: bool },
+    /// Keys side by side in the middle of their place; `pressed` — lit.
+    Keys { labels: Vec<String>, pressed: bool },
 }
 
 impl<I> Node<I> {
@@ -438,6 +456,10 @@ impl<I> Node<I> {
             },
             Node::MenuRule => Node::MenuRule,
             Node::Example { typed, key, fixed } => Node::Example { typed, key, fixed },
+            Node::OverPicture { over, otherwise } => Node::OverPicture {
+                over,
+                otherwise: one(otherwise),
+            },
             Node::LetterCard {
                 label,
                 title,
@@ -554,6 +576,8 @@ impl<I> Node<I> {
                 f(Role::Code, typed);
                 f(Role::Code, fixed);
             }
+            // The words over the picture are sized by their place in it, not by a role.
+            Node::OverPicture { otherwise, .. } => otherwise.texts_mut(f),
             Node::LetterCard {
                 label,
                 title,
