@@ -4599,3 +4599,102 @@ fn print_the_letters() {
         }
     }
 }
+
+/// What the demonstration of a description shows: the word on the screen of the laptop and whether
+/// the key is lit — the node over the picture of «Привет», or none.
+fn shown_on_the_picture<I>(window: &lang_switcher::ui::scene::Window<I>) -> Option<(String, bool)> {
+    use lang_switcher::ui::scene::{Node, OnPicture};
+
+    fn find<I>(node: &Node<I>) -> Option<(String, bool)> {
+        match node {
+            Node::OverPicture { over, .. } => {
+                let word = over.iter().find_map(|(anchor, on)| match (anchor, on) {
+                    (&"screen", OnPicture::Word { word, .. }) => Some(word.clone()),
+                    _ => None,
+                })?;
+                let pressed = over.iter().find_map(|(anchor, on)| match (anchor, on) {
+                    (&"key", OnPicture::Keys { pressed, .. }) => Some(*pressed),
+                    _ => None,
+                })?;
+                Some((word, pressed))
+            }
+            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) => {
+                nodes.iter().find_map(find)
+            }
+            _ => None,
+        }
+    }
+
+    find(&window.body)
+}
+
+/// **T-120-25 п. 4, the red «before»: in «Привет» on the shell, after three ticks the frame shown
+/// is `demo_frame(3, pair)`** — the word typed so far on the screen of the laptop and the key —
+/// and after the turn of 48 it is the first frame again. «Привет» asks the window for the tick of
+/// the demonstration (`DEMO_TICK_MS`); the other letters ask none («в покое — ноль»).
+///
+/// Before the task the letter had no tick: the example stood still and there was nothing over the
+/// picture.
+#[test]
+fn hello_shows_the_frame_of_its_tick() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Event;
+    use lang_switcher::ui::windows::letter::{Id, LetterView};
+
+    let _guard = with_product_strings();
+
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    let view = |letter| LetterView {
+        letter,
+        plan: letters::plan_in(Language::Ru, letter, &context),
+        key: "Pause".to_owned(),
+        tick: 0,
+        language: Language::Ru,
+        theme: lang_switcher::theme::ThemeSetting::Light,
+    };
+
+    let mut hello = view(Letter::Welcome);
+    let pair = hello.plan.demo_pair;
+    let expected = |tick| {
+        let frame = letters::demo_frame(tick, pair);
+        (
+            frame.text.chars().take(frame.shown).collect::<String>(),
+            frame.pressed,
+        )
+    };
+
+    for _ in 0..3 {
+        hello.event(Event::<Id>::Tick);
+    }
+    let after_three = shown_on_the_picture(&hello.describe());
+    for _ in 3..letters::DEMO_FRAMES {
+        hello.event(Event::<Id>::Tick);
+    }
+    let after_the_turn = shown_on_the_picture(&hello.describe());
+
+    assert_eq!(
+        after_three,
+        Some(expected(3)),
+        "after three ticks «Привет» shows the frame demo_frame(3, pair)"
+    );
+    assert_eq!(
+        after_the_turn,
+        Some(expected(0)),
+        "and after the turn of {} the first one again",
+        letters::DEMO_FRAMES
+    );
+    assert_ne!(
+        expected(3),
+        expected(0),
+        "the control: the third frame differs from the first"
+    );
+    assert_eq!(hello.tick(), Some(letters::DEMO_TICK_MS), "«Привет» ticks");
+    for letter in [Letter::Thanks, Letter::Update, Letter::News(7)] {
+        assert_eq!(view(letter).tick(), None, "{letter:?} stands still");
+    }
+}

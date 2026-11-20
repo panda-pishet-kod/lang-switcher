@@ -2511,6 +2511,15 @@ pub struct DemoFrame {
     pub converted: bool,
 }
 
+impl DemoFrame {
+    /// The word on the little screen as much of it as is typed at this frame — what the picture of
+    /// «Привет» shows (T-120-25), and a name of the frame a description may use: the descriptions of
+    /// the shell name no `text` (the guard of the window descriptions, rule 2).
+    pub fn word_shown(&self) -> String {
+        self.text.chars().take(self.shown).collect()
+    }
+}
+
 /// What the demonstration of `pair` shows at frame `tick` — **pure**, so the whole animation is a
 /// table a test can walk without a window, a timer or a clock.
 ///

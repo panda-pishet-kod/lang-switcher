@@ -13,7 +13,9 @@ use crate::letters::{self, Action, Button, Deed, Letter, LetterPlan};
 use crate::settings::Language;
 use crate::theme::{KEY_PLACEHOLDER, ThemeSetting};
 use crate::ui::host::{Content, Reply};
-use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Surface, Window, WindowKind};
+use crate::ui::scene::{
+    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind,
+};
 use ::windows::Win32::Foundation::HWND;
 
 /// The elements of a letter.
@@ -106,6 +108,39 @@ impl LetterView {
         }
     }
 
+    /// The demonstration at this frame: the word as much as it is typed on the screen of the laptop
+    /// and the key, lit while it is down — over the picture in a wide window; in a narrow one the
+    /// line of [`Self::example`] in the text instead (T-120-25 п. 4).
+    fn live_example(&self) -> Node<Id> {
+        let Some(frame) = self.demo() else {
+            return self.example();
+        };
+        let keys = self
+            .key
+            .split(crate::settings::DOUBLE_TAP_JOINER)
+            .map(str::to_owned)
+            .collect();
+        Node::OverPicture {
+            over: vec![
+                (
+                    "screen",
+                    OnPicture::Word {
+                        word: frame.word_shown(),
+                        fixed: frame.converted,
+                    },
+                ),
+                (
+                    "key",
+                    OnPicture::Keys {
+                        labels: keys,
+                        pressed: frame.pressed,
+                    },
+                ),
+            ],
+            otherwise: Box::new(self.example()),
+        }
+    }
+
     /// The body of the letter, part by part.
     fn body(&self) -> Vec<Node<Id>> {
         let plan = &self.plan;
@@ -126,7 +161,7 @@ impl LetterView {
             parts.push(Node::Text(Role::Lead, plan.lead.clone()));
         }
         if plan.demo {
-            let mut example = vec![self.example()];
+            let mut example = vec![self.live_example()];
             if !plan.demo_caption.is_empty() {
                 example.push(Node::Text(Role::Small, self.keyed(&plan.demo_caption)));
             }
@@ -232,9 +267,19 @@ impl Content for LetterView {
         }
     }
 
-    /// The pure description answers nothing: the actions are the program's ([`Product`]).
-    fn event(&mut self, _event: Event<Id>) -> Reply {
+    /// The tick of the window moves the demonstration of «Привет» one frame on; the actions of the
+    /// buttons are the program's ([`Product`]).
+    fn event(&mut self, event: Event<Id>) -> Reply {
+        if event == Event::Tick {
+            self.tick = self.tick.wrapping_add(1);
+        }
         Reply::Stay
+    }
+
+    /// «Привет» ticks with the frames of its demonstration (`letters::DEMO_TICK_MS`, T-120-25);
+    /// every other letter stands still — the rule of «в покое — ноль».
+    fn tick(&self) -> Option<u32> {
+        self.plan.demo.then_some(letters::DEMO_TICK_MS)
     }
 
     fn title(&self) -> String {
@@ -302,6 +347,10 @@ impl Content for Product {
         self.view.describe()
     }
 
+    fn tick(&self) -> Option<u32> {
+        self.view.tick()
+    }
+
     fn event(&mut self, event: Event<Id>) -> Reply {
         match event {
             Event::Pressed(Id::Do(action)) => {
@@ -323,7 +372,7 @@ impl Content for Product {
                 letters::open_link(letters::links::program_url(self.view.language));
                 Reply::Stay
             }
-            _ => Reply::Stay,
+            event => self.view.event(event),
         }
     }
 
