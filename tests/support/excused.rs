@@ -74,7 +74,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Ordinary,
-        languages: &["mk", "ml", "ta"],
+        languages: &["mk", "ml"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -164,4 +164,32 @@ pub fn unsettled(excuses: &[Excuse]) -> Vec<String> {
         })
         .map(excuse_line)
         .collect()
+}
+
+/// The excuses — and the languages of each — that excused nothing in a pass of the instrument
+/// which met the failures `matched` (window, class, language): an excuse no longer needed is taken
+/// away, so that it hides no fault to come.
+pub fn stale(matched: &[(String, Class, String)]) -> Vec<String> {
+    let hit = |excuse: &Excuse, tag: Option<&str>| {
+        matched.iter().any(|(window, class, language)| {
+            window == excuse.window
+                && *class == excuse.class
+                && tag.is_none_or(|tag| tag == language)
+        })
+    };
+    let mut found = Vec::new();
+    for excuse in EXCUSED {
+        if excuse.languages.is_empty() {
+            if !hit(excuse, None) {
+                found.push(excuse_line(excuse));
+            }
+        } else {
+            for tag in excuse.languages {
+                if !hit(excuse, Some(tag)) {
+                    found.push(format!("{tag}: {}", excuse_line(excuse)));
+                }
+            }
+        }
+    }
+    found
 }

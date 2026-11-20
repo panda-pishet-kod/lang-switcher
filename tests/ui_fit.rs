@@ -424,13 +424,16 @@ fn pass() -> &'static Pass {
                             // At 12 points: the emergency road of the window goes down to there.
                             let floor = (TYPE_FLOOR.0 / window_b(w, h, 1.0)).min(1.0);
                             let short = lay_out(window, size, floor, rtl, text).shortfall;
-                            pass.wave.push(format!(
-                                "| {name} | {} | {class:?} {w}×{h} | {face} | {:.1} | {:.1} | {} |",
-                                language.tag(),
-                                short.w.max(0.0),
-                                short.h.max(0.0),
-                                culprit(language, window, size, floor, rtl, text, &names)
-                            ));
+                            // Only what is short: a window that fits at 12 asks nothing of the translator.
+                            if !short.fits() {
+                                pass.wave.push(format!(
+                                    "| {name} | {} | {class:?} {w}×{h} | {face} | {:.1} | {:.1} | {} |",
+                                    language.tag(),
+                                    short.w.max(0.0),
+                                    short.h.max(0.0),
+                                    culprit(language, window, size, floor, rtl, text, &names)
+                                ));
+                            }
                         }
                     }
                 }
@@ -461,6 +464,7 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     let faces = faces();
     let mut found = Vec::new();
     let mut excused_found = Vec::new();
+    let mut matched: Vec<(String, Class, String)> = Vec::new();
 
     for language in Language::ALL {
         let (windows, _) = windows_of(language);
@@ -486,8 +490,11 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                             faults.join("; ")
                         );
                         match excused(name, class, language.tag()) {
-                            Some(excuse) => excused_found
-                                .push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse))),
+                            Some(excuse) => {
+                                excused_found
+                                    .push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse)));
+                                matched.push((name.clone(), class, language.tag().to_owned()));
+                            }
                             None => found.push(line),
                         }
                     }
@@ -500,6 +507,12 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                 }
             }
         }
+    }
+
+    // An excuse that excused nothing is taken away (208.175): it would hide a fault to come.
+    let stale = excused::stale(&matched);
+    for line in &stale {
+        found.push(format!("an excuse no longer needed — take it away: {line}"));
     }
 
     // The excused, each with its reason — seen in the output, not counted.
