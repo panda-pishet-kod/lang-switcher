@@ -4450,13 +4450,6 @@ fn buttons_of(kind: Kind) -> &'static [i32] {
 /// yet, and a feed that has never said anything is not something to turn off.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorView {
-    /// The line under the program's name: the version.
-    ///
-    /// ⚠ **«and the author's alias» no more — задача T-81-3, решение 142.2 п. 5.** The line is
-    /// `IDS_ABOUT_VERSION` now, the very one «О программе» writes, and the signature the owner
-    /// asked to remove («не надо вставлять панда, он же панда») went with the string that
-    /// carried it.
-    pub version_line: String,
     /// The first line of the head's description — `IDS_ABOUT_LINE_1`, задача T-81-3.
     pub line_1: String,
     /// The second — `IDS_ABOUT_LINE_2`.
@@ -4521,7 +4514,7 @@ pub fn author_view_in(
     feed: FeedView<'_>,
 ) -> AuthorView {
     use crate::settings::{
-        IDS_ABOUT_LINE_1, IDS_ABOUT_LINE_2, IDS_ABOUT_VERSION, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT,
+        IDS_ABOUT_LINE_1, IDS_ABOUT_LINE_2, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT,
         IDS_NEWS_ABOUT_FEED, IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST,
         IDS_NEWS_NEVER_READ, IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON,
     };
@@ -4544,10 +4537,6 @@ pub fn author_view_in(
     let update = update_is_pending(version, feed);
 
     AuthorView {
-        // ⭐⭐ **`IDS_ABOUT_VERSION` и не `IDS_AUTHOR_VERSION` — задача T-81-3, решение 142.2
-        // п. 5.** Вторая строка несла «версия {0} · Панда, он же Panda_Pishet_Kod» и снята со
-        // всеми четырнадцатью переводами; шапка у двух окон одна, и строка версии у них одна.
-        version_line: format_text(IDS_ABOUT_VERSION, &[version]),
         // Две строки описания общей шапки — те же слова, что в «О программе», из тех же строк.
         line_1: text(IDS_ABOUT_LINE_1),
         line_2: text(IDS_ABOUT_LINE_2),

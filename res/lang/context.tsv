@@ -37,7 +37,7 @@ IDS_HINT_TEXT	window in the corner / menu (drawn by the program)	-	the text of t
 IDS_HINT_OPEN	window in the corner / menu (drawn by the program)	-	the main button of the hint, two thirds of 332 px, 13.5 px	-	E119 (T-119-5): opens the page of the taskbar in Windows Settings
 IDS_MENU_WHATSNEW	window in the corner / shell_menu	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
 IDS_UPDATES_SWITCH	window in the corner / menu (drawn by the program)	-	the switch of «От автора» in place of the switch of the feed, one line	-	E119 (T-119-10): turns the window «Обновлено» on and off - the same setting as its check box
-IDS_NEWS_OFF_IN_FILE	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	the line under the switch of «От автора», 205 dialog units wide, up to two lines	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
+IDS_NEWS_OFF_IN_FILE	shell_author	-	the shell: «От автора», the hint under its switch; the limit is the fit of FIT-E120 (T-120-11)	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
 IDS_FALLBACK_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E119 (T-119-9): the heading of the letter «Обновление», which opens only from the tray menu entry «Доступна версия X…» or from «Последние письма», a week after the release when the program could not update itself; plain and honest, no blame
 IDS_FALLBACK_SUB	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version, «1.8.0»; {1} = the installed version, «1.6.1»; {2} = the day of the release, «16 ноября» (code: &announced, &context.version, &released)	-
 IDS_FALLBACK_NOTICE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the new version; {1} = the day of the release, «16 ноября» (code: &announced, &released)	the first paragraph of the letter; a date and not a count of days; the window is laid out when shown: the height grows with the text, the width does not
@@ -114,9 +114,9 @@ IDS_THEME_LIGHT	IDD_SETTINGS	IDC_THEME	175x17	-	-
 IDS_THEME_DARK	IDD_SETTINGS	IDC_THEME	175x17	-	-
 IDS_SOUND	IDD_SETTINGS	IDC_SOUND	343x21	-	-
 IDS_ABOUT_CAPTION	shell_about	caption	window caption: 448 px wide	-	-
-IDS_ABOUT_VERSION	IDD_AUTHOR	IDC_AUTHOR_VERSION	354x17	{0} = the version of the program, «1.0.0» (code: &number | version)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_ABOUT_LINE_1	IDD_AUTHOR,shell_about	IDC_AUTHOR_LINE_1	354x21	-	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
-IDS_ABOUT_LINE_2	IDD_AUTHOR,shell_about	IDC_AUTHOR_LINE_2	354x21	-	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
+IDS_ABOUT_VERSION	none — unused since T-120-17 (removal: T-120-24)	-	-	{0} = the version of the program, «1.0.0» (code: &number | version)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_ABOUT_LINE_1	shell_author,shell_about	-	the shell: the heading of «От автора» and of «О программе»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
+IDS_ABOUT_LINE_2	shell_author,shell_about	-	the shell: the heading of «От автора» and of «О программе»; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
 IDS_ABOUT_OK	-	-	81x30	-	E120 (T-120-10): the button closes the window — the word of «Закрыть» / Close, GLOSSARY-E120 §2
 IDS_ABOUT_HELP	shell_about	-	406x376 (22 lines)	-	-
 IDS_ABOUT_HELP_1	shell_about	-	362x62 (3 lines)	{0}	the number «1.» beside it is IDC_ABOUT_HELP_N1, not this string; E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
@@ -129,10 +129,10 @@ IDS_CAPTURE_HINT	IDD_SETTINGS	IDC_HOTKEY_NOTE	343x34 (2 lines)	-	key names as on
 IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_LETTER_CAPTION	shell_letter	caption	window caption: 448 px wide	-	-
-IDS_CLOSE	shell_letter,shell_letters_list,IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CLOSE	89x30	-	-
-IDS_CHANNEL_OPEN	IDD_AUTHOR,IDD_WIZARD	IDC_AUTHOR_CHANNEL,IDC_WZ_CHANNEL	110x30	-	-
+IDS_CLOSE	shell_letter,shell_letters_list,shell_author,IDD_WIZARD	IDC_WZ_NEXT	89x30	-	-
+IDS_CHANNEL_OPEN	shell_author,IDD_WIZARD	IDC_WZ_CHANNEL	158x30	-	-
 IDS_FEEDBACK_OPEN	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
-IDS_SUPPORT_OPEN	shell_letter,IDD_AUTHOR	IDC_AUTHOR_SUPPORT	193x30	-	-
+IDS_SUPPORT_OPEN	shell_letter,shell_author	-	the shell: a letter and «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_HELLO_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	«Panda» is the author's name in the letters (decision 155.2); voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); greeting without formality: «Привет», not «Здравствуйте» (208.107) — the informal greeting of the language; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
 IDS_HELLO_LEAD	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	Lang Switcher is not translated; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
 IDS_HELLO_DEMO_CAP	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	{0} = the hotkey, «Pause»	-
@@ -150,21 +150,21 @@ IDS_SUPPORT_PANEL	shell_letter	-	the shell: a letter; the limit is the fit of FI
 IDS_SUPPORT_TEXT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_THANKS_SNOOZE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the user — «I» is the person using the program, no gender (RULES 14); E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
 IDS_THANKS_FOOT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): says when the letter comes back — the button no longer does, GLOSSARY-E120 §3
-IDS_AUTHOR_CAPTION	IDD_AUTHOR	caption	window caption: 448 px wide	-	-
-IDS_AUTHOR_PANEL	IDD_AUTHOR	IDC_AUTHOR_PANEL	406x17	-	-
-IDS_AUTHOR_TEXT	IDD_AUTHOR	IDC_AUTHOR_TEXT	382x85 (5 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_PANEL	IDD_AUTHOR	IDC_NEWS_PANEL	406x17	-	-
-IDS_NEWS_ABOUT_FEED	IDD_AUTHOR	IDC_NEWS_ABOUT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_NEVER_READ	IDD_AUTHOR	IDC_NEWS_STATE	382x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_READ_ON	IDD_AUTHOR	IDC_NEWS_STATE	382x43 (2 lines)	{0} = a date, «27.10.2026» (code: &format_date(day), &days_until_feed_read(state, today).to_string(),)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_LATEST	IDD_AUTHOR	IDC_NEWS_VERSION	382x21	{0} = the installed version (code: version)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_AVAILABLE	IDD_AUTHOR	IDC_NEWS_VERSION	382x21	{0} = the installed version; {1} = the new one (code: version, newer)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_NEWS_DOWNLOAD	shell_letter,IDD_AUTHOR	IDC_NEWS_DOWNLOAD	193x30	-	-
-IDS_NEWS_LETTERS	IDD_AUTHOR	IDC_NEWS_LETTERS	110x30	-	-
-IDS_NEWS_FILE_ONLY	IDD_AUTHOR	IDC_NEWS_FILE_ONLY	382x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_FEEDBACK_PANEL	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_PANEL	406x17	-	-
-IDS_FEEDBACK_TEXT	IDD_AUTHOR,shell_letter	IDC_FEEDBACK_TEXT	382x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WRITE_TO_AUTHOR	IDD_AUTHOR,IDD_SETTINGS,shell_menu,shell_letter	IDC_FEEDBACK_WRITE,IDC_WRITE_AUTHOR	193x30	-	-
+IDS_AUTHOR_CAPTION	shell_author	caption	the shell: «От автора», the caption and the line over the heading; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_AUTHOR_PANEL	none — unused since T-120-17 (removal: T-120-24)	-	-	-	-
+IDS_AUTHOR_TEXT	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_PANEL	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_NEWS_ABOUT_FEED	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_NEVER_READ	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_READ_ON	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	{0} = a date, «27.10.2026» (code: &format_date(day), &days_until_feed_read(state, today).to_string(),)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_LATEST	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	{0} = the installed version (code: version)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_AVAILABLE	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	{0} = the installed version; {1} = the new one (code: version, newer)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_NEWS_DOWNLOAD	shell_letter,shell_author	-	the shell: a letter and «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_NEWS_LETTERS	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_NEWS_FILE_ONLY	shell_author	-	the shell: «От автора»; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_FEEDBACK_PANEL	shell_author,shell_letter	-	the shell: «От автора» and a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_FEEDBACK_TEXT	shell_author,shell_letter	-	the shell: «От автора» and a letter; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WRITE_TO_AUTHOR	shell_author,IDD_SETTINGS,shell_menu,shell_letter	IDC_WRITE_AUTHOR	154x30	-	-
 IDS_LETTERS_CAPTION	shell_letters_list	caption	window caption: 448 px wide	-	-
 IDS_LETTERS_FOOT	shell_letters_list	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_LETTERS_OPEN	shell_letters_list,window in the corner / menu (drawn by the program)	-	the shell: the list «Последние письма»; the limit is the fit of FIT-E120 (T-120-11)	-	-
