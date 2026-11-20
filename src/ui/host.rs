@@ -37,7 +37,8 @@
 //!   Windows reads to ([`corner`]) — and comes in from its side in 0,34 s, or stands at once when
 //!   Windows' animation is off. It takes no focus, a click neither; Esc closes it when the keys
 //!   reach it.
-//! * No movement in the large windows.
+//! * Movement only where the description asks for it: a tick ([`Content::tick`], T-120-25) while the
+//!   window is shown and Windows' animation is on, the frames of a picture, a popup coming in.
 //!
 //! FR-72: the host sends no message to another window at all.
 //!
@@ -104,8 +105,8 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WS_THICKFRAME,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS, WM_MOVE,
-    WM_SYSKEYDOWN,
+    IsIconic, IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS,
+    WM_MOVE, WM_SYSKEYDOWN,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, WM_NULL};
 use ::windows::core::{BOOL, HSTRING, PCWSTR, Result as WinResult, w};
@@ -137,6 +138,12 @@ pub trait Content {
     fn theme(&self) -> ThemeSetting;
     /// What Esc presses; none — Esc closes the window.
     fn escape(&self) -> Option<Self::Id> {
+        None
+    }
+    /// The period of the window's tick, ms (T-120-25): while the window is open, shown and not
+    /// minimised, and Windows moves what it shows, the content gets `Event::Tick` this often —
+    /// a live example. None — no tick, the rule of «в покое — ноль».
+    fn tick(&self) -> Option<u32> {
         None
     }
 }
@@ -364,6 +371,26 @@ struct OpenDrop<I> {
 /// The timers of a window of the shell: the steps of a popup coming in, the frames of a picture.
 const APPEAR_TIMER: usize = 1;
 const PICTURE_TIMER: usize = 2;
+const TICK_TIMER: usize = PICTURE_TIMER + 1;
+
+/// The timers of ticks alive in the process (T-120-25): none once no window with a tick is open.
+static TICK_TIMERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many windows of the shell tick now.
+pub fn live_tick_timers() -> usize {
+    TICK_TIMERS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The period a window ticks at: what its content asks, while it is shown, not minimised, and
+/// Windows moves what it shows; else none (the window shows its last frame).
+pub fn tick_period(
+    shown: bool,
+    minimised: bool,
+    animation: bool,
+    asked: Option<u32>,
+) -> Option<u32> {
+    asked.filter(|_| shown && !minimised && animation)
+}
 
 /// Where a popup stands, its left-top in screen pixels: in the corner of the work area `work`
 /// nearest the notification area `anchor` (the program's icon, or the end of the taskbar where the
@@ -617,6 +644,8 @@ struct Host<C: Content> {
     drop: Option<OpenDrop<C::Id>>,
     /// A picture moves in the window: its timer runs.
     animating: bool,
+    /// The period the tick timer runs at, while it runs.
+    ticking: Option<u32>,
 }
 
 /// The class of the windows of the shell: the ordinary one, or the popup's, which carries the
@@ -967,6 +996,7 @@ impl<C: Content> Host<C> {
             popup: None,
             drop: None,
             animating: false,
+            ticking: None,
         }
     }
 
@@ -1428,6 +1458,53 @@ impl<C: Content> Host<C> {
         true
     }
 
+    /// The tick timer runs while the content asks for it and the window is shown, not minimised,
+    /// with Windows' animation on.
+    fn keep_ticking(&mut self, hwnd: HWND) {
+        let asked = self.content.tick();
+        let wanted = if asked.is_some() {
+            // SAFETY: plain questions about a window of this thread.
+            let (shown, minimised) =
+                unsafe { (IsWindowVisible(hwnd).as_bool(), IsIconic(hwnd).as_bool()) };
+            #[allow(unused_mut)]
+            let (mut shown, mut animation) = (shown, animation_on());
+            // The testing build counts a hidden window as shown and moving, so that its timer can
+            // be counted with nothing on the screen.
+            #[cfg(feature = "testing")]
+            if std::env::var_os("LANGSW_TESTING_UI_TICK_HIDDEN").is_some() {
+                (shown, animation) = (true, true);
+            }
+            tick_period(shown, minimised, animation, asked)
+        } else {
+            None
+        };
+        if wanted == self.ticking {
+            return;
+        }
+        // SAFETY: the window's own timer.
+        unsafe {
+            match (self.ticking, wanted) {
+                (_, Some(period)) => {
+                    SetTimer(Some(hwnd), TICK_TIMER, period, None);
+                }
+                (Some(_), None) => {
+                    let _ = KillTimer(Some(hwnd), TICK_TIMER);
+                }
+                (None, None) => {}
+            }
+        }
+        match (self.ticking.is_some(), wanted.is_some()) {
+            (false, true) => {
+                TICK_TIMERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            (true, false) => {
+                TICK_TIMERS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        self.ticking = wanted;
+    }
+
     /// The timer of the frames runs while a picture that moves is in the window.
     fn keep_picture_moving(&mut self, hwnd: HWND) {
         let moving = self.layout.as_ref().is_some_and(|layout| {
@@ -1683,6 +1760,7 @@ impl<C: Content> Host<C> {
         // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
         self.sync_fields(hwnd);
         self.keep_picture_moving(hwnd);
+        self.keep_ticking(hwnd);
         if self.canvas.is_none() {
             let mut client = RECT::default();
             // SAFETY: the out parameter is a local.
@@ -2041,6 +2119,11 @@ impl<C: Content> Handler for Host<C> {
             }
             WM_ERASEBKGND => Some(LRESULT(1)),
             // The next frame of a picture: the description again, from the content's clock.
+            // The tick of the window: an event to its content, then one frame as for any other.
+            WM_TIMER if wparam.0 == TICK_TIMER => {
+                self.deliver(hwnd, Event::Tick);
+                Some(LRESULT(0))
+            }
             WM_TIMER if wparam.0 == PICTURE_TIMER => {
                 self.rebuild();
                 invalidate(hwnd);
@@ -2066,6 +2149,8 @@ impl<C: Content> Handler for Host<C> {
             }
             WM_SIZE => {
                 self.close_drop(hwnd, false);
+                // Minimised or brought back: the tick stops or goes on.
+                self.keep_ticking(hwnd);
                 let bits = lparam.0 as u32;
                 let (w, h) = (u32::from(bits as u16), bits >> u16::BITS);
                 if let Some(canvas) = self.canvas.as_mut() {
@@ -2319,6 +2404,12 @@ impl<C: Content> Handler for Host<C> {
             }
             WM_DESTROY => {
                 self.close_drop(hwnd, false);
+                // No tick outlives its window (in rest — zero).
+                if self.ticking.take().is_some() {
+                    // SAFETY: the window's own timer.
+                    let _ = unsafe { KillTimer(Some(hwnd), TICK_TIMER) };
+                    TICK_TIMERS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 // The window the menu opened from is told it went (KB 135788).
                 if let Some(Popup {
                     place:

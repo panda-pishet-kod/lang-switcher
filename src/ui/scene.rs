@@ -650,6 +650,8 @@ pub enum Event<I> {
     RowChecked(I, usize, bool),
     /// A list was scrolled to show row `usize` first.
     Scrolled(I, usize),
+    /// The tick the window asked for (`host::Content::tick`, T-120-25).
+    Tick,
 }
 
 impl<I: PartialEq> Node<I> {
