@@ -2048,7 +2048,7 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
 /// The half a pure function cannot show: which address the window's own code hands the shell. So
 /// the bodies are read — the arm of «Спасибо» in [`letters::plan_for`] must name
 /// [`links::feedback_url`] and not `CHANNEL_URL`; the action of «Спасибо» must open the address of
-/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`IDC_WZ_CHANNEL`) are
+/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`Id::Channel`) are
 /// on the channel as before.
 ///
 /// ⭐ Until stage E107 the wizard's «Скопировать и открыть…» was the second of the two; решение
@@ -2069,7 +2069,7 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         letters_function_body(&source, "fn act(")
             .expect("src\\letters.rs must still declare `act`"),
     );
-    let wizard_thanks = plan_arm(&source, "IDC_WZ_CHANNEL => {", "return true;");
+    let wizard_thanks = wizard_events();
 
     assert!(
         the_thanks_sends_a_person_to_write(thanks),
@@ -2086,12 +2086,14 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         perform.contains("Action::OpenChannel => open_link(links::CHANNEL_URL)"),
         "«Открыть канал» opens the channel as before"
     );
-    assert!(
-        source.contains("IDC_AUTHOR_CHANNEL => Some(Action::OpenChannel),"),
+    assert_eq!(
+        lang_switcher::ui::windows::author::Id::Channel.action(),
+        Some(letters::Action::OpenChannel),
         "«Открыть канал» of «От автора» (FR-103) is the channel as before"
     );
     assert!(
-        squeezed_code(wizard_thanks).contains("open_link(links::CHANNEL_URL);"),
+        squeezed_code(&wizard_thanks).contains("Event::Pressed(Id::Channel) => {")
+            && squeezed_code(&wizard_thanks).contains("Action::OpenChannel"),
         "the thanks of the wizard opens the channel as before:\n{wizard_thanks}"
     );
 
@@ -2118,15 +2120,43 @@ fn copies_and_opens_nothing(body: &str) -> bool {
 }
 
 /// Whether the code of the wizard's buttons hands the shell nothing but the channel of its thanks —
-/// no group, no GitHub Issues, no page of the site (решение 199.3).
+/// no group, no GitHub Issues, no page of the site (решение 199.3). Since T-120-19 the buttons are
+/// the events of `ui::windows::wizard::Product`, and what they open is an action of `letters`.
 fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
     let code = squeezed_code(body);
-
-    code.matches("open_link(").count() == 1
-        && code.contains("open_link(links::CHANNEL_URL)")
+    code.matches("Action::Open").count() == 1
+        && code.contains("Action::OpenChannel")
+        && !code.contains("open_link(")
         && !code.contains("feedback_url")
         && !code.contains("GROUP_URL")
         && !code.contains("ISSUES_URL")
+}
+
+/// The body of a method of an `impl` — from its signature to the brace of its indentation.
+fn method_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    let (_, after) = source.split_once(signature)?;
+
+    after.split_once("\n    }\n").map(|(body, _)| body)
+}
+
+/// What the window of the wizard does with an event — `Product::event` of `ui::windows::wizard`,
+/// a window of the shell since T-120-19.
+fn wizard_events() -> String {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("ui")
+            .join("windows")
+            .join("wizard.rs"),
+    )
+    .expect("src\\ui\\windows\\wizard.rs must be readable")
+    .replace("\r\n", "\n");
+    let (_, product) = source
+        .split_once("impl Content for Product {")
+        .expect("the window of the wizard is a content of the shell");
+    method_body(product, "fn event(")
+        .expect("the window of the wizard answers its events")
+        .to_owned()
 }
 
 /// **Задача T-107-3, решение 199.3 (until 1.2.0 — задача T-103-7, сторож (2), решение 181.6) — the
@@ -2142,13 +2172,13 @@ fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
 #[test]
 fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     let source = letters_module_source();
-    let text = letters_function_body(&source, "fn wizard_copy_text(")
-        .expect("src\\letters.rs must declare `wizard_copy_text`");
-    let address = letters_function_body(&source, "fn wizard_copy_address(")
-        .expect("src\\letters.rs must declare `wizard_copy_address`");
-    let command = letters_function_body(&source, "fn wizard_command(")
-        .expect("src\\letters.rs must declare `wizard_command`");
-    let button = squeezed_code(plan_arm(&source, "IDC_WZ_COPY => {", "return true;"));
+    let text = method_body(&source, "    pub fn copy_appeal(")
+        .expect("src\\letters.rs must declare `Wizard::copy_appeal`");
+    let address = method_body(&source, "    pub fn copy_address(")
+        .expect("src\\letters.rs must declare `Wizard::copy_address`");
+    let command = wizard_events();
+    let command = command.as_str();
+    let button = squeezed_code(command);
 
     assert!(
         copies_and_opens_nothing(text),
@@ -2163,7 +2193,7 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
         "199.3: «Скопировать и открыть группу» left the wizard"
     );
     assert!(
-        button.contains("wizard_copy_text(hwnd, links::MAIL_ADDRESS);"),
+        button.contains("Event::Pressed(Id::CopyText) => wizard.copy_appeal(self.owner),"),
         "the one button copies the text of the letter for every appeal:\n{button}"
     );
     assert!(
@@ -2172,8 +2202,8 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let issues = command.replace(
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);",
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);\n            open_link(links::ISSUES_URL);",
+        "letters::act(&deed, Action::OpenChannel);",
+        "letters::act(&deed, Action::OpenChannel);\n                letters::act(&deed, Action::OpenFeedback);",
     );
     assert_ne!(issues, command, "the control must change the body");
     assert!(
@@ -2186,8 +2216,8 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let opening = text.replace(
-        "wizard_say(hwnd, said);",
-        "open_link(links::GROUP_URL);\n    wizard_say(hwnd, said);",
+        "self.status = if",
+        "open_link(links::GROUP_URL);\n        self.status = if",
     );
     assert_ne!(opening, text, "the control must change the body");
     assert!(
@@ -2359,6 +2389,29 @@ fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
                 "{language:?}: the turn must repeat exactly at frame {frame}"
             );
         }
+    }
+}
+
+/// **The frame without a tick is the final one — T-120-25: «анимация отключена — стоит итоговый
+/// кадр».** Windows with its animation off gives the window no tick, and a window not shown has
+/// none either; the example then stands at `letters::DEMO_STILL` and must show what it is for:
+/// the word fixed, whole, the layout switched, the key up. Frame 0, where it stood before, is the
+/// first typed letter of the wrong word.
+#[test]
+fn the_demonstration_without_a_tick_stands_at_the_fixed_word() {
+    for language in Language::shipped() {
+        let pair = letters::demo_pair(language);
+        let still = letters::demo_frame(letters::DEMO_STILL, pair);
+
+        assert_eq!(
+            still.word_shown(),
+            pair.fixed,
+            "{language:?}: the still frame shows the fixed word, whole"
+        );
+        assert!(
+            still.converted && !still.pressed,
+            "{language:?}: the layout switched and the key up"
+        );
     }
 }
 
@@ -2957,61 +3010,78 @@ fn letters_module_source() -> String {
     .replace("\r\n", "\n")
 }
 
-/// The branch of the window procedure that answers the feed switch — from the test of the
-/// control to the `return 0;` that ends it — or `None` unless there is exactly one.
-fn switch_branch(source: &str) -> Option<&str> {
-    let mut heads = source.match_indices("if control == IDC_NEWS_SWITCH\n");
+/// The source of «От автора», a window of the shell since T-120-17.
+fn author_module_source() -> String {
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("ui")
+            .join("windows")
+            .join("author.rs"),
+    )
+    .expect("src\\ui\\windows\\author.rs must be readable")
+    .replace("\r\n", "\n")
+}
+
+/// The arm of «От автора» that answers its switch — from the event to the reply that ends it — or
+/// `None` unless there is exactly one.
+fn switch_arm(source: &str) -> Option<&str> {
+    let mut heads = source.match_indices("Event::Toggled(Id::Switch, on) => {");
     let (start, _) = heads.next()?;
 
     if heads.next().is_some() {
         return None;
     }
 
-    let length = source[start..].find("return 0;")?;
+    let length = source[start..].find("Reply::Stay")?;
 
     Some(&source[start..start + length])
 }
 
 /// Whether a branch writes the setting, reads the configuration again, and only then hands what
 /// it read to the copy the switch is drawn from.
+///
+/// The reading stands after the write — as a statement before the call (the dialog until
+/// T-120-17) or as its argument (`.follow_feed(&letters::state_now())`, the arm of the shell).
 fn follows_what_was_written(branch: &str) -> bool {
     let (Some(write), Some(follow)) = (branch.find("update_state("), branch.find(".follow_feed("))
     else {
         return false;
     };
+    let call = &branch[follow..];
+    let argument = call[..call.find(';').unwrap_or(call.len())].contains("state_now()");
 
-    write < follow && branch[write..follow].contains("state_now()")
+    write < follow && (branch[write..follow].contains("state_now()") || argument)
 }
 
-/// **Task T-70-1, finding Э69-Б-1 — the click moves the copy the switch is drawn from.**
+/// **Task T-70-1, finding Э69-Б-1 — the click moves the copy the switch is drawn from**, in the
+/// shell since T-120-17.
 ///
-/// The half of the repair a pure function cannot show: that the window procedure calls it. A
-/// letters window cannot be built in a test — `open_window` takes its template out of the
-/// running executable, and `embed-resource` links `app.rc` into the product and not into the
-/// test binaries. So the branch of `IDC_NEWS_SWITCH` is read instead: it has to write the setting
-/// (FR-102), read the configuration again, hand what it read to `AuthorView::follow_feed` and
-/// repaint the switch.
+/// The half of the repair a pure function cannot show: that the window calls it. The click goes
+/// through the configuration, which only the tray writes, and a test binary has no tray — so the
+/// arm of `Event::Toggled(Id::Switch, …)` of «От автора» (`ui::windows::author`) is read instead:
+/// it has to write the setting (FR-102; `release_window` since T-119-10), read the configuration
+/// again and hand what it read to `AuthorView::follow_feed`. The host describes the window again
+/// after every event (`deliver`: `rebuild`, `invalidate`), so the repaint is the host's and not
+/// the arm's.
 ///
-/// ⚠ Controls: the branch is found exactly once and is the one that writes the file and repaints;
-/// the same branch without the call — the shape of `e69` — is caught, and so are a call fed with
-/// the reading made before the write and a call put before the write.
+/// ⚠ Controls: the arm is found exactly once and is the one that writes the setting; the same arm
+/// without the call — the shape of `e69` — is caught, and so are a call fed with the reading made
+/// before the write and a call put before the write.
 #[test]
 fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
-    let source = letters_module_source();
-    let branch = switch_branch(&source).expect(
-        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
-    );
+    let source = author_module_source();
+    let branch = switch_arm(&source)
+        .expect("the sweep must find exactly one arm of «От автора» for its switch");
 
     assert!(
-        // Since task T-119-10 the switch writes `release_window` — the windows of updates.
-        branch.contains("update_state(|state| state.release_window = wanted)")
-            && branch.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)"),
-        "the branch found is not the one that writes the setting and repaints the switch:\n{branch}"
+        branch.contains("update_state(|state| state.release_window = on)"),
+        "the arm found is not the one that writes the setting:\n{branch}"
     );
 
     assert!(
         follows_what_was_written(branch),
-        "Э69-Б-1: the click writes the setting but does not move the copy `draw_switch` paints \
+        "Э69-Б-1: the click writes the setting but does not move the copy the switch is drawn \
          from:\n{branch}"
     );
 
@@ -3027,10 +3097,21 @@ fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
 
     assert!(
         !follows_what_was_written(&without(".follow_feed(")),
-        "the sweep does not see a branch without the call — it cannot fail"
+        "the sweep does not see an arm without the call — it cannot fail"
+    );
+    let read_before = format!(
+        "let state = letters::state_now();\n{}",
+        branch.replace(
+            ".follow_feed(&letters::state_now())",
+            ".follow_feed(&state)"
+        )
     );
     assert!(
-        !follows_what_was_written(&without("state_now()")),
+        read_before.contains(".follow_feed(&state)"),
+        "the control must change the arm it is made of"
+    );
+    assert!(
+        !follows_what_was_written(&read_before),
         "the sweep does not see a call fed with the reading made before the write"
     );
 
@@ -3064,245 +3145,6 @@ fn squeezed_code(text: &str) -> String {
         .join(" ")
         .replace("( ", "(")
         .replace(" )", ")")
-}
-
-/// Whether a branch repaints the switch through the door without the erase, and not through the
-/// one with it.
-fn repaints_without_an_erase(branch: &str) -> bool {
-    let code = squeezed_code(branch);
-
-    code.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)")
-        && !code.contains("repaint::control(hwnd, IDC_NEWS_SWITCH)")
-}
-
-/// The calls that put pixels into a DC — the ones a glyph body makes, and the GDI calls a later
-/// hand could put in front of them.
-const PAINT_CALLS: [&str; 9] = [
-    "FillRect(",
-    "paint_rounded(",
-    "paint_ellipse(",
-    "draw_check_mark(",
-    "paint_label(",
-    "DrawTextW(",
-    "RoundRect(",
-    "Polyline(",
-    "BitBlt(",
-];
-
-/// Whether the first thing a body paints is its whole rectangle in the colour of the ground the
-/// element lies on — the condition on which the door of task Т-45-3 may be taken.
-///
-/// ⚠ Since task T-71-5 the fill stands in the one glyph body `draw_glyph`, drawn into its buffer
-/// with the ground the door names (the switch names the panel — the sentry of that task asserts
-/// it); until then it stood in `draw_switch` as `FillRect(dc, &rect, brushes.panel_bg())`.
-fn paints_its_whole_rectangle_first(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let Some(fill) = code.find("FillRect(target, &rect, ground)") else {
-        return false;
-    };
-
-    PAINT_CALLS
-        .iter()
-        .filter_map(|call| code.find(call))
-        .all(|at| at >= fill)
-}
-
-/// **Task T-71-2, finding Э70-Б-2 — the switch is repainted without an erase frame.**
-///
-/// The owner's word of 2026-09-14: «при снятии и проставлении галки строка моргает». The branch of
-/// `IDC_NEWS_SWITCH` asked for the repaint **with** the erase: `WM_ERASEBKGND` fills the switch
-/// with the brush `on_ctl_color` answers `WM_CTLCOLORBTN` with — the brush of the **window** — and
-/// only the next frame brings `WM_DRAWITEM`, where `draw_switch` paints the rectangle in the colour
-/// of the **panel** the switch lies on. The frame between the two is the blink, and it is the very
-/// frame the door `widgets::repaint::control_no_erase` of task Т-45-3 was made to take away.
-///
-/// Two halves, because a letters window cannot be built here (see the test above): the branch goes
-/// through the door, and the condition of the door holds — the body the switch is drawn by paints
-/// its whole rectangle before anything else, so the erase is needed for nothing. Since task T-71-5
-/// that body is `draw_glyph`, the one the wizard's glyphs share.
-///
-/// ⚠ Controls: the same branch with the call of `e70` is caught, and so are a branch that repaints
-/// nothing and a branch that keeps the erase beside the door; a body whose fill comes after the
-/// figure and a body that fills the glyph cell instead of the rectangle are caught too.
-#[test]
-fn the_switch_is_repainted_without_an_erase_frame() {
-    let source = letters_module_source();
-    let branch = switch_branch(&source).expect(
-        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
-    );
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        paints_its_whole_rectangle_first(body),
-        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and the \
-         glyph body the switch is drawn by no longer fills its rectangle before anything else:\n\
-         {body}"
-    );
-
-    assert!(
-        repaints_without_an_erase(branch),
-        "Э70-Б-2: the click repaints the switch with the erase — a frame of the window's brush \
-         over a switch that stands on a panel:\n{branch}"
-    );
-
-    let door = "widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)";
-    let erase = "widgets::repaint::control(hwnd, IDC_NEWS_SWITCH)";
-
-    let of_e70 = branch.replace(door, erase);
-    assert_ne!(
-        of_e70, branch,
-        "the control must change the branch it is made of"
-    );
-    assert!(
-        !repaints_without_an_erase(&of_e70),
-        "the sweep does not see the call of e70 — it cannot fail"
-    );
-
-    let without_repaint = branch
-        .lines()
-        .filter(|line| !line.contains(door))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !repaints_without_an_erase(&without_repaint),
-        "the sweep does not see a branch that repaints nothing"
-    );
-
-    assert!(
-        !repaints_without_an_erase(&format!("{branch}\n{erase};")),
-        "the sweep does not see the erase kept beside the door"
-    );
-
-    let fill = "FillRect(target, &rect, ground)";
-
-    let moved = body
-        .lines()
-        .filter(|line| !line.contains(fill))
-        .chain([fill])
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !paints_its_whole_rectangle_first(&moved),
-        "the sweep does not see the fill put after the figure"
-    );
-
-    let of_the_cell = body.replace(fill, "FillRect(target, &cell, ground)");
-    assert_ne!(
-        of_the_cell, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !paints_its_whole_rectangle_first(&of_the_cell),
-        "the sweep does not see a fill of the glyph cell instead of the rectangle"
-    );
-}
-
-/// Whether a body paints nothing itself and hands its element to the one glyph body.
-fn hands_its_glyph_to_the_one_body(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    code.contains("draw_glyph(dc, rect, state, glyph, label)")
-        && PAINT_CALLS.iter().all(|call| !code.contains(call))
-}
-
-/// Whether a glyph body draws in one frame: into the buffer of `theme::PaintBuffer`, every paint
-/// call aimed at the buffer and none at the DC of the message, and one blit at the end.
-fn draws_in_one_frame(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let buffered = code
-        .contains("let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };")
-        && code.contains("let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);")
-        && code.contains("buffer.blit(dc)");
-
-    let aimed_at_the_message = PAINT_CALLS
-        .iter()
-        .filter(|call| **call != "BitBlt(")
-        .any(|call| code.contains(&format!("{call}dc,")));
-
-    buffered && !aimed_at_the_message
-}
-
-/// **Task T-71-5, decision 132.3 — the switch is drawn by the one glyph body, in one frame.**
-///
-/// After task T-71-2 the owner still saw the switch blink on the live 0.71.0. The erase was gone;
-/// what was left was the body: `draw_switch` laid its fill, its figure, its tick and its caption
-/// **straight into the DC of the message**, call by call, and a click brings at least four
-/// `WM_DRAWITEM` (the press, the focus, the release, the repaint of the branch) — DWM sampled the
-/// window between the calls and the row stood blank for a frame. Its twin in the wizard blinked the
-/// same way until task Т-33-5 gave it `theme::PaintBuffer`. The owner's word: the ready solution
-/// the wizard's check boxes already have, not a copy of the repair — so both elements go through
-/// one body, and what tells them apart is what does: where «checked» is read and what they lie on.
-///
-/// ⚠ Controls: a door that paints something itself, a body whose paint goes to the DC of the
-/// message, and a body without the buffer are caught.
-#[test]
-fn the_switch_is_drawn_by_the_one_glyph_body_in_one_frame() {
-    let source = letters_module_source();
-    let switch = letters_function_body(&source, "unsafe fn draw_switch(")
-        .expect("src\\letters.rs must still declare `draw_switch`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(switch),
-        "решение 132.3: draw_switch paints on its own instead of going through the one glyph body \
-         the wizard's check boxes are drawn by:\n{switch}"
-    );
-
-    let wizard = letters_function_body(&source, "unsafe fn draw_wizard_glyph(")
-        .expect("src\\letters.rs must still declare `draw_wizard_glyph`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(wizard),
-        "the wizard's glyphs must go through the same body:\n{wizard}"
-    );
-
-    assert!(
-        squeezed_code(switch).contains("ground: Ground::Panel")
-            && squeezed_code(wizard).contains("ground: Ground::Window"),
-        "the switch lies on a panel and the wizard's glyphs on the window"
-    );
-
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        draws_in_one_frame(body),
-        "the one glyph body must draw into theme::PaintBuffer and blit once:\n{body}"
-    );
-
-    // Controls of the doors.
-    assert!(
-        !hands_its_glyph_to_the_one_body(&format!(
-            "{switch}\n    unsafe {{ FillRect(dc, &rect, brushes.panel_bg()) }};"
-        )),
-        "the sweep does not see a door that paints something itself"
-    );
-
-    // Controls of the body.
-    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
-    assert_ne!(
-        at_the_message, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&at_the_message),
-        "the sweep does not see a paint call aimed at the DC of the message"
-    );
-
-    let unbuffered = body.replace(
-        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
-        "let target = dc;",
-    );
-    assert_ne!(
-        unbuffered, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&unbuffered),
-        "the sweep does not see a body that draws past the buffer"
-    );
 }
 
 /// The version line of «От автора» says what is installed, and what is available when the feed
@@ -3384,83 +3226,69 @@ fn code_lines(text: &str) -> impl Iterator<Item = &str> {
         .filter(|line| !line.starts_with("//"))
 }
 
-/// Whether this body decides «Открыть страницу загрузки» **without asking the feed** — the shape
-/// task T-78-2 put in place of the one `e77` carried.
-///
-/// ⚠ Two halves, and the first is not decoration: a body that stopped naming the button at all
-/// would satisfy the second half by saying nothing, and the sweep would be green for the one
-/// reason that must never make it green.
-///
-/// ⚠⚠ The second half looks at **every** code line of the body and not only at the lines that
-/// name the button. Written the other way it could not have failed on the enabling body at all:
-/// `e77` spelt that one over five lines, with `IDC_NEWS_DOWNLOAD,` on one and `view.download` on
-/// another, so a line-by-line look would have found no line carrying both and called it clean.
-fn download_is_free_of_the_feed(body: &str) -> bool {
-    code_lines(body).any(|line| line.contains("IDC_NEWS_DOWNLOAD"))
-        && code_lines(body).all(|line| !line.contains("view.download"))
-}
-
 /// **«Открыть страницу загрузки» stands there whatever the feed says** — task T-78-2, решение
-/// 139.2 п. 3 и п. 6.
+/// 139.2 п. 3 и п. 6, in the shell since T-120-17.
 ///
 /// Until `e77` the button was put into the row only when an `update` entry of the feed existed,
 /// and enabled only when that entry's own `link` was not a placeholder. There is no feed
 /// (138.4), so the button was translated into fourteen languages and shown to nobody.
 ///
-/// The sweep is over the two bodies that decide it, because neither is a pure function: one
-/// lays controls out in a window and the other enables them. What it asserts is the absence of
-/// the feed from both — that `view.download` is gone from the decision — and the presence of
-/// the build's own address in the enabling one.
+/// The description of «От автора» is pure now, so the window itself is asked: with no feed, with
+/// news only, with an update, the switch off and on — the button stands there every time, and it
+/// is disabled by the address of this build (`links::DOWNLOAD_URL` a placeholder) and never by the
+/// feed.
 #[test]
 fn the_download_button_stands_there_whatever_the_feed_says() {
-    let source = letters_source();
+    use lang_switcher::letters::{FeedView, author_view_in, sample_entry};
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::author::{Author, Id};
 
-    for (signature, what) in [
-        ("unsafe fn layout_author(", "lays the button out"),
-        ("fn fill_author(", "enables it"),
-    ] {
-        assert!(
-            download_is_free_of_the_feed(body_of(&source, signature)),
-            "the body that {what} must name IDC_NEWS_DOWNLOAD and ask the feed nothing about it"
-        );
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let today = item.date.expect("the sample entry carries its day");
+    let news = [sample_entry()];
+    let feeds = [
+        ("no feed", None, &news[..0]),
+        ("news only", None, &news[..]),
+        ("an update", Some(&item), &news[..]),
+    ];
+    let placeholder = links::is_placeholder(links::DOWNLOAD_URL);
+
+    for (what, update, news) in feeds {
+        for switch in [false, true] {
+            let state = Letters {
+                feed: switch,
+                release_window: switch,
+                ..Letters::default()
+            };
+            let view = author_view_in(
+                Language::Ru,
+                &state,
+                today,
+                "1.7.0",
+                FeedView { update, news },
+            );
+            let window = Author {
+                view,
+                language: Language::Ru,
+                theme: ThemeSetting::Light,
+            }
+            .describe();
+
+            assert!(
+                format!("{:?}", window.body).contains("Button { id: Download,"),
+                "{what}, switch {switch}: «Открыть страницу загрузки» must stand in «От автора»"
+            );
+            assert_eq!(
+                window.disabled.contains(&Id::Download),
+                placeholder,
+                "{what}, switch {switch}: the button is disabled by the address of this build, \
+                 not by the feed"
+            );
+        }
     }
-
-    // The enabling body judges the button by the address this build carries, and by nothing
-    // else — the same question «Открыть канал» and «Открыть страницу поддержки» stand behind.
-    assert!(
-        body_of(&source, "fn fill_author(").contains("links::DOWNLOAD_URL"),
-        "the button is enabled by the build's own download address"
-    );
-
-    // ⚠ Отрицательный контроль — **the same predicate**, run over the two shapes `e77`
-    // carried. A control that asserted something else about them would leave the sweep above
-    // unproven.
-    for (what, sample) in [
-        (
-            "the row of e77",
-            "                (IDC_NEWS_DOWNLOAD, view.download.is_some()),",
-        ),
-        (
-            "the enabling of e77",
-            "    enable(\n        hwnd,\n        IDC_NEWS_DOWNLOAD,\n        view.download\n            \
-             .as_deref()\n            .is_some_and(|url| !links::is_placeholder(url)),\n    );",
-        ),
-    ] {
-        assert!(
-            !download_is_free_of_the_feed(sample),
-            "the sweep must refuse {what}, which is the shape it is written against"
-        );
-    }
-
-    // ⚠ And the first half of the predicate is load-bearing: a body that stopped naming the
-    // button would otherwise pass by saying nothing at all.
-    assert!(
-        !download_is_free_of_the_feed("    enable(hwnd, IDC_NEWS_LETTERS, true);"),
-        "a body that never names the button is not a body that lays it out"
-    );
-
-    // And «включена» is a fact rather than a hope: the address behind it is real.
-    assert!(!links::is_placeholder(links::DOWNLOAD_URL));
 }
 
 /// **«Последние письма»** — the update first, then the news newest first, each marked read or
@@ -3642,91 +3470,6 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
 // =========================================================================================
 // The colours and the grounds of the windows — FR-92а's vocabulary, reused
 // =========================================================================================
-
-/// **Every label that stands on a block is filled with the block's colour**, and the runs are
-/// whole.
-///
-/// ⚠ The test exists because the twin of this rule was written short once: the gate of
-/// `WM_DRAWITEM` named the first row of a letter and not the four rows, and «Привет» came up with
-/// three markers and one sentence. A run written short is the defect this file is watching for.
-#[test]
-fn every_row_of_every_run_stands_on_its_panel() {
-    // The paragraphs of the three panels of «От автора».
-    for control in [1264, 1268, 1275, 1269, 1270, 1273, 1277] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} stands on a panel of «От автора»"
-        );
-    }
-
-    // And what does **not**: the name and version of «От автора».
-    for control in [1261, 1262] {
-        assert!(
-            !letters::stands_on_a_panel(control),
-            "control {control} stands on the window's own ground"
-        );
-    }
-}
-
-/// **⭐⭐ A BUTTON asks the same question as a label, and until task T-80-1 it did not** —
-/// finding of the live acceptance of `e79`.
-///
-/// The drawing cuts a rounded figure out of the button's rectangle and fills what it cuts away
-/// with **the ground the button stands on**. The buttons of these windows were handed
-/// `window_bg` unconditionally, and five of the buttons of «От автора» stand **on panels**. So
-/// the corners came out in the colour of the window over a panel of another colour — measured
-/// 18/16/13 in «Туман» and 7/8/9 in «Графит» — and what the eye saw was four square corners round
-/// a button whose own face, in «Туман», is the panel's colour exactly. Word of the user: «видны
-/// углы по краям кнопок… в темной теме также видны углы кнопок».
-///
-/// ⛔ The answer is **the function the labels already use**, not a second one beside it. That is
-/// the whole of what «привести все кнопки к типизированному механизму, который у нас уже
-/// существует» asks for.
-#[test]
-fn a_button_on_a_panel_says_so_by_the_same_question_a_label_does() {
-    // «От автора»: five buttons stand on the three panels — two on «Автор», two on «Новости и
-    // обновления», one on «Обратная связь».
-    for (control, what) in [
-        (1265, "«Поддержать автора» on the Author panel"),
-        (1266, "«Открыть канал» on the Author panel"),
-        (1271, "«Открыть страницу загрузки» on the News panel"),
-        (1272, "«Последние письма» on the News panel"),
-        (1278, "«Написать автору…» on the Feedback panel"),
-    ] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "{what} ({control}) stands on a panel and must be told so"
-        );
-    }
-
-    // And the buttons that stand on the window's own ground do **not** — «Закрыть» of «От
-    // автора». A list that said «panel» for it would paint its corners in the panel's colour over
-    // the window, which is the same defect facing the other way.
-    assert!(
-        !letters::stands_on_a_panel(1279),
-        "«Закрыть» of «От автора» (1279), below every panel, stands on the window's own ground"
-    );
-
-    // ⚠⚠ **And the drawing must ASK.** A list that answers right while nobody consults it is a
-    // guard that cannot fail — measured: with the question put back to a flat `window_bg()`, every
-    // assertion above stayed green and the defect was whole. So the body that chooses the button's
-    // ground is read, and it has to name this function.
-    let source = letters_source();
-    let body = body_of(&source, "unsafe fn on_draw_item(");
-
-    assert!(
-        body.contains("stands_on_a_panel(control)"),
-        "the button branch of on_draw_item must ask stands_on_a_panel for its ground"
-    );
-
-    // Отрицательный контроль — the shape of `e79`, which the reading must refuse.
-    assert!(
-        !body
-            .replace("stands_on_a_panel(control)", "false")
-            .contains("stands_on_a_panel(control)"),
-        "the reading must refuse the body that asked nothing"
-    );
-}
 
 // =========================================================================================
 // The mark of the first run — stage E116, task T-116-12, решение 208.59
@@ -4178,6 +3921,73 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
     );
 }
 
+/// **T-120-19, the red «before»: the wizard opens as a window of the shell, and «Закрыть» of the
+/// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
+/// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
+/// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
+/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
+/// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
+///
+/// Before the task the door made a dialog out of `IDD_WIZARD` — the class `#32770`.
+#[cfg(feature = "testing")]
+#[test]
+fn the_wizard_is_a_window_of_the_shell_and_its_row_stands_still() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::windows::wizard;
+
+    let _guard = with_product_strings();
+
+    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
+        .expect("app.rc must be readable");
+    let owner = HiddenOwner::new();
+    let window = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let mut class = [0u16; 64];
+    // SAFETY: a live window this test opened; the buffer is a local of this frame.
+    let length =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
+    let class = String::from_utf16_lossy(&class[..usize::try_from(length).unwrap_or(0)]);
+    let shell = class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
+    assert!(
+        shell && !script.contains("IDD_WIZARD DIALOGEX"),
+        "the wizard must be a window of the shell ({class}) and app.rc must carry no IDD_WIZARD"
+    );
+
+    let text = Text::new(Language::Ru.tag(), Direction::LeftToRight).expect("DirectWrite");
+    let next = wizard::Id::Next.number();
+    for (class, w, h) in [(Class::Narrow, 620.0, 500.0), (Class::Large, 1280.0, 720.0)] {
+        let k = fit::k_for(Language::Ru.tag(), class);
+        let mut places = Vec::new();
+        for (name, page) in wizard::states(Language::Ru) {
+            let page = page.map(&wizard::Id::number);
+            let layout = lay_out(&page, client_size(w, h), k, false, &text);
+            let rect = layout
+                .items
+                .iter()
+                .find(|item| item.id == Some(next))
+                .map(|item| item.rect)
+                .unwrap_or_else(|| panic!("{name}: the main button must be laid out"));
+            println!(
+                "{w} × {h}, {name}: right {:.1}, top {:.1}",
+                rect.x + rect.w,
+                rect.y
+            );
+            places.push((name, rect.x + rect.w, rect.y));
+        }
+        let (first, right, top) = &places[0];
+        for (name, other_right, other_top) in &places {
+            assert!(
+                (other_right - right).abs() < 0.5 && (other_top - top).abs() < 0.5,
+                "{w} × {h}: the main button of «{name}» stands at ({other_right:.1}, \
+                 {other_top:.1}), of «{first}» at ({right:.1}, {top:.1})"
+            );
+        }
+    }
+}
+
 /// Every button of a description, the cards' and the row's, with what it says about the browser.
 fn buttons_of<I: Copy>(window: &lang_switcher::ui::scene::Window<I>) -> Vec<(I, String, bool)> {
     use lang_switcher::ui::scene::Node;
@@ -4526,9 +4336,140 @@ fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
     );
 }
 
-/// **The pictures of C3 of T-120-16** — the four letters and «Последние письма» drawn in memory by
-/// the drawing of the shell itself (the layout and `elements::draw`, as a live window draws them):
-/// Russian straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
+/// **Задача T-103-2, сторож (4), решение 181.1 — a change of language on the fly moves where a
+/// person is sent to write**, the wizard a window of the shell since T-120-19 (moved here from
+/// `tests\settings.rs`, where it opened the dialog `IDD_WIZARD`). Opened hidden and asked by the
+/// door of the task where its address would take them: built in Russian, the group; the language
+/// moved and [`letters::language_changed`] told the window — which opens again in the new
+/// language — GitHub Issues; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let now = || {
+        let window = letters::wizard_window().expect("the wizard is open");
+        let address = letters::testing::feedback_url(window).expect("a window of `letters`");
+        (window, address)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, address) = now();
+    seen.push(("En, told", address));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let group = links::GROUP_URL;
+    let issues = links::ISSUES_URL;
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "the wizard is built again in the new language"
+    );
+}
+
+/// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
+/// pages of the site too.** «От автора», a window of the shell since T-120-17 (the test moved here
+/// from `tests\settings.rs`, where it opened the dialog `IDD_AUTHOR`), opened hidden and asked by
+/// the door of the task which pages «Открыть страницу загрузки» and the address under the panda
+/// would open — by the language `letters::act` chooses them by. Built in Russian, the Russian
+/// pages; English after [`letters::language_changed`], the pages under `/en/`; Ukrainian, its own
+/// under `/uk/` (Q-206-1); Kazakh, the Russian ones again (181.33 п. 2, 202.6).
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_author_hidden(owner.0, HMODULE::default(), "0.83.0")
+        .expect("«От автора» must open");
+    let now = || {
+        let window = letters::testing::author_window().expect("«От автора» is open");
+        let pages = letters::testing::site_pages(window).expect("a window of `letters`");
+        (window, pages)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, pages) = now();
+    seen.push(("En, told", pages));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Kk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Kk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let russian = (links::DOWNLOAD_URL, links::PROGRAM_URL);
+    let english_pages = (links::DOWNLOAD_URL_EN, links::PROGRAM_URL_EN);
+    let ukrainian = (
+        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk",
+        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk",
+    );
+
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", russian),
+            ("En, not told", russian),
+            ("En, told", english_pages),
+            ("Uk, told", ukrainian),
+            ("Kk, told", russian),
+        ],
+        "181.33: the pages follow the language of the window, and move when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "«От автора» is built again in the new language"
+    );
+}
+
+/// **The pictures of C3 of T-120-16 and T-120-17** — the four letters, «Последние письма» and «От
+/// автора» drawn in memory by the drawing of the shell itself (the layout and `elements::draw`, as a
+/// live window draws them): Russian and German straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
 /// screen (1280 × 720) and the narrowest one (620 × 500), at the factor of the table. Printed only
 /// when `LANGSW_LETTERS_DIR` names a folder.
 #[cfg(feature = "testing")]
@@ -4540,7 +4481,7 @@ fn print_the_letters() {
     use lang_switcher::ui::layout::{client_size, lay_out};
     use lang_switcher::ui::text::{Direction, Text};
     use lang_switcher::ui::tokens::{Color, Theme};
-    use lang_switcher::ui::windows::{letter, letters_list};
+    use lang_switcher::ui::windows::{author, letter, letters_list, wizard};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
     let Some(folder) = std::env::var_os("LANGSW_LETTERS_DIR") else {
@@ -4553,7 +4494,7 @@ fn print_the_letters() {
     let folder = Path::new(&folder);
     std::fs::create_dir_all(folder).expect("the folder of the pictures");
 
-    for language in [Language::Ru, Language::He] {
+    for language in [Language::Ru, Language::De, Language::He] {
         let rtl = language.is_rtl();
         let direction = if rtl {
             Direction::RightToLeft
@@ -4569,6 +4510,16 @@ fn print_the_letters() {
                     letters_list::states(language)
                         .into_iter()
                         .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+                )
+                .chain(
+                    author::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&author::Id::number))),
+                )
+                .chain(
+                    wizard::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&wizard::Id::number))),
                 )
                 .collect();
         for (name, window) in &windows {
@@ -4708,4 +4659,200 @@ fn hello_shows_the_frame_of_its_tick() {
     for letter in [Letter::Thanks, Letter::Update, Letter::News(7)] {
         assert_eq!(view(letter).tick(), None, "{letter:?} stands still");
     }
+}
+
+/// **«Обновление» dates the release in the language of its window** — the same as «От автора»
+/// below (T-120-17): `plan_in` speaks `language`, and the day of the release came out in the
+/// program's («Version 1.7.1 came out on 16 ноября» in Tamil, the list of the wave of T-120-24).
+#[test]
+fn the_update_letter_dates_the_release_in_the_language_of_its_window() {
+    use lang_switcher::letters::{format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let day = item.date.expect("the sample entry carries its day");
+    let context = letters::PlanContext {
+        version: "1.7.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: false,
+        item: Some(&item),
+    };
+    let plan = letters::plan_in(Language::De, Letter::Update, &context);
+    let german = format_date_in(Language::De, day);
+    let russian = format_date_in(Language::Ru, day);
+
+    println!("De: {} (the program speaks Russian)", plan.note);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        plan.note.contains(&german) && !plan.note.contains(&russian),
+        "the notice of «Обновление» must carry «{german}», the day in the language of the window: {}",
+        plan.note
+    );
+}
+
+/// **T-120-17: «От автора» dates the reading of the feed in the language of its window**, not in
+/// the program's. The two are one in the running program; a description built for another language
+/// — the pictures of C3, the instrument of fitting, the window built again after a change — printed
+/// the day with the Russian month of the program («16 ноября» in Hebrew).
+#[test]
+fn the_author_window_dates_the_feed_in_the_language_of_its_window() {
+    use lang_switcher::letters::{FeedView, author_view_in, format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let today = item.date.expect("the sample entry carries its day");
+    let state = Letters {
+        feed_last_read: Some(today),
+        ..Letters::default()
+    };
+    let view = author_view_in(
+        Language::De,
+        &state,
+        today,
+        "1.7.0",
+        FeedView {
+            update: None,
+            news: &[],
+        },
+    );
+    let german = format_date_in(Language::De, today);
+    let russian = format_date_in(Language::Ru, today);
+
+    println!("De: {} (the program speaks Russian)", view.feed_state);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        view.feed_state.contains(&german) && !view.feed_state.contains(&russian),
+        "the line of the feed must carry «{german}», the day in the language of the window: {}",
+        view.feed_state
+    );
+}
+
+/// **T-120-17: the two lines of the state of «От автора» are the element `Status` of the shell, and
+/// its dot says whether the line is good** (passport §6): the feed read — the accent, never read —
+/// the quiet dot; the version the latest — the accent, a newer one announced — the warning. Both
+/// ways, so that a window that put one dot on every line is caught; and through `author_view_in`,
+/// so that the view says it from the state and not the test.
+#[test]
+fn the_lines_of_the_state_of_the_author_window_say_by_their_dot_whether_they_are_good() {
+    use lang_switcher::letters::{FeedView, author_view_in, sample_entry};
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{MenuState, Node};
+    use lang_switcher::ui::windows::author::{Author, Id};
+
+    let _guard = with_product_strings();
+
+    let newer = sample_entry();
+    let today = newer.date.expect("the sample entry carries its day");
+    let cases = [
+        (
+            Some(today),
+            Some(&newer),
+            MenuState::Working,
+            MenuState::Restart,
+        ),
+        (None, None, MenuState::Paused, MenuState::Working),
+    ];
+
+    for (read, update, feed, version) in cases {
+        let state = Letters {
+            feed_last_read: read,
+            ..Letters::default()
+        };
+        let view = author_view_in(
+            Language::Ru,
+            &state,
+            today,
+            "1.7.0",
+            FeedView { update, news: &[] },
+        );
+        let lines = [
+            Node::<Id>::Status {
+                state: feed,
+                words: view.feed_state.clone(),
+            },
+            Node::<Id>::Status {
+                state: version,
+                words: view.version_state.clone(),
+            },
+        ];
+        let window = Author {
+            view,
+            language: Language::Ru,
+            theme: ThemeSetting::Light,
+        }
+        .describe();
+        let body = format!("{:?}", window.body);
+
+        for line in lines {
+            println!("read {read:?}, update {}: {line:?}", update.is_some());
+            assert!(
+                body.contains(&format!("{line:?}")),
+                "read {read:?}, update {}: the window must carry {line:?}",
+                update.is_some()
+            );
+        }
+    }
+}
+
+/// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
+/// window, 620 × 500, at a type not under 12 points** — in every language, at the factor of the
+/// table, laid out by the layout of the shell and measured by DirectWrite; the pair of its cards
+/// stands side by side there (the rule of the pair). A language that needs more than the pair gives
+/// way to is named by the instrument of fitting (`tests\ui_fit.rs`) and the common list of what is
+/// excused.
+///
+/// Before the task «От автора» was the dialog `IDD_AUTHOR`: there was no description to lay out, and
+/// its template did not fit 620 × 500 (the mock-up's measure: 84 points short).
+#[test]
+fn the_author_window_fits_the_narrowest_window() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::TYPE_FLOOR;
+    use lang_switcher::ui::windows::catalogue;
+
+    let _guard = with_product_strings();
+
+    let mut faults = Vec::new();
+    for language in [Language::Ru, Language::De, Language::En, Language::He] {
+        let Some((_, window)) = catalogue(language)
+            .into_iter()
+            .find(|(name, _)| name == "author")
+        else {
+            faults.push(format!(
+                "{language:?}: «От автора» is not a window of the shell"
+            ));
+            continue;
+        };
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        let k = fit::k_for(language.tag(), Class::Narrow);
+        let layout = lay_out(&window, client_size(620.0, 500.0), k, rtl, &text);
+        if !layout.shortfall.fits() {
+            faults.push(format!(
+                "{language:?}: does not fit 620 × 500, {:.1} down",
+                layout.shortfall.h
+            ));
+        }
+        if layout.b < TYPE_FLOOR.0 {
+            faults.push(format!("{language:?}: type {:.2} under 12", layout.b));
+        }
+    }
+    assert!(faults.is_empty(), "«От автора»:\n{}", faults.join("\n"));
 }

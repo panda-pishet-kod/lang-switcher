@@ -1447,209 +1447,6 @@ pub type NewsMap<T> = BTreeMap<String, T>;
 // 9. What goes into a letter window — FR-101, task Т-32-3
 // =========================================================================================
 
-/// Resource identifiers of the two templates, mirrored from `app.rc` by hand — the same rule
-/// every identifier of `settings` is kept by, and for the same reason: a `.rc` file and a Rust
-/// file share no header, and a mismatch shows up as a missing resource rather than the wrong
-/// one. The letters and «Последние письма» are windows of the shell (T-120-16) and have none.
-///
-/// The «От автора» window — FR-103.
-pub const IDD_AUTHOR: u16 = 204;
-/// The wizard «Написать автору» — FR-104.
-pub const IDD_WIZARD: u16 = 205;
-
-// Controls of `IDD_AUTHOR`, mirrored from `app.rc`.
-const IDC_AUTHOR_ICON: i32 = 1260;
-/// ⭐ **Публичен с задачи T-81-3** — решение 142.2 п. 6. Имя программы стало кнопкой-ссылкой и в
-/// этом окне, и `settings::is_the_program_name` спрашивает **этот** номер, а не второй такой же,
-/// записанный у себя: зеркальное число — число, которое может разойтись.
-pub const IDC_AUTHOR_NAME: i32 = 1261;
-const IDC_AUTHOR_VERSION: i32 = 1262;
-const IDC_AUTHOR_PANEL: i32 = 1263;
-const IDC_AUTHOR_TEXT: i32 = 1264;
-const IDC_AUTHOR_SUPPORT: i32 = 1265;
-const IDC_AUTHOR_CHANNEL: i32 = 1266;
-const IDC_NEWS_PANEL: i32 = 1267;
-const IDC_NEWS_ABOUT: i32 = 1268;
-const IDC_NEWS_STATE: i32 = 1269;
-const IDC_NEWS_VERSION: i32 = 1270;
-const IDC_NEWS_DOWNLOAD: i32 = 1271;
-const IDC_NEWS_LETTERS: i32 = 1272;
-const IDC_NEWS_FILE_ONLY: i32 = 1273;
-const IDC_NEWS_SWITCH: i32 = 1274;
-const IDC_NEWS_SWITCH_SUB: i32 = 1275;
-const IDC_FEEDBACK_PANEL: i32 = 1276;
-const IDC_FEEDBACK_TEXT: i32 = 1277;
-const IDC_FEEDBACK_WRITE: i32 = 1278;
-const IDC_AUTHOR_CLOSE: i32 = 1279;
-/// Две строки описания общей шапки — задача T-81-3. Слова у них те же, что в «О программе».
-const IDC_AUTHOR_LINE_1: i32 = 1280;
-const IDC_AUTHOR_LINE_2: i32 = 1281;
-
-// Controls of `IDD_WIZARD`, mirrored from `app.rc` — FR-104.
-const IDC_WZ_STEP: i32 = 1300;
-const IDC_WZ_PROGRESS: i32 = 1301;
-const IDC_WZ_TITLE: i32 = 1302;
-const IDC_WZ_NOTE: i32 = 1303;
-const IDC_WZ_CARD_1: i32 = 1304;
-const IDC_WZ_CARD_T1: i32 = 1307;
-const IDC_WZ_CARD_S1: i32 = 1310;
-const IDC_WZ_PROGRAM_LABEL: i32 = 1313;
-const IDC_WZ_PROGRAM: i32 = 1314;
-const IDC_WZ_CAPTURE: i32 = 1315;
-const IDC_WZ_CAPTURE_NOTE: i32 = 1316;
-const IDC_WZ_FIELD_1: i32 = 1317;
-const IDC_WZ_FIELD_2_SUB: i32 = 1320;
-const IDC_WZ_TYPED_LABEL: i32 = 1321;
-const IDC_WZ_LAYOUT: i32 = 1322;
-const IDC_WZ_PRESSED_LABEL: i32 = 1323;
-const IDC_WZ_CHIP: i32 = 1324;
-const IDC_WZ_EXPECTED_LABEL: i32 = 1325;
-const IDC_WZ_EXPECTED: i32 = 1326;
-const IDC_WZ_GOT_LABEL: i32 = 1327;
-const IDC_WZ_GOT: i32 = 1328;
-const IDC_WZ_REPEAT_LABEL: i32 = 1329;
-const IDC_WZ_REPEAT_1: i32 = 1330;
-const IDC_WZ_IDEA_LABEL: i32 = 1333;
-const IDC_WZ_IDEA: i32 = 1334;
-const IDC_WZ_HELPS_LABEL: i32 = 1335;
-const IDC_WZ_HELPS: i32 = 1336;
-const IDC_WZ_ATTACH_1: i32 = 1337;
-const IDC_WZ_ATTACH_V1: i32 = 1341;
-const IDC_WZ_ATTACH_FOOT: i32 = 1345;
-const IDC_WZ_PREVIEW: i32 = 1346;
-const IDC_WZ_COPY: i32 = 1347;
-const IDC_WZ_SAVE: i32 = 1348;
-const IDC_WZ_STATUS: i32 = 1349;
-const IDC_WZ_CANCEL: i32 = 1350;
-const IDC_WZ_BACK: i32 = 1351;
-const IDC_WZ_NEXT: i32 = 1352;
-const IDC_WZ_THANKS: i32 = 1353;
-const IDC_WZ_CHANNEL: i32 = 1354;
-/// «Адрес для письма: …» — the last step when the site did not answer, задача T-107-3 (решение
-/// 199.3; until 1.2.0 — a trouble's last step, задача T-103-7).
-const IDC_WZ_ADDRESS: i32 = 1355;
-/// «Скопировать адрес» — the same step.
-const IDC_WZ_COPY_ADDRESS: i32 = 1356;
-/// «Как с вами связаться…» — the label of the contact, задача T-107-3 (решения 199.10, 199.11).
-const IDC_WZ_CONTACT_LABEL: i32 = 1357;
-/// The contact itself — one line, at most [`appeal::CONTACT_MAX`] characters.
-const IDC_WZ_CONTACT: i32 = 1358;
-
-/// Every owner-drawn **static** of the wizard — the gate of `WM_DRAWITEM`, and it is written
-/// out in full for the reason a list of runs needs: a run written short
-/// is a row that never gets painted, and the screenshot is what finds it.
-const WIZARD_LABELS: [i32; 25] = [
-    IDC_WZ_STEP,
-    IDC_WZ_PROGRESS,
-    IDC_WZ_TITLE,
-    IDC_WZ_NOTE,
-    IDC_WZ_CARD_T1,
-    IDC_WZ_CARD_T1 + 1,
-    IDC_WZ_CARD_T1 + 2,
-    IDC_WZ_CARD_S1,
-    IDC_WZ_CARD_S1 + 1,
-    IDC_WZ_CARD_S1 + 2,
-    IDC_WZ_PROGRAM_LABEL,
-    IDC_WZ_CAPTURE_NOTE,
-    IDC_WZ_FIELD_2_SUB,
-    IDC_WZ_TYPED_LABEL,
-    IDC_WZ_PRESSED_LABEL,
-    IDC_WZ_CHIP,
-    IDC_WZ_EXPECTED_LABEL,
-    IDC_WZ_GOT_LABEL,
-    IDC_WZ_REPEAT_LABEL,
-    IDC_WZ_IDEA_LABEL,
-    IDC_WZ_HELPS_LABEL,
-    IDC_WZ_STATUS,
-    IDC_WZ_THANKS,
-    IDC_WZ_ADDRESS,
-    IDC_WZ_CONTACT_LABEL,
-];
-
-/// The four labels that stand beside the four boxes of «Что приложить?» — a run, and the
-/// footnote under them.
-const WIZARD_ATTACH_LABELS: [i32; 5] = [
-    IDC_WZ_ATTACH_V1,
-    IDC_WZ_ATTACH_V1 + 1,
-    IDC_WZ_ATTACH_V1 + 2,
-    IDC_WZ_ATTACH_V1 + 3,
-    IDC_WZ_ATTACH_FOOT,
-];
-
-/// Every owner-drawn **button** of the wizard: the three cards, the two radio runs, the four
-/// boxes and the six push buttons.
-const WIZARD_BUTTONS: [i32; 21] = [
-    IDC_WZ_CHANNEL,
-    IDC_WZ_CARD_1,
-    IDC_WZ_CARD_1 + 1,
-    IDC_WZ_CARD_1 + 2,
-    IDC_WZ_CAPTURE,
-    IDC_WZ_FIELD_1,
-    IDC_WZ_FIELD_1 + 1,
-    IDC_WZ_FIELD_1 + 2,
-    IDC_WZ_REPEAT_1,
-    IDC_WZ_REPEAT_1 + 1,
-    IDC_WZ_REPEAT_1 + 2,
-    IDC_WZ_ATTACH_1,
-    IDC_WZ_ATTACH_1 + 1,
-    IDC_WZ_ATTACH_1 + 2,
-    IDC_WZ_ATTACH_1 + 3,
-    IDC_WZ_COPY,
-    IDC_WZ_COPY_ADDRESS,
-    IDC_WZ_SAVE,
-    IDC_WZ_CANCEL,
-    IDC_WZ_BACK,
-    IDC_WZ_NEXT,
-];
-
-/// Whether this label stands **on** a panel, and is therefore filled with the panel's own
-/// colour — an owner-drawn static answers for the whole of its rectangle, so a
-/// window-coloured fill on a block would cut a hole in it.
-///
-/// A function over ranges and not a list: the cards of the wizard are numbered in runs, and a
-/// list is a place where a run can be written short — which is exactly the defect the first
-/// screenshot of «Привет» showed, in the twin of this rule.
-///
-/// The two windows are answered by one body because their identifiers are disjoint: every
-/// control of every template has a number of its own, so «is this label on a block» is a
-/// question about the number and not about the window.
-///
-/// ⭐⭐ **Labels only until task T-80-1, and that was the defect.** A button is owner-drawn too,
-/// and its drawing cuts a rounded figure out of the rectangle and fills what it cuts away with
-/// the ground — so a button standing on a panel but told «window» came out with four corners in
-/// the wrong colour: 18/16/13 off the panel in «Туман», 7/8/9 in «Графит», measured. The user saw
-/// exactly that on `e79` and named the cure himself — one mechanism for all of them, not a second
-/// one beside it. Hence this function is no longer about labels, and its name says so.
-///
-pub fn stands_on_a_panel(control: i32) -> bool {
-    matches!(
-        control,
-        // The paragraphs and lines of the three blocks.
-        IDC_AUTHOR_TEXT
-            | IDC_NEWS_ABOUT
-            | IDC_NEWS_SWITCH_SUB
-            | IDC_NEWS_STATE
-            | IDC_NEWS_VERSION
-            | IDC_NEWS_FILE_ONLY
-            | IDC_FEEDBACK_TEXT
-            // ⭐ **The buttons, since task T-80-1.** Every one of these is laid into a block by
-            // `place_panel_buttons`, which is handed the block's own inner corner — so «on a
-            // panel» is a fact of the layout and not a guess about pixels. «Закрыть» of «От
-            // автора» is absent on purpose: it stands below every block on the ground of the
-            // window.
-            | IDC_AUTHOR_SUPPORT
-            | IDC_AUTHOR_CHANNEL
-            | IDC_NEWS_DOWNLOAD
-            | IDC_NEWS_LETTERS
-            | IDC_FEEDBACK_WRITE
-    )
-        // The two lines of every card of the wizard stand **on** that card, and the card is
-        // drawn with the panel brush — see `draw_card`, which never changes its fill for
-        // exactly this reason.
-        || (IDC_WZ_CARD_T1..IDC_WZ_CARD_T1 + 3).contains(&control)
-        || (IDC_WZ_CARD_S1..IDC_WZ_CARD_S1 + 3).contains(&control)
-}
-
 /// What a button of a letter does when it is pressed — FR-101 and FR-103.
 ///
 /// A value and not a closure: the plan of a letter is a **pure** description of the window, and
@@ -1983,7 +1780,10 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
                 return LetterPlan::default();
             };
 
-            let released = item.date.map(format_date).unwrap_or_default();
+            let released = item
+                .date
+                .map(|day| format_date_in(language, day))
+                .unwrap_or_default();
 
             if matches!(letter, Letter::Update) {
                 // ⭐ «Обновление» — the honest letter of task T-119-9 (решения 208.95–208.99). It
@@ -2062,6 +1862,11 @@ pub const DEMO_TICK_MS: u32 = 130;
 
 /// How many frames one turn of the demonstration takes.
 pub const DEMO_FRAMES: u32 = 48;
+
+/// The frame the demonstration stands at while the window has no tick — Windows moves nothing
+/// (its animation is off) or the window is not shown: the word fixed, the key up, what the example
+/// is for (T-120-25: «анимация отключена — стоит итоговый кадр»).
+pub const DEMO_STILL: u32 = 20;
 
 /// One pair of the demonstration — the word as the wrong layout typed it, the word it becomes, and
 /// the two names of the layout indicator.
@@ -2590,37 +2395,17 @@ pub fn demo_frame(tick: u32, pair: DemoPair) -> DemoFrame {
 
 use std::cell::RefCell;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    DeleteObject, FillRect, GetDC, HDC, HFONT, ReleaseDC, SelectObject,
-};
-use windows::Win32::UI::Controls::{
-    DRAWITEMSTRUCT, ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
-    ODT_COMBOBOX, ODT_STATIC,
-};
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DM_SETDEFID, DestroyWindow, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, IDCANCEL,
-    KillTimer, MSG, MapDialogRect, PostMessageW, SET_WINDOW_POS_FLAGS, SW_HIDE, SW_SHOWNOACTIVATE,
-    SW_SHOWNORMAL, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOREDRAW, SWP_NOSIZE,
-    SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, WM_CLOSE, WM_COMMAND, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND,
-    WM_INITDIALOG, WM_MEASUREITEM, WM_NCDESTROY, WM_TIMER,
+    DestroyWindow, MSG, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
 };
 use windows::core::{Error as WinError, PCWSTR};
 
 use crate::settings::{self, Language};
-use crate::theme::{self, StaticColorRole, ThemeSetting};
+use crate::theme::ThemeSetting;
 // Общий слой элементов окон — задача Т-45-2, решение 107.1. Мастер и окна писем берут элементы
 // здесь: в этом и состоит принцип пользователя «один механизм на все окна».
 use crate::widgets;
-
-/// The identifier of the timer that counts the five seconds of «Взять из активного окна».
-///
-/// NFR-10 again: it exists only between the press of that button and the capture, and is
-/// killed on the way out of either. A second timer of this program, and the last.
-const CAPTURE_TIMER: usize = 2;
 
 // ⚠ `CAPTURE_SECONDS` stood here until task T-100-2. The five seconds are one number for the wizard
 // and for «Выбрать окно программы» of the settings window, and that number is
@@ -2709,7 +2494,7 @@ pub struct Wizard {
 
 impl Wizard {
     /// The road this appeal walks — FR-104: five steps for a trouble, three for an idea.
-    fn road(&self) -> &'static [Step] {
+    pub fn road(&self) -> &'static [Step] {
         if self.draft.trouble.is_idea() {
             &[Step::What, Step::Idea, Step::Preview]
         } else {
@@ -2724,7 +2509,7 @@ impl Wizard {
     }
 
     /// Which step is on the screen.
-    fn current(&self) -> Step {
+    pub fn current(&self) -> Step {
         if self.done {
             return Step::Done;
         }
@@ -2735,9 +2520,435 @@ impl Wizard {
     }
 
     /// Whether this is the last step — the one whose button says «Готово».
-    fn is_last(&self) -> bool {
+    pub fn is_last(&self) -> bool {
         self.step + 1 >= self.road().len()
     }
+}
+
+/// What «Далее» did — [`Wizard::forward`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forward {
+    /// The thanks was on the screen: the window closes.
+    Close,
+    /// The last step: the appeal is to go to the site — [`Wizard::send`].
+    Send,
+    /// The next step is on the screen.
+    Moved,
+}
+
+/// The answers a person types into the wizard — [`Wizard::answer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// «Программа» of «Где это случилось?».
+    Program,
+    /// «Ожидали» of «Что вы делали?».
+    Expected,
+    /// «Получили».
+    Got,
+    /// «Что предлагаете?» of «Опишите идею».
+    Idea,
+    /// «Чем это поможет?».
+    Helps,
+}
+
+/// How often the window of the wizard asks whether the site answered, ms — only while the appeal
+/// is on its way (T-120-19: the window of the shell has no message of its own to be posted, so it
+/// asks; NFR-10 — no timer at all at rest).
+pub const WIZARD_POLL_MS: u32 = 250;
+
+/// One second of the count-down of «Взять из активного окна», ms.
+pub const WIZARD_SECOND_MS: u32 = 1000;
+
+impl Wizard {
+    /// **The wizard as the menu opens it** — FR-104: the layouts of this machine, the first of them
+    /// chosen, the hotkey as it acts, and what the machine says about itself now. Until T-120-19
+    /// this was `wizard_state`, the state of the dialog `IDD_WIZARD`.
+    pub fn now() -> Self {
+        let (_, hotkey) = look();
+        let layouts = crate::layouts::enumerate_all()
+            .map(|installed| settings::layout_labels(&installed, &installed))
+            .unwrap_or_default();
+        let mut draft = report::Draft {
+            hotkey,
+            ..report::Draft::default()
+        };
+        if let Some(first) = layouts.first() {
+            draft.layout = first.clone();
+        }
+        Self::with(draft, report::facts_now(), layouts)
+    }
+
+    /// A wizard of the given answers and facts on its first step — [`Wizard::now`], and the
+    /// descriptions of the instrument of fitting and of the pictures (`ui::windows::wizard`).
+    pub fn with(draft: report::Draft, facts: report::Facts, layouts: Vec<String>) -> Self {
+        Self {
+            draft,
+            facts,
+            step: 0,
+            countdown: 0,
+            status: String::new(),
+            layouts,
+            text: String::new(),
+            contact: String::new(),
+            post: Post::Ready,
+            nonce: None,
+            done: false,
+        }
+    }
+
+    /// Where on [`Wizard::road`] the person is: 0 is the first step.
+    pub fn number(&self) -> usize {
+        self.step.min(self.road().len() - 1)
+    }
+
+    /// Where the appeal is on its way to the site.
+    pub fn post(&self) -> Post {
+        self.post
+    }
+
+    /// What the person filled in.
+    pub fn draft(&self) -> &report::Draft {
+        &self.draft
+    }
+
+    /// What the machine said about itself when the window opened.
+    pub fn facts(&self) -> &report::Facts {
+        &self.facts
+    }
+
+    /// The layout names of the list «Раскладка».
+    pub fn layouts(&self) -> &[String] {
+        &self.layouts
+    }
+
+    /// Seconds left of the capture count-down; zero — it is not running.
+    pub fn countdown(&self) -> u32 {
+        self.countdown
+    }
+
+    /// The line of the last press: «Текст скопирован…», «Сохранено…», a failure.
+    pub fn said(&self) -> &str {
+        &self.status
+    }
+
+    /// The appeal as its field holds it — the truth from the last step on.
+    pub fn appeal(&self) -> &str {
+        &self.text
+    }
+
+    /// What the field «Как с вами связаться» holds.
+    pub fn contact(&self) -> &str {
+        &self.contact
+    }
+
+    /// The period of the window's timer: the count-down's second while it runs, the asking while
+    /// the appeal is on its way, none at rest (NFR-10).
+    pub fn timer(&self) -> Option<u32> {
+        if matches!(self.post, Post::Sending(_)) {
+            Some(WIZARD_POLL_MS)
+        } else if self.countdown > 0 {
+            Some(WIZARD_SECOND_MS)
+        } else {
+            None
+        }
+    }
+
+    /// **«Далее»** — the next step; on the way into the last one the appeal is built from the
+    /// answers and the facts, with the contact already typed (until T-120-19 `wizard_forward`).
+    pub fn forward(&mut self) -> Forward {
+        if self.done {
+            return Forward::Close;
+        }
+        if self.is_last() {
+            return Forward::Send;
+        }
+        self.step += 1;
+        self.status.clear();
+        if self.current() == Step::Preview {
+            let built = report::build(&self.draft, &self.facts);
+            self.text = report::with_contact(&built, "", &self.contact);
+        }
+        Forward::Moved
+    }
+
+    /// **«Назад»** — the step before; a failure of the site is forgotten with it.
+    pub fn back(&mut self) {
+        self.step = self.step.saturating_sub(1);
+        self.status.clear();
+        self.post = Post::Ready;
+    }
+
+    /// The card of «Что случилось?» — and with it the road.
+    pub fn choose(&mut self, trouble: report::Trouble) {
+        self.draft.trouble = trouble;
+    }
+
+    /// The kind of field of «Где это случилось?».
+    pub fn set_field(&mut self, field: report::Field) {
+        self.draft.field = field;
+    }
+
+    /// «Повторяется».
+    pub fn set_repeat(&mut self, repeat: report::Repeat) {
+        self.draft.repeat = repeat;
+    }
+
+    /// One box of «Что приложить?», 0…3: the machine, the layouts, the settings, the journal.
+    pub fn attach(&mut self, index: usize, on: bool) {
+        let attach = &mut self.draft.attach;
+        match index {
+            0 => attach.machine = on,
+            1 => attach.layouts = on,
+            2 => attach.settings = on,
+            _ => attach.journal = on,
+        }
+    }
+
+    /// The layout of «Раскладка» by its place in [`Wizard::layouts`].
+    pub fn choose_layout(&mut self, index: usize) {
+        if let Some(name) = self.layouts.get(index) {
+            self.draft.layout.clone_from(name);
+        }
+    }
+
+    /// What a person typed into one of the answers.
+    pub fn answer(&mut self, which: Answer, value: String) {
+        let draft = &mut self.draft;
+        match which {
+            Answer::Program => draft.program = value,
+            Answer::Expected => draft.expected = value,
+            Answer::Got => draft.got = value,
+            Answer::Idea => draft.idea = value,
+            Answer::Helps => draft.helps = value,
+        }
+    }
+
+    /// The appeal as the person edited it in its field — from now on the truth.
+    pub fn edit_appeal(&mut self, value: String) {
+        if !value.is_empty() {
+            self.text = value;
+        }
+    }
+
+    /// **«Как с вами связаться»** — задача T-107-3: the line «Для связи: …» of the appeal follows
+    /// the field, put in, changed or taken out (until T-120-19 `wizard_contact_changed`).
+    pub fn edit_contact(&mut self, typed: String) {
+        if self.current() != Step::Preview || self.text.is_empty() {
+            self.contact = typed;
+            return;
+        }
+        self.text = report::with_contact(&self.text, &self.contact, &typed);
+        self.contact = typed;
+    }
+
+    /// **«Отправить» or «Повторить»** — задача T-107-3: the appeal goes to the site on a thread of
+    /// its own, with the nonce of the first press; nothing while it is on its way or empty. The
+    /// answer is taken by [`Wizard::take_answer`] on the window's timer.
+    pub fn send(&mut self, language: Language) -> bool {
+        static TICKETS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+        if matches!(self.post, Post::Sending(_)) || self.text.trim().is_empty() {
+            return false;
+        }
+        let ticket = TICKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let Some(nonce) = appeal::keep_or_draw(&mut self.nonce, appeal::nonce) else {
+            self.post = Post::Failed;
+            return true;
+        };
+        let body = appeal::body(&appeal::Appeal {
+            kind: appeal::kind_of(self.draft.trouble),
+            lang: language.tag(),
+            version: env!("CARGO_PKG_VERSION"),
+            text: &self.text,
+            contact: &self.contact,
+            nonce,
+        });
+        self.post = Post::Sending(ticket);
+        self.status.clear();
+        if !start_appeal(ticket, body) {
+            self.post = Post::Failed;
+        }
+        true
+    }
+
+    /// The answer of the site, if it came: the thanks, or «Не удалось отправить».
+    pub fn take_answer(&mut self) -> bool {
+        let Post::Sending(waiting) = self.post else {
+            return false;
+        };
+        let answers = APPEAL_ANSWERS
+            .lock()
+            .map(|mut answers| std::mem::take(&mut *answers))
+            .unwrap_or_default();
+        let Some((_, sent)) = answers.iter().find(|(ticket, _)| *ticket == waiting) else {
+            return false;
+        };
+        if *sent {
+            self.post = Post::Ready;
+            self.done = true;
+        } else {
+            self.post = Post::Failed;
+        }
+        self.status.clear();
+        true
+    }
+
+    /// **«Взять из активного окна»** — the count-down starts; a second press while it runs is
+    /// nothing.
+    pub fn start_capture(&mut self) -> bool {
+        if self.countdown > 0 {
+            return false;
+        }
+        self.countdown = crate::guard::CAPTURE_SECONDS;
+        true
+    }
+
+    /// One second of the count-down; at zero the window in front — not `mine` — is read into
+    /// «Программа» (until T-120-19 `wizard_tick`).
+    pub fn second(&mut self, mine: HWND) {
+        if self.countdown == 0 {
+            return;
+        }
+        self.countdown -= 1;
+        if self.countdown > 0 {
+            return;
+        }
+        let caught = capture_foreground(mine);
+        if !caught.is_empty() {
+            self.draft.program = caught;
+        }
+    }
+
+    /// **«Скопировать текст»** — the appeal to the clipboard, and the line says where to send it.
+    pub fn copy_appeal(&mut self, owner: HWND) {
+        use crate::settings::{IDS_WIZARD_FAILED, IDS_WIZARD_TEXT_COPIED, format_text, text};
+
+        if self.text.is_empty() {
+            return;
+        }
+        self.status = if crate::selection::write_unicode_text(owner, &self.text).is_ok() {
+            format_text(IDS_WIZARD_TEXT_COPIED, &[links::MAIL_ADDRESS])
+        } else {
+            text(IDS_WIZARD_FAILED)
+        };
+    }
+
+    /// **«Скопировать адрес»**.
+    pub fn copy_address(&mut self, owner: HWND) {
+        use crate::settings::{IDS_WIZARD_ADDRESS_COPIED, IDS_WIZARD_FAILED, format_text, text};
+
+        self.status = if crate::selection::write_unicode_text(owner, links::MAIL_ADDRESS).is_ok() {
+            format_text(IDS_WIZARD_ADDRESS_COPIED, &[links::MAIL_ADDRESS])
+        } else {
+            text(IDS_WIZARD_FAILED)
+        };
+    }
+
+    /// **«Сохранить в папку журнала»** — the appeal into a file of the day in the folder of the
+    /// journal, and the folder opened.
+    pub fn save(&mut self) {
+        use crate::settings::{IDS_WIZARD_FAILED, IDS_WIZARD_SAVED, format_text, text};
+
+        if self.text.is_empty() {
+            return;
+        }
+        let Some(folder) = crate::diag::log_dir() else {
+            self.status = text(IDS_WIZARD_FAILED);
+            return;
+        };
+        let today =
+            today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day"));
+        let path = folder.join(report::file_name(today));
+        crate::sandbox::guard_path(&path);
+        if std::fs::create_dir_all(&folder).is_err() || std::fs::write(&path, &self.text).is_err() {
+            self.status = text(IDS_WIZARD_FAILED);
+            return;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.status = format_text(IDS_WIZARD_SAVED, &[&name]);
+        open_folder(&folder);
+    }
+}
+
+/// **The eight pages of the wizard** for the instrument of fitting and the pictures of C3
+/// (T-120-19): the five steps of a trouble, the step of an idea, the thanks and «Не удалось
+/// отправить» — with answers near the longest a person types and the facts of a machine whose
+/// journal is full. The name of each page is what the instrument prints.
+pub fn wizard_pages() -> Vec<(&'static str, Wizard)> {
+    use report::{Attach, Draft, Facts, Field, Repeat, Trouble};
+
+    let layouts = vec![
+        "Русская (Россия)".to_owned(),
+        "English (United States)".to_owned(),
+    ];
+    let draft = |trouble| Draft {
+        trouble,
+        program: "notepad.exe · Notepad".to_owned(),
+        field: Field::Normal,
+        layout: layouts[0].clone(),
+        hotkey: "Pause".to_owned(),
+        expected: "привет, как дела".to_owned(),
+        got: "ghbdtn? rfr ltkf".to_owned(),
+        repeat: Repeat::Always,
+        idea: "Флаг текущей раскладки в трее, как у Punto Switcher".to_owned(),
+        helps: "Привычка: видно раскладку, не глядя на РУС/ENG".to_owned(),
+        attach: Attach::default(),
+    };
+    let facts = Facts {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        windows: "Windows 11 Pro 26100".to_owned(),
+        scale: "125 %".to_owned(),
+        monitors: "1".to_owned(),
+        layouts: "ru-RU, en-US".to_owned(),
+        settings: "Pause · auto · выделение вкл · исключений 0".to_owned(),
+        journal: "12:04:11 hook.install ok\n12:04:11 layouts.cache 2".to_owned(),
+        journal_entries: 37,
+    };
+    let page = |trouble, step, post, done| {
+        let mut wizard = Wizard::with(draft(trouble), facts.clone(), layouts.clone());
+        wizard.step = step;
+        wizard.post = post;
+        wizard.done = done;
+        if wizard.current() == Step::Preview || done {
+            wizard.text = report::build(&wizard.draft, &wizard.facts);
+        }
+        wizard
+    };
+
+    vec![
+        (
+            "wizard what",
+            page(Trouble::WrongResult, 0, Post::Ready, false),
+        ),
+        (
+            "wizard where",
+            page(Trouble::WrongResult, 1, Post::Ready, false),
+        ),
+        (
+            "wizard did",
+            page(Trouble::WrongResult, 2, Post::Ready, false),
+        ),
+        (
+            "wizard attach",
+            page(Trouble::WrongResult, 3, Post::Ready, false),
+        ),
+        (
+            "wizard preview",
+            page(Trouble::WrongResult, 4, Post::Ready, false),
+        ),
+        ("wizard idea", page(Trouble::Idea, 1, Post::Ready, false)),
+        (
+            "wizard sent",
+            page(Trouble::WrongResult, 4, Post::Ready, true),
+        ),
+        (
+            "wizard failed",
+            page(Trouble::WrongResult, 4, Post::Failed, false),
+        ),
+    ]
 }
 
 /// **Where the appeal is on its way to the site** — задача T-107-3, решения 199.3 и 199.11 (макет
@@ -2825,210 +3036,6 @@ pub fn step_words(step: Step, post: Post) -> StepWords {
     }
 }
 
-/// **Which slots of the last step stand on the screen, by where the appeal is** — задача T-107-3.
-///
-/// Ready and on its way: the text, the contact under it (вариант Б, 199.11) and «Сохранить в папку
-/// журнала». Not taken: the text, the address of the letter, «Скопировать текст», «Скопировать
-/// адрес» and «Сохранить в папку журнала» — the contact is in the text by then («Для связи: …»),
-/// and the request will carry it again. The status line under the buttons is in both.
-pub fn preview_controls(post: Post) -> &'static [i32] {
-    match post {
-        Post::Ready | Post::Sending(_) => &[
-            IDC_WZ_PREVIEW,
-            IDC_WZ_CONTACT_LABEL,
-            IDC_WZ_CONTACT,
-            IDC_WZ_SAVE,
-            IDC_WZ_STATUS,
-        ],
-        Post::Failed => &[
-            IDC_WZ_PREVIEW,
-            IDC_WZ_ADDRESS,
-            IDC_WZ_COPY,
-            IDC_WZ_COPY_ADDRESS,
-            IDC_WZ_SAVE,
-            IDC_WZ_STATUS,
-        ],
-    }
-}
-
-/// The six faces one of these windows draws in.
-///
-/// The **derivations** are shared with the about window — `settings::caption_logfont`,
-/// `about_name_logfont`, `about_body_logfont`, `about_number_logfont`, `about_chip_logfont`,
-/// `theme::smoothed_logfont` — so a letter and «О программе» cannot come out set differently.
-/// What is not shared is the ownership: these handles belong to **this** window and are freed
-/// when it is destroyed.
-struct Faces {
-    text: HFONT,
-    caption: HFONT,
-    name: HFONT,
-    body: HFONT,
-    number: HFONT,
-    chip: HFONT,
-    body_height: i32,
-    chip_height: i32,
-}
-
-impl Faces {
-    /// All six out of the font the dialog manager gave the window, every handle examined.
-    ///
-    /// `None` on any refusal, and a half-built set is unwound rather than leaked — the
-    /// discipline `settings::DialogFonts::new` keeps, for the same reason: a constructor that
-    /// answers `None` leaves no value for `Drop` to run on. The window then draws in the
-    /// manager's own face (NFR-13).
-    fn new(hwnd: HWND, control: i32) -> Option<Self> {
-        let base = settings::dialog_logfont(hwnd, control)?;
-        let body = settings::about_body_logfont(base);
-        let emphasis = settings::resolve_emphasis(hwnd, base);
-        let chip = settings::about_chip_logfont(base, emphasis);
-
-        let wanted = [
-            theme::smoothed_logfont(base),
-            settings::caption_logfont(base),
-            settings::about_name_logfont(base, emphasis),
-            body,
-            settings::about_number_logfont(base, emphasis),
-            chip,
-        ];
-
-        let mut made: Vec<HFONT> = Vec::with_capacity(wanted.len());
-
-        for logical in wanted {
-            let Some(face) = theme::create_font(logical) else {
-                for face in made {
-                    // SAFETY: each was created by this loop, handed to nobody, and is freed
-                    // exactly once here.
-                    let _ = unsafe { DeleteObject(face.into()) };
-                }
-
-                return None;
-            };
-
-            made.push(face);
-        }
-
-        Some(Self {
-            text: made[0],
-            caption: made[1],
-            name: made[2],
-            body: made[3],
-            number: made[4],
-            chip: made[5],
-            body_height: body.lfHeight,
-            chip_height: chip.lfHeight,
-        })
-    }
-
-    /// The step from one wrapped line of the body to the next, in pixels of this window.
-    fn body_pitch(&self) -> i32 {
-        settings::about_body_line_pitch(self.body_height)
-    }
-}
-
-impl Drop for Faces {
-    fn drop(&mut self) {
-        for face in [
-            self.text,
-            self.caption,
-            self.name,
-            self.body,
-            self.number,
-            self.chip,
-        ] {
-            // SAFETY: each handle was made by `Faces::new` and is owned by this value; nothing
-            // else frees them, and a font still selected into a DC is not: every drawing puts
-            // the previous face back before it returns.
-            let _ = unsafe { DeleteObject(face.into()) };
-        }
-    }
-}
-
-/// Everything one of these windows knows about itself.
-///
-/// Lives in a `Box` the window owns: unlike the two modal windows of `settings`, a modeless one
-/// outlives the call that made it, so a state on the caller's frame would be gone before the
-/// first `WM_PAINT`. The pointer goes into `GWLP_USERDATA` and the box is freed on
-/// `WM_NCDESTROY` — the last message a window ever gets.
-struct WindowState {
-    /// [`Kind::Author`] or [`Kind::Wizard`]: the letters and «Последние письма» are windows of
-    /// the shell (`ui::windows::letter`, `ui::windows::letters_list`) and have no state here.
-    kind: Kind,
-    setting: ThemeSetting,
-    palette: &'static theme::Palette,
-    brushes: Option<theme::Brushes>,
-    fonts: Option<Faces>,
-    /// What «От автора» says. Empty for the wizard.
-    author: AuthorView,
-    /// What the wizard is holding — `None` for «От автора». Boxed because it is the one large
-    /// member.
-    wizard: Option<Box<Wizard>>,
-    /// The hotkey as it acts, for the chip of the wizard.
-    hotkey: String,
-    icons: Option<settings::CaptionIcons>,
-    logo: Option<settings::AboutLogo>,
-    /// The locale the window was built in — what `language_switch` is asked about.
-    language: Language,
-    /// The window that owns this one — this program's hidden UI window, the same owner the two
-    /// windows of `settings` take. Kept because the actions of a letter open other windows.
-    owner: HWND,
-}
-
-impl WindowState {
-    /// Which control of this window is the accented one — the button Enter presses and the one
-    /// drawn in the accent colour.
-    ///
-    /// One place, because two ask: the drawing, which colours it, and `WM_INITDIALOG`, which
-    /// tells the dialog manager about it with `DM_SETDEFID`.
-    fn accent_control(&self) -> i32 {
-        match self.kind {
-            // «Далее» — and on the last step it says «Готово». Enter presses it on every step,
-            // which is what a wizard is for.
-            Kind::Wizard => IDC_WZ_NEXT,
-            Kind::Author | Kind::Letter | Kind::List => IDC_AUTHOR_CLOSE,
-        }
-    }
-
-    /// The `SS_ICON` static this window's logo goes into: «От автора» has one, the wizard none.
-    fn icon_control(&self) -> Option<i32> {
-        (self.kind == Kind::Author).then_some(IDC_AUTHOR_ICON)
-    }
-
-    /// What pressing this control does — `None` for a control that is not a button of this
-    /// window.
-    fn action_of(&self, control: i32) -> Option<Action> {
-        // The «От автора» window's buttons are fixed — its shape does not change — so they
-        // answer by identifier.
-        if self.kind == Kind::Author {
-            return match control {
-                // Задача T-81-3, решение 142.2 п. 6: имя открывает страницу приложения — то же,
-                // что делает щелчок по имени в «О программе», и тем же адресом.
-                IDC_AUTHOR_NAME => Some(Action::OpenProgram),
-                IDC_AUTHOR_SUPPORT => Some(Action::OpenSupport),
-                IDC_AUTHOR_CHANNEL => Some(Action::OpenChannel),
-                IDC_NEWS_DOWNLOAD => Some(Action::OpenDownload),
-                IDC_NEWS_LETTERS => Some(Action::OpenLetters),
-                IDC_FEEDBACK_WRITE => Some(Action::OpenWizard),
-                IDC_AUTHOR_CLOSE => Some(Action::Close),
-                _ => None,
-            };
-        }
-
-        // The wizard answers its own buttons (`wizard_command`).
-        None
-    }
-}
-
-thread_local! {
-    /// The windows of this module that are open **on this thread**, in the order they were
-    /// opened.
-    ///
-    /// Thread-local and not a global: every one of these windows is created on the UI thread
-    /// and an `HWND` of another thread has no business here. The message pump asks this list
-    /// what to hand `IsDialogMessageW`, the tray asks it whether a window is already up, and
-    /// FR-94 asks it which windows to relabel when the interface language changes.
-    static OPEN: RefCell<Vec<(Kind, HWND)>> = const { RefCell::new(Vec::new()) };
-}
-
 /// Whether a window of this kind is open on this thread.
 pub fn is_open(kind: Kind) -> bool {
     window_of(kind).is_some()
@@ -3036,17 +3043,10 @@ pub fn is_open(kind: Kind) -> bool {
 
 /// The handle of the open window of this kind, if there is one.
 fn window_of(kind: Kind) -> Option<HWND> {
-    OPEN.with_borrow(|open| {
+    SHELL.with_borrow(|open| {
         open.iter()
-            .find(|(other, _)| *other == kind)
-            .map(|(_, hwnd)| *hwnd)
-    })
-    .or_else(|| {
-        SHELL.with_borrow(|open| {
-            open.iter()
-                .find(|window| window.kind == kind)
-                .map(|window| window.hwnd)
-        })
+            .find(|window| window.kind == kind)
+            .map(|window| window.hwnd)
     })
 }
 
@@ -3065,20 +3065,9 @@ fn window_of(kind: Kind) -> Option<HWND> {
 ///
 /// `message` is the caller's live `MSG`, filled by `GetMessageW`.
 pub unsafe fn filter_message(message: &MSG) -> bool {
-    let open: Vec<HWND> = OPEN.with_borrow(|open| open.iter().map(|(_, hwnd)| *hwnd).collect());
-
-    // Задача T-118-2: Ctrl+A — до менеджера диалога, который этой клавиши не знает. С задачи T-118-6
-    // тело общее — `widgets::keys`: его же зовёт перехватчик модального цикла для окна настроек.
-    if widgets::keys::select_all_on_ctrl_a(message) {
-        return true;
-    }
-
-    open.into_iter().any(|hwnd| {
-        // SAFETY: `hwnd` is a window this module made and has not yet seen destroyed — the
-        // record is removed on `WM_NCDESTROY` — and `message` is the caller's live message.
-        unsafe { windows::Win32::UI::WindowsAndMessaging::IsDialogMessageW(hwnd, message) }
-            .as_bool()
-    })
+    // Задача T-118-2: Ctrl+A в поле — тело общее, `widgets::keys`. Диалогов у `letters` нет с
+    // T-120-19: мастер был последним; окна оболочки ведут клавиатуру сами.
+    widgets::keys::select_all_on_ctrl_a(message)
 }
 
 thread_local! {
@@ -3193,279 +3182,6 @@ unsafe extern "system" fn modal_loop_filter_proc(
 // The layout — measured, not written down
 // -----------------------------------------------------------------------------------------
 
-/// The two base units of a dialog and the DPI of its window: everything the layout counts in.
-///
-/// A dialog unit is a share of the font the template names, so the only honest way to get one
-/// is to ask the window — `MapDialogRect` over a rectangle of four by eight units answers the
-/// pair exactly. Spelling the numbers as constants would tie the layout to one font and one
-/// DPI, which is what a program with fourteen locales and four icon sizes must not do.
-#[derive(Debug, Clone, Copy)]
-struct Metrics {
-    base_x: i32,
-    base_y: i32,
-}
-
-impl Metrics {
-    /// The base units of this window.
-    fn of(hwnd: HWND) -> Self {
-        let mut rect = RECT {
-            left: 0,
-            top: 0,
-            right: 4,
-            bottom: 8,
-        };
-
-        // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call fills.
-        if unsafe { MapDialogRect(hwnd, &mut rect) }.is_err() {
-            // NFR-13: the units of a 9 pt Segoe UI dialog at 96 DPI. A window laid out with
-            // them is a window laid out for the wrong DPI, which is a blemish; a window not
-            // laid out at all is a blank rectangle.
-            return Self {
-                base_x: 7,
-                base_y: 15,
-            };
-        }
-
-        Self {
-            base_x: rect.right.max(1),
-            base_y: rect.bottom.max(1),
-        }
-    }
-
-    /// Horizontal dialog units in pixels of this window.
-    fn x(self, dlu: i32) -> i32 {
-        dlu * self.base_x / 4
-    }
-
-    /// Vertical dialog units in pixels of this window.
-    fn y(self, dlu: i32) -> i32 {
-        dlu * self.base_y / 8
-    }
-}
-
-/// The air and the columns of these windows, in dialog units — the mock-up's paddings, and the
-/// about window's where the two agree.
-mod air {
-    /// The margin at the left and the right of the window.
-    pub(super) const PAD: i32 = 12;
-    /// The top of the head block.
-    pub(super) const TOP: i32 = 12;
-    /// The air between two things that belong together.
-    pub(super) const TIGHT: i32 = 3;
-    /// **Зазор между текстом подписи и кромкой рамки поля** — решение 107.4, задача Т-45-3.
-    ///
-    /// ⭐ **Число названо пользователем 2026-09-04: «10px».** Он выбирал его по живому макету с
-    /// настоящими цветами и настоящей геометрией продукта при 96 DPI, то есть назвал **десять
-    /// ЭКРАННЫХ пикселей**. Сверено с окном настроек, где тот же зазор вышел 9 px у самой
-    /// тесной пары («Язык интерфейса:» → комбо) и 15 px у «Клавиши:»; разница там не замысел, а
-    /// остаток — подпись стоит в прямоугольнике постоянной ширины из шаблона. Три числа не
-    /// сошлись, поэтому выбор был вынесен пользователю, а не сделан исполнителем.
-    ///
-    /// ⚠ **Четырнадцать, а не десять, и это не описка.** Числа этой программы едут к пикселям
-    /// экрана через `theme::scaled`, а та переводит длины **макета**, нарисованного при
-    /// 134,4 DPI (`theme::MOCKUP_DPI_TENTHS`). `scaled(10, 96)` дало бы **7 px** — замерено на
-    /// живом продукте, — а нужно 10. В мерке макета десять экранных пикселей и есть
-    /// 10 × 134,4 / 96 = 14: `scaled(14, 96) = 10`, и при других DPI зазор растёт вместе со
-    /// всем остальным.
-    ///
-    /// ⚠ Единица диалога тут не годится вовсе: по горизонтали она равна 1,75 px, и ни одно
-    /// целое их число не даёт десяти — пять дают 9, шесть 11.
-    pub(super) const LABEL_TO_FIELD: i32 = 14;
-    /// The air between two blocks.
-    pub(super) const GAP: i32 = 8;
-    /// The inset of everything that stands on a panel.
-    pub(super) const PANEL_PAD: i32 = 7;
-    /// How far below the top of a panel its contents start — under the caption.
-    pub(super) const PANEL_HEAD: i32 = 20;
-    /// The height of a push button.
-    pub(super) const BUTTON: i32 = 14;
-    /// The height of the **box** of a single-line field — задача Т-33а-2.
-    ///
-    /// ⭐ **Ровно [`BUTTON`], и выведено из него, а не написано числом.** В макете поле и кнопка
-    /// одной высоты (30 px при 96 DPI), и поле «Программа:» стоит вровень с кнопкой рядом. Пока
-    /// коробку рисовала константа окна настроек — `settings::FIELD_BOX_DLU`, 12 DLU, — поле
-    /// выходило на шесть пикселей ниже кнопки: 19 против 25 (`красное-до-2-высоты.log`), и это
-    /// то самое «строки ввода как будто стали ниже», что увидел глаз на 0.43.0. Число, выведенное
-    /// из соседа, не может с ним разойтись при следующей правке.
-    pub(super) const FIELD_BOX: i32 = BUTTON;
-    /// The air inside a button, at each end of its caption.
-    pub(super) const BUTTON_PAD: i32 = 10;
-    /// The narrowest a button may be.
-    pub(super) const BUTTON_MIN: i32 = 40;
-    /// The air between two buttons of a row.
-    ///
-    /// ⚠ **6 → 4 задачей T-81-2, решение 142.2 п. 7.** Четыре — это число окна настроек, у
-    /// которого ряд стоял по правилу и до этого этапа; на приёмке Э80 владелец смотрел на то
-    /// окно как на образец (решение 141а), и «единая нижняя строка во всех окнах» означает
-    /// прийти к его зазору, а не завести седьмой.
-    pub(super) const BUTTON_GAP: i32 = 4;
-    /// Where the text of a panel row starts, from the panel's own inset.
-    pub(super) const ROW_TEXT: i32 = 11;
-}
-
-/// Measures the height one caption needs at one width, in the face it will be drawn in.
-///
-/// The face is selected into the DC first and put back afterwards, because
-/// [`theme::measure_label`] measures **whatever the DC holds** — that is what makes its answer
-/// the painter's answer and not a second opinion.
-///
-/// # Safety
-///
-/// `dc` is a live DC of this window; `face` is a live font this window owns.
-unsafe fn measure(dc: HDC, face: HFONT, width: i32, caption: &str, pitch: Option<i32>) -> i32 {
-    if caption.is_empty() {
-        return 0;
-    }
-
-    let mut wide: Vec<u16> = caption.encode_utf16().collect();
-
-    // SAFETY: `dc` is the caller's live DC and `face` a live font; the previous face is put
-    // back below.
-    let previous = unsafe { SelectObject(dc, face.into()) };
-    // SAFETY: the face is selected into `dc`, which is the contract of `measure_label`.
-    let height = unsafe { theme::measure_label(dc, width, &mut wide, pitch) };
-    // SAFETY: puts back exactly the handle the call above answered with.
-    let _ = unsafe { SelectObject(dc, previous) };
-
-    height
-}
-
-/// The width of one run of text in one face, on one line.
-///
-/// # Safety
-///
-/// As [`measure`].
-unsafe fn text_width(dc: HDC, face: HFONT, text: &str) -> i32 {
-    let mut wide: Vec<u16> = text.encode_utf16().collect();
-
-    if wide.is_empty() {
-        return 0;
-    }
-
-    // SAFETY: see the contract.
-    let previous = unsafe { SelectObject(dc, face.into()) };
-
-    let mut rect = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-
-    // SAFETY: `DT_CALCRECT | DT_SINGLELINE` measures and paints nothing.
-    let _ = unsafe {
-        windows::Win32::Graphics::Gdi::DrawTextW(
-            dc,
-            &mut wide,
-            &mut rect,
-            windows::Win32::Graphics::Gdi::DT_CALCRECT
-                | windows::Win32::Graphics::Gdi::DT_SINGLELINE,
-        )
-    };
-
-    // SAFETY: puts back exactly the handle the call above answered with.
-    let _ = unsafe { SelectObject(dc, previous) };
-
-    rect.right - rect.left
-}
-
-/// How wide a button has to be to hold its caption — the caption plus the air of the mock-up,
-/// and never narrower than [`air::BUTTON_MIN`].
-///
-/// This is what makes the row of buttons fit in **fourteen** locales without a table of widths:
-/// German writes «Unterstützungsseite öffnen» where Russian writes «Открыть страницу
-/// поддержки», and the button is as wide as the words it holds.
-///
-/// # Safety
-///
-/// As [`measure`].
-unsafe fn button_width(dc: HDC, face: HFONT, metrics: Metrics, caption: &str) -> i32 {
-    let mut wide: Vec<u16> = caption.encode_utf16().collect();
-
-    // SAFETY: see the contract.
-    let previous = unsafe { SelectObject(dc, face.into()) };
-
-    let mut rect = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-
-    // SAFETY: `DT_CALCRECT | DT_SINGLELINE` measures and paints nothing; the buffer and the
-    // rectangle are live locals of this frame.
-    let _ = unsafe {
-        windows::Win32::Graphics::Gdi::DrawTextW(
-            dc,
-            &mut wide,
-            &mut rect,
-            windows::Win32::Graphics::Gdi::DT_CALCRECT
-                | windows::Win32::Graphics::Gdi::DT_SINGLELINE,
-        )
-    };
-
-    // SAFETY: puts back exactly the handle the call above answered with.
-    let _ = unsafe { SelectObject(dc, previous) };
-
-    (rect.right - rect.left + metrics.x(air::BUTTON_PAD) * 2).max(metrics.x(air::BUTTON_MIN))
-}
-
-/// Puts one child where the layout decided, and shows it.
-fn place(hwnd: HWND, control: i32, x: i32, y: i32, width: i32, height: i32) {
-    let Ok(child) =
-        (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
-    else {
-        return;
-    };
-
-    // SAFETY: `child` is the live control just answered for this dialog; the five numbers are
-    // plain values and no pointer is passed.
-    let _ = unsafe {
-        SetWindowPos(
-            child,
-            None,
-            x,
-            y,
-            width.max(0),
-            height.max(0),
-            SWP_NOZORDER | SWP_NOACTIVATE | quiet_flag(),
-        )
-    };
-
-    // ⚠ **A panel is `NOT WS_VISIBLE` in the template and must stay that way.** It carries the
-    // caption and the rectangle, and the window's own `WM_ERASEBKGND` draws the block from
-    // them; shown, it would be an owner-drawn *button* standing over its own caption — which
-    // is exactly what the stand photographed before this line named all five panels instead of
-    // one (`scratchpad-Э32\снимки`, the first «От автора»).
-    if !PANELS.contains(&control) {
-        if quiet_layout() {
-            // Показать БЕЗ перерисовки — см. [`QUIET_LAYOUT`]. `ShowWindow` такого флага не
-            // знает, а `SetWindowPos` знает, и это единственная причина второго вызова.
-            //
-            // SAFETY: as above.
-            let _ = unsafe {
-                SetWindowPos(
-                    child,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOZORDER
-                        | SWP_NOACTIVATE
-                        | SWP_NOMOVE
-                        | SWP_NOSIZE
-                        | SWP_SHOWWINDOW
-                        | SWP_NOREDRAW,
-                )
-            };
-        } else {
-            // SAFETY: `child` is the live control; the call takes no pointer.
-            let _ = unsafe { ShowWindow(child, SW_SHOWNOACTIVATE) };
-        }
-    }
-}
-
 thread_local! {
     /// Идёт ли сейчас **тихая** перестановка — задача Т-33-8.
     ///
@@ -3483,353 +3199,9 @@ thread_local! {
     static QUIET_LAYOUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Идёт ли тихая перестановка — см. [`QUIET_LAYOUT`].
-fn quiet_layout() -> bool {
-    QUIET_LAYOUT.with(std::cell::Cell::get)
-}
-
-/// `SWP_NOREDRAW` во время тихой перестановки и ничего в остальное время.
-fn quiet_flag() -> SET_WINDOW_POS_FLAGS {
-    if quiet_layout() {
-        SWP_NOREDRAW
-    } else {
-        SET_WINDOW_POS_FLAGS(0)
-    }
-}
-
-/// Every panel of «От автора» — the controls that carry a caption and a
-/// rectangle and are never shown.
-const PANELS: [i32; 3] = [IDC_AUTHOR_PANEL, IDC_NEWS_PANEL, IDC_FEEDBACK_PANEL];
-
-/// Hides one child — a slot this letter does not use.
-///
-/// ⚠ **A panel is hidden by collapsing its rectangle and not by `ShowWindow`**, because it is
-/// never shown to begin with: what draws the block is `WM_ERASEBKGND`, out of the panel's
-/// *rectangle*, and a panel left at the size the template gave it goes on being drawn. The
-/// window of thanks is where this showed — an empty frame in the middle of four lines of text
-/// (`scratchpad-Э32\живое-В\мастер-6-спасибо.png`, the frame before this rule).
-fn hide(hwnd: HWND, control: i32) {
-    if PANELS.contains(&control) {
-        // SAFETY: the control is a live child of this dialog; the five numbers are plain
-        // values and no pointer is passed.
-        if let Ok(panel) =
-            unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) }
-        {
-            let _ = unsafe {
-                SetWindowPos(
-                    panel,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOZORDER | SWP_NOACTIVATE | quiet_flag(),
-                )
-            };
-        }
-    }
-
-    let Ok(child) =
-        (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
-    else {
-        return;
-    };
-
-    if quiet_layout() {
-        // Спрятать БЕЗ перерисовки — см. [`QUIET_LAYOUT`]: иначе родитель тут же стирает то,
-        // что из-под контрола открылось, и этот кадр видит глаз.
-        //
-        // SAFETY: `child` is the live control; the call takes no pointer.
-        let _ = unsafe {
-            SetWindowPos(
-                child,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOZORDER
-                    | SWP_NOACTIVATE
-                    | SWP_NOMOVE
-                    | SWP_NOSIZE
-                    | SWP_HIDEWINDOW
-                    | SWP_NOREDRAW,
-            )
-        };
-
-        return;
-    }
-
-    // SAFETY: `child` is the live control; the call takes no pointer.
-    let _ = unsafe { ShowWindow(child, SW_HIDE) };
-}
-
-/// Enables or disables one child — the disabled state of a button whose address is still a
-/// placeholder (полномочия П7 и П8).
-fn enable(hwnd: HWND, control: i32, enabled: bool) {
-    let Ok(child) =
-        (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
-    else {
-        return;
-    };
-
-    // SAFETY: `child` is the live control; the call takes no pointer. The previous state is
-    // deliberately dropped — this is a statement of what the state must be, not a toggle.
-    let _ = unsafe { EnableWindow(child, enabled) };
-}
-
 // -----------------------------------------------------------------------------------------
 // The window procedure
 // -----------------------------------------------------------------------------------------
-
-/// Borrows the state one of these windows keeps, by the pointer in its `GWLP_USERDATA`.
-///
-/// `None` before `WM_INITDIALOG` has stored the pointer, after `WM_NCDESTROY` has cleared it,
-/// and while the state is already borrowed — the last is what makes re-entry safe: a handler
-/// that paints while another is painting simply does nothing rather than panicking.
-///
-/// # Safety
-///
-/// `hwnd` is one of this module's windows.
-unsafe fn with_state<R>(hwnd: HWND, body: impl FnOnce(&mut WindowState) -> R) -> Option<R> {
-    // SAFETY: `GWLP_USERDATA` is a field every window has and the dialog manager does not use
-    // for itself; this module is the only writer of it on these windows.
-    let pointer = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-
-    if pointer == 0 {
-        return None;
-    }
-
-    // SAFETY: the value is the pointer `open_window` boxed and `WM_INITDIALOG` stored, and it
-    // is cleared before the box is freed, so a non-zero value names a live `RefCell`.
-    let state = unsafe { &*(pointer as *const RefCell<WindowState>) };
-
-    state
-        .try_borrow_mut()
-        .ok()
-        .map(|mut state| body(&mut state))
-}
-
-/// The colour role of one static of these windows — the closed vocabulary
-/// [`theme::StaticColorRole`] already answers with, reused rather than widened (§6.2).
-///
-/// The quiet ones are the two lines that are quiet in the mock-up — the subtitle under the
-/// heading and the line under the buttons — and the markers of the panel rows, which are the
-/// mock-up's `.key` against its row text. Everything else is the full-strength ink.
-///
-/// Public so that a test can call the very function the window calls.
-pub fn label_color_role(control: i32) -> StaticColorRole {
-    match control {
-        // ⭐ **Шапка «От автора» = шапка «О программе», задача T-81-3, решение 142.2 п. 4.**
-        // Там строка версии и обе строки описания приглушены (`about_static_color_role`), и
-        // здесь они приглушены по той же причине: это одна шапка, а не две похожие. ⚠ Строка
-        // версии до этой задачи падала сюда в `Label` и оттого была в двух окнах разного цвета —
-        // расхождение того же рода, что и ссылка у одной копии шапки из двух.
-        IDC_AUTHOR_VERSION | IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => StaticColorRole::Muted,
-        // The wizard's quiet lines: the step counter, every explanation and the status line.
-        // Everything that asks a question or names a thing stays a plain label.
-        IDC_WZ_STEP | IDC_WZ_NOTE | IDC_WZ_CAPTURE_NOTE | IDC_WZ_FIELD_2_SUB
-        | IDC_WZ_ATTACH_FOOT | IDC_WZ_STATUS => StaticColorRole::Muted,
-        // Задача T-107-3: the two fields of the last step, grey while the appeal is on its way. A
-        // disabled `EDIT` asks `WM_CTLCOLORSTATIC` and not `WM_CTLCOLOREDIT`, and without this row
-        // its ground would turn the window's colour inside the field's own frame.
-        IDC_WZ_PREVIEW | IDC_WZ_CONTACT => StaticColorRole::Field,
-        control if (IDC_WZ_CARD_S1..IDC_WZ_CARD_S1 + 3).contains(&control) => {
-            StaticColorRole::Muted
-        }
-        control if (IDC_WZ_ATTACH_V1..IDC_WZ_ATTACH_V1 + 4).contains(&control) => {
-            StaticColorRole::Muted
-        }
-        _ => StaticColorRole::Label,
-    }
-}
-
-/// The face and the line pitch one label of these windows is set in — решение 85's role table,
-/// one pure place, exactly as `settings::about_label_face` is for the about window.
-fn label_face(control: i32, faces: &Faces) -> (HFONT, Option<i32>) {
-    match control {
-        // Задача T-81-3: описание в шапке набрано читающим лицом и его шагом — ровно то, что
-        // `settings::about_label_face` отвечает про `IDC_ABOUT_LINE_1` и `_2`.
-        IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => (faces.body, Some(faces.body_pitch())),
-        // The wizard: the heading of a step is set in the face of a name, and every
-        // sentence that wraps is set in the reading face at the reading pitch.
-        IDC_WZ_TITLE => (faces.name, None),
-        IDC_WZ_NOTE | IDC_WZ_CAPTURE_NOTE | IDC_WZ_FIELD_2_SUB | IDC_WZ_ATTACH_FOOT
-        | IDC_WZ_CHIP => (faces.body, Some(faces.body_pitch())),
-        control if (IDC_WZ_CARD_S1..IDC_WZ_CARD_S1 + 3).contains(&control) => {
-            (faces.body, Some(faces.body_pitch()))
-        }
-        control if (IDC_WZ_ATTACH_V1..IDC_WZ_ATTACH_V1 + 4).contains(&control) => {
-            (faces.body, Some(faces.body_pitch()))
-        }
-        _ => (faces.text, None),
-    }
-}
-
-/// The background of one of these windows: the ground, the line under the title bar and the
-/// panel — the same three the about window draws, in the same order and for the same reason (a
-/// block is the background of what stands on it, so it is laid before the children paint).
-///
-/// # Safety
-///
-/// Called from [`letter_proc`] with the `wparam` of `WM_ERASEBKGND`.
-unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `client` a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return 0;
-    }
-
-    // The colour choice, split from the painting: the borrow ends before the DC is touched —
-    // the discipline every handler of `settings` keeps, and for the same reason.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            let brushes = state.brushes.as_ref()?;
-
-            Some((
-                brushes.window_bg(),
-                state.palette.field_border,
-                brushes.panel_bg(),
-                state.palette.panel_border,
-                state.palette.cap,
-                state.fonts.as_ref().map(|faces| faces.caption),
-                state.kind,
-                brushes.field_bg(),
-            ))
-        })
-    };
-
-    let Some(Some((ground, line, panel, border, caption, face, kind, field))) = choice else {
-        return 0;
-    };
-
-    // SAFETY: `dc` is the DC of the message, painted into for the length of this send;
-    // `ground` is a live brush this window's state owns for longer than the call.
-    unsafe { FillRect(dc, &client, ground) };
-
-    theme::paint_caption_underline(dc, &client, line);
-
-    let dpi = theme::drawing_dpi(dc);
-    let panels: &[i32] = match kind {
-        Kind::Author => &[IDC_AUTHOR_PANEL, IDC_NEWS_PANEL, IDC_FEEDBACK_PANEL],
-        // ⚠ The wizard has **no panel**: its steps stand on the window's own ground, and the
-        // three cards of the first step are drawn as blocks by the button branch rather than
-        // by the background. A panel here would be a block behind the fields.
-        Kind::Wizard | Kind::Letter | Kind::List => &[],
-    };
-
-    let rects = settings::child_rects_in_client(hwnd);
-
-    for wanted in panels {
-        let Some(rect) = rects
-            .iter()
-            .find(|(control, _)| control == wanted)
-            .map(|(_, rect)| *rect)
-        else {
-            continue;
-        };
-
-        // A panel a letter does not use is collapsed to nothing by `hide`, and nothing is what
-        // gets drawn for it — the second half of that rule, kept here so that neither half can
-        // be removed on its own.
-        if rect.right <= rect.left || rect.bottom <= rect.top {
-            continue;
-        }
-
-        theme::paint_rounded(
-            dc,
-            &rect,
-            theme::scaled(theme::CORNER_RADIUS, dpi),
-            border,
-            panel,
-            dpi,
-        );
-
-        if let Some(face) = face {
-            // SAFETY: `dc` is the caller's; `face` is a live font this window's state owns for
-            // longer than the call, and `draw_panel_caption` puts the previous one back.
-            unsafe { settings::draw_panel_caption(hwnd, *wanted, dc, rect, caption, dpi, face) };
-        }
-    }
-
-    // ⛔ **Рамка поля — задача Т-33-7, находка глазом пользователя.** До неё поля мастера не
-    // имели рамки вовсе: коробкой выглядела собственная заливка контрола, а он был высотой в
-    // кнопку — и текст стоял по его ВЕРХНЕМУ краю, оставляя под собой одиннадцать пикселей
-    // пустоты. Однострочный `EDIT` кладёт текст по верху своей клиентской области, и ни одно
-    // документированное сообщение его оттуда не двигает (`EM_SETRECT` — для многострочных,
-    // `EM_SETMARGINS` двигает бока). Задача T-12-3 решила это для окна настроек ровно так:
-    // контролу — одна кегельная строка, а коробку рисует фон **вокруг него, по центру**, и
-    // воздух ложится над текстом и под ним поровну. Здесь — то же самое тело и та же
-    // `theme::field_frame_air`.
-    if kind == Kind::Wizard {
-        // ⛔ **Не `settings::FIELD_BOX_DLU` — задача Т-33а-2.** Т-33-7 взяла коробку у окна
-        // настроек (12 DLU), а кнопка мастера — 14, и поле вышло на шесть пикселей ниже соседа.
-        // Окно настроек при этом не трогается: там 12 DLU принято глазом в Э23/Э26.
-        let box_height = Some(Metrics::of(hwnd).y(air::FIELD_BOX));
-        let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
-
-        for (control, rect) in &rects {
-            if !WIZARD_FIELDS.contains(control) && !WIZARD_AREAS.contains(control) {
-                continue;
-            }
-
-            if rect.right <= rect.left || rect.bottom <= rect.top {
-                continue;
-            }
-
-            // ⛔ **Только видимые.** Окно настроек этой проверки не знает — там видно всё, — а у
-            // мастера каждый шаг прячет чужие слоты, и прямоугольник из шаблона у них остаётся.
-            // Без этой строки фон рисовал рамки полей ЧУЖИХ шагов: пустые белые коробки по
-            // всему окну, и это увидел глаз на первом же снимке.
-            if !is_shown(hwnd, *control) {
-                continue;
-            }
-
-            // ⚠ Многострочное поле держит свои строки от верха клиентской области, и центровать
-            // вокруг него нечего: воздух ему даёт `EM_SETRECT` внутри, а рамка стоит на одной
-            // толщине — та же развилка, что у списков окна настроек (`FRAMED_LISTS`).
-            let air = if WIZARD_AREAS.contains(control) {
-                (thickness, thickness)
-            } else {
-                // Задача Т-46-5: параметра `OddPixel` больше нет — коробка равна заказанной
-                // высоте у всех окон программы (решение 109.6). У мастера число не менялось:
-                // он клал лишний пиксель вниз с задачи Т-33а-2, и это стало стандартом.
-                widgets::field::air(box_height, rect.bottom - rect.top, thickness)
-            };
-
-            theme::paint_rounded(
-                dc,
-                &widgets::field::frame(*rect, air, thickness),
-                theme::scaled(theme::CORNER_RADIUS, dpi),
-                line,
-                field,
-                dpi,
-            );
-        }
-    }
-
-    // TRUE — the background is drawn; the manager must not erase over it.
-    1
-}
-
-/// Whether a child of this window is on the screen right now.
-fn is_shown(hwnd: HWND, control: i32) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, IsWindowVisible};
-
-    // SAFETY: `hwnd` is the live window; the crate turns a missing control into an error, and
-    // `IsWindowVisible` reads a flag of the window it is handed.
-    unsafe { GetDlgItem(Some(hwnd), control) }
-        .is_ok_and(|child| unsafe { IsWindowVisible(child) }.as_bool())
-}
-
-/// The four **single-line** fields of the wizard — the ones whose box the background draws
-/// around a control one em box tall (задача Т-33-7). The contact since задача T-107-3.
-const WIZARD_FIELDS: [i32; 4] = [IDC_WZ_PROGRAM, IDC_WZ_EXPECTED, IDC_WZ_GOT, IDC_WZ_CONTACT];
 
 // ⚠ **`field_box_air` уехала в `widgets::field::air` — задача Т-45-2, решение 107.4.**
 //
@@ -3837,921 +3209,6 @@ const WIZARD_FIELDS: [i32; 4] = [IDC_WZ_PROGRAM, IDC_WZ_EXPECTED, IDC_WZ_GOT, ID
 // (`theme::field_frame_air`) отвечала одним числом на обе стороны и на нечётном остатке теряла
 // пиксель, эта клала его вниз — чтобы коробка вышла ровно вровень с кнопкой рядом. Теперь тело
 // одно, и различие названо параметром `widgets::field::OddPixel`, а не двумя телами.
-
-/// Places a single-line field so that its **box** stands centred in a row `row` pixels tall.
-///
-/// The control itself gets one em box — [`settings::DIALOG_FONT_HEIGHT_DLU`], exactly the line
-/// its text needs — and the frame the background draws around it (see [`on_erase`]) puts the
-/// leftover air above and below in equal halves. Giving the control the whole row instead is
-/// what pinned the text to the top edge, which is what the eye found on 0.43.0.
-///
-/// The sides are handed to the control itself: `EM_SETMARGINS` is the documented way to inset
-/// the text of an `EDIT`, and it is the same inset the settings window uses.
-fn place_field(hwnd: HWND, metrics: Metrics, control: i32, x: i32, y: i32, width: i32, row: i32) {
-    use windows::Win32::UI::Controls::EM_SETMARGINS;
-    use windows::Win32::UI::WindowsAndMessaging::{EC_LEFTMARGIN, EC_RIGHTMARGIN};
-
-    let line = metrics.y(settings::DIALOG_FONT_HEIGHT_DLU);
-
-    place(hwnd, control, x, y + (row - line).max(0) / 2, width, line);
-
-    let inset = metrics.x(settings::FIELD_TEXT_INSET_DLU).max(0);
-    let margins = isize::try_from((inset as u32) | ((inset as u32) << 16)).unwrap_or(0);
-
-    settings::send_to(
-        hwnd,
-        control,
-        EM_SETMARGINS,
-        usize::try_from(EC_LEFTMARGIN | EC_RIGHTMARGIN).unwrap_or(0),
-        margins,
-    );
-}
-
-/// Gives a **multi-line** field the air its text stands in — `EM_SETRECT`, the one message that
-/// moves the formatting rectangle of an edit control, and the one that is documented for
-/// multiline controls only.
-///
-/// Without it the words start in the very corner of the box, against the frame: the mock-up
-/// insets them (`textarea.field { padding: 8px 10px }`), and this is that inset.
-fn inset_area(hwnd: HWND, metrics: Metrics, control: i32) {
-    use windows::Win32::UI::Controls::EM_SETRECT;
-
-    let Ok(child) =
-        (unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), control) })
-    else {
-        return;
-    };
-
-    let mut client = RECT::default();
-
-    // SAFETY: `child` is the live control and `client` a live local the call fills.
-    if unsafe { GetClientRect(child, &mut client) }.is_err() {
-        return;
-    }
-
-    let side = metrics.x(settings::FIELD_TEXT_INSET_DLU).max(0);
-    let top = metrics.y(air::TIGHT).max(0);
-
-    let formatting = RECT {
-        left: client.left + side,
-        top: client.top + top,
-        right: (client.right - side).max(client.left + side),
-        bottom: (client.bottom - top).max(client.top + top),
-    };
-
-    // SAFETY: the pointer names a live local of this frame and the control only reads it for
-    // the length of the send — the documented shape of `EM_SETRECT`.
-    settings::send_to(
-        hwnd,
-        control,
-        EM_SETRECT,
-        0,
-        std::ptr::from_ref(&formatting) as isize,
-    );
-}
-
-/// The three **multi-line** fields of the wizard. Their box is the control's own rectangle plus
-/// one thickness, and the air around their text comes from `EM_SETRECT` inside them.
-const WIZARD_AREAS: [i32; 3] = [IDC_WZ_IDEA, IDC_WZ_HELPS, IDC_WZ_PREVIEW];
-
-/// The `WM_CTLCOLOR*` answers of these windows — the choosing half; the applying half is the
-/// shared `settings::apply_ctl_color` (§6.2).
-///
-/// # Safety
-///
-/// Called from [`letter_proc`] with the arguments of the message.
-unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> isize {
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-    let control = HWND(lparam.0 as *mut std::ffi::c_void);
-
-    // SAFETY: `control` is a window handle out of the message; asking for its identifier reads
-    // a field of that window and no memory of ours.
-    let control_id = unsafe { windows::Win32::UI::WindowsAndMessaging::GetDlgCtrlID(control) };
-
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            Some(match message {
-                WM_CTLCOLORDLG | WM_CTLCOLORBTN => (None, None, brushes.window_bg()),
-                // The six fields of the wizard and the list of its combo — a field's ground and
-                // a field's ink, the same pair the settings window gives its own (FR-92а).
-                WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (
-                    Some(palette.text),
-                    Some(palette.field_bg),
-                    brushes.field_bg(),
-                ),
-                WM_CTLCOLORSTATIC => match label_color_role(control_id) {
-                    StaticColorRole::Label => (Some(palette.text), None, brushes.window_bg()),
-                    StaticColorRole::Muted => (Some(palette.text_muted), None, brushes.window_bg()),
-                    StaticColorRole::Field => (
-                        Some(palette.text),
-                        Some(palette.field_bg),
-                        brushes.field_bg(),
-                    ),
-                },
-                _ => return None,
-            })
-        })
-    };
-
-    settings::apply_ctl_color(dc, choice.flatten())
-}
-
-/// Draws the feed switch of FR-102 — the one check box of «От автора».
-///
-/// ⭐ **Решение 132.3, задача T-71-5: тем же телом, что галки мастера — [`draw_glyph`].** До этой
-/// задачи здесь стояла третья копия тела глифа: те же шаги, что у [`draw_wizard_glyph`], но прямо
-/// в DC сообщения, вызов за вызовом, без `theme::PaintBuffer`. Щелчок приносит не меньше четырёх
-/// `WM_DRAWITEM` — нажатие, фокус, отпускание и перерисовку ветки щелчка, — DWM снимал окно между
-/// заливкой и подписью, и строка на кадр вставала пустой: «выключатель всё ещё моргает», слово
-/// владельца на живой 0.71.0 уже после двери Т-45-3 (задача T-71-2). Радиокнопки мастера моргали
-/// ровно так же, пока задача Т-33-5 не завела им буфер. Владелец: взять готовое решение галок
-/// мастера, а не копировать починку, — и теперь выключатель отличается от них ровно тем, чем
-/// отличается: «отмечено» читается из [`AuthorView::switch`], а лежит он на панели.
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] with values copied out of the `WM_DRAWITEM` message.
-unsafe fn draw_switch(
-    dc: HDC,
-    rect: RECT,
-    state: &WindowState,
-    disabled: bool,
-    label: &str,
-) -> isize {
-    let glyph = Glyph {
-        kind: theme::GlyphKind::CheckBox,
-        checked: state.author.switch.unwrap_or(false),
-        disabled,
-        ground: Ground::Panel,
-    };
-
-    // SAFETY: see the caller — the values of the message, handed on unchanged.
-    unsafe { draw_glyph(dc, rect, state, glyph, label) }
-}
-
-/// The `WM_DRAWITEM` of these windows: the owner-drawn statics and the owner-drawn buttons.
-///
-/// SEC-05: the control type and the identifier are checked before any work, the same copied
-/// fields and nothing else are taken out of the message, and `itemData` is never read.
-///
-/// # Safety
-///
-/// Called from [`letter_proc`] with the `lparam` of the message: the sender owns the struct it
-/// names for the length of the send, and this procedure is inside that send.
-unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // SAFETY: the dialog manager owns the struct for the length of the send, and this
-    // procedure is inside that send.
-    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    let (ctl_type, ctl_id, item_state, dc, rect, item_window) = (
-        item.CtlType,
-        item.CtlID,
-        item.itemState,
-        item.hDC,
-        item.rcItem,
-        item.hwndItem,
-    );
-
-    let control = i32::try_from(ctl_id).unwrap_or(-1);
-
-    // The one combo box of these windows — the layouts of «Что вы делали?». SEC-05: the type
-    // **and** the identifier are checked before anything is drawn.
-    if ctl_type == ODT_COMBOBOX {
-        if control != IDC_WZ_LAYOUT {
-            return 0;
-        }
-
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message.
-        return unsafe {
-            with_state(hwnd, |state| {
-                draw_combo_row(hwnd, dc, rect, state, item.itemID, item_state.0)
-            })
-        }
-        .unwrap_or(0);
-    }
-
-    if ctl_type == ODT_STATIC {
-        // SEC-05: a `WM_DRAWITEM` can be forged by any process of our integrity level, so the
-        // identifier is checked against the list of statics **this** window really has before
-        // anything is drawn — the gate the about window puts in front of its own four labels.
-        // SAFETY: see the caller.
-        let known = unsafe {
-            with_state(hwnd, |state| {
-                owner_drawn_labels(state.kind).contains(&control)
-                    || owner_drawn_labels_more(state.kind).contains(&control)
-            })
-        };
-
-        if known != Some(true) {
-            return 0;
-        }
-
-        // The progress bar of the wizard: a run of steps behind and a run ahead.
-        if control == IDC_WZ_PROGRESS {
-            // SAFETY: see the caller.
-            return unsafe { with_state(hwnd, |state| draw_progress(dc, rect, state)) }
-                .unwrap_or(0);
-        }
-
-        // Nor the key chip, which is a figure and not a word.
-        if control == IDC_WZ_CHIP {
-            let key = settings::get_text(hwnd, IDC_WZ_CHIP);
-
-            // SAFETY: see the caller.
-            return unsafe { with_state(hwnd, |state| draw_chip(dc, rect, state, &key)) }
-                .unwrap_or(0);
-        }
-
-        // SAFETY: see the caller.
-        return unsafe { draw_label(hwnd, control, dc, rect) };
-    }
-
-    if ctl_type != ODT_BUTTON {
-        return 0;
-    }
-
-    let pressed = item_state.0 & ODS_SELECTED.0 != 0;
-    let disabled = item_state.0 & ODS_DISABLED.0 != 0;
-    let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
-    let hot = settings::is_hot(item_window);
-
-    // The three cards of the wizard's first step — blocks with two lines of text on them, and
-    // the chosen one wears the accent frame.
-    if (IDC_WZ_CARD_1..IDC_WZ_CARD_1 + 3).contains(&control) {
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message.
-        return unsafe {
-            with_state(hwnd, |state| {
-                draw_card(hwnd, dc, rect, state, control, hot, focused)
-            })
-        }
-        .unwrap_or(0);
-    }
-
-    // The radios and the boxes of the wizard — the same glyph the settings window draws, with
-    // the wizard's own record for the answer to «is it checked».
-    if let Some(kind) = wizard_glyph(control) {
-        let label = settings::get_text(hwnd, control);
-
-        // SAFETY: see the caller.
-        return unsafe {
-            with_state(hwnd, |state| {
-                draw_wizard_glyph(dc, rect, state, kind, control, disabled, &label)
-            })
-        }
-        .unwrap_or(0);
-    }
-
-    // ⭐⭐ **The name of the program — задача T-81-3, решение 142.2 п. 6.** It is a button of this
-    // window now, and it is drawn by the **one body** that draws it in «О программе»:
-    // `settings::paint_program_name`. What this window supplies is what this window knows — its
-    // own brushes, its own palette, its own face for the name — and nothing else differs. ⛔ The
-    // arithmetic of the backing is not copied here; a second copy of it is the very расхождение
-    // this decision closes.
-    if control == IDC_AUTHOR_NAME {
-        // Read **before** the borrow, the discipline of every drawing of this file.
-        let mut caption: Vec<u16> = settings::get_text(hwnd, IDC_AUTHOR_NAME)
-            .encode_utf16()
-            .collect();
-
-        // SAFETY: see the caller.
-        let choice = unsafe {
-            with_state(hwnd, |state| {
-                let brushes = state.brushes.as_ref()?;
-
-                let (colors, hot_brush) = theme::resolve_button_colors(
-                    settings::button_color_roles(control, hot, false, false),
-                    // The head stands on the ground of the window, never on a block — the same
-                    // question every drawing of this file asks (task T-80-1).
-                    brushes.window_bg(),
-                    brushes,
-                    state.palette,
-                );
-
-                Some((
-                    colors,
-                    hot_brush,
-                    theme::label_ink(label_color_role(control), state.palette),
-                    state.fonts.as_ref().map(|faces| faces.name),
-                    brushes.window_bg(),
-                ))
-            })
-        };
-
-        // `_hot_brush` is named and not discarded: the brush of the lit face is made for the
-        // length of one paint and must outlive it.
-        let Some(Some((colors, _hot_brush, ink, face, window))) = choice else {
-            return 0;
-        };
-
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message; `face` and
-        // `window` are handles this window's state owns for longer than this call.
-        return unsafe {
-            settings::paint_program_name(dc, rect, &mut caption, face, None, ink, colors, window)
-        };
-    }
-
-    // The one control of these three windows that is not a push button: the switch of FR-102.
-    if control == IDC_NEWS_SWITCH {
-        // Read **before** the borrow, the discipline of every drawing of this file.
-        let label = settings::get_text(hwnd, IDC_NEWS_SWITCH);
-
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message.
-        return unsafe { with_state(hwnd, |state| draw_switch(dc, rect, state, disabled, &label)) }
-            .unwrap_or(0);
-    }
-
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            let brushes = state.brushes.as_ref()?;
-            let accent = state.accent_control();
-
-            let (colors, hot_brush) = theme::resolve_button_colors(
-                // The accented button of a letter is the accent of this window, and every
-                // other button is a plain one — the same table the about window's «ОК» is
-                // drawn by, asked about the identifier that is accented **here**.
-                settings::button_color_roles(
-                    if control == accent {
-                        settings::OK_COMMAND
-                    } else {
-                        control
-                    },
-                    hot,
-                    pressed,
-                    disabled,
-                ),
-                // ⭐⭐ **The ground the button actually stands on** — task T-80-1. This was
-                // `window_bg` for every button of these three windows, and five of the seven
-                // buttons of «От автора» stand on a block. The drawing cuts a rounded figure out
-                // of the rectangle and fills what it cuts away with this brush, so the wrong one
-                // does not tint the button — it paints four square corners of another colour
-                // around it, which is precisely what the user saw on `e79` in both palettes.
-                //
-                // The question is [`stands_on_a_panel`], the one the labels of this file have
-                // always asked. Not a second answer beside theirs — the same one.
-                if stands_on_a_panel(control) {
-                    brushes.panel_bg()
-                } else {
-                    brushes.window_bg()
-                },
-                brushes,
-                state.palette,
-            );
-
-            Some((
-                colors,
-                hot_brush,
-                state.fonts.as_ref().map(|faces| faces.text),
-            ))
-        })
-    };
-
-    let Some(Some((colors, _hot_brush, face))) = choice else {
-        return 0;
-    };
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only to
-    // paint into for the length of this send; `face` is a face the state owns for longer.
-    unsafe { settings::paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
-}
-
-/// Draws one owner-drawn label of these windows — the choosing half; the painting half is the
-/// shared `theme::paint_label_at_pitch`, or `theme::paint_chip_row` for a row that carries a
-/// key name (§6.2: the about window's path, not a copy of it).
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] with values copied out of the message.
-unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            let brushes = state.brushes.as_ref()?;
-
-            Some((
-                if stands_on_a_panel(control) {
-                    brushes.panel_bg()
-                } else {
-                    brushes.window_bg()
-                },
-                theme::label_ink(label_color_role(control), state.palette),
-                state.fonts.as_ref().map(|faces| label_face(control, faces)),
-                state.hotkey.clone(),
-                state
-                    .fonts
-                    .as_ref()
-                    .map(|faces| (faces.chip, faces.chip_height)),
-                state.palette,
-            ))
-        })
-    };
-
-    let Some(Some((ground, ink, face, key, chip_face, palette))) = choice else {
-        return 0;
-    };
-
-    let (face, pitch) = match face {
-        Some((face, pitch)) => (Some(face), pitch),
-        None => (None, None),
-    };
-
-    // Read after the borrow ends — the discipline of every drawing of `settings`.
-    let caption = settings::get_text(hwnd, control);
-
-    // ⛔ **Один кадр вместо двух — задача Т-33-8.** Подпись кладёт заливку, потом слова, и, пока
-    // это шло прямо в DC сообщения, между ними на экран попадал кадр с пустой землёй. На
-    // переключении шага подписей перерисовывается сразу десяток, и это последняя доля того
-    // моргания, которое видно глазом: карточки и глифы поверхность получили задачей Т-33-5,
-    // кнопки — задачей T-15-1, а подписи оставались.
-    //
-    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер освобождает свои DC и растр,
-    // когда кончится этот кадр.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // A row that names the hotkey is laid word by word with a chip around the name — решение
-    // 85 п. 1, the same body the help rows of «О программе» are drawn by.
-    if caption.contains(theme::KEY_PLACEHOLDER) && !key.is_empty() {
-        // SAFETY: `target` is the buffer of this frame or the DC of the message; every handle
-        // is an object the state owns for longer than the call.
-        let drawn = unsafe {
-            theme::paint_chip_row(
-                target,
-                rect,
-                theme::chip_row(&caption, &key),
-                theme::ChipRowStyle {
-                    ground,
-                    ink,
-                    body: face,
-                    chip_face,
-                    chip: theme::ChipColors {
-                        outline: palette.field_border,
-                        // The chip stands **on the row's own ground**, which on a panel is the
-                        // panel's colour — the same choice `draw_about_help_row` makes for the
-                        // rows of «Как пользоваться», and for the same reason: a chip filled
-                        // with the window colour would be a hole in the block.
-                        fill: ground,
-                        ink: palette.text,
-                    },
-                    pitch: pitch.unwrap_or(0),
-                    dpi: theme::drawing_dpi(dc),
-                },
-            )
-        };
-
-        // SAFETY: `dc` is the DC of the message; the buffer is this frame's own.
-        if let Some(buffer) = buffer {
-            let _ = unsafe { buffer.blit(dc) };
-        }
-
-        return drawn;
-    }
-
-    let mut wide: Vec<u16> = caption.encode_utf16().collect();
-
-    // SAFETY: `target` is the buffer of this frame or the DC of the message; `ground` and
-    // `face` are objects the state owns for longer than the call.
-    let drawn = unsafe {
-        theme::paint_label_at_pitch(
-            target,
-            rect,
-            &mut wide,
-            theme::LabelStyle {
-                ground,
-                ink,
-                face,
-                pitch,
-                reading: theme::Reading::Native,
-            },
-        )
-    };
-
-    // SAFETY: as above.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-
-    drawn
-}
-
-/// The dialog procedure of the three windows of FR-101 and FR-103 — **one procedure, three
-/// windows**, because what differs between them is which slots the plan fills and not how a
-/// window of this program behaves.
-///
-/// # Safety
-///
-/// Called by the dialog manager with the arguments of a window message. `hwnd` names the live
-/// window, and on `WM_INITDIALOG` `lparam` is the pointer [`open_window`] boxed and nothing
-/// else — the manager forwards it unchanged and no other sender can reach this procedure
-/// (SEC-05).
-unsafe extern "system" fn letter_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> isize {
-    match message {
-        WM_INITDIALOG => {
-            // SAFETY: `GWLP_USERDATA` is a field every window has, which the dialog manager
-            // does not use for itself. The value stored is the pointer the manager forwarded;
-            // it is only ever read back by `with_state` and freed on `WM_NCDESTROY`.
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
-
-            // SAFETY: the pointer has just been stored and names the box `open_window` made,
-            // which lives until this window's `WM_NCDESTROY`.
-            let prepared = unsafe {
-                with_state(hwnd, |state| {
-                    state.fonts = Faces::new(hwnd, state.accent_control());
-                    state.logo = settings::AboutLogo::load(hwnd);
-
-                    OPEN.with_borrow_mut(|open| open.push((state.kind, hwnd)));
-
-                    settings::apply_title_bar_theme(hwnd, state.palette);
-
-                    (
-                        state.kind,
-                        state.accent_control(),
-                        state.icon_control(),
-                        state.logo.as_ref().map(settings::AboutLogo::handle),
-                        state.icons.as_ref().map(settings::CaptionIcons::frames),
-                    )
-                })
-            };
-
-            let Some((kind, accent, icon, logo, frames)) = prepared else {
-                return 0;
-            };
-
-            settings::subclass_buttons(hwnd, buttons_of(kind));
-
-            // FR-104: the closed face of the layout combo is drawn by this program and not by
-            // the system — the very body the four combo boxes of the settings window are drawn
-            // by, asked for through the seam of task Т-32-8 rather than copied (§6.2).
-            //
-            // ⭐ **Задача Т-45-3: через общий слой, и слой ставит ЗАКРЫТУЮ ВЫСОТУ сам.** До Э45
-            // мастер брал у окна настроек подкласс, а высоты — нет, и `CB_SETITEMHEIGHT(−1)` не
-            // звал вовсе. Замер на живом 0.44.0: строка выпадающего списка мастера **16 px**
-            // против **26 px** у всех четырёх комбо окна настроек — это и есть «нестандартный
-            // для моей программы размер» из слов пользователя. `widgets::combo::attach` делает
-            // обе половины одним вызовом, и забыть вторую больше негде.
-            if kind == Kind::Wizard {
-                widgets::combo::attach(hwnd, IDC_WZ_LAYOUT);
-
-                // Задача T-107-3: the field does not take a contact longer than the site does
-                // (199.7: 200 characters). The answer of `EM_SETLIMITTEXT` is documented as none.
-                let _ = settings::send_to(
-                    hwnd,
-                    IDC_WZ_CONTACT,
-                    windows::Win32::UI::Controls::EM_SETLIMITTEXT,
-                    appeal::CONTACT_MAX,
-                    0,
-                );
-            }
-
-            if let Some(frames) = frames {
-                // SAFETY: `hwnd` is the live window and the handles belong to the value the
-                // state keeps, which is dropped only when the window is destroyed.
-                unsafe { settings::CaptionIcons::show_on(hwnd, frames) };
-            }
-
-            if let (Some(logo), Some(icon)) = (logo, icon) {
-                // `STM_SETICON`, the documented way to give an `SS_ICON` static a picture —
-                // the road the about window already takes for the same 40 px logo. The shared
-                // frame it answers with is deliberately dropped: it was never ours to free.
-                let _ = settings::send_to(
-                    hwnd,
-                    icon,
-                    windows::Win32::UI::WindowsAndMessaging::STM_SETICON,
-                    logo.0 as usize,
-                    0,
-                );
-
-                // Решение 97.1: a picture carries a meaning and not a direction.
-                settings::unmirror_control(hwnd, icon);
-            }
-
-            // SAFETY: as above — the pointer names the live box.
-            unsafe {
-                with_state(hwnd, |state| {
-                    fill_window(hwnd, state);
-                    layout_window(hwnd, state);
-                })
-            };
-
-            // Задача T-83-1, решение 143.6: the name's button is narrowed to its backing — by the
-            // one body «О программе» calls, `settings::fit_program_name`, and in the face the
-            // drawing uses. The face leaves the borrow before the button is moved.
-            if kind == Kind::Author {
-                // SAFETY: as above — the pointer names the live box.
-                let name_face = unsafe {
-                    with_state(hwnd, |state| state.fonts.as_ref().map(|faces| faces.name))
-                }
-                .flatten();
-
-                // SAFETY: `hwnd` is the live window in its `WM_INITDIALOG`; the face belongs to
-                // the state, which lives until `WM_NCDESTROY`.
-                unsafe { settings::fit_program_name(hwnd, IDC_AUTHOR_NAME, name_face) };
-            }
-
-            // The accented button is the default one, handed to the manager by the documented
-            // replacement — *posted*, not sent, for the reason `dialog_proc` gives at its own
-            // (FR-72).
-            //
-            // SAFETY: `hwnd` is the live window; the message carries two plain integers and no
-            // pointer.
-            if let Err(error) = unsafe {
-                PostMessageW(
-                    Some(hwnd),
-                    DM_SETDEFID,
-                    WPARAM(usize::try_from(accent).unwrap_or(0)),
-                    LPARAM(0),
-                )
-            } {
-                crate::app::report_non_critical("PostMessageW", &error);
-            }
-
-            // TRUE: let the dialog manager choose the focus.
-            1
-        }
-
-        // SAFETY: the pointer was stored on `WM_INITDIALOG` and the box lives until
-        // `WM_NCDESTROY`.
-        WM_ERASEBKGND => unsafe { on_erase(hwnd, wparam) },
-
-        // SAFETY: as above.
-        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT
-        | WM_CTLCOLORLISTBOX => unsafe { on_ctl_color(hwnd, message, wparam, lparam) },
-
-        // SAFETY: the sender owns the struct `lparam` names for the length of the send, and
-        // this procedure is inside that send.
-        WM_DRAWITEM => unsafe { on_draw_item(hwnd, lparam) },
-
-        // The height of one row of the layout combo — asked once, before the window is filled.
-        //
-        // SAFETY: as above.
-        WM_MEASUREITEM => unsafe { on_measure_item(hwnd, lparam) },
-
-        // One second of the capture count-down of FR-104 — the wizard's own timer, and the
-        // only other one this program sets.
-        WM_TIMER if wparam.0 == CAPTURE_TIMER => {
-            wizard_tick(hwnd);
-            0
-        }
-
-        // The site answered an appeal — задача T-107-3. The message is a nudge and nothing more;
-        // the answer is in the box, under the ticket of the press (SEC-05).
-        WM_APP_APPEAL => {
-            wizard_answer(hwnd);
-            0
-        }
-
-        WM_COMMAND => {
-            let control = i32::from(settings::low_word(wparam.0));
-
-            // ⭐ **Код уведомления читается — задача Т-46-2, решение 109.1.** До Э46 он не
-            // читался вовсе, и глифы этих окон переключались на каждое уведомление очереди
-            // настоящего щелчка: `BN_KILLFOCUS` соседке, `BN_SETFOCUS` и `BN_CLICKED` своей.
-            let notification = settings::high_word(wparam.0);
-
-            // Esc, which the dialog manager sends whether or not the window has the button.
-            if control == IDCANCEL.0 {
-                close_window(hwnd);
-                return 0;
-            }
-
-            // The wizard answers for its own controls — FR-104. SAFETY: the state pointer is
-            // live for the length of the window.
-            let is_wizard = unsafe { with_state(hwnd, |state| state.kind) } == Some(Kind::Wizard);
-
-            if is_wizard && wizard_command(hwnd, control, notification) {
-                return 0;
-            }
-
-            // **FR-102: the switch writes the file at once.** Not on «Закрыть» and not on a
-            // later save — a person who turns the feed off has turned it off, and a window
-            // they close some other way must not undo that.
-            //
-            // ⛔ **Задача Т-46-2: и здесь фильтр слоя, по той же причине.** Выключатель ленты —
-            // `BS_OWNERDRAW | BS_NOTIFY`, то есть шлёт ту же очередь из трёх уведомлений, что и
-            // галки мастера. Без фильтра щелчок по нему с переходом фокуса переключал ленту
-            // дважды — **и дважды писал файл**, потому что FR-102 пишет немедленно. Пикселей
-            // это не меняет; замер находки 3 (`scratchpad-Э46\красное-галки-e45.log`) показал,
-            // что болезнь была общей.
-            if control == IDC_NEWS_SWITCH
-                && widgets::glyph::answer(widgets::glyph::Kind::Check, notification)
-                    == widgets::glyph::Answer::Toggle
-            {
-                // Task T-119-10: the switch is the windows of updates, `[letters] release_window`.
-                let wanted = !state_now().release_window;
-
-                update_state(|state| state.release_window = wanted);
-
-                // ⭐ **Задача T-70-1 (находка Э69-Б-1): галка идёт за записанным.** Выключатель
-                // рисует `draw_switch` по копии `WindowState::author.switch`, которую
-                // `author_view` строит при открытии окна и при смене языка. До этой задачи
-                // щелчок писал файл и просил перерисовку, а перерисовка брала копию открытия:
-                // в файле лента выключена, а галка стоит, и второй щелчок включал ленту обратно
-                // под неподвижной галкой. Копия следует за тем, что конфигурация держит
-                // **после** записи, — поэтому конфигурация читается ещё раз, и до заёма
-                // состояния окна, как в каждой отрисовке этого файла.
-                let stored = state_now();
-
-                // SAFETY: as above.
-                unsafe { with_state(hwnd, |state| state.author.follow_feed(&stored)) };
-
-                // ⛔ **Задача T-69-5: отметку кнопке здесь не ставят.** Выключатель объявлен
-                // `BS_OWNERDRAW`, а такая кнопка бита отметки не держит: после `BM_SETCHECK(1)`
-                // `BM_GETCHECK` отвечает 0 (у `BS_AUTOCHECKBOX` — 1; замер Э43,
-                // `scratchpad-E43\t43-11-ownerdraw-check-probe.log`). Состояние живёт в
-                // `Letters::feed`, а на экран его несёт копия, подтянутая строкой выше.
-                //
-                // ⭐ **Задача T-71-2 (находка Э70-Б-2): перерисовка без стирания — дверь Т-45-3.**
-                // Со стиранием выключатель на один кадр заливался кистью, которой `on_ctl_color`
-                // отвечает на `WM_CTLCOLORBTN`, — кистью окна, а лежит он на панели, и свой
-                // прямоугольник цветом панели `draw_switch` красит только следующим кадром: «строка
-                // моргает» (слово владельца). Стирание не нужно ни для чего — `draw_switch` первым
-                // делом заливает весь свой прямоугольник сам. Канон 109.2 («глиф — как `set_check`,
-                // со стиранием») не сдвинут: он для окон, где кисть ответа равна грунту элемента, —
-                // в окне настроек элементу на панели отвечают панельной кистью.
-                widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH);
-
-                return 0;
-            }
-
-            // Кнопки писем: подписанные действия делает щелчок и ничего кроме (Т-46-2).
-            if widgets::glyph::answer(widgets::glyph::Kind::Button, notification)
-                != widgets::glyph::Answer::Act
-            {
-                return 0;
-            }
-
-            // SAFETY: as above.
-            let action = unsafe { with_state(hwnd, |state| state.action_of(control)) }.flatten();
-
-            if let Some(action) = action {
-                perform(hwnd, action);
-            }
-
-            0
-        }
-
-        WM_CLOSE => {
-            close_window(hwnd);
-            0
-        }
-
-        WM_DESTROY => {
-            // SAFETY: as above. The window is still alive here and its children with it, so
-            // the buttons are still there to be handed back their own procedures.
-            let kind = unsafe { with_state(hwnd, |state| state.kind) };
-
-            if let Some(kind) = kind {
-                settings::unsubclass_buttons(hwnd, buttons_of(kind));
-
-                // The far half of the pair installed on `WM_INITDIALOG` — while the children
-                // are still alive, which is what makes it exact.
-                if kind == Kind::Wizard {
-                    widgets::combo::detach(hwnd, IDC_WZ_LAYOUT);
-                }
-            }
-
-            // SAFETY: `hwnd` is the live window; the capture count-down may or may not be running,
-            // and killing a timer that was never set answers false and is harmless (NFR-13).
-            let _ = unsafe { KillTimer(Some(hwnd), CAPTURE_TIMER) };
-
-            OPEN.with_borrow_mut(|open| open.retain(|(_, other)| *other != hwnd));
-
-            // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
-            0
-        }
-
-        // The last message a window ever gets, and the one place the state is freed.
-        WM_NCDESTROY => {
-            // SAFETY: the field holds the pointer stored on `WM_INITDIALOG` or zero.
-            let pointer = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-
-            // Cleared **before** the box is freed, so that a message arriving in between finds
-            // nothing rather than a dangling pointer.
-            //
-            // SAFETY: `hwnd` is the live window and the value written is zero.
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
-
-            if pointer != 0 {
-                // SAFETY: the pointer came from `Box::into_raw` in `open_window` and is turned
-                // back into a box exactly once — this message arrives once per window.
-                drop(unsafe { Box::from_raw(pointer as *mut RefCell<WindowState>) });
-            }
-
-            0
-        }
-
-        // The system theme moved while this window is up — the far end of the nudge
-        // `settings::on_system_theme_message` posts. SEC-05: the message carries nothing and
-        // decides nothing; the palette is resolved afresh out of this program's own setting.
-        settings::WM_APP_SYSTEM_THEME => {
-            // SAFETY: as above.
-            let moved = unsafe {
-                with_state(hwnd, |state| {
-                    let fresh = theme::resolve(state.setting, theme::system_is_light());
-
-                    if std::ptr::eq(fresh, state.palette) {
-                        return false;
-                    }
-
-                    let Some(brushes) = theme::Brushes::new(fresh) else {
-                        return false;
-                    };
-
-                    state.palette = fresh;
-                    state.brushes = Some(brushes);
-                    true
-                })
-            };
-
-            if moved == Some(true) {
-                // SAFETY: as above.
-                unsafe {
-                    with_state(hwnd, |state| {
-                        settings::apply_title_bar_theme(hwnd, state.palette);
-                    })
-                };
-
-                widgets::repaint::whole(hwnd);
-            }
-
-            0
-        }
-
-        _ => 0,
-    }
-}
-
-/// Every owner-drawn static of one kind of window — the gate of the static branch of
-/// `WM_DRAWITEM`, and the answer to «is this identifier one of ours» (SEC-05).
-fn owner_drawn_labels(kind: Kind) -> &'static [i32] {
-    match kind {
-        Kind::Author => &AUTHOR_LABELS,
-        Kind::Wizard => &WIZARD_LABELS,
-        Kind::Letter | Kind::List => &[],
-    }
-}
-
-/// The four value lines of «Что приложить?» and the footnote under them — the second half of
-/// the wizard's statics, asked separately because the gate takes one slice.
-fn owner_drawn_labels_more(kind: Kind) -> &'static [i32] {
-    match kind {
-        Kind::Wizard => &WIZARD_ATTACH_LABELS,
-        _ => &[],
-    }
-}
-
-/// The owner-drawn statics of «От автора».
-///
-/// ⚠ **Имя ушло отсюда в [`AUTHOR_BUTTONS`] задачей T-81-3** — решение 142.2 п. 6, тем же
-/// образцом, каким T-78-3 перевела имя из надписей в кнопки в «О программе»; вместо него сюда
-/// пришли две строки описания общей шапки. Парность списков и шаблона держит тест.
-const AUTHOR_LABELS: [i32; 10] = [
-    IDC_AUTHOR_VERSION,
-    IDC_AUTHOR_LINE_1,
-    IDC_AUTHOR_LINE_2,
-    IDC_AUTHOR_TEXT,
-    IDC_NEWS_ABOUT,
-    IDC_NEWS_SWITCH_SUB,
-    IDC_NEWS_STATE,
-    IDC_NEWS_VERSION,
-    IDC_NEWS_FILE_ONLY,
-    IDC_FEEDBACK_TEXT,
-];
-
-/// The owner-drawn buttons of one kind of window — the list `subclass_buttons` walks.
-fn buttons_of(kind: Kind) -> &'static [i32] {
-    match kind {
-        Kind::Author => &AUTHOR_BUTTONS,
-        Kind::Wizard => &WIZARD_BUTTONS,
-        Kind::Letter | Kind::List => &[],
-    }
-}
-
-/// The owner-drawn buttons of «От автора».
-const AUTHOR_BUTTONS: [i32; 7] = [
-    // ⭐ **Имя программы — задача T-81-3, решение 142.2 п. 6.** Кнопка без рамки, открывающая
-    // страницу приложения; в список она входит затем, чтобы `subclass_buttons` поставила ей руку
-    // курсора и подсветку наведения теми же телами, что и в «О программе».
-    IDC_AUTHOR_NAME,
-    IDC_AUTHOR_SUPPORT,
-    IDC_AUTHOR_CHANNEL,
-    IDC_NEWS_DOWNLOAD,
-    IDC_NEWS_LETTERS,
-    IDC_FEEDBACK_WRITE,
-    IDC_AUTHOR_CLOSE,
-];
 
 // -----------------------------------------------------------------------------------------
 // «От автора» — FR-103
@@ -4767,17 +3224,10 @@ const AUTHOR_BUTTONS: [i32; 7] = [
 /// yet, and a feed that has never said anything is not something to turn off.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorView {
-    /// The line under the program's name: the version.
-    ///
-    /// ⚠ **«and the author's alias» no more — задача T-81-3, решение 142.2 п. 5.** The line is
-    /// `IDS_ABOUT_VERSION` now, the very one «О программе» writes, and the signature the owner
-    /// asked to remove («не надо вставлять панда, он же панда») went with the string that
-    /// carried it.
-    pub version_line: String,
-    /// The first line of the head's description — `IDS_ABOUT_LINE_1`, задача T-81-3.
+    /// The title of the head — `IDS_ABOUT_LINE_1`, задача T-81-3. The second line of the head
+    /// of «О программе», `IDS_ABOUT_LINE_2`, is not in «От автора» since C6 of T-120-17
+    /// (решение контролёра по слову 208.178: in the mock-up of the window there is none).
     pub line_1: String,
-    /// The second — `IDS_ABOUT_LINE_2`.
-    pub line_2: String,
     /// The paragraph of the «Автор» panel.
     pub author_text: String,
     /// What the feed is and how often it is read — said from the first day (FR-102).
@@ -4798,6 +3248,10 @@ pub struct AuthorView {
     pub letters: bool,
     /// The paragraph of the «Обратная связь» panel.
     pub feedback_text: String,
+    /// The feed has been read — the dot of its line is the accent; else the quiet one.
+    pub feed_read: bool,
+    /// A newer version is announced — the dot of the line of the version warns.
+    pub update_waiting: bool,
 }
 
 impl AuthorView {
@@ -4820,12 +3274,32 @@ impl AuthorView {
     }
 }
 
-/// The whole of what «От автора» says — FR-103.
+/// The whole of what «От автора» says — FR-103, in the language of the program.
 pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'_>) -> AuthorView {
+    author_view_in(settings::ui_language(), state, today, version, feed)
+}
+
+/// [`author_view`] in `language` — for the instrument of fitting, which goes over all of them.
+pub fn author_view_in(
+    language: Language,
+    state: &Letters,
+    today: Date,
+    version: &str,
+    feed: FeedView<'_>,
+) -> AuthorView {
     use crate::settings::{
-        IDS_ABOUT_LINE_1, IDS_ABOUT_LINE_2, IDS_ABOUT_VERSION, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT,
-        IDS_NEWS_ABOUT_FEED, IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST,
-        IDS_NEWS_NEVER_READ, IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON, format_text, text,
+        IDS_ABOUT_LINE_1, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
+        IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST, IDS_NEWS_NEVER_READ,
+        IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON,
+    };
+
+    let text = |id| settings::text_in(language, id);
+    let format_text = |id, arguments: &[&str]| {
+        let mut filled = text(id);
+        for (index, argument) in arguments.iter().enumerate() {
+            filled = filled.replace(&format!("{{{index}}}"), argument);
+        }
+        filled
     };
 
     // ⭐ Task T-119-10 (решение 208.119): the switch of the panel is «Сообщать об обновлениях
@@ -4836,14 +3310,14 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
     let switch = Some(state.release_window);
     let update = update_is_pending(version, feed);
 
+    // Строки версии под именем больше нет (T-120-17): до задачи T-81-3 она несла
+    // «версия {0} · Панда, он же Panda_Pishet_Kod» (снята решением 142.2 п. 5), потом —
+    // `IDS_ABOUT_VERSION`; у окна оболочки нет имени, под которым ей стоять, и номер версии
+    // стоит в строке состояния (`IDS_NEWS_LATEST`, `IDS_NEWS_AVAILABLE`).
     AuthorView {
-        // ⭐⭐ **`IDS_ABOUT_VERSION` и не `IDS_AUTHOR_VERSION` — задача T-81-3, решение 142.2
-        // п. 5.** Вторая строка несла «версия {0} · Панда, он же Panda_Pishet_Kod» и снята со
-        // всеми четырнадцатью переводами; шапка у двух окон одна, и строка версии у них одна.
-        version_line: format_text(IDS_ABOUT_VERSION, &[version]),
-        // Две строки описания общей шапки — те же слова, что в «О программе», из тех же строк.
+        // Заголовок общей шапки — те же слова, что в «О программе», из той же строки; подписи
+        // под ним у «От автора» нет (C6 T-120-17).
         line_1: text(IDS_ABOUT_LINE_1),
-        line_2: text(IDS_ABOUT_LINE_2),
         author_text: text(IDS_AUTHOR_TEXT),
         // The sentence about the feed moves under the switch once there is one — it is the
         // same sentence, and two copies of it on one panel would be a stutter.
@@ -4862,7 +3336,7 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
             Some(day) => format_text(
                 IDS_NEWS_READ_ON,
                 &[
-                    &format_date(day),
+                    &format_date_in(language, day),
                     &days_until_feed_read(state, today).to_string(),
                 ],
             ),
@@ -4883,6 +3357,8 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
         // assignment away from creeping back into that button.
         letters: !feed.news.is_empty() || update.is_some(),
         feedback_text: text(IDS_FEEDBACK_TEXT),
+        feed_read: state.feed_last_read.is_some(),
+        update_waiting: update.and_then(|item| item.version.as_deref()).is_some(),
     }
 }
 
@@ -4920,7 +3396,14 @@ pub fn author_view(state: &Letters, today: Date, version: &str, feed: FeedView<'
 /// NFR-13: a refusal falls back to the ISO form the configuration file is written in, which is
 /// readable everywhere and wrong nowhere.
 pub fn format_date(date: Date) -> String {
-    let locale = settings::wide(settings::ui_language().tag());
+    format_date_in(settings::ui_language(), date)
+}
+
+/// [`format_date`] in `language` — the language of the window that shows the date, which is the
+/// program's in the running program and any language in a description built for it (T-120-17:
+/// «От автора» in Hebrew printed the day with the Russian month of the program).
+pub fn format_date_in(language: Language, date: Date) -> String {
+    let locale = settings::wide(language.tag());
 
     match gregorian_month_name(&locale, date.month()) {
         Some(month) => format!("{} {month}", date.day()),
@@ -4988,29 +3471,6 @@ fn gregorian_month_name(locale: &[u16], month: u32) -> Option<String> {
 // -----------------------------------------------------------------------------------------
 // Filling and laying out, by kind
 // -----------------------------------------------------------------------------------------
-
-/// Puts the words into one of the three windows — the one body that fills a window whether it
-/// has just been created or has just been handed a new locale (FR-94, решение 99.1).
-fn fill_window(hwnd: HWND, state: &WindowState) {
-    match state.kind {
-        Kind::Author => fill_author(hwnd, state),
-        Kind::Wizard => fill_wizard(hwnd, state),
-        Kind::Letter | Kind::List => {}
-    }
-}
-
-/// Lays out one of the three windows.
-///
-/// # Safety
-///
-/// `hwnd` is the live window and `state` its own state.
-unsafe fn layout_window(hwnd: HWND, state: &WindowState) {
-    match state.kind {
-        Kind::Author => unsafe { layout_author(hwnd, state) },
-        Kind::Wizard => unsafe { layout_wizard(hwnd, state) },
-        Kind::Letter | Kind::List => {}
-    }
-}
 
 /// One entry of «Последние письма» — FR-101: what it says, when it arrived, whether it has been
 /// read, and whether it is still worth a «Прочитано».
@@ -5093,461 +3553,6 @@ fn first_line(text: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default()
         .to_owned()
-}
-
-/// Puts the words of [`AuthorView`] into «От автора» — FR-103.
-fn fill_author(hwnd: HWND, state: &WindowState) {
-    use crate::settings::{
-        IDS_AUTHOR_CAPTION, IDS_AUTHOR_PANEL, IDS_CHANNEL_OPEN, IDS_CLOSE, IDS_FEEDBACK_PANEL,
-        IDS_NEWS_DOWNLOAD, IDS_NEWS_LETTERS, IDS_NEWS_PANEL, IDS_SUPPORT_OPEN, IDS_UPDATES_SWITCH,
-        IDS_WRITE_TO_AUTHOR, text,
-    };
-
-    let view = &state.author;
-    let caption = settings::wide(&text(IDS_AUTHOR_CAPTION));
-
-    // SAFETY: `hwnd` is the live window and `caption` a NUL-terminated buffer of this frame.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    for (control, caption) in [
-        (IDC_AUTHOR_VERSION, view.version_line.clone()),
-        // Задача T-81-3: две строки описания общей шапки. Имя над ними — литерал шаблона, как и
-        // в «О программе»: «Lang Switcher» читается одинаково во всех четырнадцати локалях.
-        (IDC_AUTHOR_LINE_1, view.line_1.clone()),
-        (IDC_AUTHOR_LINE_2, view.line_2.clone()),
-        (IDC_AUTHOR_PANEL, text(IDS_AUTHOR_PANEL)),
-        (IDC_AUTHOR_TEXT, view.author_text.clone()),
-        (IDC_AUTHOR_SUPPORT, text(IDS_SUPPORT_OPEN)),
-        (IDC_AUTHOR_CHANNEL, text(IDS_CHANNEL_OPEN)),
-        (IDC_NEWS_PANEL, text(IDS_NEWS_PANEL)),
-        (IDC_NEWS_ABOUT, view.feed_about.clone()),
-        (IDC_NEWS_SWITCH, text(IDS_UPDATES_SWITCH)),
-        (IDC_NEWS_SWITCH_SUB, view.switch_note.clone()),
-        (IDC_NEWS_STATE, view.feed_state.clone()),
-        (IDC_NEWS_VERSION, view.version_state.clone()),
-        (IDC_NEWS_DOWNLOAD, text(IDS_NEWS_DOWNLOAD)),
-        (IDC_NEWS_LETTERS, text(IDS_NEWS_LETTERS)),
-        (IDC_NEWS_FILE_ONLY, view.file_only.clone()),
-        (IDC_FEEDBACK_PANEL, text(IDS_FEEDBACK_PANEL)),
-        (IDC_FEEDBACK_TEXT, view.feedback_text.clone()),
-        (IDC_FEEDBACK_WRITE, text(IDS_WRITE_TO_AUTHOR)),
-        (IDC_AUTHOR_CLOSE, text(IDS_CLOSE)),
-    ] {
-        settings::set_text(hwnd, control, &caption);
-    }
-
-    // The two buttons that lead to an address that is still a placeholder are drawn and
-    // disabled — полномочия П7 и П8.
-    enable(
-        hwnd,
-        IDC_AUTHOR_SUPPORT,
-        !links::is_placeholder(links::SUPPORT_URL),
-    );
-    enable(
-        hwnd,
-        IDC_AUTHOR_CHANNEL,
-        !links::is_placeholder(links::CHANNEL_URL),
-    );
-
-    // ⭐ The download button leads where **this build** points and not where a feed entry
-    // does — task T-78-2, решение 139.2 п. 6. A feed entry is signed and dated, so the address
-    // in it is as old as the entry and goes stale; the download page is permanent and always
-    // carries the current version. Word of the user: «если новость об обновлении пришла, значит
-    // оно уже лежит на сайте, и перейдя по ссылке загрузки программы, мы уже попадаем на
-    // актуальную версию».
-    //
-    // So the button is judged by exactly the question the two above are judged by, and the feed
-    // has nothing to say about it. Until Э78 it was judged by the entry's `link`, and since
-    // there is no feed (138.4) it was translated into fourteen languages and shown to nobody.
-    enable(
-        hwnd,
-        IDC_NEWS_DOWNLOAD,
-        !links::is_placeholder(links::DOWNLOAD_URL),
-    );
-}
-
-/// Lays out «От автора»: three panels, each as tall as what stands on it, and the window as
-/// tall as the three together — the one window of FR-103 whose height the content decides.
-///
-/// # Safety
-///
-/// As [`layout_letter`].
-unsafe fn layout_author(hwnd: HWND, state: &WindowState) {
-    let Some(faces) = state.fonts.as_ref() else {
-        return;
-    };
-
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `client` a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; the DC is released on every path below.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let metrics = Metrics::of(hwnd);
-    let view = &state.author;
-    let pad = metrics.x(air::PAD);
-    let full_width = client.right - pad * 2;
-    let inset = metrics.x(air::PANEL_PAD);
-    let inner_x = pad + inset;
-    let inner_width = full_width - inset * 2;
-    let pitch = Some(faces.body_pitch());
-    let tight = metrics.y(air::TIGHT);
-    let gap = metrics.y(air::GAP);
-    let button = metrics.y(air::BUTTON);
-
-    // ⭐⭐⭐ **ШАПКА ЗДЕСЬ НЕ РАСКЛАДЫВАЕТСЯ ВОВСЕ — задача T-81-6, находка 142б.1.**
-    //
-    // ⛔ До этой задачи она раскладывалась, и своей арифметикой: имя ставилось на `TEXT_X` с
-    // высотой ровно по тексту, версия — под ним через `TIGHT`, обе строки описания — ещё через
-    // `TIGHT` каждая. Шаблон при этом нёс шапку «О программе» **прямоугольник в прямоугольник**,
-    // и тест это подтверждал — только окно те прямоугольники выбрасывало и клало всё заново.
-    // Три симптома, которые владелец увидел на живой 0.81.0, — это **одна** причина:
-    //   * имя ставилось на `TEXT_X` = 42, а прямоугольник имени обязан начинаться на **38**:
-    //     четыре единицы слева и одна сверху — это не сдвиг имени, а **комната под подложку**
-    //     (задача T-79-2), и отрисовка кладёт текст на `rect.left + chip.inset_x`. На 42 текст
-    //     уезжал вправо ровно на инсет;
-    //   * высота ставилась по тексту, а подложке нужен ещё инсет сверху и снизу — низ подложки
-    //     и низ буквы срезались;
-    //   * между версией и строками описания появлялся `TIGHT`, которого в шаблоне нет, и шапка
-    //     расходилась по высоте.
-    //
-    // ⭐ **Лечение — не вторая арифметика, а отсутствие второй арифметики.** Геометрия шапки
-    // живёт в шаблоне, и там она общая с «О программе»; раскладка начинается **под** ней, а где
-    // она кончилась — спрашивается у самих контролов той же дорогой, какой это делает
-    // `settings::fit_about_help` (⚠ и только ею: у зеркального окна `ScreenToClient` меняет углы
-    // местами, и `screen_rect_in_client` внутри — единственное чтение этого проекта, которое это
-    // переживает).
-    let head = [
-        IDC_AUTHOR_ICON,
-        IDC_AUTHOR_NAME,
-        IDC_AUTHOR_VERSION,
-        IDC_AUTHOR_LINE_1,
-        IDC_AUTHOR_LINE_2,
-    ]
-    .into_iter()
-    .filter_map(|control| settings::child_rect_in_client(hwnd, control))
-    .map(|rect| rect.bottom)
-    .max()
-    // NFR-13: не ответил ни один контрол — окно раскладывается от числа шаблона, то есть
-    // выглядит как всегда, а не остаётся пустым прямоугольником.
-    .unwrap_or_else(|| metrics.y(57));
-
-    let mut top = head + gap;
-
-    // --- panel «Автор» ----------------------------------------------------------------------
-    let mut panel_top = top;
-    let mut y = panel_top + metrics.y(air::PANEL_HEAD);
-
-    // SAFETY: as above.
-    let height = unsafe { measure(dc, faces.body, inner_width, &view.author_text, pitch) };
-    place(hwnd, IDC_AUTHOR_TEXT, inner_x, y, inner_width, height);
-    y += height + tight;
-
-    // SAFETY: as above.
-    unsafe {
-        y = place_panel_buttons(
-            hwnd,
-            dc,
-            faces.text,
-            metrics,
-            inner_x,
-            y,
-            inner_width,
-            &[(IDC_AUTHOR_SUPPORT, true), (IDC_AUTHOR_CHANNEL, true)],
-        );
-    }
-
-    place(
-        hwnd,
-        IDC_AUTHOR_PANEL,
-        pad,
-        panel_top,
-        full_width,
-        y + inset - panel_top,
-    );
-    top = y + inset + gap;
-
-    // --- panel «Новости и обновления» --------------------------------------------------------
-    panel_top = top;
-    y = panel_top + metrics.y(air::PANEL_HEAD);
-
-    match view.switch {
-        // FR-102: before the switch may be shown, the panel says what the feed is and that the
-        // setting lives in the file.
-        None => {
-            hide(hwnd, IDC_NEWS_SWITCH);
-            hide(hwnd, IDC_NEWS_SWITCH_SUB);
-
-            // SAFETY: as above.
-            let height = unsafe { measure(dc, faces.body, inner_width, &view.feed_about, pitch) };
-            place(hwnd, IDC_NEWS_ABOUT, inner_x, y, inner_width, height);
-            y += height + tight;
-        }
-        // The state of the switch is not handed to the control: an owner-drawn button keeps no
-        // check bit (task T-69-5), and `draw_switch` reads it out of `state.author.switch` — the
-        // `view` of this function — itself.
-        Some(_) => {
-            hide(hwnd, IDC_NEWS_ABOUT);
-
-            place(
-                hwnd,
-                IDC_NEWS_SWITCH,
-                inner_x,
-                y,
-                inner_width,
-                metrics.y(10),
-            );
-            y += metrics.y(11);
-
-            // Task T-119-10: the line under the switch is there only while `[letters] feed = false`
-            // — «Новости автора выключены в файле настроек».
-            if view.switch_note.is_empty() {
-                hide(hwnd, IDC_NEWS_SWITCH_SUB);
-                y += tight;
-            } else {
-                // SAFETY: as above.
-                let height = unsafe {
-                    measure(
-                        dc,
-                        faces.body,
-                        inner_width - metrics.x(air::ROW_TEXT),
-                        &view.switch_note,
-                        pitch,
-                    )
-                };
-                place(
-                    hwnd,
-                    IDC_NEWS_SWITCH_SUB,
-                    inner_x + metrics.x(air::ROW_TEXT),
-                    y,
-                    inner_width - metrics.x(air::ROW_TEXT),
-                    height,
-                );
-                y += height + tight;
-            }
-        }
-    }
-
-    for (control, caption) in [
-        (IDC_NEWS_STATE, &view.feed_state),
-        (IDC_NEWS_VERSION, &view.version_state),
-    ] {
-        // SAFETY: as above.
-        let height = unsafe { measure(dc, faces.body, inner_width, caption, pitch) };
-        place(hwnd, control, inner_x, y, inner_width, height);
-        y += height + tight;
-    }
-
-    // SAFETY: as above.
-    unsafe {
-        y = place_panel_buttons(
-            hwnd,
-            dc,
-            faces.text,
-            metrics,
-            inner_x,
-            y,
-            inner_width,
-            &[
-                // Always — task T-78-2. The address it opens is a constant of this build, so
-                // there is no state of the feed in which the row should not carry it.
-                (IDC_NEWS_DOWNLOAD, true),
-                (IDC_NEWS_LETTERS, view.letters),
-            ],
-        );
-    }
-
-    if view.file_only.is_empty() {
-        hide(hwnd, IDC_NEWS_FILE_ONLY);
-    } else {
-        // SAFETY: as above.
-        let height = unsafe { measure(dc, faces.text, inner_width, &view.file_only, None) };
-        place(hwnd, IDC_NEWS_FILE_ONLY, inner_x, y, inner_width, height);
-        y += height + tight;
-    }
-
-    place(
-        hwnd,
-        IDC_NEWS_PANEL,
-        pad,
-        panel_top,
-        full_width,
-        y + inset - panel_top,
-    );
-    top = y + inset + gap;
-
-    // --- panel «Обратная связь» --------------------------------------------------------------
-    panel_top = top;
-    y = panel_top + metrics.y(air::PANEL_HEAD);
-
-    // SAFETY: as above.
-    let height = unsafe { measure(dc, faces.body, inner_width, &view.feedback_text, pitch) };
-    place(hwnd, IDC_FEEDBACK_TEXT, inner_x, y, inner_width, height);
-    y += height + tight;
-
-    // SAFETY: as above.
-    unsafe {
-        y = place_panel_buttons(
-            hwnd,
-            dc,
-            faces.text,
-            metrics,
-            inner_x,
-            y,
-            inner_width,
-            &[(IDC_FEEDBACK_WRITE, true)],
-        );
-    }
-
-    place(
-        hwnd,
-        IDC_FEEDBACK_PANEL,
-        pad,
-        panel_top,
-        full_width,
-        y + inset - panel_top,
-    );
-    top = y + inset + gap;
-
-    // --- the button that closes the window, and then the window's own height -----------------
-    // SAFETY: as above.
-    let width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_AUTHOR_CLOSE),
-        )
-    };
-
-    place(
-        hwnd,
-        IDC_AUTHOR_CLOSE,
-        client.right - pad - width,
-        top,
-        width,
-        button,
-    );
-
-    let wanted = top + button + metrics.y(air::PAD);
-
-    // SAFETY: releases exactly the DC taken at the top of this function, once.
-    unsafe { ReleaseDC(Some(hwnd), dc) };
-
-    resize_client(hwnd, client.bottom, wanted);
-}
-
-/// Puts a row of buttons on a panel, left to right, **wrapping to the next line when the row
-/// would run off the block**, and answers where the panel's content now ends. A button that is
-/// not wanted is hidden and takes no room.
-///
-/// ⚠ **The wrap is not decoration.** The first screenshot of «Спасибо» showed «Открыть канал»
-/// cut off at the right edge: Russian writes «Открыть страницу поддержки» beside it, and the
-/// two together are wider than the panel. A table of widths per locale would be a table that is
-/// wrong in the fifteenth language; measuring the caption and starting a new line when it does
-/// not fit is right in every one of them (`scratchpad-Э32\снимки`, `ru-dark-thanks`).
-///
-/// # Safety
-///
-/// As [`measure`].
-#[allow(clippy::too_many_arguments)]
-unsafe fn place_panel_buttons(
-    hwnd: HWND,
-    dc: HDC,
-    face: HFONT,
-    metrics: Metrics,
-    x: i32,
-    y: i32,
-    available: i32,
-    buttons: &[(i32, bool)],
-) -> i32 {
-    let height = metrics.y(air::BUTTON);
-    let gap = metrics.x(air::BUTTON_GAP);
-    let mut left = x;
-    let mut top = y;
-    let mut any = false;
-
-    for (control, wanted) in buttons {
-        if !wanted {
-            hide(hwnd, *control);
-            continue;
-        }
-
-        // SAFETY: see the contract.
-        let width = unsafe { button_width(dc, face, metrics, &settings::get_text(hwnd, *control)) };
-
-        // Not the first on its line, and it would run off the block: it starts a new one.
-        if left > x && left + width > x + available {
-            left = x;
-            top += height + metrics.y(air::TIGHT);
-        }
-
-        place(hwnd, *control, left, top, width.min(available), height);
-        left += width + gap;
-        any = true;
-    }
-
-    if any {
-        top + height + metrics.y(air::TIGHT)
-    } else {
-        y
-    }
-}
-
-/// Makes the window as tall as its content — the one window of the three that does this
-/// (FR-103; the letters keep the fixed height решение 101 п. 7 gives them).
-///
-/// The client area is what is measured and the window is what is moved, so the difference
-/// between the two — the title bar and the frame — is taken from the window itself rather than
-/// guessed at.
-fn resize_client(hwnd: HWND, current: i32, wanted: i32) {
-    if wanted <= 0 || wanted == current {
-        return;
-    }
-
-    let mut window = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `window` a live local the call fills.
-    if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut window) }.is_err()
-    {
-        return;
-    }
-
-    let chrome = (window.bottom - window.top) - current;
-    let height = wanted + chrome;
-
-    // ⭐ Решение 143.10 (а), задача T-83-3. The manager centred the window for the height of its
-    // template, and the growth goes downwards whole: a window that still keeps the air of the rule
-    // above and below stays exactly where it stands — at 100 % on a 1080p screen every one does,
-    // and nothing moves — and one that does not is put in the middle of the work area of its
-    // monitor. `settings::grown_window_top` is the whole of the choice. NFR-13: a work area that
-    // cannot be read leaves the window where the manager put it, as before this stage.
-    let top = settings::monitor_work_rect(hwnd).map_or(window.top, |work| {
-        settings::grown_window_top(window.top, height, work.top, work.bottom)
-    });
-
-    // SAFETY: `hwnd` is the live window; the numbers are plain values and no pointer is passed.
-    let _ = unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            window.left,
-            top,
-            window.right - window.left,
-            height,
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        )
-    };
 }
 
 // -----------------------------------------------------------------------------------------
@@ -5770,30 +3775,6 @@ pub(crate) fn act(deed: &Deed<'_>, action: Action) -> bool {
     false
 }
 
-/// Does what a button of «От автора» says it does — [`act`] with the window's own owner and
-/// language.
-fn perform(hwnd: HWND, action: Action) {
-    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the box lives until
-    // `WM_NCDESTROY`. Everything needed is taken out **before** anything is done, so no action
-    // runs while the state is borrowed.
-    let taken = unsafe { with_state(hwnd, |state| (state.owner, state.language)) };
-
-    let Some((owner, language)) = taken else {
-        return;
-    };
-
-    let deed = Deed {
-        owner,
-        news: None,
-        link: "",
-        language,
-    };
-
-    if act(&deed, action) {
-        close_window(hwnd);
-    }
-}
-
 /// Opens one address in the shell — the road the journal folder already takes.
 ///
 /// ⛔ **Nothing is downloaded and nothing is run**: `ShellExecuteW` with `"open"` on an
@@ -5879,160 +3860,6 @@ fn raise(hwnd: HWND, activate: bool) {
         //
         // SAFETY: `hwnd` is the live window; the call takes no pointer.
         let _ = unsafe { SetForegroundWindow(hwnd) };
-    }
-}
-
-/// **Hides the focus cue of a window that opens by itself** — FR-101, задача T-94-1, решение
-/// 158.3.
-///
-/// Находка 158: the Welcome letter came up on a clean machine with the dotted focus frame on
-/// «Открыть настройки», as if the button had been chosen in advance. Nothing had chosen it: the
-/// dialog manager gives the focus to the first tab stop of every dialog, and whether that focus is
-/// *drawn* is up to the keyboard cues, which Windows decides by the last input — and the last input
-/// of a person typing in another program is a key. A window the person did not ask for has no
-/// business pointing at a button, so its focus cue stays hidden until the person presses Tab in
-/// it: the dialog manager lifts the ban itself on the first Tab, and from then on the frame moves
-/// with the focus as in a window opened by the mouse. The focus stays where the manager put it
-/// (решение 158.3: not on «Понятно»), so Enter still presses the default button and Space the
-/// focused one.
-///
-/// ⛔ **Not in `WM_INITDIALOG`.** Windows decides the cues of a dialog — `WM_CHANGEUISTATE` with
-/// `UIS_INITIALIZE` — *after* `WM_INITDIALOG` and before the window is shown (замер 158.2, eight
-/// openings of eight), and that decision would undo a ban set any earlier. The moment after the
-/// dialog manager has returned the window and before [`raise`] shows it is the one that comes both
-/// after the decision and before the first paint.
-///
-/// `SendMessageTimeoutW` and not a bare send, for the reason [`wizard_refresh`] gives (FR-72, the
-/// sweep of `tests\guard.rs`, урок Т-33а-0): the window lives on this very thread, so the call goes
-/// straight to its procedure and the timeout is never spent. A refused ban leaves the cues as
-/// Windows decided them — the state before this function (NFR-13).
-fn hide_focus_cue(hwnd: HWND) {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SMTO_ABORTIFHUNG, SendMessageTimeoutW, UIS_SET, UISF_HIDEFOCUS, WM_CHANGEUISTATE,
-    };
-
-    /// How long to wait for the answer — nominal, as in [`wizard_refresh`]: the window is of this
-    /// thread, and its procedure is called inside the call.
-    const CUE_TIMEOUT_MS: u32 = 50;
-
-    // MAKEWPARAM(UIS_SET, UISF_HIDEFOCUS): the action in the low word, the cue in the high one.
-    let change = (UIS_SET | (UISF_HIDEFOCUS << 16)) as usize;
-
-    // SAFETY: `hwnd` is the live window this thread has just made; the message carries two plain
-    // numbers and no pointer, and the out-parameter is `None`, so nothing of ours is dereferenced.
-    // NFR-13: a refused ban leaves the cues as Windows decided them, which is the state before the
-    // call — and, as in [`wizard_refresh`], nothing goes to the journal: the journal names every
-    // operation it carries (`tests\diag.rs`), and a ban that cannot fail on this thread has no
-    // name there.
-    let _ = unsafe {
-        SendMessageTimeoutW(
-            hwnd,
-            WM_CHANGEUISTATE,
-            WPARAM(change),
-            LPARAM(0),
-            SMTO_ABORTIFHUNG,
-            CUE_TIMEOUT_MS,
-            None,
-        )
-    };
-}
-
-/// Builds one of these windows, or raises the one that is already up.
-///
-/// `activate` is FR-101's whole rule about focus: a letter that opens **by itself** is shown
-/// with `SW_SHOWNOACTIVATE` and never calls `SetForegroundWindow`, so it cannot take the
-/// keyboard from what somebody is typing into. A window the person asked for — from the menu,
-/// from «О программе», by «Открыть письмо» of the knock — is shown the ordinary way.
-fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> {
-    let kind = state.kind;
-
-    if let Some(hwnd) = window_of(kind) {
-        raise(hwnd, activate);
-        return Some(hwnd);
-    }
-
-    // SAFETY: `None` asks for the handle of the file used to create the calling process, which
-    // is the running executable — the module `app.rc` was linked into, and therefore the one
-    // holding the templates. The handle is borrowed and must not be freed.
-    let module =
-        match unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(PCWSTR::null()) } {
-            Ok(module) => module,
-            Err(error) => {
-                crate::app::report_non_critical("GetModuleHandleW", &error);
-                return None;
-            }
-        };
-
-    // The measuring door of the tests names the module the templates come out of — see
-    // [`testing`].
-    #[cfg(feature = "testing")]
-    let module = testing::templates().unwrap_or(module);
-
-    let template = match kind {
-        Kind::Author => IDD_AUTHOR,
-        Kind::Wizard => IDD_WIZARD,
-        // The letters and the list are windows of the shell: `show_letter`, `open_list`.
-        Kind::Letter | Kind::List => return None,
-    };
-
-    // The state outlives this call, so it goes on the heap and the window owns it — see
-    // `settings::show_modeless_dialog`, which says so in as many words.
-    let boxed = Box::into_raw(Box::new(RefCell::new(state)));
-
-    // SAFETY: `module` is this program's own image, `owner` a live window of this thread, and
-    // `boxed` a pointer to a value that lives until the window's `WM_NCDESTROY` frees it.
-    let created = unsafe {
-        settings::show_modeless_dialog(
-            HINSTANCE(module.0),
-            template,
-            owner,
-            Some(letter_proc),
-            LPARAM(boxed as isize),
-        )
-    };
-
-    let Some(hwnd) = created else {
-        // The window was never made, so nothing will ever free the box: this is the one path
-        // that has to.
-        //
-        // SAFETY: the pointer came from `Box::into_raw` a moment ago and no window took it.
-        drop(unsafe { Box::from_raw(boxed) });
-        return None;
-    };
-
-    // Решение 158.3: a window that opens by itself comes up without the focus cue. Here — after
-    // the creation, where Windows has already decided the cues, and before the window is shown.
-    // A window raised again above keeps the cues it has: they belong to the person, who may have
-    // pressed Tab in it already.
-    if !activate {
-        hide_focus_cue(hwnd);
-    }
-
-    raise(hwnd, activate);
-
-    Some(hwnd)
-}
-
-/// The state one of these windows starts with — the palette out of the configuration, the
-/// hotkey as it acts, and the plan.
-fn fresh_state(owner: HWND, kind: Kind) -> WindowState {
-    let (setting, hotkey) = look();
-
-    let palette = theme::resolve(setting, theme::system_is_light());
-
-    WindowState {
-        kind,
-        setting,
-        palette,
-        brushes: theme::Brushes::new(palette),
-        fonts: None,
-        author: AuthorView::default(),
-        wizard: None,
-        hotkey,
-        icons: settings::CaptionIcons::load(),
-        logo: None,
-        language: settings::ui_language(),
-        owner,
     }
 }
 
@@ -6195,7 +4022,7 @@ fn show_letter_in(
             letter,
             plan,
             key,
-            tick: 0,
+            tick: DEMO_STILL,
             language,
             theme,
         },
@@ -6221,30 +4048,56 @@ fn show_letter_in(
 
 /// **Shows «От автора»** — FR-103.
 pub fn open_author(owner: HWND) {
-    open_window(owner, author_state(owner, &version_string()), true);
+    open_author_with(owner, &version_string(), true);
 }
 
-/// The state «От автора» opens with — the words of [`AuthorView`] for `version`, out of the
-/// configuration and the feed as they stand.
-///
-/// Split out of [`open_author`] by задача T-83-1 so that the measuring door of the tests builds
-/// the window from **the same** state the product builds it from, with the version named — a test
-/// binary carries no version resource of its own, and the version stands in one of the sentences
-/// the window is as tall as.
-fn author_state(owner: HWND, version: &str) -> WindowState {
-    let stored = state_now();
-    let mut state = fresh_state(owner, Kind::Author);
+/// [`open_author`] for `version` — the product's road and the door of the tests (a test binary
+/// carries no version resource of its own). A window of the shell (T-120-17); the one that is open
+/// is raised instead.
+fn open_author_with(owner: HWND, version: &str, activate: bool) -> Option<HWND> {
+    if let Some(hwnd) = window_of(Kind::Author) {
+        raise(hwnd, activate);
+        return Some(hwnd);
+    }
 
-    state.author = with_feed(|feed| {
-        author_view(
+    let stored = state_now();
+    let language = settings::ui_language();
+    let view = with_feed(|feed| {
+        author_view_in(
+            language,
             &stored,
             today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
             version,
             feed,
         )
     });
+    open_author_view(owner, language, view, activate)
+}
 
-    state
+/// «От автора» saying `view` in `language` — [`open_author_with`] and the door of the tests that
+/// hands the window the words of a machine whose feed is live.
+fn open_author_view(
+    owner: HWND,
+    language: Language,
+    view: AuthorView,
+    activate: bool,
+) -> Option<HWND> {
+    if let Some(hwnd) = window_of(Kind::Author) {
+        raise(hwnd, activate);
+        return Some(hwnd);
+    }
+    let (theme, _) = look();
+    let product = crate::ui::windows::author::Product {
+        author: crate::ui::windows::author::Author {
+            view,
+            language,
+            theme,
+        },
+        owner,
+        _record: ShellRecord(Kind::Author),
+    };
+
+    open_shell(Kind::Author, None, language, owner, product, activate)
 }
 
 /// **The measuring door of stage Э83** — hidden windows of this module for the tests, compiled
@@ -6259,8 +4112,7 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 #[cfg(feature = "testing")]
 pub mod testing {
     use super::{
-        AuthorView, Entry, FeedItem, HWND, Kind, Letter, ThemeSetting, author_state, fresh_state,
-        open_window, show_letter, window_of, with_state, wizard_state,
+        AuthorView, Entry, FeedItem, HWND, Kind, Letter, ThemeSetting, show_letter, window_of,
     };
     use std::cell::Cell;
     use windows::Win32::Foundation::HMODULE;
@@ -6268,8 +4120,6 @@ pub mod testing {
     thread_local! {
         /// Whether [`super::raise`] must leave the window hidden.
         static HIDDEN: Cell<bool> = const { Cell::new(false) };
-        /// The module the templates come out of, or zero for the running program's own.
-        static TEMPLATES: Cell<usize> = const { Cell::new(0) };
     }
 
     /// Whether the window being opened is to stay hidden.
@@ -6277,25 +4127,10 @@ pub mod testing {
         HIDDEN.with(Cell::get)
     }
 
-    /// The module the templates come out of while the door is open.
-    pub(super) fn templates() -> Option<HMODULE> {
-        let raw = TEMPLATES.with(Cell::get);
-
-        (raw != 0).then(|| HMODULE(std::ptr::without_provenance_mut(raw)))
-    }
-
     /// Opens «От автора» on `owner` out of the templates of `module`, for `version`, and never
     /// shows it. The window answered is the caller's to destroy.
-    pub fn open_author_hidden(owner: HWND, module: HMODULE, version: &str) -> Option<HWND> {
-        HIDDEN.with(|hidden| hidden.set(true));
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let window = open_window(owner, author_state(owner, version), false);
-
-        HIDDEN.with(|hidden| hidden.set(false));
-        TEMPLATES.with(|templates| templates.set(0));
-
-        window
+    pub fn open_author_hidden(owner: HWND, _module: HMODULE, version: &str) -> Option<HWND> {
+        hidden_while(|| super::open_author_with(owner, version, false))
     }
 
     /// **The door of task T-98-1** — opens «От автора» on `owner` out of the templates of `module`
@@ -6308,18 +4143,12 @@ pub mod testing {
     /// as the product does (Э83-Б-1, решение 166.2).
     ///
     /// The window answered is the caller's to destroy.
-    pub fn open_author_hidden_with(owner: HWND, module: HMODULE, view: AuthorView) -> Option<HWND> {
-        HIDDEN.with(|hidden| hidden.set(true));
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let mut state = fresh_state(owner, Kind::Author);
-        state.author = view;
-        let window = open_window(owner, state, false);
-
-        HIDDEN.with(|hidden| hidden.set(false));
-        TEMPLATES.with(|templates| templates.set(0));
-
-        window
+    pub fn open_author_hidden_with(
+        owner: HWND,
+        _module: HMODULE,
+        view: AuthorView,
+    ) -> Option<HWND> {
+        hidden_while(|| super::open_author_view(owner, super::settings::ui_language(), view, false))
     }
 
     /// Runs `f` with the windows of this module left hidden on this thread.
@@ -6369,42 +4198,24 @@ pub mod testing {
         window_of(Kind::Letter)
     }
 
+    /// «От автора» open on this thread now — a new window after a change of language, which builds
+    /// it again (T-120-17).
+    pub fn author_window() -> Option<HWND> {
+        window_of(Kind::Author)
+    }
+
     /// [`super::language_changed`] with the windows of this module left hidden: the letter and the
     /// list it opens again in the new language are not shown on the screen of a test.
     pub fn language_changed_hidden(owner: HWND) {
         hidden_while(|| super::language_changed(owner));
     }
 
-    /// **The door of task T-102-3** — gives the open window `hwnd` the theme setting `setting`, the
-    /// way `[general].theme` of the configuration gives it to a window of the running program.
+    /// **The door of task T-103-2** — opens the wizard of FR-104 on `owner`, a window of the shell
+    /// since T-120-19, and never shows it.
     ///
-    /// A test binary has no tray to read the configuration from, so its windows follow the theme of
-    /// the system. The snapshots of «Привет» in both palettes (вопрос 178) set the setting here and
-    /// then post `settings::WM_APP_SYSTEM_THEME`: the window resolves its palette afresh and repaints
-    /// by its own answer to a moved theme — nothing of the drawing is the door's.
-    ///
-    /// `hwnd` is a window of this module on the caller's thread.
-    pub fn set_theme(hwnd: HWND, setting: ThemeSetting) {
-        // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
-        // this door — and the borrow of its state ends with the call.
-        let _ = unsafe { with_state(hwnd, |state| state.setting = setting) };
-    }
-
-    /// **The door of task T-103-2** — opens the wizard of FR-104 on `owner` out of the templates of
-    /// `module` by the product's own [`wizard_state`], and never shows it.
-    ///
-    /// The window answered is the caller's to destroy. A caller that stands on a desktop of its
-    /// own may show it itself, for the snapshots.
-    pub fn open_wizard_hidden(owner: HWND, module: HMODULE) -> Option<HWND> {
-        HIDDEN.with(|hidden| hidden.set(true));
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let window = open_window(owner, wizard_state(owner), false);
-
-        HIDDEN.with(|hidden| hidden.set(false));
-        TEMPLATES.with(|templates| templates.set(0));
-
-        window
+    /// The window answered is the caller's to destroy.
+    pub fn open_wizard_hidden(owner: HWND, _module: HMODULE) -> Option<HWND> {
+        hidden_while(|| super::open_wizard_with(owner, super::settings::ui_language(), None, false))
     }
 
     /// **The door of task T-103-2** — where the button of the open window `hwnd` that sends a
@@ -6414,14 +4225,7 @@ pub mod testing {
     ///
     /// `hwnd` is a window of this module on the caller's thread.
     pub fn feedback_url(hwnd: HWND) -> Option<&'static str> {
-        // ⚠ A window of the shell first: its `GWLP_USERDATA` is the host's, and `with_state` would
-        // read it as the state of a dialog of this module.
-        if let Some(language) = shell_language(hwnd) {
-            return Some(super::links::feedback_url(language));
-        }
-        // SAFETY: `hwnd` is a live dialog of this module on the caller's thread — the contract of
-        // this door — and the borrow of its state ends with the call.
-        unsafe { with_state(hwnd, |state| super::links::feedback_url(state.language)) }
+        shell_language(hwnd).map(super::links::feedback_url)
     }
 
     /// The language a window of the shell of this module was built in — what its pages are
@@ -6441,21 +4245,12 @@ pub mod testing {
     ///
     /// `hwnd` is a window of this module on the caller's thread.
     pub fn site_pages(hwnd: HWND) -> Option<(&'static str, &'static str)> {
-        if let Some(language) = shell_language(hwnd) {
-            return Some((
+        shell_language(hwnd).map(|language| {
+            (
                 super::links::download_url(language),
                 super::links::program_url(language),
-            ));
-        }
-        // SAFETY: as for `feedback_url` above — a dialog of this module, not a window of the shell.
-        unsafe {
-            with_state(hwnd, |state| {
-                (
-                    super::links::download_url(state.language),
-                    super::links::program_url(state.language),
-                )
-            })
-        }
+            )
+        })
     }
 
     thread_local! {
@@ -6681,6 +4476,28 @@ pub fn sample_entries(language: Language) -> Vec<Entry> {
         entry(Some(8), true),
         entry(Some(7), false),
     ]
+}
+
+/// «От автора» for the instrument of fitting, in `language`: the fullest the window gets — the feed
+/// read, a newer version announced by [`sample_entry`], news to show in «Последние письма», the switch
+/// on, and `[letters] feed = false` said under it (the longest of its two states).
+pub fn author_view_sample(language: Language) -> AuthorView {
+    let item = sample_entry();
+    let news = [sample_entry()];
+    let today = item
+        .date
+        .unwrap_or_else(|| Date::from_ymd(2026, 11, 16).expect("a day"));
+    let state = Letters {
+        feed: false,
+        feed_last_read: Some(today),
+        release_window: true,
+        ..Letters::default()
+    };
+    let feed = FeedView {
+        update: Some(&item),
+        news: &news,
+    };
+    author_view_in(language, &state, today, "1.7.0", feed)
 }
 
 /// **Shows «Последние письма»** — FR-101, a window of the shell (`ui::windows::letters_list`,
@@ -7181,55 +4998,21 @@ fn notice_ended(end: crate::corner::End) {
 /// every time it is called, so an invalidation is the whole of what a refill needs here. The
 /// lesson is not thereby ignored — it is the reason this window was built without such a cache.
 pub fn language_changed(owner: HWND) {
-    let open: Vec<(Kind, HWND)> = OPEN.with_borrow(|open| open.clone());
-
-    for (_, hwnd) in open {
-        // SAFETY: `hwnd` is a window of this module that has not been destroyed.
-        let previous = unsafe { with_state(hwnd, |state| state.language) };
-
-        let Some(previous) = previous else {
-            continue;
-        };
-
-        match settings::language_switch(previous, settings::ui_language()) {
-            settings::LanguageSwitch::Unchanged => {}
-
-            settings::LanguageSwitch::Relabel => {
-                // SAFETY: as above.
-                unsafe {
-                    with_state(hwnd, |state| {
-                        state.language = settings::ui_language();
-                        refresh_plan(state);
-                        fill_window(hwnd, state);
-                        layout_window(hwnd, state);
-                    })
-                };
-
-                widgets::repaint::whole(hwnd);
-            }
-
-            settings::LanguageSwitch::Reopen => {
-                // SAFETY: as above.
-                let kind = unsafe { with_state(hwnd, |state| state.kind) };
-
-                close_window(hwnd);
-
-                if kind == Some(Kind::Author) {
-                    open_author(owner);
-                }
-            }
-        }
-    }
-
-    // The windows of the shell are built again in the new language, wherever it moved: their
-    // words, their direction and their mirror are the description's, and a description is built
-    // from nothing. Shown without the activation — the person is at the settings window.
     let shell: Vec<ShellWindow> = SHELL.with_borrow(|open| open.clone());
 
     for window in shell {
         if settings::language_switch(window.language, settings::ui_language())
             == settings::LanguageSwitch::Unchanged
         {
+            continue;
+        }
+
+        if window.kind == Kind::Wizard {
+            KEEP_WIZARD.set(true);
+            close_window(window.hwnd);
+            KEEP_WIZARD.set(false);
+            let held = HELD_WIZARD.take();
+            open_wizard_with(owner, settings::ui_language(), held, false);
             continue;
         }
 
@@ -7246,35 +5029,11 @@ pub fn language_changed(owner: HWND) {
             (Kind::List, _) => {
                 open_list_with(owner, settings::ui_language(), list_entries_now(), false);
             }
+            (Kind::Author, _) => {
+                open_author_with(owner, &version_string(), false);
+            }
             _ => {}
         }
-    }
-}
-
-/// Builds this window's description again in the locale now in force — the half of a refill
-/// that is not about pixels.
-fn refresh_plan(state: &mut WindowState) {
-    let stored = state_now();
-    let version = version_string();
-
-    match state.kind {
-        Kind::Author => {
-            state.author = with_feed(|feed| {
-                author_view(
-                    &stored,
-                    today()
-                        .unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day")),
-                    &version,
-                    feed,
-                )
-            });
-        }
-        // The windows of the shell are built again by `language_changed`, not refilled.
-        Kind::Letter | Kind::List => {}
-        // The wizard's text is the person's own and is **not** rebuilt: a change of interface
-        // language in the middle of an appeal must not throw away what they wrote. What is
-        // rebuilt is every label around it, by `fill_wizard`, which the caller runs next.
-        Kind::Wizard => {}
     }
 }
 
@@ -7936,46 +5695,67 @@ pub mod report {
 /// The facts are read here, once: a machine that changed its scale between the first step and
 /// the last would otherwise write two different things into one appeal.
 pub fn open_wizard(owner: HWND) {
-    open_window(owner, wizard_state(owner), true);
+    open_wizard_with(owner, settings::ui_language(), None, true);
 }
 
-/// The state the wizard opens with — the facts of the machine and an empty draft.
-///
-/// Split out of [`open_wizard`] by задача T-103-2 so that the measuring door of the tests opens the
-/// very same wizard ([`testing::open_wizard_hidden`]) and not a copy of it.
-fn wizard_state(owner: HWND) -> WindowState {
-    let mut state = fresh_state(owner, Kind::Wizard);
-
-    let layouts = crate::layouts::enumerate_all()
-        .map(|installed| settings::layout_labels(&installed, &installed))
-        .unwrap_or_default();
-
-    let mut draft = report::Draft {
-        hotkey: state.hotkey.clone(),
-        ..report::Draft::default()
+/// The wizard on `owner` in `language` — a window of the shell since T-120-19
+/// (`ui::windows::wizard`); `held` — the answers of a wizard that closed for a change of the
+/// language ([`language_changed`]), else a fresh one ([`Wizard::now`]). The one that is open is
+/// raised instead.
+fn open_wizard_with(
+    owner: HWND,
+    language: Language,
+    held: Option<Wizard>,
+    activate: bool,
+) -> Option<HWND> {
+    if let Some(hwnd) = window_of(Kind::Wizard) {
+        raise(hwnd, activate);
+        return Some(hwnd);
+    }
+    let (theme, _) = look();
+    let product = crate::ui::windows::wizard::Product {
+        page: crate::ui::windows::wizard::Page {
+            wizard: held.unwrap_or_else(Wizard::now),
+            language,
+            theme,
+        },
+        owner,
+        _record: ShellRecord(Kind::Wizard),
     };
 
-    // The layout a person is most likely to have typed in is the first one they have; it is a
-    // guess, and the combo beside it is how they say otherwise.
-    if let Some(first) = layouts.first() {
-        draft.layout = first.clone();
+    open_shell(Kind::Wizard, None, language, owner, product, activate)
+}
+
+/// The open wizard — the window its capture of the active window must not take for the active
+/// one.
+pub fn wizard_window() -> Option<HWND> {
+    window_of(Kind::Wizard)
+}
+
+thread_local! {
+    /// Whether the wizard that closes now closes for a change of the language — its answers are
+    /// kept for the window that opens in its place ([`wizard_closed`]).
+    static KEEP_WIZARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The answers on their way from that window to the new one.
+    static HELD_WIZARD: RefCell<Option<Wizard>> = const { RefCell::new(None) };
+}
+
+/// **The window of the wizard closed** with `wizard` in it — `ui::windows::wizard::Product` says so
+/// as it goes. Kept only when [`language_changed`] closed it, to open it again in the new language
+/// with every answer where the person left it (the dialog until T-120-19 relabelled itself).
+pub fn wizard_closed(wizard: Wizard) {
+    if KEEP_WIZARD.get() {
+        HELD_WIZARD.set(Some(wizard));
     }
+}
 
-    state.wizard = Some(Box::new(Wizard {
-        draft,
-        facts: report::facts_now(),
-        step: 0,
-        countdown: 0,
-        status: String::new(),
-        layouts,
-        text: String::new(),
-        contact: String::new(),
-        post: Post::Ready,
-        nonce: None,
-        done: false,
-    }));
-
-    state
+/// An empty wizard — what a closing window leaves behind it in place of the one it hands over.
+pub fn wizard_left() -> Wizard {
+    Wizard::with(
+        report::Draft::default(),
+        report::Facts::default(),
+        Vec::new(),
+    )
 }
 
 // ⛔ **`open_thanks` is gone — задача Т-33-3, решение 103.3.** «Готово» used to close the
@@ -7985,2428 +5765,11 @@ fn wizard_state(owner: HWND) -> WindowState {
 // финальным шагом мастера, а не отдельным всплывающим окном». What that window said is said by
 // [`Step::Done`] now, out of the very same four strings, and `Kind::Thanks` went with it.
 
-/// Which controls one step shows — every other slot of the pool is hidden.
-///
-/// A table and not a chain of conditions: the six steps of FR-104 differ in **which slots they
-/// fill** and in nothing else, and a table is what a test can walk.
-pub fn controls_of(step: Step) -> &'static [i32] {
-    match step {
-        Step::What => &[
-            IDC_WZ_CARD_1,
-            IDC_WZ_CARD_1 + 1,
-            IDC_WZ_CARD_1 + 2,
-            IDC_WZ_CARD_T1,
-            IDC_WZ_CARD_T1 + 1,
-            IDC_WZ_CARD_T1 + 2,
-            IDC_WZ_CARD_S1,
-            IDC_WZ_CARD_S1 + 1,
-            IDC_WZ_CARD_S1 + 2,
-        ],
-        Step::Where => &[
-            IDC_WZ_PROGRAM_LABEL,
-            IDC_WZ_PROGRAM,
-            IDC_WZ_CAPTURE,
-            IDC_WZ_CAPTURE_NOTE,
-            IDC_WZ_FIELD_1,
-            IDC_WZ_FIELD_1 + 1,
-            IDC_WZ_FIELD_2_SUB,
-            IDC_WZ_FIELD_1 + 2,
-        ],
-        Step::Did => &[
-            IDC_WZ_TYPED_LABEL,
-            IDC_WZ_LAYOUT,
-            IDC_WZ_PRESSED_LABEL,
-            IDC_WZ_CHIP,
-            IDC_WZ_EXPECTED_LABEL,
-            IDC_WZ_EXPECTED,
-            IDC_WZ_GOT_LABEL,
-            IDC_WZ_GOT,
-            IDC_WZ_REPEAT_LABEL,
-            IDC_WZ_REPEAT_1,
-            IDC_WZ_REPEAT_1 + 1,
-            IDC_WZ_REPEAT_1 + 2,
-        ],
-        Step::Idea => &[
-            IDC_WZ_IDEA_LABEL,
-            IDC_WZ_IDEA,
-            IDC_WZ_HELPS_LABEL,
-            IDC_WZ_HELPS,
-        ],
-        Step::Attach => &[
-            IDC_WZ_ATTACH_1,
-            IDC_WZ_ATTACH_V1,
-            IDC_WZ_ATTACH_1 + 1,
-            IDC_WZ_ATTACH_V1 + 1,
-            IDC_WZ_ATTACH_1 + 2,
-            IDC_WZ_ATTACH_V1 + 2,
-            IDC_WZ_ATTACH_1 + 3,
-            IDC_WZ_ATTACH_V1 + 3,
-            IDC_WZ_ATTACH_FOOT,
-        ],
-        // Задача T-107-3: one step and two shapes of it — the contact while the appeal is ready
-        // or on its way, the letter once the site did not take it. All of them are slots of this
-        // step; `layout_wizard` hides what [`preview_controls`] does not name.
-        Step::Preview => &[
-            IDC_WZ_PREVIEW,
-            IDC_WZ_CONTACT_LABEL,
-            IDC_WZ_CONTACT,
-            IDC_WZ_ADDRESS,
-            IDC_WZ_COPY,
-            IDC_WZ_COPY_ADDRESS,
-            IDC_WZ_SAVE,
-            IDC_WZ_STATUS,
-        ],
-        Step::Done => &[IDC_WZ_THANKS, IDC_WZ_CHANNEL],
-    }
-}
-
-/// Every slot of the pool — what «hide everything, then place this step's own» is written
-/// against. Two arrays because the pool is longer than one line of a `const` is comfortable
-/// with; a slot missing from **both** is a slot that never gets hidden, and that is a defect
-/// only a screenshot would find.
-const WIZARD_SLOTS: [i32; 22] = [
-    IDC_WZ_CARD_1,
-    IDC_WZ_CARD_1 + 1,
-    IDC_WZ_CARD_1 + 2,
-    IDC_WZ_CARD_T1,
-    IDC_WZ_CARD_T1 + 1,
-    IDC_WZ_CARD_T1 + 2,
-    IDC_WZ_CARD_S1,
-    IDC_WZ_CARD_S1 + 1,
-    IDC_WZ_CARD_S1 + 2,
-    IDC_WZ_PROGRAM_LABEL,
-    IDC_WZ_PROGRAM,
-    IDC_WZ_CAPTURE,
-    IDC_WZ_CAPTURE_NOTE,
-    IDC_WZ_FIELD_1,
-    IDC_WZ_FIELD_1 + 1,
-    IDC_WZ_FIELD_1 + 2,
-    IDC_WZ_FIELD_2_SUB,
-    IDC_WZ_TYPED_LABEL,
-    IDC_WZ_LAYOUT,
-    IDC_WZ_PRESSED_LABEL,
-    IDC_WZ_CHIP,
-    IDC_WZ_EXPECTED_LABEL,
-];
-
-/// The rest of the pool — see [`WIZARD_SLOTS`].
-const WIZARD_SLOTS_TAIL: [i32; 18] = [
-    IDC_WZ_EXPECTED,
-    IDC_WZ_GOT_LABEL,
-    IDC_WZ_GOT,
-    IDC_WZ_REPEAT_LABEL,
-    IDC_WZ_REPEAT_1,
-    IDC_WZ_REPEAT_1 + 1,
-    IDC_WZ_REPEAT_1 + 2,
-    IDC_WZ_IDEA_LABEL,
-    IDC_WZ_IDEA,
-    IDC_WZ_HELPS_LABEL,
-    IDC_WZ_HELPS,
-    IDC_WZ_ATTACH_1,
-    IDC_WZ_ATTACH_1 + 1,
-    IDC_WZ_ATTACH_1 + 2,
-    IDC_WZ_ATTACH_1 + 3,
-    IDC_WZ_ATTACH_V1,
-    IDC_WZ_ATTACH_FOOT,
-    IDC_WZ_PREVIEW,
-];
-
-/// The rest again — the value lines two, three and four of «Что приложить?», the status line,
-/// and the two buttons of the last step.
-///
-/// ⚠ **The two buttons belong here and it took a test to notice.** They are push buttons like
-/// the three at the bottom, and the eye reads them as chrome — but they are chrome of **one
-/// step**, and a slot missing from the pool is a control that never gets hidden: «Скопировать
-/// и открыть канал» would have stood on every step of the wizard.
-const WIZARD_SLOTS_VALUES: [i32; 12] = [
-    IDC_WZ_ATTACH_V1 + 1,
-    IDC_WZ_ATTACH_V1 + 2,
-    IDC_WZ_ATTACH_V1 + 3,
-    IDC_WZ_STATUS,
-    IDC_WZ_COPY,
-    IDC_WZ_SAVE,
-    // The address of the letter and its button — задача T-103-7.
-    IDC_WZ_ADDRESS,
-    IDC_WZ_COPY_ADDRESS,
-    // The contact — задача T-107-3.
-    IDC_WZ_CONTACT_LABEL,
-    IDC_WZ_CONTACT,
-    // The two slots of «Готово» — задача Т-33-3. They belong to the pool for the same reason
-    // the two buttons above it do: a slot missing from the pool is a control that never gets
-    // hidden, and the thanks would then stand on every step of the wizard.
-    IDC_WZ_THANKS,
-    IDC_WZ_CHANNEL,
-];
-
-/// How many slots the wizard's pool holds — what a test compares the sum of the six steps
-/// against, so that a slot belonging to no step at all shows up as a number rather than as a
-/// control nobody ever sees.
-pub fn wizard_slot_count() -> usize {
-    WIZARD_SLOTS.len() + WIZARD_SLOTS_TAIL.len() + WIZARD_SLOTS_VALUES.len()
-}
-
-/// Whether this control of the wizard is checked right now — the wizard's own record and never
-/// the control, which keeps no state of its own once it is `BS_OWNERDRAW`.
-fn wizard_is_checked(wizard: &Wizard, control: i32) -> bool {
-    use report::{Field, Repeat, Trouble};
-
-    match control {
-        IDC_WZ_CARD_1 => wizard.draft.trouble == Trouble::WrongResult,
-        c if c == IDC_WZ_CARD_1 + 1 => wizard.draft.trouble == Trouble::NothingHappened,
-        c if c == IDC_WZ_CARD_1 + 2 => wizard.draft.trouble == Trouble::Idea,
-        IDC_WZ_FIELD_1 => wizard.draft.field == Field::Normal,
-        c if c == IDC_WZ_FIELD_1 + 1 => wizard.draft.field == Field::Password,
-        c if c == IDC_WZ_FIELD_1 + 2 => wizard.draft.field == Field::Unknown,
-        IDC_WZ_REPEAT_1 => wizard.draft.repeat == Repeat::Always,
-        c if c == IDC_WZ_REPEAT_1 + 1 => wizard.draft.repeat == Repeat::Sometimes,
-        c if c == IDC_WZ_REPEAT_1 + 2 => wizard.draft.repeat == Repeat::Once,
-        IDC_WZ_ATTACH_1 => wizard.draft.attach.machine,
-        c if c == IDC_WZ_ATTACH_1 + 1 => wizard.draft.attach.layouts,
-        c if c == IDC_WZ_ATTACH_1 + 2 => wizard.draft.attach.settings,
-        c if c == IDC_WZ_ATTACH_1 + 3 => wizard.draft.attach.journal,
-        _ => false,
-    }
-}
-
-/// **Fills the wizard** — every slot's text, for the step now on the screen.
-fn fill_wizard(hwnd: HWND, state: &WindowState) {
-    use crate::settings::{
-        IDS_WIZARD_AND_PRESSED, IDS_WIZARD_ATTACH_FOOT, IDS_WIZARD_ATTACH_JOURNAL,
-        IDS_WIZARD_ATTACH_JOURNAL_SUB, IDS_WIZARD_ATTACH_LAYOUTS, IDS_WIZARD_ATTACH_MACHINE,
-        IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_BACK, IDS_WIZARD_CANCEL, IDS_WIZARD_CAPTION,
-        IDS_WIZARD_CAPTURE, IDS_WIZARD_CAPTURE_COUNT, IDS_WIZARD_CAPTURE_NOTE,
-        IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_IDEA_SUB, IDS_WIZARD_CARD_NOTHING,
-        IDS_WIZARD_CARD_NOTHING_SUB, IDS_WIZARD_CARD_WRONG, IDS_WIZARD_CARD_WRONG_SUB,
-        IDS_WIZARD_DONE, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
-        IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
-        IDS_WIZARD_IDEA_HELPS, IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT,
-        IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES,
-        IDS_WIZARD_SAVE, IDS_WIZARD_STEP, IDS_WIZARD_TYPED_IN, format_text, text,
-    };
-    // The words of the letter to the box of the appeals — задача T-103-7, and since T-107-3 the
-    // way back of every appeal the site did not take (решение 199.3).
-    use crate::settings::{IDS_WIZARD_COPY_ADDRESS, IDS_WIZARD_COPY_TEXT, IDS_WIZARD_MAIL_ADDRESS};
-    // The contact and «Готово» — задача T-107-3, решения 199.10 и 199.11.
-    use crate::settings::{IDS_CHANNEL_OPEN, IDS_WIZARD_CONTACT, IDS_WIZARD_SENT_TEXT};
-
-    let Some(wizard) = state.wizard.as_deref() else {
-        return;
-    };
-
-    let caption = settings::wide(&text(IDS_WIZARD_CAPTION));
-
-    // SAFETY: `hwnd` is the live window and `caption` a NUL-terminated buffer of this frame.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    let step = wizard.current();
-    let road = wizard.road();
-    let words = step_words(step, wizard.post);
-
-    let entries = wizard.facts.journal_entries.to_string();
-
-    for (control, caption) in [
-        (
-            IDC_WZ_STEP,
-            // ⚠ **The last step is not numbered.** «Готово» is where the wizard ends, not the
-            // sixth of five — the mock-up puts that word in the place of «Шаг N из M».
-            if step == Step::Done {
-                text(IDS_WIZARD_DONE)
-            } else {
-                format_text(
-                    IDS_WIZARD_STEP,
-                    &[&(wizard.step + 1).to_string(), &road.len().to_string()],
-                )
-            },
-        ),
-        // Решение 199.10: the owner's words, one paragraph for a trouble and for an idea alike.
-        (IDC_WZ_THANKS, text(IDS_WIZARD_SENT_TEXT)),
-        (IDC_WZ_CHANNEL, text(IDS_CHANNEL_OPEN)),
-        (IDC_WZ_TITLE, text(words.title)),
-        (IDC_WZ_NOTE, words.note.map(text).unwrap_or_default()),
-        (IDC_WZ_CARD_T1, text(IDS_WIZARD_CARD_WRONG)),
-        (IDC_WZ_CARD_T1 + 1, text(IDS_WIZARD_CARD_NOTHING)),
-        (IDC_WZ_CARD_T1 + 2, text(IDS_WIZARD_CARD_IDEA)),
-        (IDC_WZ_CARD_S1, text(IDS_WIZARD_CARD_WRONG_SUB)),
-        (IDC_WZ_CARD_S1 + 1, text(IDS_WIZARD_CARD_NOTHING_SUB)),
-        (IDC_WZ_CARD_S1 + 2, text(IDS_WIZARD_CARD_IDEA_SUB)),
-        (IDC_WZ_PROGRAM_LABEL, text(IDS_WIZARD_PROGRAM)),
-        (
-            IDC_WZ_CAPTURE,
-            if wizard.countdown > 0 {
-                format_text(IDS_WIZARD_CAPTURE_COUNT, &[&wizard.countdown.to_string()])
-            } else {
-                text(IDS_WIZARD_CAPTURE)
-            },
-        ),
-        (IDC_WZ_CAPTURE_NOTE, text(IDS_WIZARD_CAPTURE_NOTE)),
-        (IDC_WZ_FIELD_1, text(IDS_WIZARD_FIELD_NORMAL)),
-        (IDC_WZ_FIELD_1 + 1, text(IDS_WIZARD_FIELD_PASSWORD)),
-        (IDC_WZ_FIELD_2_SUB, text(IDS_WIZARD_FIELD_PASSWORD_SUB)),
-        (IDC_WZ_FIELD_1 + 2, text(IDS_WIZARD_FIELD_UNKNOWN)),
-        (IDC_WZ_TYPED_LABEL, text(IDS_WIZARD_TYPED_IN)),
-        (IDC_WZ_PRESSED_LABEL, text(IDS_WIZARD_AND_PRESSED)),
-        (IDC_WZ_CHIP, state.hotkey.clone()),
-        (IDC_WZ_EXPECTED_LABEL, text(IDS_WIZARD_EXPECTED)),
-        (IDC_WZ_GOT_LABEL, text(IDS_WIZARD_GOT)),
-        (IDC_WZ_REPEAT_LABEL, text(IDS_WIZARD_REPEAT)),
-        (IDC_WZ_REPEAT_1, text(IDS_WIZARD_REPEAT_ALWAYS)),
-        (IDC_WZ_REPEAT_1 + 1, text(IDS_WIZARD_REPEAT_SOMETIMES)),
-        (IDC_WZ_REPEAT_1 + 2, text(IDS_WIZARD_REPEAT_ONCE)),
-        (IDC_WZ_IDEA_LABEL, text(IDS_WIZARD_IDEA_WHAT)),
-        (IDC_WZ_HELPS_LABEL, text(IDS_WIZARD_IDEA_HELPS)),
-        (IDC_WZ_ATTACH_1, text(IDS_WIZARD_ATTACH_MACHINE)),
-        (IDC_WZ_ATTACH_1 + 1, text(IDS_WIZARD_ATTACH_LAYOUTS)),
-        (IDC_WZ_ATTACH_1 + 2, text(IDS_WIZARD_ATTACH_SETTINGS)),
-        (IDC_WZ_ATTACH_1 + 3, text(IDS_WIZARD_ATTACH_JOURNAL)),
-        (IDC_WZ_ATTACH_V1, report::machine_line(&wizard.facts)),
-        (IDC_WZ_ATTACH_V1 + 1, wizard.facts.layouts.clone()),
-        (IDC_WZ_ATTACH_V1 + 2, wizard.facts.settings.clone()),
-        (
-            IDC_WZ_ATTACH_V1 + 3,
-            format_text(IDS_WIZARD_ATTACH_JOURNAL_SUB, &[&entries]),
-        ),
-        (IDC_WZ_ATTACH_FOOT, text(IDS_WIZARD_ATTACH_FOOT)),
-        (IDC_WZ_COPY, text(IDS_WIZARD_COPY_TEXT)),
-        (
-            IDC_WZ_ADDRESS,
-            format_text(IDS_WIZARD_MAIL_ADDRESS, &[links::MAIL_ADDRESS]),
-        ),
-        (IDC_WZ_COPY_ADDRESS, text(IDS_WIZARD_COPY_ADDRESS)),
-        (IDC_WZ_CONTACT_LABEL, text(IDS_WIZARD_CONTACT)),
-        (IDC_WZ_SAVE, text(IDS_WIZARD_SAVE)),
-        (IDC_WZ_STATUS, wizard.status.clone()),
-        (IDC_WZ_CANCEL, text(IDS_WIZARD_CANCEL)),
-        (IDC_WZ_BACK, text(IDS_WIZARD_BACK)),
-        // The faces of one button — «Далее»; «Отправить», «Отправляется…» and «Повторить» on the
-        // last step (задача T-107-3); «Закрыть» on the thanks, where it is the only button left
-        // (задача Т-33-3). [`step_words`] says which.
-        (IDC_WZ_NEXT, text(words.next)),
-    ] {
-        settings::set_text(hwnd, control, &caption);
-    }
-
-    // ⚠ The fields are written **only** when what they hold differs from the record. Writing
-    // them unconditionally would put the caret back to the start on every repaint, which is
-    // what a person typing into one would feel as the window fighting them.
-    for (control, value) in [
-        (IDC_WZ_PROGRAM, wizard.draft.program.as_str()),
-        (IDC_WZ_EXPECTED, wizard.draft.expected.as_str()),
-        (IDC_WZ_GOT, wizard.draft.got.as_str()),
-        (IDC_WZ_IDEA, wizard.draft.idea.as_str()),
-        (IDC_WZ_HELPS, wizard.draft.helps.as_str()),
-        (IDC_WZ_PREVIEW, wizard.text.as_str()),
-        (IDC_WZ_CONTACT, wizard.contact.as_str()),
-    ] {
-        if settings::get_text(hwnd, control) != value {
-            settings::set_text(hwnd, control, value);
-        }
-    }
-
-    if step == Step::Did {
-        fill_layout_combo(hwnd, wizard);
-    }
-}
-
-/// Fills the combo of «Что вы делали?» with the layouts of this machine and selects the one the
-/// draft names.
-///
-/// The list is rebuilt only when its length disagrees with the record: `CB_RESETCONTENT` while
-/// the list is dropped down closes it under the pointer, and this function runs on every fill.
-fn fill_layout_combo(hwnd: HWND, wizard: &Wizard) {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CB_ADDSTRING, CB_GETCOUNT, CB_RESETCONTENT, CB_SETCURSEL,
-    };
-
-    let held = settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_GETCOUNT, 0, 0);
-
-    if held != isize::try_from(wizard.layouts.len()).unwrap_or(0) {
-        settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_RESETCONTENT, 0, 0);
-
-        for name in &wizard.layouts {
-            let wide = settings::wide(name);
-
-            // SAFETY: `wide` is a NUL-terminated UTF-16 buffer of this frame and the control
-            // copies it — `CBS_HASSTRINGS` is what makes that true.
-            settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_ADDSTRING, 0, wide.as_ptr() as isize);
-        }
-
-        // Правило 118.1, задача T-53a-1 — ЗДЕСЬ, внутри ветви перестроения, и это ровно то
-        // «после заполнения и заново при всяком изменении числа строк», которого правило
-        // требует: ветвь срабатывает тогда и только тогда, когда число строк разошлось с
-        // записанным. Высота считается слоем `widgets::combo`, своей арифметики у мастера нет.
-        let _taken = widgets::combo::set_dropped_height(hwnd, IDC_WZ_LAYOUT);
-    }
-
-    let chosen = wizard
-        .layouts
-        .iter()
-        .position(|name| *name == wizard.draft.layout)
-        .unwrap_or(0);
-
-    settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_SETCURSEL, chosen, 0);
-}
-
-/// Which glyph a control of the wizard wears — a circle for a choice of one out of several, a
-/// box for a thing that is on or off by itself, and nothing for the three cards, which are
-/// drawn as blocks rather than as radio buttons.
-fn wizard_glyph(control: i32) -> Option<theme::GlyphKind> {
-    if (IDC_WZ_FIELD_1..IDC_WZ_FIELD_1 + 3).contains(&control)
-        || (IDC_WZ_REPEAT_1..IDC_WZ_REPEAT_1 + 3).contains(&control)
-    {
-        return Some(theme::GlyphKind::RadioButton);
-    }
-
-    if (IDC_WZ_ATTACH_1..IDC_WZ_ATTACH_1 + 4).contains(&control) {
-        return Some(theme::GlyphKind::CheckBox);
-    }
-
-    None
-}
-
-/// **Lays out the wizard** — one step at a time, everything else hidden.
-///
-/// The window's height does **not** change with the step (the mock-up asks for that), so the
-/// three buttons at the bottom are placed from the bottom edge upwards and the step's own
-/// controls from the top downwards. What is between them is air.
-///
-/// # Safety
-///
-/// As [`layout_letter`].
-unsafe fn layout_wizard(hwnd: HWND, state: &WindowState) {
-    let (Some(faces), Some(wizard)) = (state.fonts.as_ref(), state.wizard.as_deref()) else {
-        return;
-    };
-
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `client` a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; the DC is released on every path below.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let metrics = Metrics::of(hwnd);
-    let pad = metrics.x(air::PAD);
-    let width = client.right - pad * 2;
-    let tight = metrics.y(air::TIGHT);
-    let gap = metrics.y(air::GAP);
-    let button = metrics.y(air::BUTTON);
-    let pitch = Some(faces.body_pitch());
-
-    // Everything that does not belong to this step goes out of the way first: a slot of
-    // another step left on the screen is the one way this window can show two things at once.
-    // The table [`controls_of`] is what decides, and it is therefore load-bearing rather than
-    // documentation — a slot missing from it is a slot that vanishes.
-    let mine = controls_of(wizard.current());
-
-    for slot in WIZARD_SLOTS
-        .into_iter()
-        .chain(WIZARD_SLOTS_TAIL)
-        .chain(WIZARD_SLOTS_VALUES)
-    {
-        if !mine.contains(&slot) {
-            hide(hwnd, slot);
-        }
-    }
-
-    // --- the head: the step line, the progress bar, the heading and the note ---------------
-    let mut y = metrics.y(air::TOP);
-
-    // SAFETY: `dc` is the live DC and the faces belong to this window's state — the contract
-    // of `measure`, held for every call in this function.
-    let step_height = unsafe {
-        measure(
-            dc,
-            faces.text,
-            width,
-            &settings::get_text(hwnd, IDC_WZ_STEP),
-            None,
-        )
-    };
-
-    place(hwnd, IDC_WZ_STEP, pad, y, width, step_height);
-    y += step_height + tight;
-
-    // The progress bar is a static this window paints: one filled run for the steps behind and
-    // one quiet run for those ahead. Three dialog units tall, which is a line and not a bar.
-    place(hwnd, IDC_WZ_PROGRESS, pad, y, width, metrics.y(3));
-    y += metrics.y(3) + gap;
-
-    // SAFETY: as above.
-    let title_height = unsafe {
-        measure(
-            dc,
-            faces.name,
-            width,
-            &settings::get_text(hwnd, IDC_WZ_TITLE),
-            None,
-        )
-    };
-
-    place(hwnd, IDC_WZ_TITLE, pad, y, width, title_height);
-    y += title_height + tight;
-
-    // SAFETY: as above.
-    let note_height = unsafe {
-        measure(
-            dc,
-            faces.body,
-            width,
-            &settings::get_text(hwnd, IDC_WZ_NOTE),
-            pitch,
-        )
-    };
-
-    place(hwnd, IDC_WZ_NOTE, pad, y, width, note_height);
-    y += note_height + gap;
-
-    // --- the step's own controls ------------------------------------------------------------
-    let top_of_body = y;
-
-    match wizard.current() {
-        Step::What => {
-            for index in 0..3 {
-                // ⚠ **The two lines are not placed here and never were controls on the
-                // screen** — see `card_lines` and `draw_card`. The statics that carry their
-                // words are `NOT WS_VISIBLE`; what this loop needs of them is the height they
-                // make the card, and that is the third answer of the shared arithmetic.
-                //
-                // SAFETY: as above.
-                let (_, _, card_height) = unsafe {
-                    card_lines(
-                        dc,
-                        faces,
-                        metrics,
-                        width,
-                        &settings::get_text(hwnd, IDC_WZ_CARD_T1 + index),
-                        &settings::get_text(hwnd, IDC_WZ_CARD_S1 + index),
-                    )
-                };
-
-                place(hwnd, IDC_WZ_CARD_1 + index, pad, y, width, card_height);
-
-                y += card_height + gap;
-            }
-        }
-
-        Step::Where => {
-            let label = settings::get_text(hwnd, IDC_WZ_PROGRAM_LABEL);
-            // SAFETY: as above.
-            let label_width = unsafe { text_width(dc, faces.text, &label) };
-            // SAFETY: as above.
-            let capture_width = unsafe {
-                button_width(
-                    dc,
-                    faces.text,
-                    metrics,
-                    &settings::get_text(hwnd, IDC_WZ_CAPTURE),
-                )
-            };
-
-            // ⭐ **МЕСТО ПОД КРОМКУ И ЗАЗОР — задача Т-45-3, решение 107.4.** Слово
-            // пользователя: «„Поле ввода программы:“ слишком прижато к окну ввода, и часть окна
-            // ввода не дорисована со стороны текста». Обе половины жалобы — одна причина.
-            //
-            // Прежде подпись занимала прямоугольник `текст + 3 единицы диалога`, а поле
-            // начиналось СРАЗУ за ним. Коробку поля рисует фон окна на `left − толщина`, то
-            // есть **внутри прямоугольника подписи**, а подпись — owner-draw статик: она
-            // грунтует свой прямоугольник целиком и кромку стирает. Замер на живом 0.44.0
-            // (`красное-рамка-мастер-e44.log`): пикселей кромки слева **4 из 19 = 21 %** при
-            // 100 % справа и 100 % у обоих полей окна настроек; зазор «текст → кромка» — 4 px.
-            //
-            // Теперь прямоугольник подписи равен её тексту, а между текстом и полем
-            // резервируется зазор макета плюс толщина кромки. Число зазора — [`LABEL_TO_FIELD`],
-            // и оно названо пользователем.
-            let dpi = theme::drawing_dpi(dc);
-            let thickness = theme::scaled(theme::BORDER_THICKNESS, dpi).max(1);
-            let field_x = pad + label_width + theme::scaled(air::LABEL_TO_FIELD, dpi) + thickness;
-
-            place(
-                hwnd,
-                IDC_WZ_PROGRAM_LABEL,
-                pad,
-                y + tight,
-                label_width,
-                step_height,
-            );
-            place_field(
-                hwnd,
-                metrics,
-                IDC_WZ_PROGRAM,
-                field_x,
-                y,
-                pad + width - capture_width - metrics.x(air::BUTTON_GAP) - field_x,
-                button,
-            );
-            place(
-                hwnd,
-                IDC_WZ_CAPTURE,
-                pad + width - capture_width,
-                y,
-                capture_width,
-                button,
-            );
-
-            y += button + tight;
-
-            // SAFETY: as above.
-            let note = unsafe {
-                measure(
-                    dc,
-                    faces.body,
-                    width,
-                    &settings::get_text(hwnd, IDC_WZ_CAPTURE_NOTE),
-                    pitch,
-                )
-            };
-
-            place(hwnd, IDC_WZ_CAPTURE_NOTE, pad, y, width, note);
-            y += note + gap;
-
-            for index in 0..3 {
-                let control = IDC_WZ_FIELD_1 + index;
-
-                place(hwnd, control, pad, y, width, glyph_height(metrics, faces));
-                y += glyph_height(metrics, faces);
-
-                // The second radio carries a sentence of its own under it.
-                if index == 1 {
-                    let inset = metrics.x(settings::GLYPH_TEXT_INSET_DLU);
-                    // SAFETY: as above.
-                    let sub = unsafe {
-                        measure(
-                            dc,
-                            faces.body,
-                            width - inset,
-                            &settings::get_text(hwnd, IDC_WZ_FIELD_2_SUB),
-                            pitch,
-                        )
-                    };
-
-                    place(hwnd, IDC_WZ_FIELD_2_SUB, pad + inset, y, width - inset, sub);
-                    y += sub;
-                }
-
-                y += tight;
-            }
-        }
-
-        Step::Did => {
-            place(hwnd, IDC_WZ_TYPED_LABEL, pad, y, width, step_height);
-            y += step_height + tight;
-
-            let combo = width / 2;
-
-            // ⛔ **Здесь стояла `metrics.y(12)`, и в ней был дефект Э53а** — задача T-53a-1,
-            // правило 118.1. У выпадающего комбобокса высота ОКНА есть высота РАСКРЫТОГО
-            // состояния вместе с полем, а не высота ряда вёрстки. Пока 12 единиц диалога были
-            // меньше закрытой части, Windows запрос отбрасывала и держала высоту шаблона —
-            // и всё работало; Э51 подняла шрифт мастера 9 → 10 pt, `base_y` 15 → 17, и те же
-            // 12 единиц стали 25 пикселями, ровно закрытой частью: запрос приняли, на строки
-            // не осталось ничего. Замер: окно списка 203 × **2** px, ноль строк.
-            //
-            // Поэтому вёрстка назначает место и ширину, а ВЫСОТУ — общий слой, вызовом сразу
-            // следом: `fill_wizard` идёт до `layout_wizard`, и без этого вызова разметка
-            // затирала бы высоту, поставленную при заполнении списка.
-            //
-            // NFR-13: отказ слоя разобран — комбобокс остаётся при высоте ряда, то есть при
-            // прежнем поведении, а не при нулевой высоте.
-            place(hwnd, IDC_WZ_LAYOUT, pad, y, combo, step_height);
-            widgets::combo::set_dropped_height(hwnd, IDC_WZ_LAYOUT);
-
-            let pressed = settings::get_text(hwnd, IDC_WZ_PRESSED_LABEL);
-            // SAFETY: as above.
-            let pressed_width = unsafe { text_width(dc, faces.text, &pressed) } + tight;
-            let chip_x = pad + combo + metrics.x(air::BUTTON_GAP);
-
-            place(
-                hwnd,
-                IDC_WZ_PRESSED_LABEL,
-                chip_x,
-                y + tight,
-                pressed_width,
-                step_height,
-            );
-            place(
-                hwnd,
-                IDC_WZ_CHIP,
-                chip_x + pressed_width + tight,
-                y,
-                pad + width - (chip_x + pressed_width + tight),
-                metrics.y(12),
-            );
-
-            y += metrics.y(12) + gap;
-
-            for (label, field) in [
-                (IDC_WZ_EXPECTED_LABEL, IDC_WZ_EXPECTED),
-                (IDC_WZ_GOT_LABEL, IDC_WZ_GOT),
-            ] {
-                place(hwnd, label, pad, y, width, step_height);
-                y += step_height + tight;
-                place_field(hwnd, metrics, field, pad, y, width, button);
-                y += button + gap;
-            }
-
-            place(hwnd, IDC_WZ_REPEAT_LABEL, pad, y, width, step_height);
-            y += step_height + tight;
-
-            let column = (width - metrics.x(air::BUTTON_GAP) * 2) / 3;
-
-            for index in 0..3 {
-                place(
-                    hwnd,
-                    IDC_WZ_REPEAT_1 + index,
-                    pad + (column + metrics.x(air::BUTTON_GAP)) * index,
-                    y,
-                    column,
-                    glyph_height(metrics, faces),
-                );
-            }
-        }
-
-        Step::Idea => {
-            let room = (bottom_of_body(client, metrics) - y - step_height * 2 - tight * 2 - gap)
-                .max(metrics.y(30));
-            let each = room / 2;
-
-            for (label, field) in [
-                (IDC_WZ_IDEA_LABEL, IDC_WZ_IDEA),
-                (IDC_WZ_HELPS_LABEL, IDC_WZ_HELPS),
-            ] {
-                place(hwnd, label, pad, y, width, step_height);
-                y += step_height + tight;
-                place(hwnd, field, pad, y, width, each);
-                inset_area(hwnd, metrics, field);
-                y += each + gap;
-            }
-        }
-
-        Step::Attach => {
-            let inset = metrics.x(settings::GLYPH_TEXT_INSET_DLU);
-
-            for index in 0..4 {
-                place(
-                    hwnd,
-                    IDC_WZ_ATTACH_1 + index,
-                    pad,
-                    y,
-                    width,
-                    glyph_height(metrics, faces),
-                );
-                y += glyph_height(metrics, faces);
-
-                // SAFETY: as above.
-                let value = unsafe {
-                    measure(
-                        dc,
-                        faces.body,
-                        width - inset,
-                        &settings::get_text(hwnd, IDC_WZ_ATTACH_V1 + index),
-                        pitch,
-                    )
-                };
-
-                place(
-                    hwnd,
-                    IDC_WZ_ATTACH_V1 + index,
-                    pad + inset,
-                    y,
-                    width - inset,
-                    value,
-                );
-                y += value + tight;
-            }
-
-            y += gap - tight;
-
-            // SAFETY: as above.
-            let foot = unsafe {
-                measure(
-                    dc,
-                    faces.body,
-                    width,
-                    &settings::get_text(hwnd, IDC_WZ_ATTACH_FOOT),
-                    pitch,
-                )
-            };
-
-            // ⚠ **Clamped to the body, and the instrument is what asked for it.** In Greek —
-            // the longest of the fourteen — the four values and this footnote together stand
-            // taller than the window, and the sentence ran straight through the button row:
-            // `влезание-В.log`, three overlaps of 1345 with 1350…1352. The room that is left
-            // is what it gets; a sentence cut short is visible, a sentence over the buttons is
-            // a window nobody can press.
-            let room = (bottom_of_body(client, metrics) - y).max(0);
-
-            place(hwnd, IDC_WZ_ATTACH_FOOT, pad, y, width, foot.min(room));
-        }
-
-        Step::Preview => {
-            use crate::settings::{
-                IDS_WIZARD_ADDRESS_COPIED, IDS_WIZARD_FAILED, IDS_WIZARD_TEXT_COPIED, format_text,
-                text,
-            };
-
-            // Задача T-107-3, решения 199.3 и 199.11: while the appeal is ready or on its way — the
-            // contact under the text and the one button «Сохранить в папку журнала»; once the
-            // site did not take it — the letter: the line of the address and three buttons.
-            // [`preview_controls`] names the shape; what it does not name is hidden here.
-            let post = state
-                .wizard
-                .as_deref()
-                .map_or(Post::Ready, |wizard| wizard.post);
-            let shown = preview_controls(post);
-            let mail = shown.contains(&IDC_WZ_ADDRESS);
-            let row: &[i32] = if mail {
-                &[IDC_WZ_COPY, IDC_WZ_COPY_ADDRESS, IDC_WZ_SAVE]
-            } else {
-                &[IDC_WZ_SAVE]
-            };
-
-            for &control in controls_of(Step::Preview) {
-                if !shown.contains(&control) {
-                    hide(hwnd, control);
-                }
-            }
-
-            let widths: Vec<i32> = row
-                .iter()
-                .map(|&control| {
-                    // SAFETY: as above.
-                    unsafe {
-                        button_width(dc, faces.text, metrics, &settings::get_text(hwnd, control))
-                    }
-                })
-                .collect();
-
-            // ⚠ **The buttons wrap when they do not fit side by side**, and that is not a
-            // precaution: in Greek «Αποθήκευση στον φάκελο του ημερολογίου» took the second
-            // button 86 px past the right edge of the window (`влезание-В.log`, control 1348
-            // «вне клиента»). Every row costs the preview one button of height and nothing else.
-            let at = wrap_row(&widths, metrics.x(air::BUTTON_GAP), width);
-            let rows = at
-                .last()
-                .map_or(1, |&(_, line)| i32::try_from(line).unwrap_or(0) + 1);
-
-            let address = if mail {
-                // SAFETY: as above.
-                unsafe {
-                    measure(
-                        dc,
-                        faces.text,
-                        width,
-                        &settings::get_text(hwnd, IDC_WZ_ADDRESS),
-                        None,
-                    )
-                }
-            } else {
-                0
-            };
-
-            // The contact: its label as tall as its words need — two lines in a long language are
-            // allowed (201.11а) — and the field one button high, as the fields of «Что вы делали?».
-            let contact_label = if mail {
-                0
-            } else {
-                // SAFETY: as above.
-                unsafe {
-                    measure(
-                        dc,
-                        faces.text,
-                        width,
-                        &settings::get_text(hwnd, IDC_WZ_CONTACT_LABEL),
-                        None,
-                    )
-                }
-                .max(step_height)
-            };
-
-            // The line under the buttons, as tall as the longest thing it can say: «Сохранено: …»
-            // or «Не получилось…» in both shapes, and in the letter's two more that carry the
-            // address.
-            let mut said = vec![text(IDS_WIZARD_FAILED)];
-
-            if mail {
-                said.push(format_text(IDS_WIZARD_TEXT_COPIED, &[links::MAIL_ADDRESS]));
-                said.push(format_text(
-                    IDS_WIZARD_ADDRESS_COPIED,
-                    &[links::MAIL_ADDRESS],
-                ));
-            }
-
-            let status = said
-                .iter()
-                .map(|said| {
-                    // SAFETY: as above.
-                    unsafe { measure(dc, faces.text, width, said, None) }
-                })
-                .fold(step_height, i32::max);
-
-            let between = if mail {
-                address + tight
-            } else {
-                contact_label + tight + button + tight
-            };
-            let bottom = bottom_of_body(client, metrics);
-            let room = (bottom - y - between - button * rows - status - tight * (rows + 1))
-                .max(metrics.y(40));
-
-            place(hwnd, IDC_WZ_PREVIEW, pad, y, width, room);
-            inset_area(hwnd, metrics, IDC_WZ_PREVIEW);
-            y += room + tight;
-
-            if mail {
-                place(hwnd, IDC_WZ_ADDRESS, pad, y, width, address);
-                y += address + tight;
-            } else {
-                place(hwnd, IDC_WZ_CONTACT_LABEL, pad, y, width, contact_label);
-                y += contact_label + tight;
-                place_field(hwnd, metrics, IDC_WZ_CONTACT, pad, y, width, button);
-                y += button + tight;
-            }
-
-            for (&control, (&wide, &(x, line))) in row.iter().zip(widths.iter().zip(at.iter())) {
-                let line = i32::try_from(line).unwrap_or(0);
-
-                place(
-                    hwnd,
-                    control,
-                    pad + x,
-                    y + line * (button + tight),
-                    wide.min(width),
-                    button,
-                );
-            }
-
-            y += rows * (button + tight);
-            place(hwnd, IDC_WZ_STATUS, pad, y, width, status);
-        }
-
-        // «Готово» — задача Т-33-3. The paragraph gets the height its own words need, and the
-        // one button stands a block under it: the window keeps the size every other step has,
-        // and the air below is air.
-        Step::Done => {
-            // SAFETY: as above.
-            let thanks = unsafe {
-                measure(
-                    dc,
-                    faces.body,
-                    width,
-                    &settings::get_text(hwnd, IDC_WZ_THANKS),
-                    pitch,
-                )
-            };
-
-            let room = (bottom_of_body(client, metrics) - y - button - gap).max(0);
-
-            place(hwnd, IDC_WZ_THANKS, pad, y, width, thanks.min(room));
-            y += thanks.min(room) + gap;
-
-            // SAFETY: as above.
-            let channel_width = unsafe {
-                button_width(
-                    dc,
-                    faces.text,
-                    metrics,
-                    &settings::get_text(hwnd, IDC_WZ_CHANNEL),
-                )
-            };
-
-            place(
-                hwnd,
-                IDC_WZ_CHANNEL,
-                pad,
-                y,
-                channel_width.min(width),
-                button,
-            );
-
-            // ⚠ **The address is still a placeholder (П7), so the button is drawn and dead** —
-            // the same rule «От автора» keeps for the same address.
-            enable(
-                hwnd,
-                IDC_WZ_CHANNEL,
-                !links::is_placeholder(links::CHANNEL_URL),
-            );
-        }
-    }
-
-    let _ = top_of_body;
-
-    // --- the three buttons, from the bottom edge upwards --------------------------------
-    let row_y = client.bottom - metrics.y(air::PAD) - button;
-
-    // SAFETY: as above.
-    let cancel_width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_WZ_CANCEL),
-        )
-    };
-    // SAFETY: as above.
-    let back_width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_WZ_BACK),
-        )
-    };
-    // SAFETY: as above.
-    let next_width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_WZ_NEXT),
-        )
-    };
-
-    place(
-        hwnd,
-        IDC_WZ_NEXT,
-        pad + width - next_width,
-        row_y,
-        next_width,
-        button,
-    );
-
-    // ⛔ **Решается ДО размещения, а не после — задача Т-33-8, находка глазом пользователя.**
-    // «Назад» на первом шаге нет вовсе, и раньше её сперва ставили (а `place` показывает
-    // контрол), и только следующей строкой прятали: кнопка успевала мелькнуть. Замерено —
-    // семь кадров из восьмидесяти на первом шаге показывали её прямоугольник непустым
-    // (`scratchpad-Э33\моргание-шагов-до.log`). Показанный и тут же спрятанный контрол — это
-    // всегда мелькание, сколько бы миллисекунд ни прошло между двумя вызовами.
-    //
-    // ⚠ Место «Назад» держит по-прежнему: она не двигается, она отсутствует — макет просит
-    // именно этого, и кнопка, которая переезжала бы, двигала соседнюю.
-    let back_shown = wizard.step > 0 && !wizard.done;
-    let cancel_shown = !wizard.done;
-
-    if back_shown {
-        place(
-            hwnd,
-            IDC_WZ_BACK,
-            pad + width - next_width - metrics.x(air::BUTTON_GAP) - back_width,
-            row_y,
-            back_width,
-            button,
-        );
-    } else {
-        hide(hwnd, IDC_WZ_BACK);
-    }
-
-    // On «Готово» there is nothing to cancel and nowhere to go back to: both leave, «Закрыть»
-    // stays where «Далее» stood, and no button moves a pixel (задача Т-33-3, решение 103.3).
-    if cancel_shown {
-        place(hwnd, IDC_WZ_CANCEL, pad, row_y, cancel_width, button);
-    } else {
-        hide(hwnd, IDC_WZ_CANCEL);
-    }
-
-    // Задача T-107-3 (макет, «Отправляется»): while the appeal is on its way every button and
-    // field of the window is grey — it cannot be sent twice, nor changed under the request, nor
-    // the step left. Stated on every layout, so the answer of the site gives them back by the
-    // same line. The cross of the title bar and Esc still close the window; what the thread
-    // answers then finds no window and is dropped ([`wizard_answer`]).
-    let sending = matches!(wizard.post, Post::Sending(_));
-
-    for control in [
-        IDC_WZ_PREVIEW,
-        IDC_WZ_CONTACT,
-        IDC_WZ_SAVE,
-        IDC_WZ_CANCEL,
-        IDC_WZ_BACK,
-        IDC_WZ_NEXT,
-    ] {
-        enable(hwnd, control, !sending);
-    }
-
-    // SAFETY: releases exactly the DC taken above, once.
-    unsafe { ReleaseDC(Some(hwnd), dc) };
-}
-
-/// Answers `WM_MEASUREITEM` for the one owner-drawn combo of these windows.
-///
-/// # SEC-05
-///
-/// The type and the identifier are read out of the message and checked before anything is
-/// written, and the only field written back is the height. A forged message names a control
-/// that is not the combo and is refused.
-///
-/// # Safety
-///
-/// Called from [`letter_proc`] with the `lparam` of the message: the sender owns the struct it
-/// names for the length of the send.
-unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
-    use windows::Win32::UI::Controls::MEASUREITEMSTRUCT;
-
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // SAFETY: the dialog manager owns the struct for the length of the send.
-    let item = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
-
-    if item.CtlType != ODT_COMBOBOX || i32::try_from(item.CtlID).unwrap_or(-1) != IDC_WZ_LAYOUT {
-        return 0;
-    }
-
-    // ⭐ **Задача Т-45-3: высоту строки списка считает общий слой.** Здесь стояло
-    // `faces.body_height.abs() + 8` — своё число, без масштаба DPI и без связи с окном
-    // настроек. Замер на живом 0.44.0 (`красное-высоты-комбо-e44.log`): строка списка мастера
-    // **16 px**, строка списка каждого из четырёх комбо окна настроек — **26 px**. Теперь
-    // формула одна на все окна: высота шрифта диалога плюс `LIST_ITEM_EXTRA` через масштаб.
-    //
-    // ⚠ Закрытую часть это сообщение не задаёт и задавать не должно: одно `WM_MEASUREITEM`
-    // красит обе высоты сразу, поэтому закрытую двигает `CB_SETITEMHEIGHT(−1)` из
-    // `widgets::combo::attach`.
-    //
-    // ⭐ **Задача T-50-2, решение 115.2.** «Формула одна на все окна» было правдой, а результат
-    // всё равно расходился: формула несла высоту шрифта ОКНА, а мастер несёт 9 pt против 10 pt
-    // окна настроек — 24 px против 26. Теперь спрашивается бо́льшая из макетной мерки и прежней
-    // шрифтовой, и это окно поднимается до 26; окно настроек — эталон и не двигается.
-    let height = widgets::combo::list_row_height(hwnd);
-
-    let Some(height) = height else {
-        return 0;
-    };
-
-    let Ok(height) = u32::try_from(height) else {
-        return 0;
-    };
-
-    item.itemHeight = height;
-
-    // TRUE — measured.
-    1
-}
-
-/// Draws one row of the layout combo — the closed face and every item of the dropped list.
-///
-/// A body of its own and not the settings window's: that one reads its colours out of a
-/// `DialogState` this module has no access to. What is shared is the vocabulary — the same
-/// palette fields, the same `paint_label`.
-///
-/// # Safety
-///
-/// As [`draw_progress`].
-unsafe fn draw_combo_row(
-    hwnd: HWND,
-    dc: HDC,
-    rect: RECT,
-    state: &WindowState,
-    item: u32,
-    item_state: u32,
-) -> isize {
-    use windows::Win32::UI::WindowsAndMessaging::{CB_GETLBTEXT, CB_GETLBTEXTLEN};
-
-    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
-        return 0;
-    };
-
-    let palette = state.palette;
-    let selected = item_state & ODS_SELECTED.0 != 0;
-
-    // ⚠ An item identifier of `u32::MAX` means «the list is empty» — the documented value, and
-    // the one moment this can be asked before anything has been added.
-    if item == u32::MAX {
-        // SAFETY: `dc` is the DC of the message and the brush belongs to the state.
-        unsafe { FillRect(dc, &rect, brushes.field_bg()) };
-        return 1;
-    }
-
-    let index = usize::try_from(item).unwrap_or(0);
-    let length = settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_GETLBTEXTLEN, index, 0);
-    let mut buffer = vec![0u16; usize::try_from(length).unwrap_or(0) + 1];
-
-    // SAFETY: `buffer` is a live allocation of this frame long enough for the string the
-    // control has just reported, plus its terminator — `CBS_HASSTRINGS` is what keeps the
-    // strings in the control at all.
-    settings::send_to(
-        hwnd,
-        IDC_WZ_LAYOUT,
-        CB_GETLBTEXT,
-        index,
-        buffer.as_mut_ptr() as isize,
-    );
-
-    let end = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    let mut caption = buffer[..end].to_vec();
-
-    // ⭐ **Строка рисуется телом окна настроек — задача Т-46-4, решение 109.4.**
-    //
-    // Здесь стоял `theme::paint_label`, и он верен для подписей: его формат — `DT_TOP` с
-    // переносом, потому что подпись бывает многострочной. Строке списка это не подходит, и
-    // замер Т-46-1 сказал числом: в строке 24 px слово стояло с воздухом **3 сверху и 9
-    // снизу**, а в окне настроек — **8 и 5**, то есть отцентровано (`DT_VCENTER`). Глазу это
-    // видно, и пользователь это увидел. Эталон механики — окно настроек (решение 109.1).
-    //
-    // Земля остаётся за окном: у выбранной строки она своя, и роли красок этих двух окон
-    // разные. Слой красок не знает — они приходят разрешёнными.
-    let (ground, ink) = if selected {
-        (brushes.sel_bg(), palette.sel_fg)
-    } else {
-        (brushes.field_bg(), palette.text)
-    };
-
-    // SAFETY: `dc` is the DC of the message and `ground` is a live brush of this window's state.
-    unsafe { FillRect(dc, &rect, ground) };
-
-    // SAFETY: `dc` is live for the length of the message; `faces.text` is a font this window's
-    // state owns for longer than the call; `caption` is a live local of this frame.
-    unsafe {
-        widgets::combo::draw_row(
-            dc,
-            rect,
-            &mut caption,
-            ink,
-            Some(faces.text),
-            // Тот же отступ, что был: три единицы диалога окна настроек — это ≈5 px, и шесть
-            // пикселей макета через масштаб дают столько же. Число не трогается (решение
-            // 109.9: палитра и строки списка раскладок — вне этапа).
-            theme::scaled(6, theme::drawing_dpi(dc)),
-        );
-    }
-
-    1
-}
-
-/// Draws the progress line of the wizard — the steps behind in the accent, the steps ahead in
-/// the quiet border colour.
-///
-/// # Safety
-///
-/// As [`draw_demo`]: `dc` and `rect` are the values of the message.
-unsafe fn draw_progress(dc: HDC, rect: RECT, state: &WindowState) -> isize {
-    let (Some(brushes), Some(wizard)) = (state.brushes.as_ref(), state.wizard.as_deref()) else {
-        return 0;
-    };
-
-    // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
-    unsafe { FillRect(dc, &rect, brushes.window_bg()) };
-
-    let steps = i32::try_from(wizard.road().len()).unwrap_or(1).max(1);
-
-    // On «Готово» the line is full and keeps the number of cells the road had: the thanks is
-    // where the road ends, not a sixth cell in a row of five (задача Т-33-3).
-    let done = if wizard.done {
-        steps
-    } else {
-        i32::try_from(wizard.step + 1).unwrap_or(1).clamp(1, steps)
-    };
-    let width = rect.right - rect.left;
-    let gap = theme::scaled(4, theme::drawing_dpi(dc));
-    let each = (width - gap * (steps - 1)) / steps;
-
-    for index in 0..steps {
-        let left = rect.left + (each + gap) * index;
-        let cell = RECT {
-            left,
-            top: rect.top,
-            right: left + each,
-            bottom: rect.bottom,
-        };
-
-        // SAFETY: as above — the two brushes belong to the state.
-        unsafe {
-            FillRect(
-                dc,
-                &cell,
-                if index < done {
-                    brushes.accent_bg()
-                } else {
-                    brushes.box_border()
-                },
-            )
-        };
-    }
-
-    1
-}
-
-/// Draws the key chip of «Что вы делали?» — the same figure the help rows wear, alone in its
-/// own rectangle.
-///
-/// # Safety
-///
-/// As [`draw_progress`].
-unsafe fn draw_chip(dc: HDC, rect: RECT, state: &WindowState, key: &str) -> isize {
-    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
-        return 0;
-    };
-
-    let palette = state.palette;
-    let dpi = theme::drawing_dpi(dc);
-
-    // SAFETY: `dc` is the DC of the message and the brush belongs to this window's state.
-    unsafe { FillRect(dc, &rect, brushes.window_bg()) };
-
-    // SAFETY: as above; every handle of the style is an object the state owns for longer.
-    unsafe {
-        theme::paint_chip_row(
-            dc,
-            rect,
-            theme::chip_row(theme::KEY_PLACEHOLDER, key),
-            theme::ChipRowStyle {
-                ground: brushes.window_bg(),
-                ink: palette.text,
-                body: Some(faces.body),
-                chip_face: Some((faces.chip, faces.chip_height)),
-                chip: theme::ChipColors {
-                    outline: palette.field_border,
-                    fill: brushes.field_bg(),
-                    ink: palette.text,
-                },
-                pitch: faces.body_pitch(),
-                dpi,
-            },
-        )
-    }
-}
-
-/// Where the two lines of a card stand **inside it**, and how tall the card therefore is.
-///
-/// **The one place this arithmetic lives.** [`layout_wizard`] asks it for the height and
-/// [`draw_card`] asks it for the two rectangles; a second copy of the formula would be a card
-/// whose words drift out of the block the moment either half is touched.
-///
-/// The rectangles are in the card's own coordinates — origin at its top-left corner — which is
-/// exactly the space `WM_DRAWITEM` hands the drawing, and which is the same space in a mirrored
-/// window as in an ordinary one (ИТОГ-Э30 §9.7: an offset is safe where an absolute corner is
-/// not).
-///
-/// # Safety
-///
-/// `dc` is a live DC of this window and `faces` the fonts it owns — the contract of
-/// [`measure`].
-unsafe fn card_lines(
-    dc: HDC,
-    faces: &Faces,
-    metrics: Metrics,
-    width: i32,
-    title: &str,
-    sub: &str,
-) -> (RECT, RECT, i32) {
-    let pad = metrics.x(air::PANEL_PAD);
-    let tight = metrics.y(air::TIGHT);
-    let inner = width - pad * 2;
-
-    // SAFETY: see the contract.
-    let title_height = unsafe { measure(dc, faces.text, inner, title, None) };
-    // SAFETY: see the contract.
-    let sub_height = unsafe { measure(dc, faces.body, inner, sub, Some(faces.body_pitch())) };
-
-    let title_rect = RECT {
-        left: pad,
-        top: tight,
-        right: pad + inner,
-        bottom: tight + title_height,
-    };
-    let sub_rect = RECT {
-        left: pad,
-        top: tight + title_height + tight,
-        right: pad + inner,
-        bottom: tight + title_height + tight + sub_height,
-    };
-
-    (title_rect, sub_rect, tight * 3 + title_height + sub_height)
-}
-
-/// Draws one card of «Что случилось?» — a block with a heading and a line under it, and the
-/// chosen one framed in the accent.
-///
-/// # ⛔ Why the card draws its own words — задача Т-33-2, решение 103.2
-///
-/// The two lines used to be **visible statics standing on the card**, and hovering the card
-/// wiped them off the screen. Measured rather than reasoned
-/// (`scratchpad-Э33\причина-2-наведение.log`):
-///
-/// * in the z-order of the dialog the three cards stand **above** their own six labels — the
-///   template lists the buttons first, and the order of a template *is* the z-order;
-/// * **not one control of this window carries `WS_CLIPSIBLINGS`** (every style read off the
-///   live window is `0x5001400B` or `0x5002000D`);
-/// * so at a full repaint the children paint from the top of the z-order downwards: the card
-///   fills its rectangle and the labels, being **below** it, paint afterwards and land on top.
-///   The words were visible only because they were painted **last**;
-/// * on hover `settings::invalidate_hot` invalidates **the button alone**. It fills its whole
-///   rectangle again and nothing ever asks the labels to repaint. Ink inside a card measured
-///   3030 → **0**.
-///
-/// So the card is one body of drawing now: the statics are `NOT WS_VISIBLE` carriers of the
-/// two strings — the arrangement the panels of a letter and «Как пользоваться» have always
-/// used — and everything inside this rectangle is painted here, in one pass, by one owner.
-///
-/// # Safety
-///
-/// As [`draw_progress`]; `hwnd` is the live window the item belongs to.
-unsafe fn draw_card(
-    hwnd: HWND,
-    dc: HDC,
-    rect: RECT,
-    state: &WindowState,
-    control: i32,
-    hot: bool,
-    focused: bool,
-) -> isize {
-    let (Some(brushes), Some(faces), Some(wizard)) = (
-        state.brushes.as_ref(),
-        state.fonts.as_ref(),
-        state.wizard.as_deref(),
-    ) else {
-        return 0;
-    };
-
-    let palette = state.palette;
-    let dpi = theme::drawing_dpi(dc);
-    let chosen = wizard_is_checked(wizard, control);
-
-    // ⚠ **Один кадр вместо череды — задача Т-33-5, находка глазом пользователя.** Тело ниже
-    // кладёт заливку, потом рамку, потом две строки, и, пока оно писало прямо в DC сообщения,
-    // DWM успевал снять окно между заливкой и текстом: карточка **моргала** при наведении.
-    // Замерено на живом продукте, а не выведено — очередь кадров с качающимся указателем,
-    // чернила текста 1852 → **0** → 1852 в **21 кадре из 160** (`scratchpad-Э33\моргание-до.log`;
-    // положительный контроль, указатель вне окна, — ровный ряд 1852). Это тот же дефект, ради
-    // которого задача T-15-1 сделала [`theme::PaintBuffer`] для кнопок настроек, и лечится он
-    // теми же тремя строками: поверхность своего размера, тело пишет в неё, готовый элемент
-    // переходит на экран одним `BitBlt`.
-    //
-    // `None` — GDI отказал (NFR-13): `map_or` тогда отдаёт телу DC сообщения, и карточка
-    // рисуется ровно как до этой задачи — с морганием, то есть ухудшенно, но живо.
-    //
-    // ⚠ DPI берётся **у DC сообщения**, а не у поверхности: `GetDeviceCaps` буфера отвечает про
-    // память, и радиус, посчитанный по нему, был бы неверен на любом масштабе кроме 100 %.
-    //
-    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер читает его глубину цвета и
-    // освобождает свои DC и растр, когда кончится этот кадр.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // ⛔⛔ **Заливка ГРУНТУЕТ буфер, и без неё углы карточки становятся чёрными.** Находка
-    // глазом пользователя на светлой палитре 0.43.0: `paint_rounded` держит четыре угловых
-    // плитки вне отсечения и потом смешивает дугу **с той подложкой, которую читает из того же
-    // DC**, — а пиксели свежего `CreateCompatibleBitmap` не определены. На тёмной палитре
-    // неопределённое чёрное совпало с фоном и никто не заметил; на светлой углы вышли чёрными.
-    // Ровно об этом предупреждает `theme::PaintBuffer`: «эта заливка — то, чем грунтуется
-    // буфер», и ровно эту строку носит `settings::paint_push_button` с задачи T-15-1. Здесь она
-    // была пропущена, потому что `paint_rounded` заливает **середину** сама и выглядела
-    // самодостаточной.
-    //
-    // ⚠ Грунтуется **фоном окна, а не лицом карточки**: за срезанными углами стоит то, на чём
-    // карточка лежит, и до буфера там оставалось ровно это — то, что нарисовал `WM_ERASEBKGND`
-    // окна. Заливка панельной кистью закрасила бы углы лицом карточки, и скругление в крайнем
-    // пикселе пропало бы: замерено, угол читался 0xFFFFFF при подложке 0xEDEFF2. Это та же
-    // кисть, которой `settings::paint_push_button` грунтует свой буфер, — «та самая, которой
-    // отвечает сообщение».
-    //
-    // SAFETY: `target` — буфер этого кадра или, при отказе GDI, DC сообщения; `rect` — значение
-    // сообщения, кисть принадлежит состоянию окна дольше, чем длится вызов.
-    unsafe { FillRect(target, &rect, brushes.window_bg()) };
-
-    // ⚠ The **fill** never changes: the ground of a card is the panel brush whatever the
-    // pointer is doing, because the words above it are drawn on that ground. What answers to
-    // the pointer and to the focus is the frame.
-    theme::paint_rounded(
-        target,
-        &rect,
-        theme::scaled(theme::CORNER_RADIUS, dpi),
-        if chosen {
-            palette.accent_bg
-        } else if hot || focused {
-            palette.box_border
-        } else {
-            palette.panel_border
-        },
-        brushes.panel_bg(),
-        dpi,
-    );
-
-    let index = control - IDC_WZ_CARD_1;
-    let title = settings::get_text(hwnd, IDC_WZ_CARD_T1 + index);
-    let sub = settings::get_text(hwnd, IDC_WZ_CARD_S1 + index);
-
-    // ⚠ Мерится по **DC сообщения**, а не по буферу: `measure` выбирает начертание в тот DC,
-    // которому его дали, и обе поверхности несут одно и то же начертание — но правило «у окна
-    // спрашивают про окно» стоит держать в одном месте, а не вспоминать.
-    //
-    // SAFETY: `dc` is the DC of the message and `faces` the fonts of this window's state.
-    let (title_rect, sub_rect, _) = unsafe {
-        card_lines(
-            dc,
-            faces,
-            Metrics::of(hwnd),
-            rect.right - rect.left,
-            &title,
-            &sub,
-        )
-    };
-
-    for (line, box_of, role, face, pitch) in [
-        (
-            &title,
-            title_rect,
-            label_color_role(IDC_WZ_CARD_T1),
-            faces.text,
-            None,
-        ),
-        (
-            &sub,
-            sub_rect,
-            label_color_role(IDC_WZ_CARD_S1),
-            faces.body,
-            Some(faces.body_pitch()),
-        ),
-    ] {
-        let mut wide: Vec<u16> = line.encode_utf16().collect();
-
-        // The rectangle comes back in the card's own coordinates; `rcItem` is (0,0)-based for
-        // a button, and the shift is written out anyway so that the two spaces are never
-        // silently assumed to be the same one.
-        let placed = RECT {
-            left: rect.left + box_of.left,
-            top: rect.top + box_of.top,
-            right: rect.left + box_of.right,
-            bottom: rect.top + box_of.bottom,
-        };
-
-        // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message;
-        // `placed` is live, and the brush and the face belong to this window's state for longer
-        // than the call.
-        unsafe {
-            theme::paint_label_at_pitch(
-                target,
-                placed,
-                &mut wide,
-                theme::LabelStyle {
-                    ground: brushes.panel_bg(),
-                    ink: theme::label_ink(role, palette),
-                    face: Some(face),
-                    pitch,
-                    reading: theme::Reading::Native,
-                },
-            );
-        }
-    }
-
-    // The one moment any of this becomes visible. A refused blit leaves the card showing the
-    // picture the window already had there — its previous state and never a hole; painting the
-    // body a second time into the DC of the message would be the very flicker this removes.
-    //
-    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it
-    // goes out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-
-    1
-}
-
-/// Draws one radio or one check box of the wizard — the glyph and the words beside it.
-///
-/// Since decision 132.3 (task T-71-5) a door into [`draw_glyph`], the body the feed switch of «От
-/// автора» goes through as well: this one reads «checked?» out of the wizard's draft and lays the
-/// element on the ground of the window.
-///
-/// # Safety
-///
-/// As [`draw_progress`].
-unsafe fn draw_wizard_glyph(
-    dc: HDC,
-    rect: RECT,
-    state: &WindowState,
-    kind: theme::GlyphKind,
-    control: i32,
-    disabled: bool,
-    label: &str,
-) -> isize {
-    let Some(wizard) = state.wizard.as_deref() else {
-        return 0;
-    };
-
-    let glyph = Glyph {
-        kind,
-        checked: wizard_is_checked(wizard, control),
-        disabled,
-        ground: Ground::Window,
-    };
-
-    // SAFETY: see the caller — the values of the message, handed on unchanged.
-    unsafe { draw_glyph(dc, rect, state, glyph, label) }
-}
-
-/// One glyph element of these windows — the four answers the two doors of [`draw_glyph`] differ
-/// by (decision 132.3).
-#[derive(Clone, Copy)]
-struct Glyph {
-    /// A check box or a radio button.
-    kind: theme::GlyphKind,
-    /// The answer to «checked?», read by the door out of its own record.
-    checked: bool,
-    /// `ODS_DISABLED` of the message.
-    disabled: bool,
-    /// What the element lies on.
-    ground: Ground,
-}
-
-/// What a glyph element lies on — the brush its whole rectangle is grounded with.
-#[derive(Clone, Copy)]
-enum Ground {
-    /// The window itself — the radios and the check boxes of the wizard.
-    Window,
-    /// A panel — the feed switch, on «Новости и обновления».
-    Panel,
-}
-
-/// Draws one glyph element — the glyph and the words beside it, **in one frame**.
-///
-/// ⭐ **The one body of the glyphs of these windows since decision 132.3 (task T-71-5)**: the
-/// wizard's radios and check boxes ([`draw_wizard_glyph`]) and the feed switch of «От автора»
-/// ([`draw_switch`]). Everything below the four answers of [`Glyph`] was the same table
-/// (`theme::glyph_color_roles`), the same cell (`widgets::glyph::cell`) and the same caption in
-/// both copies; what the switch's copy lacked was the buffer below, and the owner saw that as a
-/// blink.
-///
-/// ⚠ Not the body of the settings window (`settings::draw_glyph_element`): that one differs by the
-/// rule of the ground, the caption, the focus frame and the pen of the circle, and merging them
-/// would move pixels of an accepted window — decision 107.2, the documentation of
-/// `widgets::glyph`.
-///
-/// # Safety
-///
-/// As [`draw_progress`].
-unsafe fn draw_glyph(dc: HDC, rect: RECT, state: &WindowState, glyph: Glyph, label: &str) -> isize {
-    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
-        return 0;
-    };
-
-    let palette = state.palette;
-    let dpi = theme::drawing_dpi(dc);
-    let colors = theme::glyph_color_roles(glyph.kind, glyph.checked, glyph.disabled);
-
-    // The ground of the whole rectangle. It is also what grounds the buffer below: the corners of
-    // the rounded cell are smoothed into what the buffer holds under them.
-    let ground = match glyph.ground {
-        Ground::Window => brushes.window_bg(),
-        Ground::Panel => brushes.panel_bg(),
-    };
-
-    // ⚠ **Один кадр вместо череды — задача Т-33-5.** То же, что у [`draw_card`], и по той же
-    // измеренной причине: заливка, глиф и подпись писались прямо в DC сообщения, и радиокнопка
-    // **моргала** под указателем — чернила 738 → **0** → 738 в 13 кадрах из 120 и 474 → **0** →
-    // 474 в 25 из 120 (`scratchpad-Э33\моргание-до.log`). Кнопки этого окна не моргали никогда
-    // именно потому, что `settings::paint_push_button` носит эту поверхность с задачи T-15-1.
-    // ⚠ Задача T-71-5: выключатель ленты этой поверхности не носил и моргал по той же причине.
-    //
-    // SAFETY: как в [`draw_card`].
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // SAFETY: `target` is the buffer of this frame or the DC of the message, and the brush
-    // belongs to this window's state.
-    unsafe { FillRect(target, &rect, ground) };
-
-    // ⚠ Задача Т-45-2: та же клетка, что у окна настроек, и теперь одним телом
-    // (`widgets::glyph::cell`). Всё остальное здесь у двух окон различается — см. доктекст
-    // `widgets::glyph`.
-    let cell = widgets::glyph::cell(rect, dpi);
-
-    let fill = match colors.fill {
-        theme::GlyphFillRole::FieldBg => brushes.field_bg(),
-        theme::GlyphFillRole::AccentBg => brushes.accent_bg(),
-    };
-
-    let outline = match colors.frame {
-        Some(theme::GlyphFrameRole::BoxBorder) => palette.box_border,
-        // The one cell the accent fill covers whole is outlined in its own fill, so that
-        // `RoundRect` — which draws frame and fill in one figure — shows no line at all.
-        None => match colors.fill {
-            theme::GlyphFillRole::FieldBg => palette.field_bg,
-            theme::GlyphFillRole::AccentBg => palette.accent_bg,
-        },
-    };
-
-    match glyph.kind {
-        theme::GlyphKind::CheckBox => {
-            theme::paint_rounded(
-                target,
-                &cell,
-                theme::scaled(settings::GLYPH_CORNER_RADIUS, dpi),
-                outline,
-                fill,
-                dpi,
-            );
-
-            if let Some(mark) = colors.mark {
-                theme::draw_check_mark(
-                    target,
-                    &cell,
-                    glyph_ink(mark, palette),
-                    settings::GLYPH_CHECK_MARK,
-                    dpi,
-                );
-            }
-        }
-        theme::GlyphKind::RadioButton => {
-            theme::paint_ellipse(target, &cell, Some(outline), fill, dpi);
-
-            if colors.mark.is_some() {
-                let inset = theme::scaled_tenths_offset(settings::GLYPH_DOT_INSET_TENTHS, dpi);
-                let dot = RECT {
-                    left: cell.left + inset,
-                    top: cell.top + inset,
-                    right: cell.right - inset,
-                    bottom: cell.bottom - inset,
-                };
-
-                theme::paint_ellipse(target, &dot, None, brushes.accent_bg(), dpi);
-            }
-        }
-    }
-
-    let text = RECT {
-        left: cell.right + theme::scaled(settings::LIST_CHECK_TEXT_GAP, dpi),
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-    };
-
-    let mut caption: Vec<u16> = label.encode_utf16().collect();
-
-    // SAFETY: `target` and `text` are live; the face belongs to this window's state.
-    let drawn = unsafe {
-        theme::paint_label(
-            target,
-            text,
-            &mut caption,
-            theme::LabelStyle {
-                ground,
-                ink: match colors.text {
-                    theme::GlyphTextRole::Text => palette.text,
-                    theme::GlyphTextRole::TextMuted => palette.text_muted,
-                },
-                face: Some(faces.text),
-                pitch: None,
-                reading: theme::Reading::Native,
-            },
-        )
-    };
-
-    // The one moment any of this becomes visible — see the head of this body.
-    //
-    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it
-    // goes out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-
-    drawn
-}
-
-/// **What a press does in the wizard** — FR-104, and the answer is whether it was handled here.
-///
-/// # ⛔ Задача Т-46-2, решение 109.1: КОД УВЕДОМЛЕНИЯ ЧИТАЕТСЯ, и это ремонт находки пользователя
-///
-/// До Э46 эта функция брала из `WM_COMMAND` только идентификатор, а код уведомления не читала
-/// вовсе. Все глифы шаблона `IDD_WIZARD` — `BS_OWNERDRAW | BS_NOTIFY`, поэтому на один
-/// настоящий щелчок мышью приходит **очередь из трёх уведомлений**, и замер Т-46-1 её напечатал
-/// (`scratchpad-Э46\красное-галки-e45.log`): `1337/BN_KILLFOCUS`, `1338/BN_SETFOCUS`,
-/// `1338/BN_CLICKED`. Отвечая на каждое, окно переключало соседку и переключало свою **дважды**
-/// — 36 несработавших щелчков и 35 сдвинутых соседок из 44. Слова пользователя: «то не ставятся
-/// с первого раза, то не снимаются с первого раза».
-///
-/// Теперь решает [`widgets::glyph::answer`] — **то же тело, что у окна настроек** (эталон
-/// механики, решение 109.1). Галка отвечает на щелчок, радио — ещё на приход фокуса от стрелки,
-/// карточка и кнопка — только на щелчок, комбобокс — только на `CBN_SELCHANGE`.
-fn wizard_command(hwnd: HWND, control: i32, notification: u16) -> bool {
-    use crate::widgets::glyph::{Answer, Kind, answer};
-    use report::{Field, Repeat, Trouble};
-    use windows::Win32::UI::WindowsAndMessaging::{CB_GETCURSEL, CBN_SELCHANGE, EN_CHANGE};
-
-    // Кнопки шаблона `BS_NOTIFY` не несут и шлют один `BN_CLICKED`, но правило одно на все
-    // элементы окна и здесь: то, что за кнопкой написано, делает щелчок и ничего кроме.
-    let pressed = answer(Kind::Button, notification) == Answer::Act;
-
-    // The three that do not touch the draft.
-    match control {
-        IDC_WZ_CANCEL if pressed => {
-            close_window(hwnd);
-            return true;
-        }
-        IDC_WZ_NEXT if pressed => {
-            wizard_forward(hwnd);
-            return true;
-        }
-        IDC_WZ_BACK if pressed => {
-            // ⭐ **Черновик собирается и на шаге НАЗАД — задача Т-46-3, решение 109.3.** Поля
-            // есть правда, пока шаг на экране; уходя с него в любую сторону, эту правду надо
-            // забрать, иначе набранное потеряется. Вперёд это делал `wizard_forward` с самого
-            // начала, назад — не делал никто.
-            wizard_harvest(hwnd);
-
-            // SAFETY: the state pointer is live for the length of the window.
-            unsafe {
-                with_state(hwnd, |state| {
-                    if let Some(wizard) = state.wizard.as_deref_mut() {
-                        wizard.step = wizard.step.saturating_sub(1);
-                        wizard.status.clear();
-                        // Задача T-107-3: a step back from «Не удалось отправить» is a step back
-                        // into the appeal; coming forward again, it is ready to be sent. The
-                        // nonce stays — it is still the same appeal (199.7 (б)).
-                        wizard.post = Post::Ready;
-                    }
-                })
-            };
-
-            wizard_refresh(hwnd);
-            return true;
-        }
-        IDC_WZ_CAPTURE => {
-            wizard_start_capture(hwnd);
-            return true;
-        }
-        // «Скопировать текст» — the letter the site did not take, задача T-107-3 (решение 199.3):
-        // the clipboard and nothing else, for every appeal. Until 1.2.0 the same button of an
-        // idea opened the group or GitHub Issues as well; решение 199.3 took that way out.
-        IDC_WZ_COPY => {
-            wizard_copy_text(hwnd, links::MAIL_ADDRESS);
-            return true;
-        }
-        // The contact, as it is typed — задача T-107-3: its line in the text follows it at once,
-        // so what the person sees in the field above is what goes (решение 199.1).
-        IDC_WZ_CONTACT if u32::from(notification) == EN_CHANGE => {
-            wizard_contact_changed(hwnd);
-            return true;
-        }
-        IDC_WZ_COPY_ADDRESS => {
-            wizard_copy_address(hwnd);
-            return true;
-        }
-        IDC_WZ_SAVE => {
-            wizard_save(hwnd);
-            return true;
-        }
-        // «Открыть канал» on the thanks — задача Т-33-3. Dead while the address is a
-        // placeholder, and the button is disabled to say so (П7).
-        IDC_WZ_CHANNEL => {
-            open_link(links::CHANNEL_URL);
-            return true;
-        }
-        _ => {}
-    }
-
-    // Выбор внутри шага. **Что именно считать нажатием, решает слой** (`widgets::glyph::answer`,
-    // решение 109.1) — и по роду элемента: карточка отвечает щелчку, радио ещё и приходу фокуса
-    // от стрелки, галка щелчку, список — только `CBN_SELCHANGE`.
-    let chosen = settings::send_to(hwnd, IDC_WZ_LAYOUT, CB_GETCURSEL, 0, 0);
-
-    let card_pressed = pressed;
-    let radio_chosen = answer(Kind::Radio, notification) == Answer::Choose;
-    let check_toggled = answer(Kind::Check, notification) == Answer::Toggle;
-    let list_changed = u32::from(notification) == CBN_SELCHANGE;
-
-    // SAFETY: as above.
-    let touched = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref_mut()?;
-
-            let touched = match control {
-                c if (IDC_WZ_CARD_1..=IDC_WZ_CARD_1 + 2).contains(&c) && card_pressed => {
-                    // Прежняя карточка нужна, чтобы перерисовать ровно две: ту, что теряет
-                    // выбор, и ту, что его получает.
-                    let was = IDC_WZ_CARD_1
-                        + match wizard.draft.trouble {
-                            Trouble::WrongResult => 0,
-                            Trouble::NothingHappened => 1,
-                            Trouble::Idea => 2,
-                        };
-
-                    wizard.draft.trouble = match control - IDC_WZ_CARD_1 {
-                        0 => Trouble::WrongResult,
-                        1 => Trouble::NothingHappened,
-                        _ => Trouble::Idea,
-                    };
-
-                    Touched::Cards(was, control)
-                }
-
-                c if (IDC_WZ_FIELD_1..=IDC_WZ_FIELD_1 + 2).contains(&c) && radio_chosen => {
-                    wizard.draft.field = match control - IDC_WZ_FIELD_1 {
-                        0 => Field::Normal,
-                        1 => Field::Password,
-                        _ => Field::Unknown,
-                    };
-
-                    Touched::Range(IDC_WZ_FIELD_1, IDC_WZ_FIELD_1 + 2)
-                }
-
-                c if (IDC_WZ_REPEAT_1..=IDC_WZ_REPEAT_1 + 2).contains(&c) && radio_chosen => {
-                    wizard.draft.repeat = match control - IDC_WZ_REPEAT_1 {
-                        0 => Repeat::Always,
-                        1 => Repeat::Sometimes,
-                        _ => Repeat::Once,
-                    };
-
-                    Touched::Range(IDC_WZ_REPEAT_1, IDC_WZ_REPEAT_1 + 2)
-                }
-
-                c if (IDC_WZ_ATTACH_1..=IDC_WZ_ATTACH_1 + 3).contains(&c) && check_toggled => {
-                    let attach = &mut wizard.draft.attach;
-
-                    match control - IDC_WZ_ATTACH_1 {
-                        0 => attach.machine = !attach.machine,
-                        1 => attach.layouts = !attach.layouts,
-                        2 => attach.settings = !attach.settings,
-                        _ => attach.journal = !attach.journal,
-                    }
-
-                    Touched::Glyph(control)
-                }
-
-                IDC_WZ_LAYOUT if list_changed => {
-                    let index = usize::try_from(chosen).ok()?;
-                    wizard.draft.layout = wizard.layouts.get(index)?.clone();
-
-                    // Комбобокс перерисовывает закрытую часть сам, выбирая строку.
-                    Touched::Nothing
-                }
-
-                _ => return None,
-            };
-
-            Some(touched)
-        })
-    }
-    .flatten();
-
-    let Some(touched) = touched else {
-        return false;
-    };
-
-    // ⭐ **ЗДЕСЬ И БЫЛО МОРГАНИЕ — задача Т-45-3, решение 107.5.** До Э45 эта строка звала
-    // `wizard_refresh`, то есть на КАЖДЫЙ щелчок по карточке, радио или галке гасила окно
-    // `WM_SETREDRAW`, переставляла все контролы шага и стирала окно целиком
-    // `RedrawWindow(RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW)`. Комментарий рядом честно
-    // говорил, почему так: «Rebuilding always is the cheaper rule to hold».
-    //
-    // Цена правила измерена на живом продукте 0.44.0 (`красное-моргание-e44.log`): при щелчках
-    // по карточкам **5 кадров из 1087** не равны ни одному устоявшемуся виду, два из них
-    // расходятся больше чем на процент окна, худший — на **27 700 пикселей**: на сохранённом
-    // кадре первой карточки в окне НЕТ ВОВСЕ.
-    //
-    // ⭐ **Задача Т-46-3, решение 109.2:** и `wizard_refresh_controls`, который перерисовывал
-    // ВЕСЬ шаг и ещё семь контролов на каждый щелчок, тоже ушёл. Перерисовывается только
-    // затронутое, и **по роду элемента**, как в окне настроек.
-    //
-    // Смена шага по-прежнему идёт полной дорогой: там контролы вправду переезжают.
-    wizard_after_choice(hwnd, touched);
-    true
-}
-
-/// Что именно затронул выбор внутри шага — задача Т-46-3, решение 109.2.
-///
-/// Перерисовка идёт **по роду элемента, как в окне настроек**: глиф — дорогой `set_check`
-/// (со стиранием), карточка — дорогой `invalidate_hot` (без стирания). Список перерисовывает
-/// себя сам.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Touched {
-    /// Одна галка.
-    Glyph(i32),
-    /// Ряд радио: диапазон идентификаторов, тот же, что ходит `check_radio`.
-    Range(i32, i32),
-    /// Две карточки: прежняя и новая.
-    Cards(i32, i32),
-    /// Ничего своего.
-    Nothing,
-}
-
-/// **Состояние элемента внутри шага сменилось** — перерисовать затронутое и ничего больше.
-///
-/// Решение 109.2, задача Т-46-3. Пришло на смену `wizard_refresh_controls`, который звал
-/// [`fill_wizard`] (а тот **переписывал поля устаревшим черновиком** — находка пользователя) и
-/// инвалидировал все контролы шага плюс ещё семь на каждый щелчок.
-///
-/// # Что делается
-///
-/// 1. **Затронутый элемент** — по роду: галка и ряд радио через `widgets::repaint::control` и
-///    `range` (со стиранием, ровно как `set_check`/`check_radio` окна настроек); две карточки
-///    через `control_no_erase` (без стирания, ровно как `invalidate_hot`).
-/// 2. **Подписи, чей текст вправду изменился.** Выбор карточки «идея» укорачивает дорогу с пяти
-///    шагов до трёх, и «Шаг N из M», заголовок, пояснение и подпись кнопки обязаны это
-///    показать. Пишутся только те, у кого текст стал другим: `SetDlgItemTextW` сам просит
-///    перерисовку, и запись того же слова была бы лишним кадром.
-/// 3. **Полоса хода** — только если строка шага изменилась: полоса рисует длину дороги, и
-///    другой у неё причины меняться нет.
-///
-/// # Чего НЕ делается
-///
-/// [`fill_wizard`] — ни целиком, ни частью: **поля есть правда, пока шаг на экране**
-/// (решение 109.3), и смена состояния их не касается. [`layout_wizard`] — внутри одного шага ни
-/// один контрол не переезжает.
-fn wizard_after_choice(hwnd: HWND, touched: Touched) {
-    match touched {
-        Touched::Glyph(control) => widgets::repaint::control(hwnd, control),
-        Touched::Range(first, last) => widgets::repaint::range(hwnd, first, last),
-        Touched::Cards(was, now) => {
-            widgets::repaint::control_no_erase(hwnd, was);
-
-            if now != was {
-                widgets::repaint::control_no_erase(hwnd, now);
-            }
-        }
-        Touched::Nothing => {}
-    }
-
-    // Подписи, зависящие от черновика. `road()` и `is_last()` читаются здесь, чтобы дорога
-    // «идеи» короче пяти шагов стала видна сразу.
-    //
-    // SAFETY: the state pointer is live for the length of the window.
-    let words = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref()?;
-            Some(wizard_choice_words(wizard))
-        })
-    }
-    .flatten();
-
-    let Some(words) = words else {
-        return;
-    };
-
-    let mut step_changed = false;
-
-    for (control, text) in words {
-        let changed = set_text_if_changed(hwnd, control, &text);
-
-        if control == IDC_WZ_STEP {
-            step_changed = changed;
-        }
-    }
-
-    if step_changed {
-        widgets::repaint::control_no_erase(hwnd, IDC_WZ_PROGRESS);
-    }
-}
-
-/// Четыре подписи, которые зависят от черновика и потому могут смениться внутри шага.
-///
-/// Слова берутся теми же строками, что и в [`fill_wizard`], — второй таблицы не заводится:
-/// одна и та же строка ресурса читается там и здесь.
-fn wizard_choice_words(wizard: &Wizard) -> [(i32, String); 4] {
-    use crate::settings::{IDS_WIZARD_DONE, IDS_WIZARD_STEP, format_text, text};
-
-    let step = wizard.current();
-    let road = wizard.road();
-    // Задача T-107-3: the same table `fill_wizard` asks — one, and not a copy of it.
-    let words = step_words(step, wizard.post);
-
-    [
-        (
-            IDC_WZ_STEP,
-            if step == Step::Done {
-                text(IDS_WIZARD_DONE)
-            } else {
-                format_text(
-                    IDS_WIZARD_STEP,
-                    &[&(wizard.step + 1).to_string(), &road.len().to_string()],
-                )
-            },
-        ),
-        (IDC_WZ_TITLE, text(words.title)),
-        (IDC_WZ_NOTE, words.note.map(text).unwrap_or_default()),
-        (IDC_WZ_NEXT, text(words.next)),
-    ]
-}
-
-/// Пишет подпись, **только если она вправду другая**, и отвечает, писала ли.
-///
-/// Решение 109.2: `SetDlgItemTextW` сам просит перерисовку контрола, поэтому запись того же
-/// слова — это лишний кадр и ничего больше.
-fn set_text_if_changed(hwnd: HWND, control: i32, text: &str) -> bool {
-    if settings::get_text(hwnd, control) == text {
-        return false;
-    }
-
-    settings::set_text(hwnd, control, text);
-    true
-}
-
-/// Reads what the person typed out of the fields of this step into the draft.
-///
-/// Called before every move: the fields are the truth while a step is on the screen, and the
-/// draft is the truth between steps.
-fn wizard_harvest(hwnd: HWND) {
-    let program = settings::get_text(hwnd, IDC_WZ_PROGRAM);
-    let expected = settings::get_text(hwnd, IDC_WZ_EXPECTED);
-    let got = settings::get_text(hwnd, IDC_WZ_GOT);
-    let idea = settings::get_text(hwnd, IDC_WZ_IDEA);
-    let helps = settings::get_text(hwnd, IDC_WZ_HELPS);
-    let preview = settings::get_text(hwnd, IDC_WZ_PREVIEW);
-    let contact = settings::get_text(hwnd, IDC_WZ_CONTACT);
-
-    // SAFETY: the state pointer is live for the length of the window.
-    unsafe {
-        with_state(hwnd, |state| {
-            let Some(wizard) = state.wizard.as_deref_mut() else {
-                return;
-            };
-
-            wizard.draft.program = program;
-            wizard.draft.expected = expected;
-            wizard.draft.got = got;
-            wizard.draft.idea = idea;
-            wizard.draft.helps = helps;
-            // The contact is the field's from the moment the last step is first on the screen —
-            // before that the field is empty and holds nothing to take (задача T-107-3).
-            if wizard.current() == Step::Preview {
-                wizard.contact = contact;
-            }
-
-            // The appeal is only taken back from the field once it has one — before the last
-            // step the control is empty and would erase what `build` is about to write.
-            if !preview.is_empty() {
-                wizard.text = preview;
-            }
-        })
-    };
-}
-
 // ⚠ **`wizard_refresh_controls` убран — задача Т-46-3, решение 109.2.** Он звал `fill_wizard`
 // на КАЖДЫЙ щелчок, и тот переписывал поля устаревшим черновиком (находка пользователя: «текст
 // в полях сбрасывается при нажатии любого переключателя»), а затем инвалидировал все контролы
 // шага и ещё семь. Дорога щелчка теперь — `wizard_after_choice` с перерисовкой затронутого по
 // роду элемента; отсчёт, состояние и захват — три подписи ниже.
-
-/// Подпись кнопки «Взять из активного окна» — она одна и меняется отсчётом, задача Т-46-3.
-///
-/// ⛔ **Пришло на смену `wizard_refresh_controls`, который звал [`fill_wizard`]** — а тот
-/// переписывал ПОЛЯ устаревшим черновиком (решение 109.3, находка пользователя). Отсчёт меняет
-/// одну надпись, и трогать он обязан одну надпись.
-fn wizard_show_capture(hwnd: HWND) {
-    use crate::settings::{IDS_WIZARD_CAPTURE, IDS_WIZARD_CAPTURE_COUNT, format_text, text};
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let caption = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref()?;
-
-            Some(if wizard.countdown > 0 {
-                format_text(IDS_WIZARD_CAPTURE_COUNT, &[&wizard.countdown.to_string()])
-            } else {
-                text(IDS_WIZARD_CAPTURE)
-            })
-        })
-    }
-    .flatten();
-
-    if let Some(caption) = caption {
-        set_text_if_changed(hwnd, IDC_WZ_CAPTURE, &caption);
-    }
-}
-
-/// Строка состояния под кнопками «Скопировать» и «Сохранить» — одна подпись, задача Т-46-3.
-fn wizard_show_status(hwnd: HWND) {
-    // SAFETY: the state pointer is live for the length of the window.
-    let said = unsafe {
-        with_state(hwnd, |state| {
-            state.wizard.as_deref().map(|w| w.status.clone())
-        })
-    }
-    .flatten();
-
-    if let Some(said) = said {
-        set_text_if_changed(hwnd, IDC_WZ_STATUS, &said);
-    }
-}
-
-/// Имя пойманной программы — в поле «Программа:», задача Т-46-3.
-///
-/// ⚠ **Единственное место, где программа пишет в поле, пока шаг на экране,** и это не
-/// нарушение решения 109.3, а его смысл: захват для того и нажат, чтобы поле заполнилось.
-/// Пишется, только если имя вправду другое, — иначе каретка человека уехала бы ни за чем.
-fn wizard_show_program(hwnd: HWND) {
-    // SAFETY: the state pointer is live for the length of the window.
-    let name = unsafe {
-        with_state(hwnd, |state| {
-            state.wizard.as_deref().map(|w| w.draft.program.clone())
-        })
-    }
-    .flatten();
-
-    if let Some(name) = name {
-        set_text_if_changed(hwnd, IDC_WZ_PROGRAM, &name);
-    }
-}
-
-/// Fills and lays out the wizard again, and repaints it.
-///
-/// # ⛔ Один кадр вместо череды — задача Т-33-8, находка глазом пользователя
-///
-/// Переключение шага двигает, показывает и прячет **несколько десятков** контролов, и каждый
-/// `SetWindowPos`/`ShowWindow` сам просит перерисовать то, что из-под него открылось. Пока это
-/// шло с включённой перерисовкой, на экран попадали кадры, которые не были ни прежним шагом,
-/// ни новым: замерено — **19 кадров из 100**, худший расходился с обеими картинками на
-/// 73 230 пикселей из 251 488 (`scratchpad-Э33\моргание-шагов-до.log`). Это и есть то
-/// моргание, которое видно глазом.
-///
-/// `WM_SETREDRAW` — документированный способ сказать окну «пока не рисуй»: вся перестановка
-/// проходит вслепую, и один `RedrawWindow` в конце показывает готовый шаг целиком.
-/// `RDW_ALLCHILDREN` обязателен — без него перерисуется фон, а дети останутся прежними.
-///
-/// # ⛔ Почему здесь `SendMessageTimeoutW`, а не `SendMessage` — задача Т-33а-0
-///
-/// Первая редакция этой функции слала `WM_SETREDRAW` голым `SendMessageW`, и сторож FR-72
-/// (`tests\guard.rs`) от этого падал: запрет голого `SendMessage` в этой программе стоит **на
-/// всей** `src\`, а не на одном модуле `guard`, — ровно чтобы будущая правка не могла завести
-/// его тихо. Красный уехал в поставку e43 вместе с правкой. Окно здесь своё и поток свой,
-/// повиснуть не на чем, но правило от этого не перестаёт быть правилом: сторож, который падает,
-/// не сторожит уже ничего.
-fn wizard_refresh(hwnd: HWND) {
-    use windows::Win32::Graphics::Gdi::{
-        RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETREDRAW,
-    };
-
-    /// Сколько ждать ответа на `WM_SETREDRAW` — величина номинальная и никогда не тратится:
-    /// адресат этих двух сообщений живёт в **этом же** потоке, а такому адресату система зовёт
-    /// оконную процедуру прямо внутри вызова, не заводя ожидания вовсе. Число существует затем,
-    /// чтобы в программе не осталось ни одного вызова без верхней границы (FR-72).
-    const REDRAW_TIMEOUT_MS: u32 = 50;
-
-    // SAFETY: `hwnd` is the live dialog of this very thread; the message carries two numbers and
-    // no pointer, and the out-parameter is `None`, so nothing of ours is dereferenced. NFR-13: a
-    // refused switch leaves the window drawing as it did, which is the state before the call.
-    let _ = unsafe {
-        SendMessageTimeoutW(
-            hwnd,
-            WM_SETREDRAW,
-            WPARAM(0),
-            LPARAM(0),
-            SMTO_ABORTIFHUNG,
-            REDRAW_TIMEOUT_MS,
-            None,
-        )
-    };
-
-    // ⚠ `WM_SETREDRAW` у родителя гасит только его собственное рисование: у каждого ребёнка
-    // свой флаг, и `SetWindowPos`/`ShowWindow` по ним перерисовываются сразу. Флаг ниже — вторая
-    // половина тишины, без неё моргание оставалось (см. [`QUIET_LAYOUT`]).
-    QUIET_LAYOUT.with(|quiet| quiet.set(true));
-
-    // SAFETY: the state pointer is live for the length of the window.
-    unsafe {
-        with_state(hwnd, |state| {
-            fill_wizard(hwnd, state);
-            layout_wizard(hwnd, state);
-        })
-    };
-
-    QUIET_LAYOUT.with(|quiet| quiet.set(false));
-
-    // SAFETY: as above.
-    let _ = unsafe {
-        SendMessageTimeoutW(
-            hwnd,
-            WM_SETREDRAW,
-            WPARAM(1),
-            LPARAM(0),
-            SMTO_ABORTIFHUNG,
-            REDRAW_TIMEOUT_MS,
-            None,
-        )
-    };
-
-    // NFR-13: a refused redraw leaves the window to the next `WM_PAINT`, which arrives anyway.
-    //
-    // SAFETY: `hwnd` is the live dialog; both region arguments are `None`, which is the
-    // documented «the whole window», and the call keeps no pointer.
-    let _ = unsafe {
-        RedrawWindow(
-            Some(hwnd),
-            None,
-            None,
-            // `RDW_UPDATENOW` — чтобы всё нарисовалось ЗДЕСЬ, одним заходом, а не отдельными
-            // `WM_PAINT` фона и каждого ребёнка: между такими проходами и виден чужой кадр.
-            RDW_ERASE | RDW_FRAME | RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW,
-        )
-    };
-}
-
-/// «Далее»; «Отправить» and «Повторить» on the last step of the road; «Закрыть» on the thanks —
-/// FR-104.
-///
-/// ⚠ **The thanks is a step and not a second window** (задача Т-33-3, решение 103.3), and since
-/// задача T-107-3 the step it comes to is decided by the **site**: the last step's button sends
-/// the appeal ([`wizard_send`]), and the thanks is shown when the site answered 201
-/// ([`wizard_answer`]) — never on the press itself.
-fn wizard_forward(hwnd: HWND) {
-    wizard_harvest(hwnd);
-
-    /// What the press does, decided under the borrow and done after it.
-    enum Next {
-        Close,
-        Send,
-        Refresh,
-    }
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let next = unsafe {
-        with_state(hwnd, |state| {
-            let Some(wizard) = state.wizard.as_deref_mut() else {
-                return Next::Refresh;
-            };
-
-            // The thanks is the end of the road: its one button closes the window.
-            if wizard.done {
-                return Next::Close;
-            }
-
-            if wizard.is_last() {
-                return Next::Send;
-            }
-
-            wizard.step += 1;
-            wizard.status.clear();
-
-            // The text of the appeal is built on the way **into** the last step, out of what
-            // the person has filled in by then — and from that moment the field owns it. The
-            // contact a person typed before going back is written into it again (T-107-3).
-            if wizard.current() == Step::Preview {
-                let built = report::build(&wizard.draft, &wizard.facts);
-
-                wizard.text = report::with_contact(&built, "", &wizard.contact);
-            }
-
-            Next::Refresh
-        })
-    };
-
-    match next {
-        Some(Next::Close) => close_window(hwnd),
-        Some(Next::Send) => wizard_send(hwnd),
-        Some(Next::Refresh) | None => wizard_refresh(hwnd),
-    }
-}
-
-/// **The contact changed** — its line in the text of the appeal follows it, задача T-107-3
-/// (решение 199.10: «Для связи: …», only when there is a contact).
-///
-/// The line written for the contact before this keystroke is taken off the end of the text and
-/// the line of the new one put there ([`report::with_contact`]); whatever else the person wrote
-/// in the text stays as they wrote it. Written into the field only when it changed, as every
-/// write of this window is.
-fn wizard_contact_changed(hwnd: HWND) {
-    let typed = settings::get_text(hwnd, IDC_WZ_CONTACT);
-    let preview = settings::get_text(hwnd, IDC_WZ_PREVIEW);
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let text = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref_mut()?;
-
-            if wizard.current() != Step::Preview || preview.is_empty() {
-                return None;
-            }
-
-            let text = report::with_contact(&preview, &wizard.contact, &typed);
-
-            wizard.contact = typed;
-            wizard.text.clone_from(&text);
-
-            Some(text)
-        })
-    }
-    .flatten();
-
-    if let Some(text) = text {
-        set_text_if_changed(hwnd, IDC_WZ_PREVIEW, &text);
-    }
-}
-
-/// **«Отправить» and «Повторить»** — the appeal goes to the site, задача T-107-3 (решения 199.1,
-/// 199.3, 199.7).
-///
-/// What goes is the text the field holds — the very text on the screen — with the language of
-/// the window, the kind of the first step, the version of this build, the contact and the nonce
-/// of this appeal, drawn at the first press and the same at every «Повторить». The window goes
-/// grey under «Отправляется…» ([`Post::Sending`]) and the request runs on a thread of its own
-/// ([`start_appeal`]); its answer comes back as [`WM_APP_APPEAL`].
-///
-/// Nothing is sent for a text that is empty or only spaces (the site would answer 400, 199.9),
-/// and nothing a second time while one request is on its way. A nonce the system would not draw,
-/// or a thread that would not start, is a «Не удалось отправить» at once — the letter is there.
-fn wizard_send(hwnd: HWND) {
-    /// The ticket of the next request — so an answer is taken only by the press it answers.
-    static TICKETS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let body = unsafe {
-        with_state(hwnd, |state| {
-            let language = state.language;
-            let wizard = state.wizard.as_deref_mut()?;
-
-            if matches!(wizard.post, Post::Sending(_)) || wizard.text.trim().is_empty() {
-                return None;
-            }
-
-            let ticket = TICKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            let Some(nonce) = appeal::keep_or_draw(&mut wizard.nonce, appeal::nonce) else {
-                wizard.post = Post::Failed;
-                return Some(None);
-            };
-
-            let body = appeal::body(&appeal::Appeal {
-                kind: appeal::kind_of(wizard.draft.trouble),
-                lang: language.tag(),
-                version: env!("CARGO_PKG_VERSION"),
-                text: &wizard.text,
-                contact: &wizard.contact,
-                nonce,
-            });
-
-            wizard.post = Post::Sending(ticket);
-            wizard.status.clear();
-
-            Some(Some((ticket, body)))
-        })
-    }
-    .flatten();
-
-    let pressed = body.is_some();
-
-    if let Some(Some((ticket, body))) = body
-        && !start_appeal(hwnd, ticket, body)
-    {
-        // SAFETY: as above.
-        unsafe {
-            with_state(hwnd, |state| {
-                if let Some(wizard) = state.wizard.as_deref_mut() {
-                    wizard.post = Post::Failed;
-                }
-            })
-        };
-    }
-
-    if pressed {
-        wizard_refresh(hwnd);
-    }
-}
 
 /// The nudge the thread of an appeal posts to its wizard when the site has answered — задача
 /// T-107-3.
@@ -10428,11 +5791,10 @@ static APPEAL_ANSWERS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::ne
 
 /// **Starts the request of one appeal** on a thread that lives exactly that request — the shape
 /// of [`start_feed_read`]: no user interface, no input, no hook. `false` when the thread would not
-/// start, and then nothing was sent.
-fn start_appeal(hwnd: HWND, ticket: u32, body: String) -> bool {
-    // `HWND` is not `Send`; what crosses is its bits, which `PostMessageW` takes from any thread.
-    let target = hwnd.0 as isize;
-
+/// start, and then nothing was sent. The answer waits in `APPEAL_ANSWERS` for the window of the
+/// wizard to take it on its timer ([`Wizard::take_answer`]): a window of the shell has no message
+/// of its own to be posted (T-120-19).
+fn start_appeal(ticket: u32, body: String) -> bool {
     let started = std::thread::Builder::new()
         .name("langsw-appeal".to_owned())
         .spawn(move || {
@@ -10441,17 +5803,6 @@ fn start_appeal(hwnd: HWND, ticket: u32, body: String) -> bool {
             if let Ok(mut answers) = APPEAL_ANSWERS.lock() {
                 answers.push((ticket, sent));
             }
-
-            // SAFETY: `target` is the bits of the wizard that asked; if it was closed meanwhile,
-            // the post fails and is dropped. The message carries two zeros and no pointer.
-            let _ = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                    Some(HWND(target as *mut std::ffi::c_void)),
-                    WM_APP_APPEAL,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-            };
         });
 
     if started.is_err() {
@@ -10460,121 +5811,6 @@ fn start_appeal(hwnd: HWND, ticket: u32, body: String) -> bool {
     }
 
     true
-}
-
-/// **Takes the answer of the site** — the far end of [`WM_APP_APPEAL`], on the UI thread.
-///
-/// The answer with the ticket this wizard is waiting for: 201 — the thanks, «Обращение
-/// отправлено» ([`Step::Done`]); anything else — «Не удалось отправить», the text where it was,
-/// «Повторить» and the letter. Answers of other tickets belong to windows that are gone, and are
-/// dropped with it.
-fn wizard_answer(hwnd: HWND) {
-    let answers = APPEAL_ANSWERS
-        .lock()
-        .map(|mut answers| std::mem::take(&mut *answers))
-        .unwrap_or_default();
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let changed = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref_mut()?;
-
-            let Post::Sending(waiting) = wizard.post else {
-                return None;
-            };
-
-            let (_, sent) = answers.iter().find(|(ticket, _)| *ticket == waiting)?;
-
-            if *sent {
-                wizard.post = Post::Ready;
-                wizard.done = true;
-            } else {
-                wizard.post = Post::Failed;
-            }
-
-            wizard.status.clear();
-
-            Some(())
-        })
-    }
-    .flatten();
-
-    if changed.is_some() {
-        wizard_refresh(hwnd);
-    }
-}
-
-/// «Взять из активного окна» — starts the five-second count-down of FR-104.
-fn wizard_start_capture(hwnd: HWND) {
-    // SAFETY: the state pointer is live for the length of the window.
-    let started = unsafe {
-        with_state(hwnd, |state| {
-            let Some(wizard) = state.wizard.as_deref_mut() else {
-                return false;
-            };
-
-            if wizard.countdown > 0 {
-                return false;
-            }
-
-            wizard.countdown = crate::guard::CAPTURE_SECONDS;
-            true
-        })
-    };
-
-    if started != Some(true) {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; `None` for the callback asks for `WM_TIMER` at this
-    // window, which is what the procedure answers.
-    if unsafe { SetTimer(Some(hwnd), CAPTURE_TIMER, 1000, None) } == 0 {
-        crate::app::report_non_critical("SetTimer", &WinError::from_thread());
-    }
-
-    // Задачи Т-45-3 и Т-46-3: меняется одна подпись — перерисовывается она одна.
-    wizard_show_capture(hwnd);
-}
-
-/// One second of the count-down; at zero it looks at the foreground window and stops.
-fn wizard_tick(hwnd: HWND) {
-    // SAFETY: the state pointer is live for the length of the window.
-    let now = unsafe {
-        with_state(hwnd, |state| {
-            let wizard = state.wizard.as_deref_mut()?;
-
-            wizard.countdown = wizard.countdown.saturating_sub(1);
-            Some(wizard.countdown)
-        })
-    }
-    .flatten();
-
-    if now != Some(0) {
-        // ⭐ Тик отсчёта каждую секунду перерисовывал ОКНО ЦЕЛИКОМ. Задача Т-45-3: только
-        // затронутое — на экране меняется одна цифра (Т-46-3: одна подпись).
-        wizard_show_capture(hwnd);
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; killing a timer that is not set is harmless.
-    let _ = unsafe { KillTimer(Some(hwnd), CAPTURE_TIMER) };
-
-    let caught = capture_foreground(hwnd);
-
-    // SAFETY: as above.
-    unsafe {
-        with_state(hwnd, |state| {
-            if let Some(wizard) = state.wizard.as_deref_mut()
-                && !caught.is_empty()
-            {
-                wizard.draft.program = caught;
-            }
-        })
-    };
-
-    // Задачи Т-45-3 и Т-46-3: шаг тот же, меняются имя в поле и подпись кнопки — точечно.
-    wizard_show_program(hwnd);
-    wizard_show_capture(hwnd);
 }
 
 /// **What the capture takes** — «имя.exe · КлассОкна», and nothing else.
@@ -10613,102 +5849,6 @@ fn capture_foreground(mine: HWND) -> String {
 // on GitHub (решение 181.1). Решение 199.3 took the group and the issues out of the wizard: an
 // appeal goes to the site by «Отправить», and the way back is the letter below.
 
-/// «Скопировать текст» — the letter of an appeal the site did not take, задача T-107-3 (решение
-/// 199.3; until 1.2.0 — the letter of a trouble, задача T-103-7, решение 181.6).
-///
-/// **The clipboard and nothing else**: no page is opened, no mail program is started, nothing is
-/// sent. The line under the buttons says where to paste it.
-fn wizard_copy_text(hwnd: HWND, address: &str) {
-    use crate::settings::{IDS_WIZARD_FAILED, IDS_WIZARD_TEXT_COPIED, format_text, text};
-
-    wizard_harvest(hwnd);
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let appeal = unsafe {
-        with_state(hwnd, |state| {
-            state.wizard.as_deref().map(|wizard| wizard.text.clone())
-        })
-    }
-    .flatten()
-    .unwrap_or_default();
-
-    if appeal.is_empty() {
-        return;
-    }
-
-    let said = if crate::selection::write_unicode_text(hwnd, &appeal).is_ok() {
-        format_text(IDS_WIZARD_TEXT_COPIED, &[address])
-    } else {
-        text(IDS_WIZARD_FAILED)
-    };
-
-    wizard_say(hwnd, said);
-}
-
-/// «Скопировать адрес» — the author's email to the clipboard, задача T-103-7 (решение 181.6).
-///
-/// The address stands on the screen as well; the button is there because an owner-drawn line
-/// cannot be selected, and a typed address is an address with a typo in it.
-fn wizard_copy_address(hwnd: HWND) {
-    use crate::settings::{IDS_WIZARD_ADDRESS_COPIED, IDS_WIZARD_FAILED, format_text, text};
-
-    let said = if crate::selection::write_unicode_text(hwnd, links::MAIL_ADDRESS).is_ok() {
-        format_text(IDS_WIZARD_ADDRESS_COPIED, &[links::MAIL_ADDRESS])
-    } else {
-        text(IDS_WIZARD_FAILED)
-    };
-
-    wizard_say(hwnd, said);
-}
-
-/// «Сохранить в папку журнала» — FR-104: a file beside the journal, and the folder opened after
-/// it so that the person can see what was written.
-fn wizard_save(hwnd: HWND) {
-    use crate::settings::{IDS_WIZARD_FAILED, IDS_WIZARD_SAVED, format_text, text};
-
-    wizard_harvest(hwnd);
-
-    // SAFETY: the state pointer is live for the length of the window.
-    let appeal = unsafe {
-        with_state(hwnd, |state| {
-            state.wizard.as_deref().map(|wizard| wizard.text.clone())
-        })
-    }
-    .flatten()
-    .unwrap_or_default();
-
-    if appeal.is_empty() {
-        return;
-    }
-
-    let Some(folder) = crate::diag::log_dir() else {
-        wizard_say(hwnd, text(IDS_WIZARD_FAILED));
-        return;
-    };
-
-    let today = today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day"));
-    let path = folder.join(report::file_name(today));
-    crate::sandbox::guard_path(&path);
-
-    if std::fs::create_dir_all(&folder).is_err() || std::fs::write(&path, &appeal).is_err() {
-        wizard_say(hwnd, text(IDS_WIZARD_FAILED));
-        return;
-    }
-
-    // ⚠ The **name** of the file and not its path: the live acceptance showed the whole path
-    // running off the one line the status is (`живое-В\мастер-5-сохранено.png` — «Сохранено:»
-    // and nothing after it). The folder opens a moment later, so the name is what a person
-    // needs to find it there.
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-
-    wizard_say(hwnd, format_text(IDS_WIZARD_SAVED, &[&name]));
-
-    open_folder(&folder);
-}
-
 /// Opens a folder in the shell — the road the journal folder of the settings window takes.
 fn open_folder(folder: &std::path::Path) {
     // ⭐ **Finding С26, task T-41-4 — this is the door the finding warned about.** It opens the
@@ -10716,67 +5856,6 @@ fn open_folder(folder: &std::path::Path) {
     // different code: «вторая дверь через полгода» had already happened by the time the repair
     // arrived. Both now go through [`settings::open_in_the_shell`].
     settings::open_in_the_shell(&folder.display().to_string());
-}
-
-/// Writes one line into the wizard's status line and shows it.
-fn wizard_say(hwnd: HWND, said: String) {
-    // SAFETY: the state pointer is live for the length of the window.
-    unsafe {
-        with_state(hwnd, |state| {
-            if let Some(wizard) = state.wizard.as_deref_mut() {
-                wizard.status = said;
-            }
-        })
-    };
-
-    // Задачи Т-45-3 и Т-46-3: строка состояния — одна подпись, и пишется она одна.
-    wizard_show_status(hwnd);
-}
-
-/// The ink of a glyph's mark, by the role the table names.
-fn glyph_ink(
-    mark: theme::GlyphMarkRole,
-    palette: &theme::Palette,
-) -> windows::Win32::Foundation::COLORREF {
-    match mark {
-        theme::GlyphMarkRole::AccentFg => palette.accent_fg,
-        theme::GlyphMarkRole::AccentBg => palette.accent_bg,
-        theme::GlyphMarkRole::BoxBorder => palette.box_border,
-    }
-}
-
-/// The height of one line with a glyph beside it — the box or the circle, or the text, which
-/// ever is taller.
-fn glyph_height(metrics: Metrics, faces: &Faces) -> i32 {
-    metrics.y(10).max(faces.body_height.abs() + 2)
-}
-
-/// Where the body of the wizard has to stop — the top of the button row, less the air above it.
-fn bottom_of_body(client: RECT, metrics: Metrics) -> i32 {
-    client.bottom - metrics.y(air::PAD) - metrics.y(air::BUTTON) - metrics.y(air::GAP)
-}
-
-/// Where each button of a row stands when the row wraps — its offset from the left edge of the
-/// row and the line it is on, for buttons `widths` wide and `gap` apart in a row `width` wide.
-///
-/// A button that is not the first on its line and would run past the edge starts the next line;
-/// nothing is narrowed here. Two buttons answer exactly what the last step of the wizard answered
-/// before задача T-103-7 gave it a third: side by side when the two and the gap fit, else two lines.
-fn wrap_row(widths: &[i32], gap: i32, width: i32) -> Vec<(i32, usize)> {
-    let mut at = Vec::with_capacity(widths.len());
-    let (mut x, mut line) = (0, 0);
-
-    for &wide in widths {
-        if x > 0 && x + wide > width {
-            x = 0;
-            line += 1;
-        }
-
-        at.push((x, line));
-        x += wide + gap;
-    }
-
-    at
 }
 
 // =========================================================================================

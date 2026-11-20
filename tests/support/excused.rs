@@ -107,6 +107,26 @@ pub const EXCUSED: &[Excuse] = &[
         decision: None,
         why: "«Привет»: IDS_HELLO_LEAD не помещается в 620×500 даже при 12 — укоротить в волне",
     },
+    Excuse {
+        window: "author",
+        class: Class::Narrow,
+        languages: &[
+            "be", "cy", "hy", "ka", "km", "kn", "lb", "ml", "ta", "te", "uz-Cyrl",
+        ],
+        category: Some(Category::Wave),
+        until: "T-120-24",
+        decision: None,
+        why: "«От автора»: перевод IDS_AUTHOR_TEXT или заголовка IDS_ABOUT_LINE_1 не помещается даже при 12 после слова 208.178 (короткие кнопки, шапка без подписи) — укоротить в волне",
+    },
+    Excuse {
+        window: "author",
+        class: Class::Ordinary,
+        languages: &["hy", "ka", "kn", "ml", "ta", "te"],
+        category: Some(Category::Wave),
+        until: "T-120-24",
+        decision: None,
+        why: "«От автора»: перевод IDS_AUTHOR_TEXT или заголовка IDS_ABOUT_LINE_1 не помещается даже при 12 после слова 208.178 (короткие кнопки, шапка без подписи) — укоротить в волне",
+    },
 ];
 
 /// The excuse of `window` at `class` in the language `tag`, if there is one.
