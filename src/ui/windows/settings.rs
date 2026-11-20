@@ -20,14 +20,23 @@ use crate::settings::{
     IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
     IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
     IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRAY_FLAG,
-    IDS_UPDATES_SWITCH, IDS_WIZARD_ATTACH_SETTINGS, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder,
-    LayoutMode, LayoutRow, Modifiers, Refusal,
+    IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow,
+    Modifiers, Refusal,
+};
+use crate::settings::{
+    IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
+    IDS_SECTION_EXCLUSIONS_SUB, IDS_SECTION_GENERAL_SUB, IDS_SECTION_HOTKEY_SUB,
+    IDS_SECTION_LAYOUTS_SUB, IDS_SETTINGS_EYEBROW, IDS_STATE_AUTOSTART, IDS_STATE_HEALTH,
+    IDS_STATE_JOINED, IDS_STATE_LAYOUTS, IDS_STATE_NO_FAILURES, IDS_STATE_PAIR, IDS_STATE_WORKING,
+    IDS_STATUS_AUTOSTART_OFF, IDS_STATUS_AUTOSTART_ON, IDS_STATUS_COPY, IDS_STATUS_DETAILS,
+    IDS_STATUS_FIXES, IDS_STATUS_FIXES_NONE, IDS_STATUS_HOTKEY,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
 use crate::ui::scene::{
     Art, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
 };
+use crate::ui::windows::tray_menu;
 use ::windows::Win32::Foundation::HWND;
 use ::windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
 use std::time::{Duration, Instant};
@@ -60,6 +69,7 @@ pub enum Id {
     OpenFolder,
     SaveJournal,
     Write,
+    Details,
     Close,
 }
 
@@ -89,6 +99,17 @@ impl Section {
             Self::Layouts => IDS_GROUP_LAYOUTS,
             Self::Exclusions => IDS_GROUP_EXCLUSIONS,
             Self::Diagnostics => IDS_GROUP_DIAGNOSTICS,
+        }
+    }
+
+    /// The line under the title — the mock-up's `sub` (C3 of T-120-20, решение 208.160).
+    fn subtitle(self) -> u16 {
+        match self {
+            Self::General => IDS_SECTION_GENERAL_SUB,
+            Self::Hotkey => IDS_SECTION_HOTKEY_SUB,
+            Self::Layouts => IDS_SECTION_LAYOUTS_SUB,
+            Self::Exclusions => IDS_SECTION_EXCLUSIONS_SUB,
+            Self::Diagnostics => IDS_SECTION_DIAGNOSTICS_SUB,
         }
     }
 }
@@ -129,6 +150,8 @@ pub struct Settings {
     pick_at: Option<Instant>,
     /// What the last pick found, said under its button; none — the line at rest.
     pick_note: Option<String>,
+    /// What the block «Состояние» of «Диагностика» shows; none — no block (T-120-21).
+    program: Option<Program>,
     /// «Сохранить журнал»: the journal into its folder, and whether it was written.
     save_journal: fn() -> bool,
     apply: Apply,
@@ -154,6 +177,21 @@ enum CaptureLine {
     Refused(Refusal),
     /// «Ещё раз Shift — двойное нажатие; …» — stays till the next press.
     ShiftAgain,
+}
+
+/// The program as the block «Состояние» shows it (T-120-21): whether it works, and the lines for the
+/// author — `settings::state_details` in the product, read when the window opens and after every
+/// change.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Program {
+    /// `general.enabled` in force: working or suspended.
+    pub enabled: bool,
+    /// The program refused to resume (FR-96, `tray::resume_is_refused`): a restart is needed.
+    pub fail_safe: bool,
+    /// The four lines of the old group «Состояние», word for word.
+    pub details: Vec<String>,
+    /// The command of the `Run` key, where it is there: shown on a line of its own.
+    pub path: Option<String>,
 }
 
 impl Settings {
@@ -191,6 +229,7 @@ impl Settings {
             combination_taken: false,
             pick_at: None,
             pick_note: None,
+            program: None,
             save_journal: save_journal_in_force,
             apply,
         }
@@ -470,7 +509,72 @@ impl Settings {
         if self.journal == Some(false) {
             nodes.insert(0, note(self.line(IDS_LOG_SAVE_FAILED)));
         }
+        if let Some(program) = &self.program {
+            nodes.extend(self.status_block(program));
+        }
         nodes
+    }
+
+    /// **«Состояние» in the words of a person** (T-120-21): the state of the program with the dot of
+    /// the head of the menu, what the program fixes, the key, the start with Windows; the lines for
+    /// the author only in the window «Подробности для автора» opens ([`Details`], C6 (а)).
+    fn status_block(&self, program: &Program) -> Vec<Node<Id>> {
+        let (state, words) = tray_menu::status(program.enabled, program.fail_safe);
+        let autostart = if self.config.general.autostart {
+            IDS_STATUS_AUTOSTART_ON
+        } else {
+            IDS_STATUS_AUTOSTART_OFF
+        };
+        vec![
+            Node::Status {
+                state,
+                words: self.line(words),
+            },
+            Node::Text(Role::Body, self.fixes()),
+            Node::Text(
+                Role::Body,
+                self.line(IDS_STATUS_HOTKEY)
+                    .replace("{0}", &settings::effective_hotkey_name(&self.config.hotkey)),
+            ),
+            Node::Text(Role::Body, self.line(autostart)),
+            Node::Buttons(vec![Node::Button {
+                id: Id::Details,
+                label: self.line(IDS_STATUS_DETAILS),
+                kind: ButtonKind::Quiet,
+                browser: false,
+            }]),
+        ]
+    }
+
+    /// «Исправляет: English → Русский»: the pair source → target, or the layouts of the cycle in
+    /// their order — one direction in every window (T-120-21 п. 3), the arrow of the language.
+    fn fixes(&self) -> String {
+        let names: Vec<LayoutId> = match self.config.layouts.mode {
+            LayoutMode::Pair => [
+                &self.config.layouts.pair_source,
+                &self.config.layouts.pair_target,
+            ]
+            .into_iter()
+            .filter_map(|spec| {
+                self.session
+                    .iter()
+                    .copied()
+                    .find(|layout| settings::spec_text(*layout, &self.session) == *spec)
+            })
+            .collect(),
+            LayoutMode::Cycle => self
+                .rows
+                .iter()
+                .filter(|row| row.checked)
+                .map(|row| row.layout)
+                .collect(),
+        };
+        if names.len() <= 1 {
+            return self.line(IDS_STATUS_FIXES_NONE);
+        }
+        let labels = settings::layout_labels(&names, &self.session);
+        self.line(IDS_STATUS_FIXES)
+            .replace("{0}", &labels.join(&self.line(IDS_CYCLE_ARROW)))
     }
 
     /// One event of the capture, decided by its session with the memory of a pair of `Shift`, and
@@ -607,6 +711,16 @@ impl Settings {
         self.capture.is_some()
     }
 
+    /// The block «Состояние» shows `program` (T-120-21).
+    pub fn showing_program(&mut self, program: Program) {
+        self.program = Some(program);
+    }
+
+    /// The layouts of this session, in the order the lists show them.
+    pub fn session(&self) -> &[LayoutId] {
+        &self.session
+    }
+
     /// «Выбрать окно программы», or while it counts, the seconds left: «Выбор через {0} с…».
     fn pick_caption(&self) -> String {
         match self.pick_at {
@@ -705,9 +819,9 @@ impl Content for Settings {
         }
         let mut body = vec![
             Node::Header {
-                eyebrow: Some(self.line(IDS_WIZARD_ATTACH_SETTINGS)),
+                eyebrow: Some(self.line(IDS_SETTINGS_EYEBROW)),
                 title: self.line(self.section.title()),
-                subtitle: None,
+                subtitle: Some(self.line(self.section.subtitle())),
             },
             Node::Sections {
                 id: Id::Sections,
@@ -938,6 +1052,25 @@ struct Product {
     _session: settings::DialogSession,
 }
 
+impl Product {
+    /// The program as it is now, for «Состояние»: the tray's state and the lines for the author.
+    fn read_program(&mut self) {
+        let Some(now) = crate::tray::menu_now() else {
+            return;
+        };
+        let details = settings::state_details(
+            self.settings.config.diagnostics.log_enabled,
+            self.settings.session(),
+        );
+        self.settings.showing_program(Program {
+            enabled: now.enabled,
+            fail_safe: now.fail_safe,
+            details,
+            path: settings::autostart_value(),
+        });
+    }
+}
+
 impl Content for Product {
     type Id = Id;
 
@@ -946,13 +1079,32 @@ impl Content for Product {
     }
 
     fn event(&mut self, event: Event<Id>) -> Reply {
-        match event {
+        let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
                 Reply::Stay
             }
+            // C6 (а) of T-120-21: the lines for the author in a small window of their own.
+            Event::Pressed(Id::Details) => {
+                if let (Some(window), Some(program)) =
+                    (settings::open_window(), self.settings.program.clone())
+                {
+                    open_details(
+                        window,
+                        self.settings.language,
+                        self.settings.config.general.theme,
+                        program,
+                    );
+                }
+                Reply::Stay
+            }
             event => self.settings.event(event),
+        };
+        // «Состояние» follows what was just put in force (and what the menu did meanwhile).
+        if reply == Reply::Stay {
+            self.read_program();
         }
+        reply
     }
 
     fn title(&self) -> String {
@@ -981,7 +1133,7 @@ pub fn open(owner: HWND) -> Option<HWND> {
     }
     let config = crate::tray::config_now()?;
     let language = config.general.language.in_force();
-    let product = Product {
+    let mut product = Product {
         settings: Settings::new(
             config,
             language,
@@ -990,6 +1142,7 @@ pub fn open(owner: HWND) -> Option<HWND> {
         owner,
         _session: settings::DialogSession::open(),
     };
+    product.read_program();
 
     #[cfg(feature = "testing")]
     let made = if testing::hidden() {
@@ -1061,6 +1214,8 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     .to_vec();
     let mut window = Settings::with_session(config, language, session, Box::new(|_| true));
     let mut all = Vec::new();
+    // «Диагностика» with its block «Состояние» (T-120-21), the program working.
+    window.showing_program(sample_program(language, true, false));
     for section in Section::ALL.iter().copied() {
         window.section = section;
         all.push((format!("settings {section:?}"), window.describe()));
@@ -1073,5 +1228,219 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     window.section = Section::Layouts;
     window.config.layouts.mode = LayoutMode::Cycle;
     all.push(("settings Layouts cycle".to_owned(), window.describe()));
+    // «Состояние»: the two other states of the program.
+    window.section = Section::Diagnostics;
+    for (name, enabled, fail_safe) in [("paused", false, false), ("restart", false, true)] {
+        window.showing_program(sample_program(language, enabled, fail_safe));
+        all.push((format!("settings Diagnostics {name}"), window.describe()));
+    }
     all
+}
+
+/// A program for the pictures and the fitting: the lines for the author as `settings::state_details`
+/// makes them, in `language`, with a path of the `Run` key as long as an installed program has.
+fn sample_program(language: Language, enabled: bool, fail_safe: bool) -> Program {
+    let line = |id| settings::text_in(language, id);
+    let path = r"C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned();
+    let joined =
+        |a: String, b: String| line(IDS_STATE_JOINED).replace("{0}", &a).replace("{1}", &b);
+    let none = "0";
+    let three = "3";
+    let health = line(IDS_STATE_HEALTH)
+        .replace("{0}", none)
+        .replace("{1}", none)
+        .replace("{2}", none);
+    let counts = line(IDS_STATE_LAYOUTS)
+        .replace("{0}", three)
+        .replace("{1}", three)
+        .replace("{2}", none);
+    let autostart = line(IDS_STATE_AUTOSTART)
+        .replace("{0}", &line(IDS_AUTOSTART_PRESENT).replace("{0}", &path));
+    let pair = line(IDS_STATE_PAIR)
+        .replace("{0}", "English (United States)")
+        .replace("{1}", "Русский (Россия)");
+    Program {
+        enabled,
+        fail_safe,
+        details: vec![
+            joined(line(IDS_STATE_WORKING), health),
+            counts,
+            autostart,
+            joined(pair, line(IDS_STATE_NO_FAILURES)),
+        ],
+        path: Some(path),
+    }
+}
+
+/// The elements of the window of «Подробности для автора».
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetailsId {
+    Copy,
+    Close,
+}
+
+/// What «Копировать» puts the words on the clipboard with, and whether it did.
+pub type Copier = Box<dyn Fn(&str) -> bool>;
+
+/// **The small window of «Подробности для автора»** (T-120-21 Б, C6 (а) of the controller): the
+/// four lines of the author word for word, in the face of code, the path of the `Run` key on a line
+/// of its own (the mock-up's `.spath`); «Копировать» puts them on the clipboard, «Закрыть» and Esc
+/// close. An ordinary window of the shell at the least size of the passport, owned by the window of
+/// the settings.
+pub struct Details {
+    pub language: Language,
+    pub theme: ThemeSetting,
+    pub program: Program,
+    copy: Copier,
+}
+
+impl Details {
+    /// The window over `program`; «Копировать» goes through `copy`.
+    pub fn new(language: Language, theme: ThemeSetting, program: Program, copy: Copier) -> Self {
+        Self {
+            language,
+            theme,
+            program,
+            copy,
+        }
+    }
+
+    fn line(&self, id: u16) -> String {
+        settings::text_in(self.language, id)
+    }
+
+    /// The lines as the window shows them: the line of the `Run` key without its path, the path on
+    /// a line of its own.
+    pub fn shown_lines(&self) -> Vec<String> {
+        let mut shown = Vec::new();
+        for line in &self.program.details {
+            match self
+                .program
+                .path
+                .as_deref()
+                .filter(|path| line.contains(*path))
+            {
+                Some(path) => {
+                    let head = line.replace(path, "");
+                    shown.push(head.trim_end_matches([',', ' ']).to_owned());
+                    shown.push(path.to_owned());
+                }
+                None => shown.push(line.clone()),
+            }
+        }
+        shown
+    }
+
+    /// What «Копировать» puts on the clipboard: the four lines word for word, one to a line.
+    pub fn clipboard_words(&self) -> String {
+        self.program.details.join("\r\n")
+    }
+}
+
+impl Content for Details {
+    type Id = DetailsId;
+
+    fn describe(&self) -> Window<DetailsId> {
+        let mut body = vec![Node::Header {
+            eyebrow: Some(self.line(IDS_SETTINGS_EYEBROW)),
+            title: self.line(IDS_STATUS_DETAILS),
+            subtitle: None,
+        }];
+        body.push(Node::Rows(
+            self.shown_lines()
+                .into_iter()
+                .map(|line| Node::Text(Role::Code, line))
+                .collect(),
+        ));
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(body),
+            buttons: vec![
+                Node::Button {
+                    id: DetailsId::Copy,
+                    label: self.line(IDS_STATUS_COPY),
+                    kind: ButtonKind::Normal,
+                    browser: false,
+                },
+                Node::Button {
+                    id: DetailsId::Close,
+                    label: self.line(IDS_CLOSE),
+                    kind: ButtonKind::Primary,
+                    browser: false,
+                },
+            ],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<DetailsId>) -> Reply {
+        match event {
+            Event::Pressed(DetailsId::Copy) => {
+                let _ = (self.copy)(&self.clipboard_words());
+                Reply::Stay
+            }
+            Event::Pressed(DetailsId::Close) => Reply::Close,
+            _ => Reply::Stay,
+        }
+    }
+
+    fn title(&self) -> String {
+        self.line(IDS_STATUS_DETAILS)
+    }
+
+    fn language(&self) -> (String, bool) {
+        (self.language.tag().to_owned(), self.language.is_rtl())
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        self.theme
+    }
+
+    fn least(&self) -> bool {
+        true
+    }
+}
+
+/// Opens the window of «Подробности для автора» over `owner`, the window of the settings; under
+/// the `testing` feature the hidden door of this module makes it without showing it.
+pub fn open_details(
+    owner: HWND,
+    language: Language,
+    theme: ThemeSetting,
+    program: Program,
+) -> Option<HWND> {
+    let copy: Copier =
+        Box::new(move |words: &str| crate::selection::write_unicode_text(owner, words).is_ok());
+    let details = Details::new(language, theme, program, copy);
+
+    #[cfg(feature = "testing")]
+    let made = if testing::hidden() {
+        host::create(details, Some(owner))
+    } else {
+        host::open(details, Some(owner))
+    };
+    #[cfg(not(feature = "testing"))]
+    let made = host::open(details, Some(owner));
+
+    match made {
+        Ok(window) => Some(window),
+        Err(error) => {
+            crate::app::report_non_critical("CreateWindowExW", &error);
+            None
+        }
+    }
+}
+
+/// The window of «Подробности для автора» for the instrument of fitting and the pictures, in
+/// `language`.
+pub fn details_states(language: Language) -> Vec<(String, Window<DetailsId>)> {
+    let details = Details::new(
+        language,
+        ThemeSetting::Light,
+        sample_program(language, true, false),
+        Box::new(|_| true),
+    );
+    vec![("settings details".to_owned(), details.describe())]
 }

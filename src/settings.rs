@@ -3813,6 +3813,21 @@ pub const IDS_STATUS_AUTOSTART_ON: u16 = 3286;
 pub const IDS_STATUS_AUTOSTART_OFF: u16 = 3287;
 /// «Подробности для автора» — the quiet button that opens the lines of the developer.
 pub const IDS_STATUS_DETAILS: u16 = 3288;
+/// «Копировать» — the window of «Подробности для автора» puts its lines on the clipboard (T-120-21,
+/// C6 (а)); 3295, the reserve the controller named.
+pub const IDS_STATUS_COPY: u16 = 3295;
+/// «Запуск, звук, флаг в трее, язык и вид программы» — the subtitle of «Общие» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_GENERAL_SUB: u16 = 3307;
+/// «Одна клавиша исправляет набранный текст и переключает раскладку» — the subtitle of «Горячая клавиша» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_HOTKEY_SUB: u16 = 3308;
+/// «Между какими раскладками переводить текст» — the subtitle of «Раскладки» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_LAYOUTS_SUB: u16 = 3309;
+/// «Программы, в которых Lang Switcher не вмешивается» — the subtitle of «Исключения» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_EXCLUSIONS_SUB: u16 = 3310;
+/// «Журнал помогает автору разобраться, если что-то пошло не так» — the subtitle of «Диагностика» (T-120-20, C3 of the controller).
+pub const IDS_SECTION_DIAGNOSTICS_SUB: u16 = 3311;
+/// «Настройки» — the eyebrow over the title of the window of the settings (T-120-20, C3 of the controller).
+pub const IDS_SETTINGS_EYEBROW: u16 = 3312;
 /// The note about a layout named in the file that this session does not have.
 pub const IDS_LAYOUT_NOTE: u16 = 3052;
 /// The word «источник» inside that note.
@@ -4512,7 +4527,13 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty-five since task T-120-20** — the window of the settings: the note of a
 /// refused write, [`IDS_SETTINGS_NOT_SAVED`] (3303), and the badge «новое», [`IDS_NEW_BADGE`] (3304).
 /// 263 + 2.
-pub const INTERFACE_STRINGS: [u16; 265] = [
+///
+/// ⚠ **Two hundred and sixty-six since task T-120-21** — «Копировать» of the small window of
+/// «Подробности для автора», [`IDS_STATUS_COPY`] (3295). 265 + 1.
+///
+/// ⚠ **Two hundred and seventy-two since the C3 of task T-120-20** — the subtitles of the five
+/// sections (3307…3311) and the eyebrow of the window of the settings (3312). 266 + 6.
+pub const INTERFACE_STRINGS: [u16; 272] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4581,6 +4602,13 @@ pub const INTERFACE_STRINGS: [u16; 265] = [
     IDS_STATUS_AUTOSTART_ON,
     IDS_STATUS_AUTOSTART_OFF,
     IDS_STATUS_DETAILS,
+    IDS_STATUS_COPY,
+    IDS_SECTION_GENERAL_SUB,
+    IDS_SECTION_HOTKEY_SUB,
+    IDS_SECTION_LAYOUTS_SUB,
+    IDS_SECTION_EXCLUSIONS_SUB,
+    IDS_SECTION_DIAGNOSTICS_SUB,
+    IDS_SETTINGS_EYEBROW,
     IDS_LAYOUT_NOTE,
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,
@@ -9794,6 +9822,89 @@ pub fn acting_line(acting: &Acting, refusals: u32) -> String {
     };
 
     format_text(IDS_STATE_JOINED, &[&what, &refused])
+}
+
+/// **The lines for the author under «Подробности для автора»** — task T-120-21: the four lines of the
+/// «Состояние» group of the old dialog, word for word (`fill_state_lines` until task T-120-20), now
+/// shown only when that button is pressed. `log_enabled` adds the health of the hook to the first
+/// line, as it always did; `session` are the layouts of this session, named as the lists name them.
+///
+/// **Every number here comes from another module's public reader** — `watchdog`, `hook`, `layouts`,
+/// `guard`, `diag` — and nothing is written back to any of them (section 6.2). SEC-07: counts and a
+/// path, never a stroke.
+pub fn state_details(log_enabled: bool, session: &[LayoutId]) -> Vec<String> {
+    let health = crate::watchdog::health();
+    let program = program_state(
+        crate::hook::is_installed(),
+        crate::watchdog::hook_down(),
+        crate::hook::is_active(),
+        crate::hook::fail_safe(),
+    );
+    let first = if log_enabled {
+        format_text(
+            IDS_STATE_JOINED,
+            &[
+                &text(program.string_id()),
+                &format_text(
+                    IDS_STATE_HEALTH,
+                    &[
+                        &health.silent_removals.to_string(),
+                        &health.install_failures.to_string(),
+                        &crate::hook::lost_hotkeys().to_string(),
+                    ],
+                ),
+            ],
+        )
+    } else {
+        text(program.string_id())
+    };
+    let counts = format_text(
+        IDS_STATE_LAYOUTS,
+        &[
+            &session.len().to_string(),
+            &crate::guard::counters().exclusions.to_string(),
+            &crate::diag::recorded().to_string(),
+        ],
+    );
+    let autostart = format_text(
+        IDS_STATE_AUTOSTART,
+        &[&match autostart_value() {
+            Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command]),
+            None => text(IDS_AUTOSTART_ABSENT),
+        }],
+    );
+
+    // Task T-34-6, finding Н102: what acts when the key is pressed — the very selection the hotkey
+    // makes, `layouts::cycle_for` over the published configuration and the layouts of this session.
+    let available: Vec<LayoutId> = session
+        .iter()
+        .copied()
+        .take(crate::layouts::MAX_SESSION)
+        .collect();
+    let of_session = crate::layouts::Session::of(available.len(), session.len());
+    let acting =
+        match crate::layouts::cycle_for(crate::layouts::published(), &available, of_session) {
+            Ok(cycle) => {
+                let names = layout_labels(cycle.layouts(), session);
+                match (crate::layouts::published().mode(), names.as_slice()) {
+                    (LayoutMode::Pair, [source, target]) => {
+                        Acting::Pair(source.clone(), target.clone())
+                    }
+                    (_, names) if names.len() >= 2 => Acting::Cycle(names.to_vec()),
+                    _ => Acting::None,
+                }
+            }
+            Err(_) => Acting::None,
+        };
+    let failures = crate::layouts::selection_failures();
+    let refusals = failures
+        .ime_layout
+        .saturating_add(failures.no_layouts)
+        .saturating_add(failures.origin_outside)
+        .saturating_add(failures.too_many_layouts)
+        .saturating_add(failures.pair_variant_missing);
+
+    vec![first, counts, autostart, acting_line(&acting, refusals)]
 }
 
 // ⚠ **`arrow_key_is_down` переехал в `widgets::glyph` — задача Т-46-2.** Он был частью правила

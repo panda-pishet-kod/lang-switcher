@@ -76,7 +76,10 @@ fn print_the_pictures_of_the_window_of_the_settings() {
             Direction::LeftToRight
         };
         let text = Text::new(language.tag(), direction).expect("DirectWrite");
-        for (state, window) in window_of_settings::states(language) {
+        for (state, window) in lang_switcher::ui::windows::catalogue(language)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("settings"))
+        {
             for theme in [Theme::Light, Theme::Dark] {
                 for (name, size) in sizes {
                     let k = fit::k_for(language.tag(), size.class);
@@ -173,5 +176,260 @@ fn the_list_of_exclusions_takes_what_the_section_leaves() {
         // ⚠ Not `layout.shortfall`: the core measures it from the natural height, where a list in a
         // fill has its six rows (reported to the core, T-120-20).
         assert!(lowest <= rule, "{language:?}: nothing under the rule");
+    }
+}
+
+/// The words of «Диагностика» from its block «Состояние» on: the block is the last of the section.
+fn the_block_of_the_state(language: Language, state: &str) -> Option<String> {
+    let (_, window) = window_of_settings::states(language)
+        .into_iter()
+        .find(|(name, _)| name == state)?;
+    let words = format!("{:?}", window.body);
+    let at = words.find("Status {")?;
+    Some(words[at..].to_owned())
+}
+
+/// **T-120-21 — the red before.** The block «Состояние» speaks to a person until «Подробности для
+/// автора» is pressed: the state, what is fixed, the key, the start with Windows — and not one word of
+/// the developer (the registry and its path, the published exclusions).
+#[test]
+fn the_block_of_the_state_speaks_to_a_person_before_the_details() {
+    with_product_strings();
+    for (language, words) in [
+        (Language::Ru, ["реестр", "hkcu", "опубликован", "\\"]),
+        (Language::En, ["registry", "hkcu", "published", "\\"]),
+    ] {
+        let block = the_block_of_the_state(language, "settings Diagnostics")
+            .unwrap_or_else(|| panic!("{language:?}: «Диагностика» has the block «Состояние»"));
+        println!("{language:?}: {block}");
+        let lower = block.to_lowercase();
+        for word in words {
+            assert!(
+                !lower.contains(word),
+                "{language:?}: «{word}» stands in the block before «Подробности для автора»"
+            );
+        }
+        let details = format!(
+            "{:?}",
+            window_of_settings::details_states(language)[0].1.body
+        );
+        assert!(
+            details.to_lowercase().contains("hkcu"),
+            "{language:?}: «Подробности для автора» opens the lines of the author"
+        );
+    }
+}
+
+/// **Three states, three first lines, three dots — the head of the menu's own** (T-120-21): one
+/// source, `tray_menu::status`.
+#[test]
+fn the_three_states_of_the_program_are_the_menus_three() {
+    use lang_switcher::ui::windows::tray_menu;
+
+    with_product_strings();
+    for (state, enabled, fail_safe) in [
+        ("settings Diagnostics", true, false),
+        ("settings Diagnostics paused", false, false),
+        ("settings Diagnostics restart", false, true),
+    ] {
+        let (dot, words) = tray_menu::status(enabled, fail_safe);
+        let expected = format!(
+            "Status {{ state: {dot:?}, words: {:?} }}",
+            settings::text_in(Language::Ru, words)
+        );
+        let block = the_block_of_the_state(Language::Ru, state).expect("the block");
+        assert!(
+            block.starts_with(&expected),
+            "{state}: {expected} — the block begins {}",
+            &block[..block.len().min(80)]
+        );
+    }
+}
+
+/// **«Подробности для автора» shows the four lines as they were, the path of the `Run` key on a line
+/// of its own** (the mock-up's `.spath`), in the face of code.
+#[test]
+fn the_details_show_the_lines_of_the_author_with_the_path_apart() {
+    with_product_strings();
+    let block = format!(
+        "{:?}",
+        window_of_settings::details_states(Language::Ru)[0].1.body
+    );
+    let path = r"C:\Program Files\Lang_Switcher\LangSwitcher.exe";
+    let code_lines = block.matches("Text(Code,").count();
+    assert_eq!(code_lines, 5, "four lines and the path apart: {block}");
+    assert!(
+        block.contains(&format!("Text(Code, {path:?})")),
+        "the path is a line of its own"
+    );
+    assert!(
+        block.contains(&format!(
+            "Text(Code, {:?})",
+            settings::text_in(Language::Ru, settings::IDS_STATE_AUTOSTART).replace(
+                "{0}",
+                settings::text_in(Language::Ru, settings::IDS_AUTOSTART_PRESENT)
+                    .replace("{0}", "")
+                    .trim_end_matches([',', ' '])
+            )
+        )),
+        "the line of the `Run` key keeps its words: {block}"
+    );
+}
+
+/// **«Копировать» puts the four lines on the clipboard word for word; «Закрыть» closes; the window
+/// opens at the least size** (T-120-21 Б, C6 (а)).
+#[test]
+fn the_window_of_the_details_copies_the_lines_and_closes() {
+    use lang_switcher::ui::host::{Content, Reply};
+    use lang_switcher::ui::scene::Event;
+    use lang_switcher::ui::windows::settings::{Details, DetailsId, Program};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    with_product_strings();
+    let program = Program {
+        enabled: true,
+        fail_safe: false,
+        details: vec![
+            "line one".to_owned(),
+            "line two".to_owned(),
+            r"Autostart: yes, C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned(),
+            "line four".to_owned(),
+        ],
+        path: Some(r"C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned()),
+    };
+    let copied = Rc::new(RefCell::new(Vec::new()));
+    let log = Rc::clone(&copied);
+    let mut details = Details::new(
+        Language::Ru,
+        lang_switcher::theme::ThemeSetting::Light,
+        program.clone(),
+        Box::new(move |words: &str| {
+            log.borrow_mut().push(words.to_owned());
+            true
+        }),
+    );
+
+    let stays = details.event(Event::Pressed(DetailsId::Copy));
+    let closes = details.event(Event::Pressed(DetailsId::Close));
+
+    assert_eq!(stays, Reply::Stay, "«Копировать» leaves the window open");
+    assert_eq!(
+        copied.borrow().as_slice(),
+        [program.details.join("\r\n")],
+        "and puts the four lines on the clipboard word for word"
+    );
+    assert_eq!(closes, Reply::Close, "«Закрыть» closes");
+    assert!(
+        details.least(),
+        "the window opens at the least size of the passport"
+    );
+    assert_eq!(
+        details.shown_lines()[2..4],
+        [
+            "Autostart: yes".to_owned(),
+            r"C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned()
+        ],
+        "the path of the `Run` key on a line of its own"
+    );
+}
+
+/// **«Подробности для автора» opens a window of the shell owned by the window of the settings.**
+#[test]
+fn the_details_open_a_window_owned_by_the_settings() {
+    use lang_switcher::ui::windows::settings::{Program, open_details, testing};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GW_OWNER, GetWindow, WINDOW_EX_STYLE, WS_POPUP,
+    };
+    use windows::core::w;
+
+    with_product_strings();
+    // SAFETY: a hidden window of this thread stands in for the window of the settings.
+    let owner = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("STATIC"),
+            w!("owner"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("a window of this thread");
+    let details = testing::hidden_while(|| {
+        open_details(
+            owner,
+            Language::Ru,
+            lang_switcher::theme::ThemeSetting::Light,
+            Program::default(),
+        )
+    });
+    // SAFETY: windows of this thread.
+    let owned_by = details.map(|window| unsafe { GetWindow(window, GW_OWNER) });
+    if let Some(window) = details {
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(window) };
+    }
+    // SAFETY: the window made above.
+    let _ = unsafe { DestroyWindow(owner) };
+
+    assert!(details.is_some(), "the window of the details opens");
+    assert_eq!(
+        owned_by.and_then(Result::ok),
+        Some(owner),
+        "owned by the window of the settings"
+    );
+}
+
+/// **The C3 of T-120-20 (решение 208.160): every section shows its subtitle under its title, and the
+/// window its own eyebrow** — `IDS_SETTINGS_EYEBROW`, not the word of the wizard it borrowed before.
+/// English and German tell the two keys apart («Settings» against «The settings», «Einstellungen»);
+/// in Russian both say «Настройки».
+#[test]
+fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
+    with_product_strings();
+    let sections = [
+        ("settings General", settings::IDS_SECTION_GENERAL_SUB),
+        ("settings Hotkey", settings::IDS_SECTION_HOTKEY_SUB),
+        ("settings Layouts", settings::IDS_SECTION_LAYOUTS_SUB),
+        ("settings Exclusions", settings::IDS_SECTION_EXCLUSIONS_SUB),
+        (
+            "settings Diagnostics",
+            settings::IDS_SECTION_DIAGNOSTICS_SUB,
+        ),
+    ];
+    for language in [Language::Ru, Language::En, Language::De] {
+        let eyebrow = settings::text_in(language, settings::IDS_SETTINGS_EYEBROW);
+        if language != Language::Ru {
+            // ⚠ Контроль: where the two keys say the same, the check below proves nothing.
+            assert_ne!(
+                eyebrow,
+                settings::text_in(language, settings::IDS_WIZARD_ATTACH_SETTINGS),
+                "{language:?}: the eyebrow and the word of the wizard must differ for this check"
+            );
+        }
+        let states = window_of_settings::states(language);
+        for (state, subtitle) in sections {
+            let (_, window) = states
+                .iter()
+                .find(|(name, _)| name == state)
+                .unwrap_or_else(|| panic!("{state}"));
+            let words = format!("{:?}", window.body);
+            let subtitle = settings::text_in(language, subtitle);
+            assert!(
+                words.contains(&format!("eyebrow: Some({eyebrow:?})")),
+                "{language:?} {state}: the eyebrow of its own, «{eyebrow}»"
+            );
+            assert!(
+                words.contains(&format!("subtitle: Some({subtitle:?})")),
+                "{language:?} {state}: the subtitle under the title, «{subtitle}»"
+            );
+        }
     }
 }
