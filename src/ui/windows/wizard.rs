@@ -17,13 +17,16 @@ use crate::settings::{
     IDS_WIZARD_CARD_WRONG, IDS_WIZARD_CARD_WRONG_SUB, IDS_WIZARD_CONTACT, IDS_WIZARD_COPY_ADDRESS,
     IDS_WIZARD_COPY_TEXT, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
     IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT, IDS_WIZARD_IDEA_HELPS,
-    IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT,
-    IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE,
-    IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP, IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
+    IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_RECEIVED,
+    IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE,
+    IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE, IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP,
+    IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
-use crate::ui::scene::{Art, ButtonKind, Event, FieldKind, Node, Role, Window, WindowKind};
+use crate::ui::scene::{
+    Art, ButtonKind, Event, FieldKind, MenuState, Node, Role, Window, WindowKind,
+};
 use ::windows::Win32::Foundation::HWND;
 
 /// The elements of the wizard, of all its pages.
@@ -402,6 +405,12 @@ impl Page {
     fn sent(&self) -> Node<Id> {
         Node::Rows(vec![
             Node::Text(Role::Body, self.line(IDS_WIZARD_SENT_TEXT)),
+            // The page stands only after the site answered with success (`Wizard::take_answer`), so
+            // the line says so as a fact (passport §6, the line of the state).
+            Node::Status {
+                state: MenuState::Working,
+                words: self.line(IDS_WIZARD_RECEIVED),
+            },
             Node::Row(vec![self.button(
                 Id::Channel,
                 settings::IDS_CHANNEL_OPEN,

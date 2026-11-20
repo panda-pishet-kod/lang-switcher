@@ -584,3 +584,31 @@ fn the_thanks_is_a_step_of_the_wizard_and_no_road_counts_it() {
     );
     assert_eq!(row, [wizard::Id::Next], "and «Закрыть» alone in its row");
 }
+
+/// **T-120-19: «Получено сайтом автора» stands on the thanks and nowhere else** (3313, the condition
+/// of the controller: the line says the site took the appeal, so it is shown only on the page that
+/// stands after the site answered with success — `Wizard::take_answer` — and not on the last step
+/// or on «Не удалось отправить»).
+#[test]
+fn the_line_of_the_site_stands_only_on_the_thanks() {
+    use lang_switcher::ui::host::Content;
+
+    with_product_strings();
+
+    for (name, wizard) in letters::wizard_pages() {
+        let window = wizard::Page {
+            wizard,
+            language: settings::Language::Ru,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        }
+        .describe();
+        // Its words are held by the canon of the strings (`tests\settings.rs`); here — the line itself.
+        let carries = format!("{:?}", window.body).contains("Status {");
+        println!("{name}: {carries}");
+        assert_eq!(
+            carries,
+            name == "wizard sent",
+            "{name}: the line «Получено сайтом автора» belongs to the thanks alone"
+        );
+    }
+}

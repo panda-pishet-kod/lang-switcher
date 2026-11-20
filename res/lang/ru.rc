@@ -266,6 +266,7 @@ BEGIN
     IDS_NEW_BADGE           "новое"
     IDS_AUTHOR_SUPPORT      "Поддержать"
     IDS_AUTHOR_CHANNEL      "Канал"
+    IDS_WIZARD_RECEIVED     "Получено сайтом автора"
     IDS_OWN_LIST_TITLE      "Раскладка"
     IDS_OWN_LIST_MORE       "Дополнительные параметры клавиатуры"
     IDS_CORNER_UPDATE       "обновление"

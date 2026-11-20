@@ -3884,6 +3884,9 @@ pub const IDS_AUTHOR_SUPPORT: u16 = 3305;
 /// «Канал» — the second button of that card. Its own key: the wizard keeps [`IDS_CHANNEL_OPEN`]
 /// (FR-104).
 pub const IDS_AUTHOR_CHANNEL: u16 = 3306;
+/// «Получено сайтом автора» — the line of the state of the page «Обращение отправлено» of the
+/// wizard (T-120-19); shown only when the site answered with success.
+pub const IDS_WIZARD_RECEIVED: u16 = 3313;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -4524,7 +4527,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and sixty-seven since task T-120-17** — the two buttons of the card «Поддержать
 /// автора» of «От автора», [`IDS_AUTHOR_SUPPORT`] (3305) and [`IDS_AUTHOR_CHANNEL`] (3306). 272 + 2 = 274 since the merge of the shell after Б.
-pub const INTERFACE_STRINGS: [u16; 274] = [
+///
+/// ⚠ **Two hundred and seventy-five since task T-120-19** — the line of the state of the
+/// thanks of the wizard, [`IDS_WIZARD_RECEIVED`] (3313). 274 + 1.
+pub const INTERFACE_STRINGS: [u16; 275] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4787,6 +4793,7 @@ pub const INTERFACE_STRINGS: [u16; 274] = [
     IDS_NEW_BADGE,
     IDS_AUTHOR_SUPPORT,
     IDS_AUTHOR_CHANNEL,
+    IDS_WIZARD_RECEIVED,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

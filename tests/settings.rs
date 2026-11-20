@@ -4075,11 +4075,11 @@ fn all_our_drawing_goes_by_the_step() {
     // and the name «Lang Switcher» of the old «От автора»; T-120-20: the old settings dialog went
     // with its places, the box of T-118-1 (`repaint_capture`) and the pictures of its check boxes
     // among them; T-120-19: the wizard, the last window of the old kind, and what only it called
-    // in settings.rs went with it. 5 are left.
+    // in settings.rs went with it, and the drawing of the labels of the dialogs (692f0c3). 4 are left.
     assert_eq!(
         calls,
-        5 + 1 + 1,
-        "the 5 places of П4 left, the definition and the buffer's carry"
+        4 + 1 + 1,
+        "the 4 places of П4 left, the definition and the buffer's carry"
     );
 
     // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
@@ -4111,8 +4111,8 @@ fn all_our_drawing_goes_by_the_step() {
         .sum();
     assert_eq!(
         caught,
-        5 + 1,
-        "the text of e82 must be caught at all 5 places left and at the buffer's carry"
+        4 + 1,
+        "the text of e82 must be caught at all 4 places left and at the buffer's carry"
     );
 
     // ⚠ Контроль «мутант задачи»: one place of `widgets.rs` put back (`letters.rs` has none since
@@ -8007,7 +8007,9 @@ impl Drop for ProductImage {
 ///
 /// ⚠ **267 since task T-120-17** — the two buttons of the card «Поддержать автора» of «От автора»
 /// (слово владельца 208.178), keys of their own — 272 + 2 = 274 since the merge of the shell after Б.
-const FR_94_STRINGS: [(u16, &str, &str); 274] = [
+///
+/// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
+const FR_94_STRINGS: [(u16, &str, &str); 275] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -9113,6 +9115,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 274] = [
     // «От автора» — keys of their own, «Спасибо» and the wizard keep theirs.
     (settings::IDS_AUTHOR_SUPPORT, "Поддержать", "Support"),
     (settings::IDS_AUTHOR_CHANNEL, "Канал", "Channel"),
+    // T-120-19: the line of the state of the thanks of the wizard (3313).
+    (
+        settings::IDS_WIZARD_RECEIVED,
+        "Получено сайтом автора",
+        "Received by the author’s site",
+    ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
     (
@@ -13935,8 +13943,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        274,
-        "two hundred and SEVENTY-FOUR identifiers in use since the merge of the shell after Б: \
+        275,
+        "two hundred and SEVENTY-FIVE identifiers in use since task T-120-19: the line of the state \
+         of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
+         after Б: \
          the two buttons of the card «Поддержать автора» of «От автора» (3305, 3306, task \
          T-120-17). \
          Two hundred and seventy-two since the C3 of task T-120-20: the subtitles of the five \
