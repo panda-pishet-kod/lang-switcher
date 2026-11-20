@@ -97,208 +97,208 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "ru",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "en",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.9,
             large: 1.0,
         },
     ),
     (
         "uk",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "de",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "fr",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "es",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "pt",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "it",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "pl",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "cs",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "tr",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "el",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
-            large: 1.0,
+            narrow: 0.899,
+            ordinary: 0.882,
+            large: 0.95,
         },
     ),
     (
         "he",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "ar",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "hi",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "bn",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "ur",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "pa",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "mr",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "te",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "ta",
         K {
-            narrow: 1.0,
-            ordinary: 0.997,
-            large: 1.0,
+            narrow: 0.944,
+            ordinary: 0.845,
+            large: 0.987,
         },
     ),
     (
         "fa",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "gu",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "th",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "kn",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "or",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
@@ -306,319 +306,319 @@ pub const TABLE: &[(&str, K)] = &[
         "ml",
         K {
             narrow: 1.0,
-            ordinary: 0.997,
-            large: 1.0,
+            ordinary: 0.878,
+            large: 0.924,
         },
     ),
     (
         "uz",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.896,
+            ordinary: 0.877,
             large: 1.0,
         },
     ),
     (
         "uz-Cyrl",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.896,
+            ordinary: 0.877,
             large: 1.0,
         },
     ),
     (
         "ne",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.882,
             large: 1.0,
         },
     ),
     (
         "as",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "az",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "km",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "kk",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "sr",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "sr-Latn",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "ug",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "bg",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.91,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "hy",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "lo",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "be",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "tt",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "ka",
         K {
-            narrow: 1.0,
-            ordinary: 0.997,
-            large: 1.0,
+            narrow: 0.899,
+            ordinary: 0.882,
+            large: 0.95,
         },
     ),
     (
         "mk",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
-            large: 1.0,
+            narrow: 0.91,
+            ordinary: 0.867,
+            large: 0.941,
         },
     ),
     (
         "vi",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.923,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "nl",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "ro",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.882,
             large: 1.0,
         },
     ),
     (
         "hu",
         K {
-            narrow: 1.0,
-            ordinary: 0.997,
+            narrow: 0.896,
+            ordinary: 0.877,
             large: 1.0,
         },
     ),
     (
         "sv",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.875,
             large: 1.0,
         },
     ),
     (
         "sq",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "da",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.903,
             large: 1.0,
         },
     ),
     (
         "fi",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "hr",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "sk",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "nb",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.91,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "lt",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "sl",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "bs",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "lv",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "et",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.923,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
     (
         "cy",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.91,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "mt",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "is",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "lb",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.937,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
     (
         "mi",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.899,
+            ordinary: 0.882,
             large: 1.0,
         },
     ),
     (
         "nn",
         K {
-            narrow: 1.0,
-            ordinary: 1.0,
+            narrow: 0.933,
+            ordinary: 0.912,
             large: 1.0,
         },
     ),
