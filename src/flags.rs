@@ -2195,6 +2195,42 @@ pub fn own_layout_to_give(chosen: LayoutId, now: LayoutId, blind: bool) -> Optio
     (chosen.raw() != 0 && (blind || now != chosen)).then_some(chosen)
 }
 
+/// How many more times the gift of the chosen layout looks again, 120 ms apart, for the person's
+/// window that is not in front yet — defect 3 of the stand (2026-11-20).
+pub const GIFT_RETRIES: u8 = 2;
+
+/// One look of the list timer at the person's window, 120 ms after the list closed — what
+/// [`gift_step`] decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiftStep {
+    /// The person's window is in front: the gift is decided now (by [`layout_to_give`] or
+    /// [`own_layout_to_give`]) and the session ends — whatever is given, it is given once.
+    Now,
+    /// Not in front yet, a look is left: nothing is given, the session waits 120 ms more with
+    /// `left` looks after that one.
+    Wait {
+        /// The looks left after the coming one.
+        left: u8,
+    },
+    /// Not in front and no look left: the session ends with no gift.
+    GiveUp,
+}
+
+/// ⭐ **The gift waits for the person's window, and is given once** — defect 3 of the stand
+/// (2026-11-20): with the icon under ^, Edge did not get the row chosen in the list of the
+/// program's own (0 of 7), and in the probe that followed it did (4 of 4). The gift was skipped
+/// without a word whenever the person's window was not in front 120 ms after the close. The cause
+/// is not proven; this looks again `retries_left` times and the journal names every skip. Nothing is
+/// given to a window that is not the person's, and only [`GiftStep::Now`] gives — after it the
+/// session is over. Pure.
+pub fn gift_step(target_in_front: bool, retries_left: u8) -> GiftStep {
+    match (target_in_front, retries_left) {
+        (true, _) => GiftStep::Now,
+        (false, 0) => GiftStep::GiveUp,
+        (false, left) => GiftStep::Wait { left: left - 1 },
+    }
+}
+
 /// ⭐ **Whether the flag shows the layout just given, without reading it back** — defect 3 of the
 /// stand (2026-11-20): after a choice in the list of the program's own, a console (`blind`, FR-52)
 /// kept the old flag — its layout is known only from the name of РУС/ENG, and that indicator is

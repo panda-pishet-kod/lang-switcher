@@ -856,6 +856,12 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // Facts and no value — not a path, not a word of the document; appended at the end.
     ("feed keep", Kind::Process),
     ("kept feed refused", Kind::Process),
+    // Stage E119, task T-119-13, defect 3 of the stand (2026-11-20): 120 ms after a list of layouts
+    // closed, the person's window was not in front, and the gift of the chosen layout waited
+    // (`flags::gift_step`) — «skipped» on every such look, «given up» when no look was left. Facts
+    // and no value — not a window, not a layout; appended at the end.
+    ("list gift skipped", Kind::Tray),
+    ("list gift given up", Kind::Tray),
     // Stage Э120, task T-120-3: the canvas of the interface shell (`ui::canvas`) — Direct2D refused
     // a render target, and, after two refusals in a row, the canvas turned to the plain look of
     // GDI. Appended at the end so that no index above them moves; a fact and no value.
