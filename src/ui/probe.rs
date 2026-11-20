@@ -188,6 +188,8 @@ struct FieldsState {
     selected: usize,
     first: usize,
     checks: Vec<bool>,
+    /// The option of the choice field.
+    language: usize,
     events: usize,
 }
 
@@ -196,6 +198,7 @@ enum FieldId {
     Name,
     Note,
     Layouts,
+    Language,
     Apply,
     Close,
 }
@@ -207,6 +210,18 @@ struct FieldsProbe {
     rtl: bool,
 }
 
+/// The options of the choice field of the stand: languages by their own names.
+const STAND_LANGUAGES: [&str; 8] = [
+    "English",
+    "Deutsch",
+    "Français",
+    "Română",
+    "Русский",
+    "Українська",
+    "עברית",
+    "日本語",
+];
+
 /// The rows of the list of the stand.
 const STAND_ROWS: usize = 20;
 
@@ -217,6 +232,7 @@ struct StandWords {
     note: &'static str,
     hint: &'static str,
     row: &'static str,
+    language: &'static str,
     apply: &'static str,
     close: &'static str,
 }
@@ -227,6 +243,7 @@ const RUSSIAN: StandWords = StandWords {
     note: "Заметка",
     hint: "например game.exe",
     row: "Раскладка",
+    language: "Язык",
     apply: "Применить",
     close: "Закрыть",
 };
@@ -237,6 +254,7 @@ const HEBREW: StandWords = StandWords {
     note: "הערה",
     hint: "למשל game.exe",
     row: "פריסה",
+    language: "שפה",
     apply: "החל",
     close: "סגור",
 };
@@ -285,6 +303,12 @@ impl crate::ui::host::Content for FieldsProbe {
                     selected: state.selected,
                     first: state.first,
                 },
+                Node::Choice {
+                    id: FieldId::Language,
+                    label: words.language.to_owned(),
+                    options: STAND_LANGUAGES.map(str::to_owned).to_vec(),
+                    selected: state.language,
+                },
             ]),
             buttons: vec![
                 button(FieldId::Apply, words.apply, ButtonKind::Normal),
@@ -302,6 +326,7 @@ impl crate::ui::host::Content for FieldsProbe {
             Event::Edited(FieldId::Name, text) => state.name = text,
             Event::Edited(FieldId::Note, text) => state.note = text,
             Event::Selected(FieldId::Layouts, row) => state.selected = row,
+            Event::Selected(FieldId::Language, option) => state.language = option,
             Event::Scrolled(FieldId::Layouts, first) => state.first = first,
             Event::RowChecked(FieldId::Layouts, row, on) => {
                 if let Some(check) = state.checks.get_mut(row) {
@@ -390,6 +415,8 @@ pub fn run_fields() -> std::process::ExitCode {
                 format!("note={}", code_points(&state.note)),
                 format!("selected={} first={}", state.selected, state.first),
                 format!("checks={checks}"),
+                format!("choice={}", state.language),
+                format!("list_open={}", probe.dropdown.is_some()),
                 format!("events={}", state.events),
                 format!("frames={}", probe.frames),
                 format!(
