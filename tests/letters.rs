@@ -4336,6 +4336,66 @@ fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
     );
 }
 
+/// **Задача T-103-2, сторож (4), решение 181.1 — a change of language on the fly moves where a
+/// person is sent to write**, the wizard a window of the shell since T-120-19 (moved here from
+/// `tests\settings.rs`, where it opened the dialog `IDD_WIZARD`). Opened hidden and asked by the
+/// door of the task where its address would take them: built in Russian, the group; the language
+/// moved and [`letters::language_changed`] told the window — which opens again in the new
+/// language — GitHub Issues; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let now = || {
+        let window = letters::wizard_window().expect("the wizard is open");
+        let address = letters::testing::feedback_url(window).expect("a window of `letters`");
+        (window, address)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, address) = now();
+    seen.push(("En, told", address));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let group = links::GROUP_URL;
+    let issues = links::ISSUES_URL;
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "the wizard is built again in the new language"
+    );
+}
+
 /// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
 /// pages of the site too.** «От автора», a window of the shell since T-120-17 (the test moved here
 /// from `tests\settings.rs`, where it opened the dialog `IDD_AUTHOR`), opened hidden and asked by
