@@ -7,7 +7,8 @@ use lang_switcher::diag;
 use lang_switcher::ui::canvas::Rect;
 use lang_switcher::ui::fit;
 use lang_switcher::ui::layout::{
-    Class, Concession, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
+    Class, Concession, Layout, Part, Placed, WindowSize, client_size, columns_fit, lay_out,
+    window_size,
 };
 use lang_switcher::ui::scene::{
     Art, Brand, ButtonKind, FieldKind, Node, Surface, Window, WindowKind,
@@ -1617,5 +1618,79 @@ fn a_field_of_code_is_lines_of_the_role_code() {
     assert!(
         roles.contains(&(Role::Body, "a = 1".to_owned())),
         "{roles:?}"
+    );
+}
+
+/// **208.198 — the body of a small screen scrolls; the head and the row of buttons stand still.** A
+/// window under its least frame (620 × 500, a work area under 900 × 540) whose body lacks height after
+/// the steps of giving way lays the body at its natural height under the head and tells the host the
+/// room it shows it in; nothing is cut and nothing is failed. The bar stands at the edge of the room,
+/// mirrored on the left.
+///
+/// ⚠ Control: the same window at the reference, 900 × 540, does not scroll — the lack stays a lack, as
+/// it was.
+#[test]
+fn the_body_of_a_small_screen_scrolls_under_a_head_and_over_buttons_that_stand_still() {
+    let mut rows = vec![Node::Header {
+        eyebrow: None,
+        title: "Head".to_owned(),
+        subtitle: None,
+    }];
+    rows.extend((0..40).map(|row| text(Role::Body, &format!("Row {row}"))));
+    let window = Window {
+        buttons: vec![button(Id::Close, "Close", ButtonKind::Primary)],
+        ..bare(Node::Column(rows))
+    };
+    let small = client_size(620.0, 500.0);
+    assert!(small.scrolls, "620 × 500 is a small screen");
+
+    for rtl in [false, true] {
+        let layout = lay_out(&window, small, 1.0, rtl, &MEASURE);
+        let body = layout
+            .scroll
+            .unwrap_or_else(|| panic!("rtl {rtl}: the body scrolls: {:?}", layout.shortfall));
+        let index_of = |wanted: fn(&Part) -> bool| {
+            layout
+                .items
+                .iter()
+                .position(|item| wanted(&item.part))
+                .expect("the element is placed")
+        };
+        let head = index_of(|part| matches!(part, Part::Text { text, .. } if text == "Head"));
+        let close = index_of(|part| matches!(part, Part::Button { .. }));
+        let (head_rect, close_rect) = (layout.items[head].rect, layout.items[close].rect);
+        println!("rtl {rtl}: {body:?}; head {head_rect:?}; close {close_rect:?}");
+
+        assert!(layout.shortfall.h <= 0.0, "rtl {rtl}: nothing is failed");
+        assert!(
+            body.content > body.viewport.h,
+            "rtl {rtl}: the body is taller than its room"
+        );
+        assert!(
+            !(body.start..body.end).contains(&head) && head_rect.bottom() <= body.viewport.y,
+            "rtl {rtl}: the head stands still over the room"
+        );
+        assert!(
+            !(body.start..body.end).contains(&close) && close_rect.y >= body.viewport.bottom(),
+            "rtl {rtl}: the buttons stand still under the room"
+        );
+        assert!(
+            layout.items[body.start..body.end]
+                .iter()
+                .all(|item| item.rect.y >= body.viewport.y),
+            "rtl {rtl}: the body lies under the head"
+        );
+        if rtl {
+            assert!(body.bar.right() <= body.viewport.x, "the bar on the left");
+        } else {
+            assert!(body.bar.x >= body.viewport.right(), "the bar on the right");
+        }
+    }
+
+    let reference = lay(&window, client_size(900.0, 540.0));
+    assert!(
+        reference.scroll.is_none() && reference.shortfall.h > 0.0,
+        "the control: at the reference the lack stays a lack: {:?}",
+        reference.shortfall
     );
 }

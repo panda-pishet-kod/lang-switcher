@@ -381,6 +381,23 @@ pub struct Placed<I> {
     pub id: Option<I>,
 }
 
+/// **The body of a window that scrolls** (208.198): only on a small screen — a work area under the
+/// least frame, 900 × 540 — and only when after the steps of giving way it still lacks height. The
+/// head stands still at the top and the row of buttons at the bottom; the rest of the body lies at its
+/// natural height under the head, and the host shows the part of it the room holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyScroll {
+    /// The room of the body on the screen, between the head and the row of buttons.
+    pub viewport: Rect,
+    /// The bar at the edge of the room — right, mirrored left.
+    pub bar: Rect,
+    /// The natural height of the body, at least the room's.
+    pub content: f32,
+    /// The elements that scroll: `items[start..end]` of the layout.
+    pub start: usize,
+    pub end: usize,
+}
+
 /// How many points the content lacks, across and down; zero or less — it fits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Shortfall {
@@ -442,6 +459,8 @@ pub struct Layout<I> {
     pub mirrored: bool,
     pub items: Vec<Placed<I>>,
     pub shortfall: Shortfall,
+    /// The body that scrolls, on a small screen only (208.198); `None` — nothing scrolls.
+    pub scroll: Option<BodyScroll>,
     /// The last step of the order of giving way the window came to (§3а); none — it fitted as it
     /// was.
     pub step: Option<Concession>,
@@ -527,6 +546,8 @@ pub fn lay_out_with<I: Copy>(
         out: Vec::new(),
         rtl,
         over: 0.0,
+        scroll: false,
+        body: None,
     };
 
     let mut shortfall = place.window(window, size);
@@ -551,9 +572,23 @@ pub fn lay_out_with<I: Copy>(
         step = Some(*concession);
     }
 
+    // 208.198: a small screen scrolls the body that still lacks height after the steps of giving way;
+    // a lack across stays a lack.
+    if gives_way && size.scrolls && shortfall.h > 0.0 {
+        place.scroll = true;
+        place.out.clear();
+        place.over = 0.0;
+        shortfall = place.window(window, size);
+    }
+    let mut scroll = place.body.take();
     let mut items = place.out;
     if rtl {
         mirror(&mut items, size.w);
+        if let Some(body) = scroll.as_mut() {
+            for rect in [&mut body.viewport, &mut body.bar] {
+                rect.x = size.w - rect.x - rect.w;
+            }
+        }
     }
 
     Layout {
@@ -564,6 +599,7 @@ pub fn lay_out_with<I: Copy>(
         items,
         shortfall,
         step,
+        scroll,
     }
 }
 
@@ -584,6 +620,8 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         out: Vec::new(),
         rtl: false,
         over: 0.0,
+        scroll: false,
+        body: None,
     };
     let parts: Vec<&Node<I>> = match &window.body {
         Node::Column(children) => children.iter().collect(),
@@ -658,6 +696,10 @@ struct Placer<'m, I> {
     out: Vec<Placed<I>>,
     /// The widest overflow met: a run of text wider than its room.
     over: f32,
+    /// Place the body to scroll (208.198) — the last pass of a small screen.
+    scroll: bool,
+    /// What [`Self::scroll`] placed.
+    body: Option<BodyScroll>,
 }
 
 impl<I: Copy> Placer<'_, I> {
@@ -853,8 +895,11 @@ impl<I: Copy> Placer<'_, I> {
         } else {
             top + (room - natural) / 2.0
         };
-        self.node(&window.body, x, top, column, slot);
-
+        if self.scroll {
+            self.scrolling_body(window, x, top, column, floor, area_x + area_w);
+        } else {
+            self.node(&window.body, x, top, column, slot);
+        }
         if let Some((rule, buttons)) = row {
             self.push(Part::ButtonRule, Rect::new(x, rule, column, LINE.0), None);
             self.window_buttons(window, x, buttons, column);
@@ -863,8 +908,53 @@ impl<I: Copy> Placer<'_, I> {
 
         Shortfall {
             w: self.over,
-            h: least - room,
+            h: if self.scroll { 0.0 } else { least - room },
         }
+    }
+
+    /// The body of a small screen (208.198): the head, when the body opens with one, stands still at
+    /// `top`; the rest lies at its natural height under it, and [`BodyScroll`] tells the host which
+    /// elements scroll and in what room — from under the head to `floor`, the bar in the padding
+    /// before `edge`, the right edge of the content area.
+    fn scrolling_body(
+        &mut self,
+        window: &Window<I>,
+        x: f32,
+        top: f32,
+        column: f32,
+        floor: f32,
+        edge: f32,
+    ) {
+        let mut under = top;
+        let start;
+        let content;
+        match &window.body {
+            Node::Column(children) if matches!(children.first(), Some(Node::Header { .. })) => {
+                let head = self.node(&children[0], x, top, column, None);
+                under = top + head + self.em(BLOCK_GAP);
+                start = self.out.len();
+                content = self.column(&children[1..], x, under, column, None, self.em(BLOCK_GAP));
+            }
+            body => {
+                start = self.out.len();
+                content = self.node(body, x, top, column, None);
+            }
+        }
+        let viewport = Rect::new(x, under, column, (floor - under).max(0.0));
+        let gap = ((edge - viewport.right()) - LIST_BAR.0) / 2.0;
+        let bar = Rect::new(
+            viewport.right() + gap.max(0.0),
+            viewport.y,
+            LIST_BAR.0,
+            viewport.h,
+        );
+        self.body = Some(BodyScroll {
+            viewport,
+            bar,
+            content: content.max(viewport.h),
+            start,
+            end: self.out.len(),
+        });
     }
 
     /// Places `node` at `x`, `y` in `w`; `slot` is the height it must take, where it has one.
@@ -2629,6 +2719,8 @@ pub fn place_node<I: Copy>(
         out: Vec::new(),
         rtl: false,
         over: 0.0,
+        scroll: false,
+        body: None,
     };
     let height = place.node(node, 0.0, 0.0, width, None);
     (place.out, height)

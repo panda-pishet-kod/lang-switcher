@@ -171,6 +171,18 @@ fn faults_with(
             layout.shortfall.w, layout.shortfall.h
         ));
     }
+    // 208.198: on a small screen a body that still lacks height after the steps of giving way
+    // scrolls — no fault while every element of it can be reached, that is while its room holds a
+    // line of it at least.
+    if let Some(body) = layout.scroll {
+        let line = Style::of(Role::Body, layout.b, size.h).line_height();
+        if body.viewport.h < line {
+            found.push(format!(
+                "the room of the scrolled body is {:.1}, under a line ({line:.1}): not reachable",
+                body.viewport.h
+            ));
+        }
+    }
     if layout.b < TYPE_FLOOR.0 {
         found.push(format!("B {:.2} under 12", layout.b));
     }
@@ -503,6 +515,8 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     let mut found = Vec::new();
     let mut excused_found = Vec::new();
     let mut matched: Vec<(String, Class, String)> = Vec::new();
+    // 208.198: who scrolls on a small screen — printed, not counted.
+    let mut scrolled: Vec<String> = Vec::new();
 
     for language in Language::ALL {
         let (windows, _) = windows_of(language);
@@ -520,6 +534,16 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                 let k = fit::k_for(language.tag(), class);
                 for (name, window) in &windows {
                     let faults = faults(window, size, k, rtl, &text);
+                    if size.scrolls
+                        && lay_out_with(window, size, k, rtl, &text, Concession::ALL)
+                            .scroll
+                            .is_some()
+                    {
+                        let who = format!("{}: {name}, {class:?}", language.tag());
+                        if !scrolled.contains(&who) {
+                            scrolled.push(who);
+                        }
+                    }
                     if !faults.is_empty() {
                         let who = culprit(language, window, size, k, rtl, &text, &names);
                         let line = format!(
@@ -568,6 +592,13 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     );
     for excuse in EXCUSED {
         println!("- {}", excuse_line(excuse));
+    }
+    println!(
+        "scrolls on a small screen (208.198, 620 × 500): {}",
+        scrolled.len()
+    );
+    for line in &scrolled {
+        println!("- {line}");
     }
     // How far the windows gave way (§3а) at the factors of the table.
     let steps = &pass().steps;
@@ -1001,10 +1032,13 @@ fn entry_fits(
             // At the edge of its cap an entry may fit at the factor of the table and fail a step
             // under it — the lines break otherwise — and the search of the factor, which halves its
             // range, then lands under the table (measured: «Обновление» ru, fits at 0,916, the
-            // search found 0,897). So the entry fits only where the search agrees.
+            // search found 0,897). So the entry fits only where the search agrees. The search of the table
+            // floors the factor to thousandths, and so does this: an entry that needed 0,8776 fitted
+            // here and asked the table 0,877 (208.198, the merge of 4c3318d).
             windows.iter().all(|(_, window)| {
                 faults_with(window, size, k, rtl, &text, Concession::TABLE).is_empty()
-                    && k_needed(window, size, rtl, &text).is_some_and(|need| need >= k - 0.0005)
+                    && k_needed(window, size, rtl, &text)
+                        .is_some_and(|need| (need * 1000.0).floor() / 1000.0 + 0.0005 >= k)
             })
         })
     })

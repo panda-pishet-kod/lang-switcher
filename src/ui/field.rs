@@ -45,6 +45,9 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS,
     WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    IsWindowVisible, SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow,
+};
 use ::windows::core::{HSTRING, w};
 use std::cell::{Cell, RefCell};
 
@@ -79,6 +82,8 @@ pub struct Spec<'a, I> {
     pub value: &'a str,
     pub hint: &'a str,
     pub disabled: bool,
+    /// In view (208.198): a field of a scrolled body out of its room hides behind the edge.
+    pub shown: bool,
     /// The text and the background, by the state of the wrapper.
     pub ink: Rgb,
     pub fill: Rgb,
@@ -281,6 +286,16 @@ impl<I: Copy + PartialEq> Fields<I> {
             }
             // SAFETY: as above.
             let _ = unsafe { EnableWindow(item.hwnd, !spec.disabled) };
+            // SAFETY: as above; only a change is told.
+            if unsafe { IsWindowVisible(item.hwnd) }.as_bool() != spec.shown {
+                let show = if spec.shown {
+                    SW_SHOWNOACTIVATE
+                } else {
+                    SW_HIDE
+                };
+                // SAFETY: as above.
+                let _ = unsafe { ShowWindow(item.hwnd, show) };
+            }
         }
         for old in [old, old_code].into_iter().flatten() {
             // SAFETY: a font this object made, which no field holds any more.
