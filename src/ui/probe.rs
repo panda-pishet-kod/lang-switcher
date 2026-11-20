@@ -602,3 +602,79 @@ pub fn run_popup() -> std::process::ExitCode {
     mark(format!("closed_unix_ms={}", unix_ms()));
     std::process::ExitCode::SUCCESS
 }
+
+/// The entry of the stand of the window in the corner (T-120-14), testing build only:
+/// `LangSwitcher.exe --ui-probe-corner` shows «Обновлено» — with the picture of the taskbar — as
+/// the program does (`corner::show`), marks the foreground window before and after, the window's
+/// rectangle, and closes it after `LANGSW_TESTING_UI_PROBE_CLOSE_MS`.
+pub fn run_corner() -> std::process::ExitCode {
+    use ::windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
+    use ::windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, FindWindowW, GetForegroundWindow, GetMessageW, GetWindowRect, IsWindow,
+        MSG, PostMessageW, TranslateMessage, WM_CLOSE,
+    };
+
+    let mut lines = String::new();
+    let mut mark = |line: String| {
+        lines.push_str(&line);
+        lines.push_str("\r\n");
+        report_to(&lines);
+    };
+    // SAFETY: reads the foreground window.
+    let before = unsafe { GetForegroundWindow() };
+    mark(format!("asked_unix_ms={}", unix_ms()));
+    mark(format!("foreground_before={}", before.0 as usize));
+    let shown = crate::corner::show(crate::corner::release_content("1.6.1"), false, |_| {});
+    mark(format!("shown={shown}"));
+    // SAFETY: the class of the popups of the shell, a static name; the window of this process.
+    let Ok(popup) = (unsafe { FindWindowW(::windows::core::w!("LangSwitcher.Shell.Popup"), None) })
+    else {
+        return std::process::ExitCode::FAILURE;
+    };
+    let mut rect = RECT::default();
+    // SAFETY: the out parameter is a local; reads the foreground window.
+    let after = unsafe {
+        let _ = GetWindowRect(popup, &mut rect);
+        GetForegroundWindow()
+    };
+    mark(format!("popup={}", popup.0 as usize));
+    mark(format!(
+        "rect={},{},{},{}",
+        rect.left, rect.top, rect.right, rect.bottom
+    ));
+    mark(format!("focus_kept={}", after == before));
+
+    if let Some(close) = std::env::var("LANGSW_TESTING_UI_PROBE_CLOSE_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        let raw = popup.0 as usize;
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(close));
+            // SAFETY: a posted message to the probe's window; a window already gone ignores it.
+            let _ = unsafe {
+                PostMessageW(
+                    Some(::windows::Win32::Foundation::HWND(raw as *mut _)),
+                    WM_CLOSE,
+                    WPARAM(0),
+                    LPARAM(0),
+                )
+            };
+        });
+    }
+    let mut message = MSG::default();
+    // SAFETY: the message loop of this thread; it ends when the window is gone.
+    while unsafe { IsWindow(Some(popup)) }.as_bool()
+        && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
+    {
+        // SAFETY: a message just taken from the queue.
+        unsafe {
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+    // SAFETY: reads the foreground window.
+    let end = unsafe { GetForegroundWindow() };
+    mark(format!("foreground_at_end={}", end.0 as usize));
+    std::process::ExitCode::SUCCESS
+}

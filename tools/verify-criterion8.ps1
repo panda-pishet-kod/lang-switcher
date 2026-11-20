@@ -149,7 +149,8 @@ $Strings = @(
     @{ Name = 'LANGSW_TESTING_UI_PROBE_RTL';       Value = 'LANGSW_TESTING_UI_PROBE_RTL';       Source = 'src\ui\probe.rs';          Control = 'testing' },
     @{ Name = 'probe switch --ui-probe-about';     Value = '--ui-probe-about';                  Source = 'src\main.rs';              Control = 'testing' },
     @{ Name = 'probe switch --ui-probe-fields';    Value = '--ui-probe-fields';                 Source = 'src\main.rs';              Control = 'testing' },
-    @{ Name = 'probe switch --ui-probe-popup';     Value = '--ui-probe-popup';                  Source = 'src\main.rs';              Control = 'testing' }
+    @{ Name = 'probe switch --ui-probe-popup';     Value = '--ui-probe-popup';                  Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-corner';    Value = '--ui-probe-corner';                 Source = 'src\main.rs';              Control = 'testing' }
 )
 
 $Failures = New-Object System.Collections.Generic.List[string]
