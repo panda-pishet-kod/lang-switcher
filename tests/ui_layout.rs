@@ -1186,3 +1186,44 @@ fn the_sections_of_the_settings_stand_in_the_panel_under_the_picture() {
         "the tabs in the flow under the header"
     );
 }
+
+/// **A line of status** (passport §6, T-120-17): its dot first, in the middle of the first line, the
+/// words after it and wrapping under themselves — never under the dot; the dot by the state.
+#[test]
+fn a_line_of_status_is_its_dot_and_its_words() {
+    use lang_switcher::ui::layout::Status;
+    use lang_switcher::ui::scene::MenuState;
+
+    let line = |state, words: &str| {
+        bare(Node::Status {
+            state,
+            words: words.to_owned(),
+        })
+    };
+    let layout = lay(&line(MenuState::Working, "Updates are told"), usual());
+    let dot = rects_of(&layout, |part| matches!(part, Part::Dot(Status::Working)))[0];
+    let words = texts(&layout)[0];
+    assert!(
+        words.x > dot.right(),
+        "the words after the dot: {dot:?} {words:?}"
+    );
+    assert!(close(dot.y, words.y), "the dot on the first line");
+
+    let long = lay(
+        &line(MenuState::Restart, &"wrapping words ".repeat(20)),
+        usual(),
+    );
+    let dot = rects_of(&long, |part| matches!(part, Part::Dot(Status::Restart)))[0];
+    let words = texts(&long)[0];
+    assert!(words.h > dot.h * 1.5, "the words wrap: {words:?}");
+    assert!(words.x > dot.right(), "and stay after the dot: {words:?}");
+    assert_eq!(
+        rects_of(
+            &lay(&line(MenuState::Paused, "Off"), usual()),
+            |part| matches!(part, Part::Dot(Status::Idle))
+        )
+        .len(),
+        1,
+        "paused — the dot of ink3"
+    );
+}

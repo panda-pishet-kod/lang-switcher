@@ -9906,6 +9906,7 @@ fn wizard_save(hwnd: HWND) {
 
     let today = today().unwrap_or_else(|| Date::from_ymd(1970, 1, 1).expect("the epoch is a day"));
     let path = folder.join(report::file_name(today));
+    crate::sandbox::guard_path(&path);
 
     if std::fs::create_dir_all(&folder).is_err() || std::fs::write(&path, &appeal).is_err() {
         wizard_say(hwnd, text(IDS_WIZARD_FAILED));

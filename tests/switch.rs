@@ -2628,6 +2628,13 @@ mod own_window {
             let child = std::process::Command::new(env!("CARGO_BIN_EXE_LangSwitcher"))
                 // FR-97. Never started without it: the program carries a live global hook.
                 .env("LANGSW_DEBUG_TIMEOUT_SEC", "45")
+                // The night of 2026-11-20: the product a test starts keeps its configuration and its
+                // journal in a folder of the test's own, never in the person's %APPDATA% — the
+                // guard of `src\sandbox.rs` does not see a child that is the product itself.
+                .env(
+                    "APPDATA",
+                    std::env::temp_dir().join(format!("langsw-product-{}", std::process::id())),
+                )
                 .spawn()
                 .expect("the product binary is built beside this test");
 

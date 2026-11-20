@@ -809,19 +809,22 @@ fn button(
     if let Some(frame) = frame {
         painter.stroke_rect(rect, radius, LINE.0, c(frame));
     }
-    // A label wider than its button (§3а, step 5: the layout made the button taller) goes on to a
-    // second line, inside the paddings.
-    let pad = BUTTON_PAD.h.at(look.b);
+    // A label wider than its button goes on to a second line, inside the paddings — only where the
+    // layout made the button taller for it (§3а, step 5).
+    let (pad, pad_v) = (BUTTON_PAD.h.at(look.b), BUTTON_PAD.v.at(look.b));
     let mut style = Style::of(Role::Button, look.b, look.h);
     if let Some(weight) = weight {
         style = style.with_weight(weight);
     }
-    let wide = look
-        .text
-        .measure(label, style, Wrap::OneLine, f32::MAX)
-        .width
-        > rect.w - pad * 2.0;
-    let (place, wrap) = if wide {
+    let wraps = button_label_wraps(
+        look.text
+            .measure(label, style, Wrap::OneLine, f32::MAX)
+            .width,
+        rect.w - pad * 2.0,
+        rect.h - pad_v * 2.0,
+        style.line_height(),
+    );
+    let (place, wrap) = if wraps {
         (
             Rect::new(rect.x + pad, rect.y, (rect.w - pad * 2.0).max(0.0), rect.h),
             Wrap::Words,
@@ -841,6 +844,16 @@ fn button(
         true,
         text,
     );
+}
+
+/// Whether the label of a button goes on to a second line (§3а, step 5): when the layout made the
+/// inside of the button taller than one line for it **and** the label is wider than the inside by
+/// more than the rounding of a measure. A label that fits its button to the last hundredth stays on
+/// its line whole — the stand of 2026-11-20, Windows 11: the main button «Close» of «О программе»,
+/// exactly as wide as its label, came out «Clos / e». Pure: the width of the label on one line, the
+/// width and height of the inside of the button, the height of one line.
+pub fn button_label_wraps(label: f32, inner_w: f32, inner_h: f32, line: f32) -> bool {
+    label > inner_w + 0.5 && inner_h > line + line * 0.5
 }
 
 /// The keyboard ring of §4 around `rect`, `FOCUS_GAP` outside it, its corners following the part's.

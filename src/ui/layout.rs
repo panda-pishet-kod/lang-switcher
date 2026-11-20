@@ -50,7 +50,7 @@ use crate::ui::tokens::{
     ON_PICTURE_KEY, ON_PICTURE_KEY_GAP, ON_PICTURE_KEY_LABEL, ON_PICTURE_KEY_MIN,
     ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
-use crate::ui::tokens::{SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD};
+use crate::ui::tokens::{SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD, STATUS_DOT};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -600,6 +600,15 @@ pub fn mirror<I>(items: &mut [Placed<I>], width: f32) {
     }
 }
 
+/// The dot of a line of status for the state of the program.
+fn status_of(state: MenuState) -> Status {
+    match state {
+        MenuState::Working => Status::Working,
+        MenuState::Paused => Status::Idle,
+        MenuState::Restart => Status::Restart,
+    }
+}
+
 /// What places the nodes of one window.
 struct Placer<'m, I> {
     b: f32,
@@ -994,6 +1003,25 @@ impl<I: Copy> Placer<'_, I> {
                 );
                 pad_v * 2.0 + LINE.0
             }
+            Node::Status { state, words } => {
+                // The dot in the middle of the first line, the words after it.
+                let (dot, gap) = (self.em(STATUS_DOT), self.em(CONTROL_GAP));
+                let line = self.style(Role::Body).line_height();
+                self.push(
+                    Part::Dot(status_of(*state)),
+                    Rect::new(x, y, dot, line),
+                    None,
+                );
+                let words = self.text(
+                    Role::Body,
+                    words,
+                    x + dot + gap,
+                    y,
+                    (w - dot - gap).max(0.0),
+                    Wrap::Words,
+                );
+                words.max(line)
+            }
             Node::Taskbar(picture) => {
                 let h = CORNER_PICTURE.0;
                 self.push(Part::Taskbar(picture.clone()), Rect::new(x, y, w, h), None);
@@ -1231,13 +1259,8 @@ impl<I: Copy> Placer<'_, I> {
             ),
             None,
         );
-        let status = match state {
-            MenuState::Working => Status::Working,
-            MenuState::Paused => Status::Idle,
-            MenuState::Restart => Status::Restart,
-        };
         self.push(
-            Part::Dot(status),
+            Part::Dot(status_of(state)),
             Rect::new(dot_x, middle(dot), dot, dot),
             None,
         );
