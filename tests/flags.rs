@@ -803,6 +803,104 @@ fn a_console_shows_the_layout_the_own_list_gave_it() {
     ));
 }
 
+/// ⭐ **The gift of the chosen layout waits for the person's window and is given once** — defect 3
+/// of the stand (2026-11-20, Edge under ^). Every sequence of looks «in front / not yet» is run
+/// through [`flags::gift_step`] the way `tray::list_timer` runs it: a gift only with the person's
+/// window in front, never more than one, and the session over within `1 + GIFT_RETRIES` looks.
+#[test]
+fn the_gift_of_the_list_waits_for_the_window_and_is_given_once() {
+    use flags::GiftStep;
+
+    assert_eq!(flags::gift_step(true, flags::GIFT_RETRIES), GiftStep::Now);
+    assert_eq!(flags::gift_step(true, 0), GiftStep::Now);
+    assert_eq!(
+        flags::gift_step(false, flags::GIFT_RETRIES),
+        GiftStep::Wait {
+            left: flags::GIFT_RETRIES - 1
+        }
+    );
+    assert_eq!(flags::gift_step(false, 0), GiftStep::GiveUp);
+
+    let looks = usize::from(flags::GIFT_RETRIES) + 1;
+
+    for pattern in 0u32..(1 << looks) {
+        let mut left = flags::GIFT_RETRIES;
+        let mut gifts = 0;
+        let mut taken = 0;
+
+        for look in 0..looks {
+            let in_front = pattern & (1 << look) != 0;
+            taken += 1;
+
+            match flags::gift_step(in_front, left) {
+                GiftStep::Now => {
+                    assert!(
+                        in_front,
+                        "pattern {pattern:b}: a gift to a window not in front"
+                    );
+                    gifts += 1;
+                    break;
+                }
+                GiftStep::Wait { left: next } => left = next,
+                GiftStep::GiveUp => break,
+            }
+        }
+
+        assert!(gifts <= 1, "pattern {pattern:b}: {gifts} gifts");
+        assert_eq!(
+            gifts,
+            usize::from(pattern != 0),
+            "pattern {pattern:b}: the window came in front within the looks, so it is given"
+        );
+        assert!(
+            taken <= looks,
+            "pattern {pattern:b}: the session did not end"
+        );
+    }
+
+    // The wiring of `tray::list_timer`: only the look «now» gives, and it ends the session before
+    // it does — a session that lives on after the switch would give a second time.
+    let tray = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("tray.rs"),
+    )
+    .expect(r"src\tray.rs reads")
+    .replace("\r\n", "\n");
+    let start = tray.find("fn list_timer(").expect("list_timer is there");
+    let body = &tray[start..start + tray[start..].find("\n}\n").expect("its end")];
+    let decided = body.find("gift_step(").expect("list_timer asks gift_step");
+    let now = body
+        .find("GiftStep::Now => {}")
+        .expect("the look «now» falls through");
+    let switch = body
+        .find("crate::switch::to(")
+        .expect("the gift is the switch");
+    let tail = &body[now..];
+
+    assert!(
+        decided < now && now < switch,
+        "the switch comes after the look «now» only"
+    );
+    assert!(
+        !body[..now].contains("crate::switch::to("),
+        "no switch while waiting"
+    );
+    let ended = tail
+        .find("tray.list_session = None")
+        .expect("the look «now» ends the session");
+
+    assert!(ended < switch - now, "the session ends before the gift");
+    assert!(
+        !tail.contains("arm_list_timer("),
+        "after the gift nothing looks again"
+    );
+    assert!(
+        body[..now].contains("\"list gift skipped\"")
+            && body[..now].contains("\"list gift given up\"")
+    );
+}
+
 /// **The geometry of the own list — the mock-up's numbers at 96 DPI, scaled with the monitor.**
 #[test]
 fn the_own_list_has_the_size_of_the_mock_up_and_scales() {
