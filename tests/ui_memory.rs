@@ -797,6 +797,11 @@ impl Series {
     fn last(&self) -> f64 {
         self.private.last().copied().unwrap_or_default()
     }
+
+    /// The level of the last [`BLOCK`] steps: the median of their private memory, KB.
+    fn end(&self) -> f64 {
+        median(&mut self.private[self.private.len().saturating_sub(BLOCK)..].to_vec())
+    }
 }
 
 /// One opening of the window `hwnd`: painted, closed.
@@ -811,7 +816,10 @@ fn opening(hwnd: windows::Win32::Foundation::HWND) {
 /// The three series of the gate in one process: «О программе» warmed by `warm` openings, then
 /// `steps` openings of it; rest — `steps` steps of nothing but the time one opening took on average;
 /// the letter with the panda warmed and opened the same way.
-fn the_series_of_the_gate(warm: usize, steps: usize) -> (Series, Series, Series) {
+fn the_series_of_the_gate(
+    warm: usize,
+    steps: usize,
+) -> (Option<(f64, f64)>, Series, Series, Series) {
     use lang_switcher::letters::{self, Letter};
     use lang_switcher::ui::windows::letter::LetterView;
 
@@ -849,9 +857,11 @@ fn the_series_of_the_gate(warm: usize, steps: usize) -> (Series, Series, Series)
     };
 
     let started = std::time::Instant::now();
+    let mut warming = Vec::with_capacity(warm);
     for _ in 0..warm {
         opening(about());
         pump();
+        warming.push(memory().0 * 1024.0);
     }
     let about_series = Series::run(steps, || opening(about()));
     let pace = started.elapsed() / (warm + steps).max(1) as u32;
@@ -861,25 +871,38 @@ fn the_series_of_the_gate(warm: usize, steps: usize) -> (Series, Series, Series)
         pump();
     }
     let letter_series = Series::run(steps, || opening(letter()));
-    (about_series, rest, letter_series)
+    // The warming of a fresh process, KB: the level of the openings 11…30 and that of the last 20 of
+    // the warming (none with a warming shorter than 50 openings).
+    let warmed = (warm >= 50).then(|| {
+        (
+            median(&mut warming[10..30].to_vec()),
+            median(&mut warming[warm - BLOCK..].to_vec()),
+        )
+    });
+    (warmed, about_series, rest, letter_series)
 }
 
 /// **The memory does not grow with every opening** — the gate of 208.183 (the word of the owner: the
 /// program does not eat more memory with every opening of a window; T-120-24, a gate of the release).
 /// In a fresh process «О программе» is opened `WARM` times to warm (the first window loads
 /// Direct2D, the caches of a fresh process fill), then `STEPS` times more; then the process rests
-/// as long; then the letter with the panda is warmed and opened the same way. Each series gives the
-/// growth per opening ([`Series::growth`], [`Series::busy`]), and the gate is on the series less
-/// the rest — what grows with the time alone is not the openings':
+/// as long; then the letter with the panda is warmed and opened the same way. Two parts:
 ///
-/// * the private memory: no more than `LIMIT_KB` per opening;
-/// * the busy bytes of the heaps (`HeapWalk`, exact, no pages): no more than `LIMIT_BUSY` per
-///   opening — a block kept per opening shows here even where the pages hide it.
+/// * **(а) the warming of a fresh process** — the level of the last 20 openings of the warming
+///   (the median) no more than `WARMING_KB` above that of the openings 11…30, the limit of the
+///   decision 208.183 (+0,59…0,78 MB measured). A memory not given back after the last window
+///   (`canvas::give_back_free_memory`) grows here: +5,6…6,5 MB.
+/// * **The growth per opening after the warming**, each series ([`Series::growth`],
+///   [`Series::busy`]) less the rest — what grows with the time alone is not the openings': the
+///   private memory no more than `LIMIT_KB` per opening; the busy bytes of the heaps (`HeapWalk`,
+///   exact, no pages) no more than `LIMIT_BUSY` per opening — a block kept per opening shows here
+///   even where the pages hide it.
 ///
-/// Not the difference of two ends any more: the memory after one closing catches spikes (committed
-/// for a moment, given back within some 25 openings, 0,25…0,45 MB measured) and a cache taken once
-/// is a step — the median of the rises from block to block is moved by neither. The experiments of
-/// 208.183 (T-120-24): 4 KB kept per opening turn it red; 1 MB taken once amid the series does not.
+/// The series is not judged by the difference of its two ends: the memory after one closing catches
+/// spikes (committed for a moment, given back within some 25 openings, 0,25…0,45 MB measured) and a
+/// cache taken once is a step — the median of the rises from block to block is moved by neither.
+/// The experiments of 208.183 (T-120-24): the free memory not given back and 4 KB kept per opening
+/// turn it red; 1 MB taken once amid the series does not.
 ///
 /// The only test of this binary run without `--ignored`: alone in its process, as the gate needs.
 #[test]
@@ -888,8 +911,11 @@ fn the_memory_does_not_grow_with_every_opening() {
     const STEPS: usize = 200;
     const LIMIT_KB: f64 = 2.0;
     const LIMIT_BUSY: f64 = 512.0;
+    const WARMING_KB: f64 = 1.5 * 1024.0;
 
-    let (about, rest, letter) = the_series_of_the_gate(WARM, STEPS);
+    let (warmed, about, rest, letter) = the_series_of_the_gate(WARM, STEPS);
+    let (early, warm) = warmed.expect("a warming of 50 openings and more");
+    let warming = warm - early;
     let line = |name: &str, series: &Series| {
         format!(
             "{name}: {:+.2} KB and {:+.0} busy bytes per opening, less the rest {:+.2} KB and {:+.0} B (after the last {:.0} KB)",
@@ -901,24 +927,30 @@ fn the_memory_does_not_grow_with_every_opening() {
         )
     };
     let report = format!(
-        "{}; {}; rest {:+.2} KB and {:+.0} B per step",
+        "«О программе» warming, the openings 11…30 to {}…{WARM}: {early:.0} -> {warm:.0} KB, {warming:+.0} KB (the last {BLOCK} of the series {:.0} KB); {}; {}; rest {:+.2} KB and {:+.0} B per step",
+        WARM - BLOCK + 1,
+        about.end(),
         line("«О программе»", &about),
         line("the letter", &letter),
         rest.growth(),
         rest.busy()
     );
     println!("{report}");
+    // Every limit is checked and every one passed is named: an experiment shows which part caught it.
+    let mut failed = Vec::new();
+    if warming > WARMING_KB {
+        failed.push("(а) «О программе» grows past the warming of a fresh process".to_owned());
+    }
     for (name, series) in [("(а) «О программе»", &about), ("(б) the letter", &letter)]
     {
-        assert!(
-            series.growth() - rest.growth() <= LIMIT_KB,
-            "{name} grows with every opening: {report}"
-        );
-        assert!(
-            series.busy() - rest.busy() <= LIMIT_BUSY,
-            "{name} keeps heap blocks with every opening: {report}"
-        );
+        if series.growth() - rest.growth() > LIMIT_KB {
+            failed.push(format!("{name} grows with every opening"));
+        }
+        if series.busy() - rest.busy() > LIMIT_BUSY {
+            failed.push(format!("{name} keeps heap blocks with every opening"));
+        }
     }
+    assert!(failed.is_empty(), "{}: {report}", failed.join("; "));
 }
 
 /// **The series of the gate, written out** — the instrument behind its limits: the series of
@@ -938,7 +970,7 @@ fn the_series_of_the_gate_written_out() {
         number("LANGSW_UI_MEMORY_WARM", 200),
         number("LANGSW_UI_MEMORY_STEPS", 200),
     );
-    let (about, rest, letter) = the_series_of_the_gate(warm, steps);
+    let (_, about, rest, letter) = the_series_of_the_gate(warm, steps);
     let mut lines = Vec::new();
     for (name, series) in [("about", &about), ("rest", &rest), ("letter", &letter)] {
         lines.push(format!(
