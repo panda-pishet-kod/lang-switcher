@@ -63,15 +63,6 @@ pub const EXCUSED: &[Excuse] = &[
         why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
     },
     Excuse {
-        window: "letter update",
-        class: Class::Narrow,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Обновление»: временные образцы строк ×1,3 и длинный перевод — укоротить в волне",
-    },
-    Excuse {
         window: "author",
         class: Class::Narrow,
         languages: &["ml", "ta"],
