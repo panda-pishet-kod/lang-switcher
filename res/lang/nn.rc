@@ -254,6 +254,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Meldinga er send"
     IDS_WIZARD_SENT_TEXT    "Takk for at du sende meldinga! Eg er glad for at du tek del i prosjektet, og eg skal lese alt når eg har fritid."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

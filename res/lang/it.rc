@@ -256,6 +256,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Messaggio inviato"
     IDS_WIZARD_SENT_TEXT    "Grazie per aver inviato il messaggio! Sono contento che partecipi alla vita del progetto, e leggerò sicuramente tutto nel mio tempo libero."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

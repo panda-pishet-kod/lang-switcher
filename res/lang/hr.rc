@@ -250,6 +250,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Poruka je poslana"
     IDS_WIZARD_SENT_TEXT    "Hvala što ste poslali poruku! Drago mi je što sudjelujete u životu projekta i sve ću pročitati u slobodno vrijeme."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

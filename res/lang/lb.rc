@@ -250,6 +250,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Noriicht geschéckt"
     IDS_WIZARD_SENT_TEXT    "Merci, datt Dir d'Noriicht geschéckt hutt! Ech si frou, datt Dir um Liewe vum Projet deelhëlt, an ech wäert alles a menger Fräizäit liesen."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

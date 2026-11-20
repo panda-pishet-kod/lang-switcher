@@ -3245,7 +3245,10 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         CMD_SETTINGS => open_settings(hwnd),
 
         // FR-93, task T-08-1.
+        #[cfg(not(feature = "testing"))]
         CMD_AUTOSTART => toggle_autostart(),
+        #[cfg(feature = "testing")]
+        CMD_AUTOSTART => toggle_autostart_for_tests(),
 
         // Outside any borrow of the tray, like the letters below: the window of FR-92а is made
         // while the arm runs.
@@ -3414,7 +3417,7 @@ pub fn apply_settings_now(config: &Config) -> Option<bool> {
 fn apply_settings(config: &Config) {
     let flag_was_on = with_tray(|tray| tray.flag_on()).unwrap_or(false);
 
-    apply_settings_via(config, settings::set_autostart);
+    apply_settings_in_force(config);
 
     // Task T-119-5: the flag was just turned on — once per turning on, and only while it stands
     // under ^, its hint comes up by the notification area.
@@ -3597,6 +3600,59 @@ pub fn adopt_ui_language() {
 /// system would make the tray show a state that is not true.
 fn toggle_autostart() {
     toggle_autostart_via(settings::set_autostart);
+}
+
+/// The same under the `testing` feature: the writer a test put in for its thread, else the registry.
+#[cfg(feature = "testing")]
+fn toggle_autostart_for_tests() {
+    match testing::run_key_writer() {
+        Some(write) => toggle_autostart_via(write),
+        None => toggle_autostart(),
+    }
+}
+
+/// «Применить» and the window of the settings put a configuration in force with the real write
+/// of the `Run` key of FR-93 in hand.
+#[cfg(not(feature = "testing"))]
+fn apply_settings_in_force(config: &Config) {
+    apply_settings_via(config, settings::set_autostart);
+}
+
+/// The same under the `testing` feature: the writer a test put in for its thread, else the registry
+/// (the stands run the `testing` image as the product).
+#[cfg(feature = "testing")]
+fn apply_settings_in_force(config: &Config) {
+    match testing::run_key_writer() {
+        Some(write) => apply_settings_via(config, write),
+        None => apply_settings_via(config, settings::set_autostart),
+    }
+}
+
+/// What the tests put in the place of the write of the `Run` key — finding of task T-120-20: the
+/// window of the settings puts every change in force at once, and a test of it that went the
+/// product's road wrote the `Run` key of the machine the tests ran on with the path of the test
+/// image. A thread that attached a tray for a test hands in its own writer here, and no test
+/// touches that key.
+#[cfg(feature = "testing")]
+pub mod testing {
+    use super::WinResult;
+    use std::cell::Cell;
+
+    /// A writer of the `Run` key: the value asked for, and whether it was written.
+    pub type RunKeyWriter = fn(bool) -> WinResult<()>;
+
+    thread_local! {
+        static RUN_KEY: Cell<Option<RunKeyWriter>> = const { Cell::new(None) };
+    }
+
+    /// The `Run` key of this thread is written through `write` from now on.
+    pub fn write_run_key_with(write: RunKeyWriter) {
+        RUN_KEY.with(|cell| cell.set(Some(write)));
+    }
+
+    pub(super) fn run_key_writer() -> Option<RunKeyWriter> {
+        RUN_KEY.with(Cell::get)
+    }
 }
 
 /// The same, with the registry write handed in — task T-55-2.

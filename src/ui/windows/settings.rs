@@ -9,23 +9,28 @@
 
 use crate::layouts::LayoutId;
 use crate::settings::{
-    self, Config, ExclusionVerdict, IDS_AUTOSTART, IDS_CLOSE, IDS_CYCLE_DOWN, IDS_CYCLE_HINT,
-    IDS_CYCLE_UP, IDS_DIALOG_CAPTION, IDS_EXCLUSION_ADD, IDS_EXCLUSION_AUTO, IDS_EXCLUSION_HINT,
-    IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE,
-    IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS, IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY,
-    IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL,
-    IDS_LOG_ENABLED, IDS_LOG_OPEN, IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED,
-    IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED,
-    IDS_SETTINGS_NOT_SAVED, IDS_SOUND, IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT,
-    IDS_THEME_SYSTEM, IDS_TRAY_FLAG, IDS_UPDATES_SWITCH, IDS_WIZARD_ATTACH_SETTINGS,
-    IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow,
+    self, CaptureEvent, CaptureSession, CaptureStep, Config, ExclusionPick, ExclusionVerdict,
+    Hotkey, IDS_AUTOSTART, IDS_CAPTURE_HINT, IDS_CAPTURE_PROMPT, IDS_CAPTURE_SHIFT_AGAIN,
+    IDS_CLOSE, IDS_CYCLE_DOWN, IDS_CYCLE_HINT, IDS_CYCLE_UP, IDS_DIALOG_CAPTION, IDS_EXCLUSION_ADD,
+    IDS_EXCLUSION_ADDED, IDS_EXCLUSION_ALREADY, IDS_EXCLUSION_AUTO, IDS_EXCLUSION_HINT,
+    IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_NOT_PICKED, IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_COUNT,
+    IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE, IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS,
+    IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY, IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET,
+    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_OPEN,
+    IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
+    IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
+    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRAY_FLAG,
+    IDS_UPDATES_SWITCH, IDS_WIZARD_ATTACH_SETTINGS, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder,
+    LayoutMode, LayoutRow, Modifiers, Refusal,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
 use crate::ui::scene::{
-    ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
+    Art, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
 };
 use ::windows::Win32::Foundation::HWND;
+use ::windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
+use std::time::{Duration, Instant};
 
 /// The elements of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +118,42 @@ pub struct Settings {
     refused: bool,
     /// The journal was just saved; or its saving failed.
     journal: Option<bool>,
+    /// «Журнал сохранён» stands on the button till then (`settings::JOURNAL_SAVED_MS`).
+    journal_until: Option<Instant>,
+    /// The capture of the hotkey, while the field takes every key.
+    capture: Option<Capture>,
+    /// The last capture took a combination or the double press: the line under the field says
+    /// once which half stays with the programs (task T-93-2), till the next capture.
+    combination_taken: bool,
+    /// «Выбрать окно программы» counts: the moment the window in front is taken.
+    pick_at: Option<Instant>,
+    /// What the last pick found, said under its button; none — the line at rest.
+    pick_note: Option<String>,
+    /// «Сохранить журнал»: the journal into its folder, and whether it was written.
+    save_journal: fn() -> bool,
     apply: Apply,
+}
+
+/// An armed capture of the hotkey (FR-94): the hotkey is suspended while it lives — the session
+/// gives it back when dropped, the window closing among the ways (FR-02).
+struct Capture {
+    session: CaptureSession,
+    /// The line under the field.
+    line: CaptureLine,
+    /// A `Shift` went down on its own: the field says «Shift…» till then (`hook::DOUBLE_TAP_MS`
+    /// after the last tap, the timer of the pair of task T-95-2).
+    pair_until: Option<Instant>,
+}
+
+/// What the line under the field says in a capture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaptureLine {
+    /// «Esc или клик мимо — отмена».
+    Hint,
+    /// Why the last press cannot be the hotkey; the capture stays armed.
+    Refused(Refusal),
+    /// «Ещё раз Shift — двойное нажатие; …» — stays till the next press.
+    ShiftAgain,
 }
 
 impl Settings {
@@ -146,6 +186,12 @@ impl Settings {
             exclusion_name: String::new(),
             refused: false,
             journal: None,
+            journal_until: None,
+            capture: None,
+            combination_taken: false,
+            pick_at: None,
+            pick_note: None,
+            save_journal: save_journal_in_force,
             apply,
         }
     }
@@ -163,6 +209,9 @@ impl Settings {
     /// Puts the configuration changed by `edit` in force; the file refused it — the change is
     /// stepped back, and the note says so.
     fn change(&mut self, edit: impl FnOnce(&mut Config)) {
+        // Nothing is put in force while the hotkey is suspended: publishing the configuration
+        // would give the callback its hotkey back in the middle of a capture (C6).
+        self.capture = None;
         let mut next = self.config.clone();
         edit(&mut next);
         if next == self.config {
@@ -209,11 +258,15 @@ impl Settings {
                 self.line(IDS_SELECTION_ENABLED),
                 self.config.selection.enabled,
             ),
-            toggle(
-                Id::TrayFlag,
-                self.line(IDS_TRAY_FLAG),
-                self.config.general.tray_flag,
-            ),
+            Node::Toggle {
+                id: Id::TrayFlag,
+                label: self.line(IDS_TRAY_FLAG),
+                hint: None,
+                on: self.config.general.tray_flag,
+                // The setting came with 1.7.0 (T-119-2); the badge «новое» stays while the
+                // window is the window of 1.8.0 (T-120-20, passport §6).
+                badge: Some(self.line(IDS_NEW_BADGE)),
+            },
             toggle(
                 Id::Updates,
                 self.line(IDS_UPDATES_SWITCH),
@@ -246,17 +299,49 @@ impl Settings {
         ]
     }
 
+    /// The field of the hotkey and «Задать» beside it; under them, one line: at rest the ways a
+    /// hotkey may be, once after a capture what stays with the programs, in a capture the way out
+    /// or why the press was refused (решение 82.6, task T-95-2).
     fn hotkey(&self) -> Vec<Node<Id>> {
-        vec![Node::Row(vec![
-            Node::Field {
-                id: Id::Hotkey,
-                label: self.line(IDS_HOTKEY_LABEL),
-                value: settings::effective_hotkey_name(&self.config.hotkey),
-                hint: String::new(),
-                kind: FieldKind::Line,
-            },
-            button(Id::HotkeySet, self.line(IDS_HOTKEY_SET)),
-        ])]
+        let (value, set, line) = match &self.capture {
+            Some(capture) => (
+                if capture.pair_until.is_some() {
+                    settings::pending_shift_name()
+                } else {
+                    self.line(IDS_CAPTURE_PROMPT)
+                },
+                IDS_HOTKEY_STOP,
+                match capture.line {
+                    CaptureLine::Hint => self.line(IDS_CAPTURE_HINT),
+                    CaptureLine::Refused(refusal) => self.line(refusal.string_id()),
+                    CaptureLine::ShiftAgain => self.line(IDS_CAPTURE_SHIFT_AGAIN),
+                },
+            ),
+            None => (
+                settings::effective_hotkey_name(&self.config.hotkey),
+                IDS_HOTKEY_SET,
+                settings::hotkey_line_in(
+                    self.language,
+                    &self.config.hotkey,
+                    self.combination_taken,
+                ),
+            ),
+        };
+        vec![
+            Node::Row(vec![
+                Node::Field {
+                    id: Id::Hotkey,
+                    label: self.line(IDS_HOTKEY_LABEL),
+                    value,
+                    hint: String::new(),
+                    kind: FieldKind::Key {
+                        capturing: self.capture.is_some(),
+                    },
+                },
+                button(Id::HotkeySet, self.line(set)),
+            ]),
+            Node::Line(Role::Small, line),
+        ]
     }
 
     fn layouts(&self) -> Vec<Node<Id>> {
@@ -331,20 +416,29 @@ impl Settings {
                 first: 0,
             },
             Node::Buttons(vec![button(Id::Remove, self.line(IDS_EXCLUSION_REMOVE))]),
-            Node::Line(Role::Label, self.line(IDS_EXCLUSION_AUTO)),
-            Node::Buttons(vec![button(Id::Pick, self.line(IDS_EXCLUSION_PICK))]),
-            Node::Line(Role::Small, self.line(IDS_EXCLUSION_PICK_NOTE)),
-            Node::Line(Role::Label, self.line(IDS_EXCLUSION_MANUAL)),
-            Node::Row(vec![
-                Node::Field {
-                    id: Id::ExclusionName,
-                    label: String::new(),
-                    value: self.exclusion_name.clone(),
-                    hint: self.line(IDS_EXCLUSION_HINT),
-                    kind: FieldKind::Line,
-                },
-                button(Id::Add, self.line(IDS_EXCLUSION_ADD)),
-            ]),
+            // The two ways to add one, side by side as in the mock-up (`.form2`).
+            Node::Pair(
+                Box::new(Node::Rows(vec![
+                    Node::Line(Role::Label, self.line(IDS_EXCLUSION_AUTO)),
+                    Node::Buttons(vec![button(Id::Pick, self.pick_caption())]),
+                    Node::Line(
+                        Role::Small,
+                        self.pick_note
+                            .clone()
+                            .unwrap_or_else(|| self.line(IDS_EXCLUSION_PICK_NOTE)),
+                    ),
+                ])),
+                Box::new(Node::Row(vec![
+                    Node::Field {
+                        id: Id::ExclusionName,
+                        label: self.line(IDS_EXCLUSION_MANUAL),
+                        value: self.exclusion_name.clone(),
+                        hint: self.line(IDS_EXCLUSION_HINT),
+                        kind: FieldKind::Line,
+                    },
+                    button(Id::Add, self.line(IDS_EXCLUSION_ADD)),
+                ])),
+            ),
         ]
     }
 
@@ -368,13 +462,168 @@ impl Settings {
             Node::Buttons(vec![
                 button(Id::OpenFolder, self.line(IDS_LOG_OPEN)),
                 button(Id::SaveJournal, self.line(save)),
-                button(Id::Write, self.line(IDS_WRITE_TO_AUTHOR)),
             ]),
+            Node::Buttons(vec![button(Id::Write, self.line(IDS_WRITE_TO_AUTHOR))]),
         ];
         if self.journal == Some(false) {
             nodes.insert(0, note(self.line(IDS_LOG_SAVE_FAILED)));
         }
         nodes
+    }
+
+    /// One event of the capture, decided by its session with the memory of a pair of `Shift`, and
+    /// carried out (tasks Т-23-5, T-95-2: the machine is `settings::CapturePair`, not copied).
+    fn capture_step(&mut self, event: CaptureEvent) {
+        // SAFETY: reads the time of the message this thread dispatches — the key's own, since the
+        // shell sends `Event::KeyDown` inside it. The cast is the documented reading of a tick.
+        let time = unsafe { GetMessageTime() } as u32;
+        let Some(step) = self
+            .capture
+            .as_mut()
+            .map(|capture| capture.session.step(event, time))
+        else {
+            return;
+        };
+        match step {
+            CaptureStep::Ignore => {}
+            CaptureStep::Cancel => self.capture = None,
+            CaptureStep::Take(hotkey) => self.take_hotkey(hotkey),
+            step => {
+                let Some(capture) = self.capture.as_mut() else {
+                    return;
+                };
+                match step {
+                    // The capture stays armed: «not that one», not the end of the question. The
+                    // refusal is counted and journaled where it is carried out (task T-71-3), and it
+                    // ends an open pair.
+                    CaptureStep::Refuse(refusal) => {
+                        settings::note_capture_refused();
+                        capture.line = CaptureLine::Refused(refusal);
+                        capture.pair_until = None;
+                    }
+                    CaptureStep::AwaitShift => {
+                        capture.line = CaptureLine::ShiftAgain;
+                        capture.pair_until = Some(
+                            Instant::now()
+                                + Duration::from_millis(crate::hook::DOUBLE_TAP_MS.into()),
+                        );
+                    }
+                    // The line «Ещё раз Shift…» stays till the next press (157.18).
+                    _ => capture.pair_until = None,
+                }
+            }
+        }
+    }
+
+    /// A press taken (FR-94): the capture ends — its session gives the callback the hotkey it had —
+    /// and only then is the new one put in force, like any other change.
+    fn take_hotkey(&mut self, hotkey: Hotkey) {
+        self.capture = None;
+        let combination = !hotkey.modifiers.is_empty() || hotkey.is_double_tap();
+        self.change(|config| config.hotkey = hotkey);
+        self.combination_taken = combination && !self.refused;
+    }
+
+    /// The timer of the window: whatever moment has come is carried out.
+    fn timer_came(&mut self) {
+        let now = Instant::now();
+        let pair_over = self
+            .capture
+            .as_ref()
+            .and_then(|capture| capture.pair_until)
+            .is_some_and(|until| until <= now);
+        if pair_over {
+            self.capture_step(CaptureEvent::PairTimeout);
+            if let Some(capture) = self.capture.as_mut() {
+                capture.pair_until = None;
+            }
+        }
+        if self.journal_until.is_some_and(|until| until <= now) {
+            self.journal_until = None;
+            self.journal = None;
+        }
+        if self.pick_at.is_some_and(|at| at <= now) {
+            self.pick_at = None;
+            self.pick_now();
+        }
+    }
+
+    /// The count of «Выбрать окно программы» is over: the program of the window in front goes into
+    /// the list, or the line under the button says why not.
+    fn pick_now(&mut self) {
+        let captured = crate::guard::capture_foreground(crate::guard::Asker::Process)
+            .and_then(|found| found.process);
+        let pick = settings::exclusion_pick(captured.as_deref(), &self.config.exclusions.processes);
+        if pick == ExclusionPick::Refused {
+            crate::app::sound_refusal();
+        }
+        let note = match pick {
+            ExclusionPick::Added(name) => {
+                self.change(|config| config.exclusions.processes.push(name.clone()));
+                self.marked = vec![false; self.config.exclusions.processes.len()];
+                // A refused write says so at the top of the section, and nothing was added.
+                (!self.refused).then(|| self.line(IDS_EXCLUSION_ADDED).replace("{0}", &name))
+            }
+            ExclusionPick::AlreadyListed(_, name) => {
+                Some(self.line(IDS_EXCLUSION_ALREADY).replace("{0}", &name))
+            }
+            ExclusionPick::NotPicked | ExclusionPick::Refused => {
+                Some(self.line(IDS_EXCLUSION_NOT_PICKED))
+            }
+        };
+        self.pick_note = note;
+    }
+
+    /// Brings every moment the window waits for `by` nearer — the tests do not wait them out.
+    #[cfg(feature = "testing")]
+    pub fn hurry(&mut self, by: Duration) {
+        let sooner = |at: &mut Instant| *at = at.checked_sub(by).unwrap_or(*at);
+        if let Some(until) = self
+            .capture
+            .as_mut()
+            .and_then(|capture| capture.pair_until.as_mut())
+        {
+            sooner(until);
+        }
+        if let Some(at) = self.pick_at.as_mut() {
+            sooner(at);
+        }
+        if let Some(until) = self.journal_until.as_mut() {
+            sooner(until);
+        }
+    }
+
+    /// «Сохранить журнал» writes through `save` — a test does not write the journal of the program
+    /// installed on the machine it runs on.
+    #[cfg(feature = "testing")]
+    pub fn saving_the_journal_with(&mut self, save: fn() -> bool) {
+        self.save_journal = save;
+    }
+
+    /// A capture of the hotkey is armed.
+    pub fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
+
+    /// «Выбрать окно программы», or while it counts, the seconds left: «Выбор через {0} с…».
+    fn pick_caption(&self) -> String {
+        match self.pick_at {
+            Some(at) => self
+                .line(IDS_EXCLUSION_PICK_COUNT)
+                .replace("{0}", &seconds_to(at).max(1).to_string()),
+            None => self.line(IDS_EXCLUSION_PICK),
+        }
+    }
+
+    /// The moments the window must look again at: the end of a pair of `Shift`, the next second
+    /// of the count of «Выбрать окно программы», the end of «Журнал сохранён».
+    fn deadlines(&self) -> impl Iterator<Item = Instant> {
+        let pair = self.capture.as_ref().and_then(|capture| capture.pair_until);
+        // The count says one second less at the moment minus the seconds it will say then.
+        let pick = self
+            .pick_at
+            .map(|at| at - Duration::from_secs(seconds_to(at).saturating_sub(1)));
+        pair.into_iter().chain(pick).chain(self.journal_until)
     }
 
     /// The elements unavailable now.
@@ -404,12 +653,24 @@ impl Settings {
     }
 }
 
+/// «Сохранить журнал» in the product: the journal into its folder (`diag::write_to`).
+fn save_journal_in_force() -> bool {
+    crate::diag::log_path().is_some_and(|target| crate::diag::write_to(&target).is_ok())
+}
+
+/// The whole seconds left till `at`, counted up: none once it has come.
+fn seconds_to(at: Instant) -> u64 {
+    let left = at.saturating_duration_since(Instant::now());
+    left.as_secs() + u64::from(left.subsec_nanos() > 0)
+}
+
 fn toggle(id: Id, label: String, on: bool) -> Node<Id> {
     Node::Toggle {
         id,
         label,
         hint: None,
         on,
+        badge: None,
     }
 }
 
@@ -462,7 +723,7 @@ impl Content for Settings {
 
         Window {
             kind: WindowKind::Settings,
-            art: None,
+            art: Some(Art::About),
             brand: None,
             body: Node::Column(body),
             buttons: vec![Node::Button {
@@ -476,6 +737,43 @@ impl Content for Settings {
     }
 
     fn event(&mut self, event: Event<Id>) -> Reply {
+        // The keys of the capture, its end and the timer; anything else ends a capture first —
+        // the hotkey is suspended only while the field takes the keys.
+        let event = match event {
+            Event::KeyDown { id: Id::Hotkey, vk } => {
+                self.capture_step(CaptureEvent::KeyDown(vk, Modifiers::held_now()));
+                return Reply::Stay;
+            }
+            Event::KeyUp { id: Id::Hotkey, vk } => {
+                self.capture_step(CaptureEvent::KeyUp(vk));
+                return Reply::Stay;
+            }
+            Event::FocusLost { id: Id::Hotkey, to } => {
+                self.capture_step(CaptureEvent::FocusLost {
+                    to_capture_button: to == Some(Id::HotkeySet),
+                });
+                return Reply::Stay;
+            }
+            Event::Timer => {
+                self.timer_came();
+                return Reply::Stay;
+            }
+            Event::Pressed(Id::HotkeySet) => {
+                if self.capture.take().is_none() {
+                    self.capture = Some(Capture {
+                        session: CaptureSession::arm(self.config.hotkey.clone()),
+                        line: CaptureLine::Hint,
+                        pair_until: None,
+                    });
+                    self.combination_taken = false;
+                }
+                return Reply::Stay;
+            }
+            event => {
+                self.capture = None;
+                event
+            }
+        };
         match event {
             Event::Pressed(Id::Close) => return Reply::Close,
             Event::Selected(Id::Sections, index) => {
@@ -582,10 +880,21 @@ impl Content for Settings {
                 }
             }
             Event::Pressed(Id::SaveJournal) => {
-                self.journal = Some(
-                    crate::diag::log_path()
-                        .is_some_and(|target| crate::diag::write_to(&target).is_ok()),
-                );
+                let saved = (self.save_journal)();
+                self.journal = Some(saved);
+                self.journal_until = saved.then(|| {
+                    Instant::now() + Duration::from_millis(settings::JOURNAL_SAVED_MS.into())
+                });
+            }
+            // The second press stops the count (as the old button did); the first starts it.
+            Event::Pressed(Id::Pick) => {
+                self.pick_note = None;
+                self.pick_at = match self.pick_at {
+                    Some(_) => None,
+                    None => Some(
+                        Instant::now() + Duration::from_secs(crate::guard::CAPTURE_SECONDS.into()),
+                    ),
+                };
             }
             _ => {}
         }
@@ -602,6 +911,17 @@ impl Content for Settings {
 
     fn theme(&self) -> ThemeSetting {
         self.config.general.theme
+    }
+
+    /// Only while something waits — a pair of `Shift`, the count of a pick, «Журнал сохранён»: at
+    /// rest nothing ticks (NFR-10). The period is what is left till the nearest moment, so the
+    /// timer is armed anew whenever that moment moves.
+    fn timer(&self) -> Option<u32> {
+        let now = Instant::now();
+        self.deadlines().min().map(|at| {
+            let left = at.saturating_duration_since(now).as_millis();
+            u32::try_from(left).unwrap_or(u32::MAX).max(1)
+        })
     }
 }
 
@@ -641,6 +961,10 @@ impl Content for Product {
 
     fn theme(&self) -> ThemeSetting {
         self.settings.theme()
+    }
+
+    fn timer(&self) -> Option<u32> {
+        self.settings.timer()
     }
 }
 

@@ -252,6 +252,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Hlášení odesláno"
     IDS_WIZARD_SENT_TEXT    "Děkuji, že jste hlášení odeslali! Těší mě vaše aktivita v životě projektu a všechno si určitě přečtu ve volném čase."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

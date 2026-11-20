@@ -249,6 +249,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Mesazhi u dërgua"
     IDS_WIZARD_SENT_TEXT    "Faleminderit që e dërguat mesazhin! Jam i gëzuar që merrni pjesë në jetën e projektit dhe do ta lexoj gjithçka në kohën time të lirë."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

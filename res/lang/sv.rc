@@ -248,6 +248,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Ärendet har skickats"
     IDS_WIZARD_SENT_TEXT    "Tack för att du skickade ärendet! Jag är glad att du deltar i projektets liv, och jag läser allt på min fritid."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

@@ -255,6 +255,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Bildirim gönderildi"
     IDS_WIZARD_SENT_TEXT    "Bildiriminizi gönderdiğiniz için teşekkürler! Projenin hayatına katılmanıza seviniyorum; hepsini boş vaktimde mutlaka okuyacağım."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

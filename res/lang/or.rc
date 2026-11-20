@@ -250,6 +250,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "ବାର୍ତ୍ତା ପଠାଗଲା"
     IDS_WIZARD_SENT_TEXT    "ବାର୍ତ୍ତା ପଠାଇଥିବାରୁ ଧନ୍ୟବାଦ! ପ୍ରୋଜେକ୍ଟର ଜୀବନରେ ଆପଣ ଅଂଶଗ୍ରହଣ କରୁଥିବାରୁ ମୁଁ ଖୁସି, ଏବଂ ମୋ ଖାଲି ସମୟରେ ନିଶ୍ଚୟ ସବୁ ପଢ଼ିବି।"
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"

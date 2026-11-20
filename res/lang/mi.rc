@@ -248,6 +248,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Kua tukuna te karere"
     IDS_WIZARD_SENT_TEXT    "Ngā mihi mō te tuku i te karere! E koa ana ahau kei te whai wāhi koe ki te oranga o te kaupapa, ā, ka pānui ahau i te katoa i taku wā wātea."
     IDS_TRAY_FLAG           "Layout flag in the tray"
+    IDS_NEW_BADGE           "new"
     IDS_OWN_LIST_TITLE      "Keyboard layout"
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"
