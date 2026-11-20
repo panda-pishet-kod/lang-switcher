@@ -57,6 +57,7 @@ BEGIN
     IDS_LOG_OPEN            "Günlük klasörünü aç"
     IDS_LOG_SAVE            "Günlüğü kaydet"
     IDS_LOG_SAVE_FAILED     "Günlük kaydedilemedi."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Günlük kaydedildi"
     IDS_LOG_DIR_LABEL       "Günlük klasörü:"
     IDS_GROUP_STATE         "Durum"

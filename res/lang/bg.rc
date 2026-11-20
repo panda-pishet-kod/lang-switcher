@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "Отвори папката"
     IDS_LOG_SAVE            "Запази дневника"
     IDS_LOG_SAVE_FAILED     "Дневникът не можа да бъде запазен."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Дневникът е запазен"
     IDS_LOG_DIR_LABEL       "Папка:"
     IDS_GROUP_STATE         "Състояние"

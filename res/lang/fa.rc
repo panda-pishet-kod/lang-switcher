@@ -57,6 +57,7 @@ BEGIN
     IDS_LOG_OPEN            "باز کردن پوشه‌ی گزارش"
     IDS_LOG_SAVE            "ذخیره‌ی گزارش"
     IDS_LOG_SAVE_FAILED     "ذخیره‌ی گزارش ممکن نشد."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "گزارش ذخیره شد"
     IDS_LOG_DIR_LABEL       "پوشه‌ی گزارش:"
     IDS_GROUP_STATE         "وضعیت"

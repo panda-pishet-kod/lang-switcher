@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Otvori mapu dnevnika"
     IDS_LOG_SAVE            "Spremi dnevnik"
     IDS_LOG_SAVE_FAILED     "Dnevnik nije moguće spremiti."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Dnevnik je spremljen"
     IDS_LOG_DIR_LABEL       "Mapa dnevnika:"
     IDS_GROUP_STATE         "Stanje"

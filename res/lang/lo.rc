@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "ເປີດໂຟນເດີບັນທຶກ"
     IDS_LOG_SAVE            "ເກັບຮັກສາບັນທຶກການເຮັດວຽກ"
     IDS_LOG_SAVE_FAILED     "ເກັບຮັກສາບັນທຶກການເຮັດວຽກບໍ່ສຳເລັດ"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "ເກັບຮັກສາບັນທຶກແລ້ວ"
     IDS_LOG_DIR_LABEL       "ໂຟນເດີບັນທຶກ:"
     IDS_GROUP_STATE         "ສະຖານະ"

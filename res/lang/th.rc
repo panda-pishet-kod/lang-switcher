@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "เปิดโฟลเดอร์บันทึก"
     IDS_LOG_SAVE            "จัดเก็บบันทึกการทำงาน"
     IDS_LOG_SAVE_FAILED     "จัดเก็บบันทึกการทำงานไม่สำเร็จ"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "จัดเก็บบันทึกแล้ว"
     IDS_LOG_DIR_LABEL       "โฟลเดอร์บันทึก:"
     IDS_GROUP_STATE         "สถานะ"

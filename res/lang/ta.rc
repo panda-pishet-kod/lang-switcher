@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "பதிவு இடத்தைத் திற"
     IDS_LOG_SAVE            "பதிவைச் சேமி"
     IDS_LOG_SAVE_FAILED     "பதிவைச் சேமிக்க முடியவில்லை."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "பதிவு சேமிக்கப்பட்டது"
     IDS_LOG_DIR_LABEL       "பதிவு இடம்:"
     IDS_GROUP_STATE         "நிலை"

@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "Otvoriť priečinok"
     IDS_LOG_SAVE            "Uložiť denník"
     IDS_LOG_SAVE_FAILED     "Denník sa nepodarilo uložiť."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Denník uložený"
     IDS_LOG_DIR_LABEL       "Priečinok:"
     IDS_GROUP_STATE         "Stav"

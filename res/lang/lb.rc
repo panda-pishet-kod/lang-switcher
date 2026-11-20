@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Journaldossier weisen"
     IDS_LOG_SAVE            "Journal späicheren"
     IDS_LOG_SAVE_FAILED     "D'Journal konnt net gespäichert ginn."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Journal gespäichert"
     IDS_LOG_DIR_LABEL       "Journaldossier:"
     IDS_GROUP_STATE         "Zoustand"

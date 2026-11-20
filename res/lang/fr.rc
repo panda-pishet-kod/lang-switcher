@@ -58,6 +58,7 @@ BEGIN
     IDS_LOG_OPEN            "Ouvrir le dossier"
     IDS_LOG_SAVE            "Enregistrer le journal"
     IDS_LOG_SAVE_FAILED     "Le journal n'a pas pu être enregistré."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Journal enregistré"
     IDS_LOG_DIR_LABEL       "Dossier :"
     IDS_GROUP_STATE         "État"

@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "Журнал қалтасын ашу"
     IDS_LOG_SAVE            "Журналды сақтау"
     IDS_LOG_SAVE_FAILED     "Журналды сақтау мүмкін болмады."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Журнал сақталды"
     IDS_LOG_DIR_LABEL       "Журнал қалтасы:"
     IDS_GROUP_STATE         "Күй"

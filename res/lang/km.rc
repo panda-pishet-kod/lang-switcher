@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "បើកថតកំណត់ហេតុ"
     IDS_LOG_SAVE            "រក្សាទុកកំណត់ហេតុ"
     IDS_LOG_SAVE_FAILED     "មិនអាចរក្សាទុកកំណត់ហេតុបានទេ។"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "បានរក្សាទុកកំណត់ហេតុ"
     IDS_LOG_DIR_LABEL       "ថតកំណត់ហេតុ:"
     IDS_GROUP_STATE         "ស្ថានភាព"

@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "Otevřít složku protokolu"
     IDS_LOG_SAVE            "Uložit protokol"
     IDS_LOG_SAVE_FAILED     "Protokol se nepodařilo uložit."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Protokol uložen"
     IDS_LOG_DIR_LABEL       "Složka:"
     IDS_GROUP_STATE         "Stav"

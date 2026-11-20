@@ -58,6 +58,7 @@ BEGIN
     IDS_LOG_OPEN            "Otwórz folder dziennika"
     IDS_LOG_SAVE            "Zapisz dziennik"
     IDS_LOG_SAVE_FAILED     "Nie udało się zapisać dziennika."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Dziennik zapisany"
     IDS_LOG_DIR_LABEL       "Folder dziennika:"
     IDS_GROUP_STATE         "Stan"

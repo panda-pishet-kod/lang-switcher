@@ -58,6 +58,7 @@ BEGIN
     IDS_LOG_OPEN            "Apri la cartella"
     IDS_LOG_SAVE            "Salva il registro"
     IDS_LOG_SAVE_FAILED     "Impossibile salvare il registro."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Registro salvato"
     IDS_LOG_DIR_LABEL       "Cartella:"
     IDS_GROUP_STATE         "Stato"

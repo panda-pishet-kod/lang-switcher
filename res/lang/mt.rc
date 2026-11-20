@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Iftaħ il-folder tal-ġurnal"
     IDS_LOG_SAVE            "Issejvja l-ġurnal"
     IDS_LOG_SAVE_FAILED     "Il-ġurnal ma setax jiġi ssejvjat."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Ġurnal issejvjat"
     IDS_LOG_DIR_LABEL       "Folder tal-ġurnal:"
     IDS_GROUP_STATE         "Stat"

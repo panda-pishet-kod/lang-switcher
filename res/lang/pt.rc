@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Abrir a pasta do registro"
     IDS_LOG_SAVE            "Salvar o registro"
     IDS_LOG_SAVE_FAILED     "Não foi possível salvar o registro."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Registro salvo"
     IDS_LOG_DIR_LABEL       "Pasta do registro:"
     IDS_GROUP_STATE         "Estado"

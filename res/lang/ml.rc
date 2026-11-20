@@ -55,6 +55,7 @@ BEGIN
     IDS_LOG_OPEN            "ലോഗ് ഫോൾഡർ"
     IDS_LOG_SAVE            "ലോഗ് സംരക്ഷിക്കുക"
     IDS_LOG_SAVE_FAILED     "ലോഗ് സംരക്ഷിക്കാനായില്ല."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "ലോഗ് സംരക്ഷിച്ചു"
     IDS_LOG_DIR_LABEL       "ഫോൾഡർ:"
     IDS_GROUP_STATE         "നില"

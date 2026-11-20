@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "Журнал папкасын ачу"
     IDS_LOG_SAVE            "Журналны саклау"
     IDS_LOG_SAVE_FAILED     "Журналны саклап булмады."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Журнал сакланды"
     IDS_LOG_DIR_LABEL       "Папка:"
     IDS_GROUP_STATE         "Хәл"

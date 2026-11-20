@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Jurnal jildini ochish"
     IDS_LOG_SAVE            "Jurnalni saqlash"
     IDS_LOG_SAVE_FAILED     "Jurnalni saqlab boʻlmadi."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Jurnal saqlandi"
     IDS_LOG_DIR_LABEL       "Jurnal jildi:"
     IDS_GROUP_STATE         "Holat"

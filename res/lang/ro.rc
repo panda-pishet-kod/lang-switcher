@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "Deschidere folder jurnal"
     IDS_LOG_SAVE            "Salvare jurnal"
     IDS_LOG_SAVE_FAILED     "Jurnalul nu a putut fi salvat."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Jurnal salvat"
     IDS_LOG_DIR_LABEL       "Folder jurnal:"
     IDS_GROUP_STATE         "Stare"

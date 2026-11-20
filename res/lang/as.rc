@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "লগ ফোল্ডাৰ খোলক"
     IDS_LOG_SAVE            "লগ সংৰক্ষণ কৰক"
     IDS_LOG_SAVE_FAILED     "লগ সংৰক্ষণ কৰিব নোৱাৰিলে।"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "লগ সংৰক্ষণ কৰা হৈছে"
     IDS_LOG_DIR_LABEL       "লগ ফোল্ডাৰ:"
     IDS_GROUP_STATE         "অৱস্থা"

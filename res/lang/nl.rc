@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Logboekmap openen"
     IDS_LOG_SAVE            "Logboek opslaan"
     IDS_LOG_SAVE_FAILED     "Het logboek kon niet worden opgeslagen."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Logboek opgeslagen"
     IDS_LOG_DIR_LABEL       "Logboekmap:"
     IDS_GROUP_STATE         "Status"

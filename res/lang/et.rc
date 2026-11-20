@@ -57,6 +57,7 @@ BEGIN
     IDS_LOG_OPEN            "Ava logikaust"
     IDS_LOG_SAVE            "Salvesta logi"
     IDS_LOG_SAVE_FAILED     "Logi salvestamine ebaõnnestus."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Logi salvestatud"
     IDS_LOG_DIR_LABEL       "Logikaust:"
     IDS_GROUP_STATE         "Olek"

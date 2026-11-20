@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "روزنامچے کا فولڈر کھولیں"
     IDS_LOG_SAVE            "روزنامچہ محفوظ کریں"
     IDS_LOG_SAVE_FAILED     "روزنامچہ محفوظ نہیں ہو سکا۔"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "روزنامچہ محفوظ ہو گیا"
     IDS_LOG_DIR_LABEL       "روزنامچے کا فولڈر:"
     IDS_GROUP_STATE         "حالت"

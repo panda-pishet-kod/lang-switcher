@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "Hap dosjen e ditarit"
     IDS_LOG_SAVE            "Ruaj ditarin"
     IDS_LOG_SAVE_FAILED     "Ditari nuk mund të ruhej."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Ditari u ruajt"
     IDS_LOG_DIR_LABEL       "Dosja e ditarit:"
     IDS_GROUP_STATE         "Gjendja"

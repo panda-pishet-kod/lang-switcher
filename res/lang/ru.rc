@@ -57,6 +57,7 @@ BEGIN
     IDS_LOG_OPEN            "Открыть папку журнала"
     IDS_LOG_SAVE            "Сохранить журнал"
     IDS_LOG_SAVE_FAILED     "Не удалось сохранить журнал."
+    IDS_SETTINGS_NOT_SAVED  "Не удалось сохранить настройки. Изменение не применено."
     IDS_LOG_SAVED           "Журнал сохранён"
     IDS_LOG_DIR_LABEL       "Папка журнала:"
     IDS_GROUP_STATE         "Состояние"

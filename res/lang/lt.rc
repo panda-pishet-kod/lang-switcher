@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "Atidaryti žurnalo aplanką"
     IDS_LOG_SAVE            "Įrašyti žurnalą"
     IDS_LOG_SAVE_FAILED     "Nepavyko įrašyti žurnalo."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Žurnalas įrašytas"
     IDS_LOG_DIR_LABEL       "Žurnalo vieta:"
     IDS_GROUP_STATE         "Būsena"

@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "लॉग फ़ोल्डर खोलें"
     IDS_LOG_SAVE            "लॉग सहेजें"
     IDS_LOG_SAVE_FAILED     "लॉग सहेजा नहीं जा सका।"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "लॉग सहेजा गया"
     IDS_LOG_DIR_LABEL       "लॉग फ़ोल्डर:"
     IDS_GROUP_STATE         "स्थिति"

@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Agor ffolder y log"
     IDS_LOG_SAVE            "Cadw'r log i ffeil"
     IDS_LOG_SAVE_FAILED     "Ni ellid cadw'r log."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Cadwyd y log"
     IDS_LOG_DIR_LABEL       "Ffolder y log:"
     IDS_GROUP_STATE         "Statws"

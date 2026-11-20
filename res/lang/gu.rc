@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "લૉગ ફોલ્ડર ખોલો"
     IDS_LOG_SAVE            "લૉગ સાચવો"
     IDS_LOG_SAVE_FAILED     "લૉગ સાચવી શકાયો નથી."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "લૉગ સાચવાયો"
     IDS_LOG_DIR_LABEL       "લૉગ ફોલ્ડર:"
     IDS_GROUP_STATE         "સ્થિતિ"

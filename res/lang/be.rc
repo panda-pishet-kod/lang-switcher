@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Да папкі журнала"
     IDS_LOG_SAVE            "Захаваць журнал"
     IDS_LOG_SAVE_FAILED     "Не атрымалася захаваць журнал."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Журнал захаваны"
     IDS_LOG_DIR_LABEL       "Папка журнала:"
     IDS_GROUP_STATE         "Стан"

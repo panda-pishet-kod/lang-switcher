@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "ਲੌਗ ਫ਼ੋਲਡਰ ਖੋਲ੍ਹੋ"
     IDS_LOG_SAVE            "ਲੌਗ ਸੰਭਾਲੋ"
     IDS_LOG_SAVE_FAILED     "ਲੌਗ ਸੰਭਾਲਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ।"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "ਲੌਗ ਸੰਭਾਲਿਆ ਗਿਆ"
     IDS_LOG_DIR_LABEL       "ਲੌਗ ਫ਼ੋਲਡਰ:"
     IDS_GROUP_STATE         "ਸਥਿਤੀ"

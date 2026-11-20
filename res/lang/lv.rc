@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "Atvērt žurnāla mapi"
     IDS_LOG_SAVE            "Saglabāt žurnālu"
     IDS_LOG_SAVE_FAILED     "Neizdevās saglabāt žurnālu."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Žurnāls saglabāts"
     IDS_LOG_DIR_LABEL       "Žurnāla mape:"
     IDS_GROUP_STATE         "Stāvoklis"

@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "ଲଗ୍ ଫୋଲ୍ଡର ଖୋଲନ୍ତୁ"
     IDS_LOG_SAVE            "ଲଗ୍ ସେଭ୍ କରନ୍ତୁ"
     IDS_LOG_SAVE_FAILED     "ଲଗ୍ ସେଭ୍ କରାଯାଇପାରିଲା ନାହିଁ।"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "ଲଗ୍ ସେଭ୍ ହେଲା"
     IDS_LOG_DIR_LABEL       "ଲଗ୍ ଫୋଲ୍ଡର:"
     IDS_GROUP_STATE         "ସ୍ଥିତି"

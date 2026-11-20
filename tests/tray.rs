@@ -1561,44 +1561,6 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
 // pointer to nothing, and the shape of the arm in the source.
 // ---------------------------------------------------------------------------------------
 
-/// **The rule itself, all twelve rows.** Two windows and three themes, and the string is
-/// worth reading in exactly two of the twelve states.
-#[test]
-fn the_setting_change_string_is_wanted_in_exactly_two_of_the_twelve_states() {
-    for (dialog_open, about_open, setting, expected) in [
-        // Nobody on the screen. Whatever the theme says, there is no window to repaint —
-        // this is the row the audit found the program reading a foreign pointer in.
-        (false, false, ThemeSetting::System, false),
-        (false, false, ThemeSetting::Light, false),
-        (false, false, ThemeSetting::Dark, false),
-        // The settings dialog of FR-92 is up. Only `system` gives the system a say: under
-        // the two fixed themes FR-92а pins the palette and a broadcast changes nothing.
-        (true, false, ThemeSetting::System, true),
-        (true, false, ThemeSetting::Light, false),
-        (true, false, ThemeSetting::Dark, false),
-        // The «О программе» window of task T-13-17, alone. This disjunct has to carry the
-        // gate by itself, or that task's repair is undone.
-        (false, true, ThemeSetting::System, true),
-        (false, true, ThemeSetting::Light, false),
-        (false, true, ThemeSetting::Dark, false),
-        // Both records set. Not a state the program reaches — «О программе» is modal — and
-        // the rule answers it all the same, because a rule with a hole in it is a rule that
-        // depends on somebody keeping the hole unreachable.
-        (true, true, ThemeSetting::System, true),
-        (true, true, ThemeSetting::Light, false),
-        (true, true, ThemeSetting::Dark, false),
-    ] {
-        let wanted = tray::setting_name_is_wanted(dialog_open, about_open, setting);
-
-        println!("dialog={dialog_open} about={about_open} {setting:?} -> wanted={wanted}");
-
-        assert_eq!(
-            wanted, expected,
-            "setting_name_is_wanted({dialog_open}, {about_open}, {setting:?})"
-        );
-    }
-}
-
 /// **Criterion 5 of task T-13-20, on the product's own road.** A real tray, a real
 /// `Tray::handle_message`, a real `WM_SETTINGCHANGE` — and an `lParam` that is a pointer to
 /// nothing.
@@ -2088,44 +2050,24 @@ fn nothing_of_a_window_message_is_dereferenced_in_the_tray() {
         .expect("the unit-test module must be at the foot of this file");
     let source = &source[..at];
 
-    assert_eq!(
-        source.matches("pub fn setting_name_is_wanted(").count(),
-        1,
-        "one rule, one definition"
-    );
-    assert!(
-        source.contains("(dialog_open || about_open) && setting == theme::ThemeSetting::System"),
-        "and the rule is «есть кому отдать» — either window — **and** the theme that lets the \
-         system have a say"
-    );
-
-    // The arm of `handle_message`: the theme travels in, and nothing else does.
-    assert!(
-        source.contains("on_setting_change(self.config().general.theme)"),
-        "the arm hands over the one cheap local fact and does not hand over `lparam`"
-    );
-
-    let at = source
-        .find("fn on_setting_change(setting: theme::ThemeSetting) {")
-        .expect("on_setting_change must be in this file, and must take no `lparam`");
-    let body = &source[at..];
-    let end = body.find("\n}").expect("a function closes with its brace");
+    // The theme arm of `handle_message` (since stage Э120 it only follows the taskbar — the
+    // windows of the shell follow the theme on their own): it takes nothing of the message.
+    let arm = source
+        .find("WM_SETTINGCHANGE | WM_THEMECHANGED => {")
+        .expect("the two theme messages share one arm of handle_message");
+    let body = &source[arm..];
+    let end = body
+        .find("\n            }")
+        .expect("an arm closes with its brace");
     let body = &body[..end];
 
-    println!("--- on_setting_change ---\n{body}");
+    println!("--- the theme arm ---\n{body}");
 
     assert!(
-        body.contains("settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET))"),
-        "and what goes on to the far side is this build's own word, not the message's"
-    );
-    assert!(
-        body.contains("settings::dialog_is_open()") && body.contains("settings::about_is_open()"),
-        "«кому отдать» is both windows of FR-92а: task T-13-17 made the about window a \
-         listener, and a gate asking only the dialog would silently undo it"
-    );
-    assert!(
-        !body.contains("lparam") && !body.contains("LPARAM"),
-        "and the message is not so much as named inside the function"
+        body.contains("self.follow_taskbar_theme();")
+            && !body.contains("lparam")
+            && !body.contains("wparam"),
+        "the arm follows the taskbar and does not so much as name the message"
     );
 
     // The claim of the whole file, and the one the finding asks for. Both spellings, because
@@ -2584,15 +2526,6 @@ fn both_theme_arms_follow_the_taskbar_switch_outside_the_gate_of_t_13_20() {
     fixed.general.theme = ThemeSetting::Dark;
     tray.replace_config(fixed);
 
-    assert!(
-        !tray::setting_name_is_wanted(
-            settings::dialog_is_open(),
-            settings::about_is_open(),
-            tray.config().general.theme
-        ),
-        "the gate of T-13-20 is shut"
-    );
-
     for (name, message) in [
         ("WM_SETTINGCHANGE", WM_SETTINGCHANGE),
         ("WM_THEMECHANGED", WM_THEMECHANGED),
@@ -2640,126 +2573,6 @@ fn both_theme_arms_follow_the_taskbar_switch_outside_the_gate_of_t_13_20() {
             "{name}: the same answer again costs nothing"
         );
     }
-}
-
-/// **Task T-86-2, guard (4), the text half: the two arms call the following BEFORE the gate,
-/// and the following reaches the switch and the update.**
-///
-/// Swept over the product half of `src\tray.rs` without its comment lines — the sweep of task
-/// T-85-1: a claim about a branch is made of its calls, not of its prose. Four claims: the
-/// `WM_SETTINGCHANGE` arm names `self.follow_taskbar_theme()` and names it before
-/// `on_setting_change(`; the `WM_THEMECHANGED` arm names it before
-/// `settings::on_system_theme_message(`; `follow_taskbar_theme` reaches
-/// `theme::taskbar_is_light()` and its seam reaches `self.refresh_icon()`; and none of the four
-/// bodies goes through `setting_name_is_wanted(`. Plus the count: the following is called from
-/// exactly the two arms.
-///
-/// The negative control is measured: the same sweep over the tree before the arms were wired
-/// fails on the first claim — `scratchpad-E86\red-before-T-86-2-arms.log`.
-#[test]
-fn the_theme_arms_call_the_following_before_the_gate_by_their_calls_and_not_their_prose() {
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tray.rs"),
-    )
-    .expect("src\\tray.rs must be readable")
-    .replace("\r\n", "\n");
-
-    let at = source
-        .find("\n#[cfg(test)]\nmod tests {")
-        .expect("the unit-test module must be at the foot of this file");
-    let product: String = source[..at]
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .map(|line| format!("{line}\n"))
-        .collect();
-
-    // An arm of `handle_message`: from its pattern to the next arm's.
-    let arm = |pattern: &str, next: &str| -> String {
-        let start = product
-            .find(pattern)
-            .unwrap_or_else(|| panic!("{pattern} must be an arm of handle_message"));
-        let rest = &product[start..];
-        let end = rest
-            .find(next)
-            .unwrap_or_else(|| panic!("{next} must follow {pattern}"));
-
-        rest[..end].to_owned()
-    };
-    let setting_change = arm("WM_SETTINGCHANGE => {", "WM_THEMECHANGED => {");
-    let theme_changed = arm("WM_THEMECHANGED => {", "_ => Reaction::Ignored,");
-
-    println!(
-        "--- WM_SETTINGCHANGE arm ---\n{setting_change}--- WM_THEMECHANGED arm ---\n{theme_changed}"
-    );
-
-    let before = |body: &str, first: &str, second: &str| {
-        let a = body
-            .find(first)
-            .unwrap_or_else(|| panic!("«{first}» must be in the arm"));
-        let b = body
-            .find(second)
-            .unwrap_or_else(|| panic!("«{second}» must be in the arm"));
-
-        assert!(a < b, "«{first}» must stand before «{second}»");
-    };
-    before(
-        &setting_change,
-        "self.follow_taskbar_theme()",
-        "on_setting_change(",
-    );
-    before(
-        &theme_changed,
-        "self.follow_taskbar_theme()",
-        "settings::on_system_theme_message(",
-    );
-
-    // The body of a method: from its signature to the first brace that closes at its depth.
-    let method = |signature: &str| -> String {
-        let start = product
-            .find(signature)
-            .unwrap_or_else(|| panic!("{signature} must be in src\\tray.rs"));
-        let rest = &product[start..];
-        let end = rest
-            .find("\n    }\n")
-            .expect("a method closes with a brace of its own");
-
-        rest[..end].to_owned()
-    };
-    let follow = method("fn follow_taskbar_theme(&mut self) {");
-    let follow_with =
-        method("pub fn follow_taskbar_theme_with(&mut self, taskbar_is_light: bool) {");
-
-    println!(
-        "--- follow_taskbar_theme ---\n{follow}\n--- follow_taskbar_theme_with ---\n{follow_with}"
-    );
-
-    assert!(
-        follow.contains("theme::taskbar_is_light()"),
-        "the following reads the switch"
-    );
-    assert!(
-        follow.contains("self.follow_taskbar_theme_with("),
-        "and hands the answer to the seam"
-    );
-    assert!(
-        follow_with.contains("self.refresh_icon()"),
-        "the seam reaches the update"
-    );
-
-    for body in [&setting_change, &theme_changed, &follow, &follow_with] {
-        assert!(
-            !body.contains("setting_name_is_wanted("),
-            "the following does not go through the gate of T-13-20"
-        );
-    }
-
-    assert_eq!(
-        product.matches("self.follow_taskbar_theme()").count(),
-        2,
-        "the following is called from exactly the two arms"
-    );
 }
 
 /// **Задача Т-33а-1, находка глазом пользователя: «размытая иконка в уведомлении».**
@@ -5760,6 +5573,84 @@ fn the_menu_is_a_window_of_the_shell_and_no_code_calls_track_popup_menu() {
         "the menu must not be Windows' own any more: {calls:#?}"
     );
     assert!(opens, "`show_menu` must open the menu of the shell");
+}
+
+/// Clicks the element `id` of the window of the shell `hwnd`, at the middle of where the layout put
+/// it — the press of a person's mouse, through the host.
+#[cfg(feature = "testing")]
+fn click_the_element(hwnd: HWND, id: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
+    };
+
+    // A hidden window has drawn no frame and laid nothing out yet: one frame, as the core's own
+    // tests of the host draw it.
+    // SAFETY: a message to a live window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let Some(probe) = lang_switcher::ui::host::probe(hwnd) else {
+        return false;
+    };
+    let Some((_, _, rect)) = probe
+        .items
+        .iter()
+        .find(|(_, item, _)| item.as_deref() == Some(id))
+    else {
+        return false;
+    };
+    let (x, y) = (
+        (rect.x + rect.w / 2.0) as i32,
+        (rect.y + rect.h / 2.0) as i32,
+    );
+    let point = LPARAM(((y & 0xFFFF) << 16 | (x & 0xFFFF)) as isize);
+    for message in [WM_LBUTTONDOWN, WM_LBUTTONUP] {
+        // SAFETY: a press to a live window of this thread.
+        unsafe { SendMessageW(hwnd, message, Some(WPARAM(1)), Some(point)) };
+    }
+    true
+}
+
+/// **Task T-120-20 — the red before.** A click on the switch «Звуковой отклик» of the window of
+/// the settings changes the setting in force — in the tray and in the file — with no other button
+/// pressed: the window applies at once.
+#[cfg(feature = "testing")]
+#[test]
+fn a_click_on_the_sound_switch_changes_the_setting_in_force_at_once() {
+    use lang_switcher::ui::windows::settings as window_of_settings;
+
+    let window = TestWindow::new();
+    let home = TestDir::new("settings-sound");
+    let _ui = attach_ui(&window, &home);
+    let before = live(|tray| tray.config().feedback.sound);
+
+    window_of_settings::testing::hidden_while(|| {
+        tray::dispatch_command(window.handle, tray::CMD_SETTINGS);
+    });
+    let opened = settings::open_window();
+    let clicked = opened.is_some_and(|hwnd| click_the_element(hwnd, "Sound"));
+    let in_force = live(|tray| tray.config().feedback.sound);
+    let on_disk = settings::read_or_default(&home.config()).0.feedback.sound;
+    if let Some(hwnd) = opened {
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
+
+    println!(
+        "window {opened:?}, clicked {clicked}; sound {before} → in force {in_force}, on disk {on_disk}"
+    );
+
+    assert!(
+        opened.is_some(),
+        "«Настройки…» opens the window of the shell"
+    );
+    assert!(
+        clicked,
+        "and its switch «Звуковой отклик» is there to click"
+    );
+    assert_ne!(
+        in_force, before,
+        "the click changes the setting in force at once"
+    );
+    assert_eq!(on_disk, in_force, "and the file holds it");
 }
 
 // ---------------------------------------------------------------------------------------

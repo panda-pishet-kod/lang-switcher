@@ -61,6 +61,7 @@ BEGIN
     IDS_LOG_OPEN            "Άνοιγμα φακέλου"
     IDS_LOG_SAVE            "Αποθήκευση καταγραφής"
     IDS_LOG_SAVE_FAILED     "Η καταγραφή δεν αποθηκεύτηκε."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Καταγραφή αποθηκεύτηκε"
     IDS_LOG_DIR_LABEL       "Φάκελος:"
     IDS_GROUP_STATE         "Κατάσταση"

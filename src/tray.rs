@@ -1002,49 +1002,14 @@ impl Tray {
             // own state and a clock, and at worst one letter shown a few hours early.
             WM_TIMER if wparam.0 == LETTERS_TIMER => Reaction::Ignored,
 
-            // FR-92а, task T-11-9: the two messages Windows broadcasts when the system
-            // theme moves, received here because the hidden UI window is the one top-level
-            // window of this process. The whole reaction is a call that may post one
-            // private message to the open settings dialog — a closed dialog and a fixed
-            // `theme != "system"` are both «nothing happens», decided in `settings`.
-            // `Ignored`, not `Handled`: the broadcast goes on to `DefWindowProcW` like any
-            // other message that is not ours to consume.
-            //
-            // ⭐ **SEC-05, task T-41-2, finding В2: `lparam` is not passed on and is not read.**
-            // Up to this task the arm handed the pointer to a reader that dereferenced it —
-            // carefully, and still a dereference of a number a stranger wrote. What the far
-            // end did with the answer was compare it against one word; so that word is handed
-            // over directly, out of this build's own memory, and the message's content plays
-            // no part in this program at all. The needless repaint the comparison used to
-            // spare is spared by the third check inside
-            // [`settings::repaint_for_system_theme`], which was always there.
-            //
-            // The setting is read out of `self` here, on the way in, because it is the one
-            // cheap local fact this arm has and the gate inside needs it.
-            //
-            // ⭐ **FR-90, task T-86-2, решение 145.2: the icon follows the taskbar first.** The
-            // taskbar switch is re-read and, if it moved, the record gets the icon of the other
-            // set — **before** `on_setting_change` and its gate of task T-13-20, because that
-            // gate is about repainting the windows of FR-92а and the icon has to follow with
-            // every window closed and under a hand-fixed theme alike. Still nothing of the
-            // message is read: a forged broadcast buys one reading of the switch and, while
-            // the answer stands, no `NIM_MODIFY`.
-            WM_SETTINGCHANGE => {
+            // **FR-90, task T-86-2, решение 145.2: the icon follows the taskbar.** The taskbar
+            // switch is re-read and, if it moved, the record gets the icon of the other set. Nothing
+            // of the message is read: a forged broadcast buys one reading of the switch and, while
+            // the answer stands, no `NIM_MODIFY`. The windows of the shell — the settings and
+            // «О программе» among them since stage Э120 — follow the system theme on their own,
+            // so nothing is handed on from here any more.
+            WM_SETTINGCHANGE | WM_THEMECHANGED => {
                 self.follow_taskbar_theme();
-
-                on_setting_change(self.config().general.theme);
-
-                Reaction::Ignored
-            }
-
-            // `WM_THEMECHANGED` carries no string: it *is* the theme notification, by its
-            // own name, so it enters the same decision as a `WM_SETTINGCHANGE` that named
-            // the switch — one path after the string check, not two. And the same first
-            // step as its neighbour: the icon follows the taskbar (task T-86-2).
-            WM_THEMECHANGED => {
-                self.follow_taskbar_theme();
-
-                settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
 
                 Reaction::Ignored
             }
@@ -1271,6 +1236,13 @@ impl Tray {
     /// change kept only in memory would reach the disk at shutdown (FR-83) or never. Since task
     /// T-55-4 a configuration equal to what the file holds is not written again — see
     /// [`Tray::save_config`].
+    /// Whether the configuration in force is the one on the disk — false after a write that
+    /// failed or was held back. Without `%APPDATA%` there is no file to agree with, and nothing is
+    /// lost by that.
+    pub fn config_saved(&self) -> bool {
+        self.config_path.is_none() || self.on_disk.as_ref() == Some(&self.config)
+    }
+
     pub fn replace_config(&mut self, config: Config) {
         self.config = config;
         // FR-90б, task T-119-2: the check box of the flag acts at once — a flag put on reads the
@@ -2121,120 +2093,6 @@ pub fn with_tray<R>(f: impl FnOnce(&mut Tray) -> R) -> Option<R> {
     UI_TRAY.with(|slot| slot.borrow_mut().as_mut().map(f))
 }
 
-/// Whether a `WM_SETTINGCHANGE` is worth acting on at all — FR-92а, SEC-05, task T-13-20.
-///
-/// Two facts line up, and both of them are this program's **own**: there is somebody to hand
-/// the string to — one of the two windows of FR-92а is up — and the setting in force is
-/// `system`, under which alone the system's switch has any say (FR-92а fixes the palette
-/// outright under `light` and `dark`, and a broadcast then changes nothing whatever).
-///
-/// «Кому отдать» is *two* windows since task T-13-17, not one: the settings dialog of FR-92
-/// ([`settings::dialog_is_open`]) **or** the «О программе» window ([`settings::about_is_open`]).
-/// Asking only the first would leave the about window on yesterday's palette and undo that
-/// task — the very repair the second name exists for.
-///
-/// The shape is [`resume_is_refused`]'s and [`dialog_locks_command`]'s, for the same reason:
-/// the facts are read once by the caller and handed in, so the rule is a function of its
-/// arguments and a table can close it. **SEC-05, R-20:** all three arguments are published
-/// values of this process — two thread-locals of the UI thread and one field of the
-/// configuration the tray holds. No `wParam`, no `lParam` and no pointer reaches this
-/// decision.
-///
-/// ⭐ **Task T-41-2 left the name and took away the reading.** Since finding В2 nothing reads the
-/// message at all, so this rule no longer guards a dereference — it guards a repaint. The name
-/// is kept because the rule is the same rule and task T-13-20's table closes it; what it means
-/// now is «стоит ли вообще будить окна», and the answer is unchanged.
-pub fn setting_name_is_wanted(
-    dialog_open: bool,
-    about_open: bool,
-    setting: theme::ThemeSetting,
-) -> bool {
-    (dialog_open || about_open) && setting == theme::ThemeSetting::System
-}
-
-/// The whole of the `WM_SETTINGCHANGE` arm of [`Tray::handle_message`] — FR-92а, SEC-05,
-/// tasks T-13-20 and **T-41-2**.
-///
-/// # The message is not read at all — finding В2
-///
-/// The audit of 2026-08-24 found this arm dereferencing the pointer in `lParam` after a single
-/// null check, and task T-13-20 narrowed the window in which it did so: only when a window of
-/// FR-92а was up under the `system` theme. **The audit of 2026-09-04 asked for the question to
-/// be closed instead of narrowed a third time**, and this is that closure — the pointer is not
-/// passed in, so there is nothing here to read, and after it `tray.rs` dereferences nothing that
-/// arrives on a message at all.
-///
-/// `WM_SETTINGCHANGE` is *posted*, and a posted message is not marshalled: the number in
-/// `lParam` is whatever the sender put there. Any process at this integrity level could send a
-/// number naming nothing — as could a third-party program broadcasting a malformed one by
-/// accident — and the read was an access violation and **the end of the process**: no panic
-/// hook, the keyboard hook left installed, the icon left in the tray, the configuration unsaved.
-/// Measured, not assumed: premise П4 of this stage took the test binary down with
-/// `STATUS_ACCESS_VIOLATION` on the code this task replaced.
-///
-/// # What replaces the reading, and why it costs nothing
-///
-/// The only use the answer was ever put to is one comparison against
-/// [`settings::IMMERSIVE_COLOR_SET`]. So that word is handed over directly, out of this build's
-/// own memory: it is what the neighbouring `WM_THEMECHANGED` arm has always done, and the two
-/// arms now say the same thing in the same way.
-///
-/// The needless repaint that comparison used to spare is spared where it always really was —
-/// [`settings::repaint_for_system_theme`] asks three questions, and the third is whether the
-/// palette the system now resolves to differs from the one on the screen. A `WM_SETTINGCHANGE`
-/// about something else therefore costs one reading of the personalization switch and one
-/// comparison of two pointers, and repaints nothing.
-///
-/// `setting` is `[general].theme` as the tray holds it, copied out by the caller: the same value
-/// the settings dialog was opened with and the same one
-/// [`show_about_dialog`](settings::show_about_dialog) was handed, since «Применить» is the one
-/// road that moves it and it moves both at once.
-fn on_setting_change(setting: theme::ThemeSetting) {
-    // Task T-13-20, and it still stands: with no window of FR-92а up, or under a theme fixed by
-    // hand, there is nobody to repaint and no reason to ask the system anything. Both facts are
-    // this program's own — two thread-locals of this, the UI thread, and one field of the
-    // configuration the tray holds.
-    if !setting_name_is_wanted(
-        settings::dialog_is_open(),
-        settings::about_is_open(),
-        setting,
-    ) {
-        return;
-    }
-
-    note_theme_handoff(Some(settings::IMMERSIVE_COLOR_SET));
-
-    settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
-}
-
-/// Remembers what the arm handed on to [`settings::on_system_theme_message`] — task T-41-2,
-/// finding В2. Test-only; the product has no such record.
-///
-/// The number task T-13-20's acceptance read was «сколько раз входили в читателя». Task T-41-2
-/// takes the reader away altogether, so what has to be shown in its place is the other half of
-/// the same sentence: that the arm hands on **the program's own word**, and hands it on whatever
-/// the message carried.
-#[cfg(test)]
-fn note_theme_handoff(name: Option<&str>) {
-    THEME_HANDOFF.with(|last| *last.borrow_mut() = Some(name.map(str::to_owned)));
-}
-
-/// Nothing at all in the product — see the test-only twin above. An empty body the compiler
-/// removes outright; no `#[inline]` is asked for, because there is nothing here to inline.
-#[cfg(not(test))]
-fn note_theme_handoff(_name: Option<&str>) {}
-
-#[cfg(test)]
-thread_local! {
-    /// What the `WM_SETTINGCHANGE` arm last handed to [`settings::on_system_theme_message`] on
-    /// this thread — task T-41-2. `None` means the arm has not reached the hand-off at all.
-    /// The signature is `Option<&str>` and not the constant on purpose: the instrument records
-    /// **whatever the arm hands over**, so a future edit that started reading the message again
-    /// would be caught by the same assertion rather than pass it by construction.
-    static THEME_HANDOFF: std::cell::RefCell<Option<Option<String>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 // ⛔ **`setting_change_name` stood here until task T-41-2 (finding В2), and it is not coming
 // back.** It read the string a `WM_SETTINGCHANGE` names by dereferencing the pointer in
 // `lParam` — bounded by a cap and a null check, and still a dereference of a number a stranger
@@ -3024,6 +2882,11 @@ pub struct MenuNow {
     /// The setting «Оформление».
     pub theme: theme::ThemeSetting,
 }
+/// The configuration in force, out of the tray of this thread — what the window of the settings
+/// opens over (task T-120-20). None without a tray.
+pub fn config_now() -> Option<Config> {
+    with_tray(|tray| tray.config().clone())
+}
 
 /// [`MenuNow`] out of the tray of this thread, or none without one.
 pub fn menu_now() -> Option<MenuNow> {
@@ -3518,66 +3381,13 @@ pub fn refresh_unread_mark() {
 // The settings dialog — FR-92, and the autostart of FR-93
 // ---------------------------------------------------------------------------------------
 
-/// Opens the settings dialog of FR-92 and applies whatever it produces.
-///
-/// Called with **no borrow of the tray held**: `DialogBoxParamW` runs a modal message loop that
-/// dispatches back into this module, exactly as `TrackPopupMenuEx` does. The configuration the
-/// dialog starts from is therefore *copied* out of the tray first, and what comes back arrives
-/// through [`apply_settings`].
-///
-/// # The loop — решение 99.1(б), task Т-31-2
-///
-/// «Применить» that changed the **direction of writing** answers
-/// [`settings::DialogOutcome::Reopen`] instead of closing: the mirror of task Т-30-2 is a style
-/// of the template a window is created from, and there is no later moment to put it on. So the
-/// window is built again, in the rectangle the previous one stood in, out of a configuration
-/// that has already been written to the file — there is nothing to lose and nothing to carry
-/// across.
-///
-/// **The loop stands here and not inside the dialog procedure**, at the very depth the first
-/// showing was made from and with no borrow of the tray held — посылка П2 of the mandate,
-/// measured before this was written (`scratchpad-Э31\посылки-п2.log`): two showings out of one
-/// call, and `with_tray` answering between them.
-///
-/// It cannot spin: the second showing starts in the language the first one published, so
-/// `language_switch` there answers `Unchanged` until a person picks another language and presses
-/// «Применить» again. Every turn of this loop is a press of a button.
+/// Opens the window of the settings of FR-92 — a window of the shell since task T-120-20
+/// (`ui::windows::settings`), owned by the program's window `hwnd`. It is not modal and has no
+/// «Применить»: every change it makes is put in force at once through [`apply_settings_now`]. One
+/// at a time — while it or «О программе» is up the door turns round, and the menu greys the entry
+/// ([`dialog_locks_command`]).
 fn open_settings(hwnd: HWND) {
-    // SAFETY: `None` asks for the handle of the file used to create the calling process, which
-    // is the running executable — the module `app.rc` was linked into, and therefore the one
-    // holding the dialog template. The handle is borrowed and must not be freed; nothing here
-    // frees it.
-    let module = match unsafe { GetModuleHandleW(PCWSTR::null()) } {
-        Ok(module) => module,
-        Err(error) => {
-            app::report_non_critical("GetModuleHandleW", &error);
-            return;
-        }
-    };
-
-    let mut opening = settings::Opening::Fresh;
-
-    loop {
-        // Read afresh on every turn: the previous showing wrote its «Применить» through
-        // `apply_settings` into this very tray, and the window that comes up next must start
-        // from what is in force and not from a copy taken before it.
-        let Some(config) = with_tray(|tray| tray.config().clone()) else {
-            return;
-        };
-
-        let mut apply = apply_settings;
-
-        match settings::show_dialog(hwnd, HINSTANCE(module.0), &config, &mut apply, opening) {
-            Ok(settings::DialogOutcome::Closed) => return,
-            Ok(settings::DialogOutcome::Reopen(at)) => opening = settings::Opening::Again(at),
-            Err(error) => {
-                // NFR-13. The dialog either came up or it did not, and if it did not the user is
-                // told by the absence of a window; the reason goes to the journal.
-                app::report_non_critical("DialogBoxParamW", &error);
-                return;
-            }
-        }
-    }
+    let _ = crate::ui::windows::settings::open(hwnd);
 }
 
 /// Takes a configuration the dialog produced and makes it the program's — the «Применить» of
@@ -3592,6 +3402,15 @@ fn open_settings(hwnd: HWND) {
 ///
 /// The registry is the one destination of the three that can answer no, and what is done with
 /// that answer is [`apply_settings_via`], one function down.
+/// Puts `config` in force the way «Применить» did, and answers whether the file of the
+/// configuration took it — the window of the settings applies every change at once by this
+/// (task T-120-20) and steps the change back when the file refused it. None without a tray.
+pub fn apply_settings_now(config: &Config) -> Option<bool> {
+    with_tray(|_| ())?;
+    apply_settings(config);
+    with_tray(|tray| tray.config_saved())
+}
+
 fn apply_settings(config: &Config) {
     let flag_was_on = with_tray(|tray| tray.flag_on()).unwrap_or(false);
 
@@ -4736,204 +4555,4 @@ mod tests {
         assert_eq!(scaled(16, 168), 28, "175 % of the small metric is 28 px");
         assert_eq!(scaled(32, 120), 40, "125 % of the large metric is 40 px");
     }
-
-    // -----------------------------------------------------------------------------------
-    // `WM_SETTINGCHANGE`: the string is read only when there is somebody to hand it to —
-    // task T-13-20
-    // -----------------------------------------------------------------------------------
-    //
-    // ⚠ These live here and not in `tests\tray.rs` for the reason the three above do:
-    // [`setting_change_name`], [`on_setting_change`] and the counter are private to this
-    // module and are staying private. A reader that dereferences a pointer out of a window
-    // message is the last thing in this program to publish for the sake of a test — that
-    // would widen the very surface SEC-05 narrows. What `tests\tray.rs` checks instead is
-    // the published half: the table of [`setting_name_is_wanted`] and the product's own
-    // call sites.
-    //
-    // ⚠ Every thread-local these read — the hand-off record, [`settings::dialog_is_open`],
-    // [`settings::about_is_open`] — belongs to the thread running the test, so the tests
-    // below do not see each other however `cargo test` schedules them.
-    //
-    // ⭐ **Task T-41-2 changed what they measure, and the change is the repair.** The number
-    // these tests used to read was «сколько раз входили в читателя»; there is no reader any
-    // more, so the question «читателя не звали» has no meaning and its successor is «дошло ли
-    // дело до передачи и что именно передано». Criteria 5, 6, 7 and ловушка 3 of task T-13-20
-    // are all statements about the gate, and the gate is exactly where it was — only the thing
-    // it guards changed, from a dereference to a repaint.
-
-    /// What the arm last handed to `settings::on_system_theme_message` on this thread — task
-    /// T-41-2. The outer `None` means the arm never reached the hand-off.
-    fn handoff() -> Option<Option<String>> {
-        THEME_HANDOFF.with(|last| last.borrow().clone())
-    }
-
-    /// Forgets it again, so that a test measures its own call and not its neighbour's.
-    fn forget_handoff() {
-        THEME_HANDOFF.with(|last| *last.borrow_mut() = None);
-    }
-
-    // ⛔ Two helpers of task T-13-20 stood here: `a_pointer_to_nothing`, the «мусорный
-    // ненулевой `lParam`» of criterion 5, and `immersive_color_set`, a well-formed payload for
-    // criterion 6. Task T-41-2 took the reading away, so neither a good payload nor a bad
-    // pointer has anywhere to go — the arm is not given one.
-
-    /// A handle that names no window — the record test of task T-13-17 uses the same trick
-    /// and for the same reason: what is under test is the *record*, not the dialog manager.
-    /// Nothing is ever sent to this number; `GetWindowLongPtrW` answers zero for it, which is
-    /// where `on_system_theme_message` stops.
-    fn a_handle_that_names_no_window() -> HWND {
-        HWND(0x1357 as *mut std::ffi::c_void)
-    }
-
-    /// **Criterion 5 of task T-13-20 — «некому отдать», re-aimed by task T-41-2.**
-    ///
-    /// The state the audit of 2026-08-24 found: no window of FR-92а on the screen, and a
-    /// `WM_SETTINGCHANGE` arriving all the same. What the gate used to spare was a dereference
-    /// of the sender's pointer; since task T-41-2 there is no pointer to spare, and what it
-    /// spares is a reading of the personalization switch and a walk over two empty records.
-    /// The sentence is the same sentence: with nobody to tell, nothing happens.
-    #[test]
-    fn a_setting_change_with_nobody_to_tell_goes_no_further() {
-        assert!(
-            !settings::dialog_is_open(),
-            "this thread has no settings dialog"
-        );
-        assert!(
-            !settings::about_is_open(),
-            "and no «О программе» window either"
-        );
-
-        let wanted = setting_name_is_wanted(
-            settings::dialog_is_open(),
-            settings::about_is_open(),
-            theme::ThemeSetting::System,
-        );
-
-        forget_handoff();
-        on_setting_change(theme::ThemeSetting::System);
-        let handed = handoff();
-
-        println!("gate: {wanted}; handed on: {handed:?}");
-
-        assert!(!wanted, "with neither window up there is nobody to tell");
-        assert_eq!(
-            handed, None,
-            "and the arm must not have reached the hand-off — the finding of the audit of \
-             2026-08-24 is exactly this call carrying on anyway"
-        );
-    }
-
-    /// **Criterion 6 of task T-13-20 — «есть кому отдать».** The dialog is open and the theme
-    /// is `system`: the arm goes through, and what it hands over is the word FR-92а names.
-    ///
-    /// The flag is raised through [`settings::DialogSession`] — the product's own guard and
-    /// the only thing that raises it — so what the gate reads here is what it reads in the
-    /// running program. No window is behind the flag, so `on_system_theme_message` stops at
-    /// its own empty record; that half of the road belongs to `tests\settings.rs`, which
-    /// closes it by a table.
-    ///
-    /// ⭐ **Task T-41-2: the message is not involved.** This test used to build a well-formed
-    /// `WM_SETTINGCHANGE` payload and assert that the arm read it back correctly; now there is
-    /// nothing to build, because the word travels out of this build's own memory.
-    #[test]
-    fn an_open_dialog_under_the_system_theme_is_told_as_it_always_was() {
-        let _open = settings::DialogSession::open();
-
-        assert!(settings::dialog_is_open(), "the guard raised the flag");
-
-        forget_handoff();
-        on_setting_change(theme::ThemeSetting::System);
-        let handed = handoff();
-
-        println!("handed on: {handed:?}");
-
-        assert_eq!(
-            handed,
-            Some(Some(settings::IMMERSIVE_COLOR_SET.to_owned())),
-            "the arm goes through, and it hands over the one word FR-92а names"
-        );
-    }
-
-    /// **Criterion 7 of task T-13-20 — тема задана вручную.** The dialog is open, so there is
-    /// a window on the screen; but `[general].theme` is `light` or `dark`, and under those
-    /// FR-92а fixes the palette outright. The system's switch has no say, nothing would be
-    /// repainted whatever the switch said, and so nothing is asked of the system at all.
-    #[test]
-    fn a_theme_fixed_by_hand_stops_the_arm_even_with_a_window_up() {
-        let _open = settings::DialogSession::open();
-
-        assert!(settings::dialog_is_open(), "a window *is* up for this test");
-
-        forget_handoff();
-
-        for setting in [theme::ThemeSetting::Light, theme::ThemeSetting::Dark] {
-            let wanted = setting_name_is_wanted(true, false, setting);
-
-            on_setting_change(setting);
-
-            println!("{setting:?}: gate {wanted}");
-
-            assert!(
-                !wanted,
-                "{setting:?} is fixed by FR-92а — the system has no say"
-            );
-        }
-
-        let handed = handoff();
-
-        println!("handed on: {handed:?}");
-
-        assert_eq!(
-            handed, None,
-            "neither fixed theme may reach the hand-off — FR-92а pins the palette under both, \
-             so waking the windows would be work done for no purpose at all"
-        );
-    }
-
-    /// **Ловушка 3 of task T-13-20, driven and not merely tabled.** Task T-13-17 is in this
-    /// tree, so «есть кому отдать» is «диалог открыт **или** about жив» — and the second
-    /// disjunct has to carry the gate on its own.
-    ///
-    /// A gate written as `dialog_is_open()` alone passes every other test in this file and
-    /// fails this one, which is precisely what it is here for: the about window would stop
-    /// following the system theme, and task T-13-17's repair would be undone in silence.
-    #[test]
-    fn the_about_window_alone_is_somebody_to_tell() {
-        let _about = settings::AboutSession::open();
-        settings::AboutSession::record(a_handle_that_names_no_window());
-
-        assert!(
-            !settings::dialog_is_open(),
-            "no settings dialog — the first disjunct is false"
-        );
-        assert!(settings::about_is_open(), "and the second one is true");
-
-        forget_handoff();
-        on_setting_change(theme::ThemeSetting::System);
-        let handed = handoff();
-
-        println!("handed on with only the about window up: {handed:?}");
-
-        assert_eq!(
-            handed,
-            Some(Some(settings::IMMERSIVE_COLOR_SET.to_owned())),
-            "the about window is somebody to tell, and a gate that asked only about the \
-             settings dialog would have refused here"
-        );
-    }
-
-    // ⛔ **Two scaffolding tests of task T-41-2 stood here and were taken away with the thing
-    // they measured.** `the_arm_hands_on_the_programs_own_word_whatever_the_message_named`
-    // built a well-formed `WM_SETTINGCHANGE` naming «Environment» and asserted that what went
-    // on to `settings::on_system_theme_message` was this build's own word: it failed on the old
-    // code with `Some("Environment")` against `Some("ImmersiveColorSet")` — the honest red of
-    // this task, journal `scratchpad-E41\red-T-41-2-handoff.log`.
-    // `a_forged_lparam_no_longer_ends_the_process` drove the pointer to nothing through the arm
-    // and **took the test binary down** with `STATUS_ACCESS_VIOLATION` on the old code — premise
-    // П4 measured, journal `scratchpad-E41\premise-P4-crash.log`.
-    //
-    // Neither can be written now, and that is the repair: `on_setting_change` has no `lParam`
-    // to be given. What is left of them lives in two places — the criteria above, which say what
-    // the arm hands over, and the sweep of `tests\tray.rs`, which says that no code of this file
-    // dereferences anything arriving on a message.
 }

@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod corner;
+pub mod settings;
 pub mod tray_menu;
 
 use crate::settings::Language;
@@ -27,6 +28,12 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
             crate::corner::release_content_in(language, "1.6.1"),
         ),
     ];
+    // The window of the settings (T-120-20): five sections and «Несколько раскладок».
+    all.extend(
+        settings::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&|id| id as u16))),
+    );
     // The menu of the icon (T-120-15) in its five states.
     all.extend(
         tray_menu::states(language)

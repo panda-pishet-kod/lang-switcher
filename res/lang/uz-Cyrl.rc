@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Журнал жилдини очиш"
     IDS_LOG_SAVE            "Журнални сақлаш"
     IDS_LOG_SAVE_FAILED     "Журнални сақлаб бўлмади."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Журнал сақланди"
     IDS_LOG_DIR_LABEL       "Журнал жилди:"
     IDS_GROUP_STATE         "Ҳолат"

@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "Mở thư mục nhật ký"
     IDS_LOG_SAVE            "Lưu nhật ký"
     IDS_LOG_SAVE_FAILED     "Không thể lưu nhật ký."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Đã lưu nhật ký"
     IDS_LOG_DIR_LABEL       "Thư mục nhật ký:"
     IDS_GROUP_STATE         "Trạng thái"

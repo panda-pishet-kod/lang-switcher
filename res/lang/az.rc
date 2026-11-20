@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "Jurnal qovluğunu aç"
     IDS_LOG_SAVE            "Jurnalı saxla"
     IDS_LOG_SAVE_FAILED     "Jurnalı saxlamaq mümkün olmadı."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Jurnal saxlandı"
     IDS_LOG_DIR_LABEL       "Jurnal qovluğu:"
     IDS_GROUP_STATE         "Vəziyyət"

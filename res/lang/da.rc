@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "Åbn logmappen"
     IDS_LOG_SAVE            "Gem loggen"
     IDS_LOG_SAVE_FAILED     "Loggen kunne ikke gemmes."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Loggen er gemt"
     IDS_LOG_DIR_LABEL       "Logmappe:"
     IDS_GROUP_STATE         "Status"

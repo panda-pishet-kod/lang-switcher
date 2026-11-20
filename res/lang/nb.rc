@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "Åpne loggmappen"
     IDS_LOG_SAVE            "Lagre loggen"
     IDS_LOG_SAVE_FAILED     "Kunne ikke lagre loggen."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Loggen er lagret"
     IDS_LOG_DIR_LABEL       "Loggmappe:"
     IDS_GROUP_STATE         "Status"

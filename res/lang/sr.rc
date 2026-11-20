@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Отвори фасциклу"
     IDS_LOG_SAVE            "Сачувај дневник"
     IDS_LOG_SAVE_FAILED     "Дневник није могао да се сачува."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Дневник је сачуван"
     IDS_LOG_DIR_LABEL       "Фасцикла:"
     IDS_GROUP_STATE         "Стање"

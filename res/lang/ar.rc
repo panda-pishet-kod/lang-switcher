@@ -50,6 +50,7 @@ BEGIN
     IDS_LOG_OPEN            "فتح المجلد"
     IDS_LOG_SAVE            "حفظ السجل الآن"
     IDS_LOG_SAVE_FAILED     "تعذّر حفظ السجل."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "حُفظ السجل"
     IDS_LOG_DIR_LABEL       "المجلد:"
     IDS_GROUP_STATE         "الحالة"

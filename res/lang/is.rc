@@ -52,6 +52,7 @@ BEGIN
     IDS_LOG_OPEN            "Opna möppu annálsins"
     IDS_LOG_SAVE            "Vista annálinn"
     IDS_LOG_SAVE_FAILED     "Ekki tókst að vista annálinn."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Annáll vistaður"
     IDS_LOG_DIR_LABEL       "Annálsmappa:"
     IDS_GROUP_STATE         "Staða"

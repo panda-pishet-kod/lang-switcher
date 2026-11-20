@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "Otvori fasciklu"
     IDS_LOG_SAVE            "Sačuvaj dnevnik"
     IDS_LOG_SAVE_FAILED     "Dnevnik nije mogao da se sačuva."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Dnevnik je sačuvan"
     IDS_LOG_DIR_LABEL       "Fascikla:"
     IDS_GROUP_STATE         "Stanje"

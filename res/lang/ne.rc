@@ -53,6 +53,7 @@ BEGIN
     IDS_LOG_OPEN            "लग फोल्डर खोल्नुहोस्"
     IDS_LOG_SAVE            "लग सुरक्षित गर्नुहोस्"
     IDS_LOG_SAVE_FAILED     "लग सुरक्षित गर्न सकिएन।"
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "लग सुरक्षित गरियो"
     IDS_LOG_DIR_LABEL       "लग फोल्डर:"
     IDS_GROUP_STATE         "अवस्था"

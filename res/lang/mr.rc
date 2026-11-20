@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "लॉग फोल्डर उघडा"
     IDS_LOG_SAVE            "लॉग जतन करा"
     IDS_LOG_SAVE_FAILED     "लॉग जतन करता आला नाही."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "लॉग जतन केला"
     IDS_LOG_DIR_LABEL       "लॉग फोल्डर:"
     IDS_GROUP_STATE         "स्थिती"

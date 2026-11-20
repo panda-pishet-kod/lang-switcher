@@ -56,6 +56,7 @@ BEGIN
     IDS_LOG_OPEN            "Avaa lokikansio"
     IDS_LOG_SAVE            "Tallenna loki"
     IDS_LOG_SAVE_FAILED     "Lokia ei voitu tallentaa."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "Loki tallennettu"
     IDS_LOG_DIR_LABEL       "Lokikansio:"
     IDS_GROUP_STATE         "Tila"

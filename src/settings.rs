@@ -54,7 +54,7 @@
 //! open for an hour costs the program nothing — that separation is what section 6.1 exists
 //! for.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
@@ -74,13 +74,13 @@ use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DT_CALCRECT,
-    DT_CENTER, DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect,
-    DrawTextW, EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW, GetObjectW,
-    GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW, HBITMAP, HBRUSH, HDC, HFONT, HGDIOBJ,
+    BeginPaint, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DT_CENTER,
+    DT_END_ELLIPSIS, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawFocusRect, DrawTextW,
+    EndPaint, FONT_WEIGHT, FW_BOLD, FillRect, GetDC, GetMonitorInfoW, GetObjectW,
+    GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW, HBRUSH, HDC, HFONT, HGDIOBJ,
     InvalidateRect, LOGFONTW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
-    PAINTSTRUCT, ReleaseDC, SRCCOPY, ScreenToClient, SelectObject, SetBkColor, SetBkMode,
-    SetTextColor, TEXTMETRICW, TRANSPARENT, TextOutW,
+    PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor,
+    TEXTMETRICW, TRANSPARENT, TextOutW,
 };
 use windows::Win32::System::LibraryLoader::{
     FindResourceExW, FindResourceW, GetModuleHandleW, LoadResource, LockResource, SizeofResource,
@@ -90,22 +90,13 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::Win32::UI::Controls::{
-    CDDS_ITEMPREPAINT, CDDS_PREPAINT, CDIS_SELECTED, CDRF_DODEFAULT, CDRF_NOTIFYITEMDRAW, CLR_NONE,
-    DRAWITEMSTRUCT, EM_LIMITTEXT, EM_SETMARGINS, HIMAGELIST, ICC_LISTVIEW_CLASSES, ILC_COLOR32,
-    ILC_MASK, INITCOMMONCONTROLSEX, ImageList_AddMasked, ImageList_Create, ImageList_Destroy,
-    ImageList_SetBkColor, InitCommonControlsEx, LIST_VIEW_ITEM_STATE_FLAGS, LVCF_WIDTH, LVCOLUMNW,
-    LVIF_STATE, LVIF_TEXT, LVIR_BOUNDS, LVIS_FOCUSED, LVIS_SELECTED, LVIS_STATEIMAGEMASK, LVITEMW,
-    LVM_DELETEALLITEMS, LVM_GETIMAGELIST, LVM_GETITEMCOUNT, LVM_GETITEMRECT, LVM_GETITEMSTATE,
-    LVM_GETNEXTITEM, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETCOLUMNWIDTH,
-    LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETIMAGELIST, LVM_SETITEMSTATE, LVM_SETTEXTBKCOLOR,
-    LVM_SETTEXTCOLOR, LVN_ITEMCHANGED, LVN_ITEMCHANGING, LVNI_SELECTED, LVS_EX_CHECKBOXES,
-    LVS_EX_FULLROWSELECT, LVSIL_STATE, MEASUREITEMSTRUCT, NM_CUSTOMDRAW, NM_SETFOCUS,
-    NMCUSTOMDRAW_DRAW_STATE_FLAGS, NMHDR, NMLISTVIEW, NMLVCUSTOMDRAW, ODS_COMBOBOXEDIT,
-    ODS_DISABLED, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON, ODT_COMBOBOX, ODT_LISTBOX,
-    ODT_STATIC, SetScrollInfo, WM_MOUSELEAVE,
+    CLR_NONE, HIMAGELIST, ILC_COLOR32, ILC_MASK, ImageList_AddMasked, ImageList_Create,
+    ImageList_Destroy, ImageList_SetBkColor, LVIS_STATEIMAGEMASK, LVM_GETIMAGELIST,
+    LVM_GETITEMCOUNT, LVM_GETITEMSTATE, LVM_SETIMAGELIST, LVSIL_STATE, ODT_COMBOBOX, ODT_LISTBOX,
+    WM_MOUSELEAVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, SetFocus, TME_LEAVE, TRACKMOUSEEVENT,
+    EnableWindow, GetFocus, GetKeyState, IsWindowEnabled, TME_LEAVE, TRACKMOUSEEVENT,
     TrackMouseEvent, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE,
     VK_F1, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT,
     VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
@@ -115,35 +106,21 @@ use windows::Win32::UI::Shell::{
     DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BN_SETFOCUS, CB_ADDSTRING, CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CB_RESETCONTENT,
-    CB_SETCURSEL, CBN_SETFOCUS, CallWindowProcW, CreateDialogIndirectParamW, CreateDialogParamW,
-    DLGC_STATIC, DLGC_WANTALLKEYS, DLGPROC, DLGTEMPLATE, DM_SETDEFID, DWLP_MSGRESULT,
-    DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN,
-    EC_RIGHTMARGIN, EN_SETFOCUS, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
-    GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetMessageTime,
-    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND,
-    IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETSELCOUNT, LB_GETSELITEMS, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCARETINDEX,
-    LB_SETSEL, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW,
-    MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
-    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
-    SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, SW_ERASE, SW_INVALIDATE,
-    SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
-    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-    SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
-    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
-    WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC,
+    CB_GETCURSEL, CB_GETLBTEXT, CB_GETLBTEXTLEN, CreateDialogIndirectParamW, CreateDialogParamW,
+    DLGPROC, DLGTEMPLATE, DestroyIcon, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GetClientRect,
+    GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetParent, GetWindow, GetWindowLongPtrW,
+    GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND, IDCANCEL, IDOK, IMAGE_ICON, KillTimer,
+    LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW, PostMessageW, RT_DIALOG, SB_BOTTOM,
+    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendDlgItemMessageW, SetCursor, SetDlgItemTextW,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, UISF_HIDEFOCUS, WM_APP, WM_ERASEBKGND, WM_GETFONT,
+    WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_QUERYUISTATE, WM_SETCURSOR, WM_SETICON, WNDPROC,
     WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
 use crate::CONFIG_DIR_NAME;
-use crate::layouts::{self, LayoutId, LayoutSpec};
+use crate::layouts::{LayoutId, LayoutSpec};
 // The state of `[letters]` lives in this file because the schema of section 7 does; the
 // calendar it is written in, the vocabulary of `thanks` and every rule that reads the section
 // live in `letters`, which owns them (§6.2). The import is by module name for the same reason
@@ -160,15 +137,11 @@ use crate::widgets;
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
     self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
-    CORNER_RADIUS, CheckMark, ComboBorderRole, ComboChevronRole, ComboFillRole, CornerColors,
-    GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole, HotBrush,
+    CORNER_RADIUS, CheckMark, ComboBorderRole, ComboChevronRole, ComboFillRole, HotBrush,
     ResolvedButtonColors, StaticColorRole, ThemeSetting, caption_advance, check_frame_colors,
-    combo_chevron_points, combo_closed_color_roles, combo_fill_brush, combo_item_color_roles,
-    combo_text_ink, create_font, dc_dpi, draw_check_mark, draw_combo_chevron, drawing_dpi,
-    glyph_color_roles, label_ink, list_frame_air, list_frame_box, list_item_color_roles,
-    paint_caption_underline, paint_ellipse, paint_label, paint_rounded, paint_rounded_corners,
-    paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
-    select_face, smoothed_logfont, title_bar_is_dark,
+    combo_chevron_points, combo_closed_color_roles, combo_fill_brush, combo_text_ink, create_font,
+    dc_dpi, draw_check_mark, draw_combo_chevron, drawing_dpi, list_frame_air, paint_rounded,
+    paint_selection_stripe, restore_face, scaled, select_face, smoothed_logfont, title_bar_is_dark,
 };
 
 /// File name of the configuration inside the program's application data directory.
@@ -1258,7 +1231,17 @@ pub fn language_order(windows: Option<Language>, layouts: &[Language]) -> Langua
 /// its English at the end): the first preferred interface language the build offers. A layout
 /// speaks the language of its locale (`LCIDToLocaleName` of its language identifier), matched by
 /// the same rule as Windows' own tags — so `uz-Cyrl-UZ` is Uzbek in Cyrillic.
-fn language_order_on_this_machine(session: &[LayoutId]) -> LanguageOrder {
+/// The layouts the instrument of fitting describes the window of the settings over — three
+/// common ones, so that the window is measured with the names a person sees there (T-120-20).
+pub fn layouts_for_fitting() -> Vec<LayoutId> {
+    vec![
+        LayoutId::from_raw(0x0409_0409),
+        LayoutId::from_raw(0x0419_0419),
+        LayoutId::from_raw(0x0407_0407),
+    ]
+}
+
+pub fn language_order_on_this_machine(session: &[LayoutId]) -> LanguageOrder {
     let windows = preferred_ui_languages()
         .iter()
         .find_map(|tag| language_of_ui_tag(tag));
@@ -4081,6 +4064,9 @@ pub const IDS_TOAST_THANKS: u16 = 3136;
 pub const IDS_LOG_SAVE: u16 = 3213;
 /// The one sentence the person sees when that write is refused — task T-34-3.
 pub const IDS_LOG_SAVE_FAILED: u16 = 3214;
+/// The note at the top of a section of the window of the settings when the file of the
+/// configuration refused a change and the change was stepped back — T-120-20.
+pub const IDS_SETTINGS_NOT_SAVED: u16 = 3303;
 /// «Работает» — the first line of «Состояние», task T-34-5, finding Н80.
 pub const IDS_STATE_WORKING: u16 = 3215;
 /// «Приостановлена» — FR-90.
@@ -4480,7 +4466,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
 /// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
 /// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
-pub const INTERFACE_STRINGS: [u16; 261] = [
+pub const INTERFACE_STRINGS: [u16; 262] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4508,6 +4494,7 @@ pub const INTERFACE_STRINGS: [u16; 261] = [
     IDS_LOG_OPEN,
     IDS_LOG_SAVE,
     IDS_LOG_SAVE_FAILED,
+    IDS_SETTINGS_NOT_SAVED,
     IDS_LOG_SAVED,
     IDS_LOG_DIR_LABEL,
     IDS_GROUP_STATE,
@@ -5614,106 +5601,6 @@ pub const IDD_SETTINGS: u16 = 200;
 /// template that is somehow the old form is left alone rather than patched at the wrong place.
 const DLGTEMPLATEEX_EXSTYLE_AT: usize = 8;
 
-/// Runs one modal dialog of this program, **mirrored** when the interface locale reads right to
-/// left — вопрос 97, task Т-30-2.
-///
-/// # Why the template is copied instead of a process-wide switch being thrown
-///
-/// The obvious lever, `SetProcessDefaultLayout(LAYOUT_RTL)`, was measured first and does not do
-/// this job (`scratchpad-Э30\посылки-п1.log`). It is documented to change the default layout
-/// «when windows are created with **no parent or owner**», and that turns out to be exactly what
-/// it means: a window created after the call with no owner came back carrying `WS_EX_LAYOUTRTL`,
-/// the same window created with an owner did not, and the dialogs of this program always have an
-/// owner. Neither dialog mirrored, and neither did any of their forty-four children.
-///
-/// What does work — measured on this program's own `IDD_SETTINGS` in the same run — is a copy of
-/// the compiled template with `WS_EX_LAYOUTRTL` added to its `exStyle`, run through
-/// `DialogBoxIndirectParamW`: the dialog came back mirrored and **all forty-four children
-/// inherited it**, which is the half that matters. Children inherit the layout of the parent at
-/// creation, and the dialog manager creates them, so the style has to be on the window before
-/// they exist. There is no later moment to add it in.
-///
-/// A process-wide switch would also have been the wrong shape even if it had worked: it outlives
-/// the window, and the next window this program grows would be mirrored by an inheritance
-/// nobody remembers setting. The tray menu takes the same view — it asks for `TPM_LAYOUTRTL` at
-/// the one call that shows it (measured to be sufficient on its own,
-/// `scratchpad-Э30\посылки-п1б.log`) rather than reading a flag left lying about.
-///
-/// # Why every locale goes through the copy
-///
-/// One body (§6.2). The twelve left-to-right locales copy the same bytes and patch nothing, so
-/// what they get is the template they always got; running them through the same call means the
-/// path Hebrew and Arabic take is the path every test and every acceptance run exercises, rather
-/// than a branch reached by two locales out of fourteen.
-///
-/// NFR-13: any refusal along the way — the resource not found, not loadable, empty, or not the
-/// extended form — falls back to `DialogBoxParamW` on the resource itself. An unmirrored window
-/// is a poor answer for a Hebrew user and a far better one than no window at all.
-///
-/// # Safety
-///
-/// `owner` is a live window of this thread, `proc` is the dialog procedure that reads `param`,
-/// and `param` names something that outlives this call — which is every call, because the call
-/// is modal.
-unsafe fn show_modal_dialog(
-    instance: HINSTANCE,
-    template: u16,
-    owner: HWND,
-    proc: DLGPROC,
-    param: LPARAM,
-) -> isize {
-    // ⭐ Задача T-118-2: пока этот цикл выбирает сообщения потока, окна писем — мастер «Написать
-    // автору…» с кнопки этого же окна — получают Tab, Enter и Esc через перехватчик, а не никак.
-    // Снимается на выходе из функции по любому из трёх путей ниже.
-    let _letters = crate::letters::ModalLoopFilter::install();
-
-    let mirrored = ui_language().is_rtl();
-
-    if let Some(mut copy) = compiled_template(instance, template) {
-        // Вопрос 143, задача T-83-3: the step of the font, by the one body both calls share.
-        apply_font_step(owner, copy.as_mut_bytes());
-
-        if mirrored && mirror_template(copy.as_mut_bytes()).is_none() {
-            // The template is not the extended form after all, so there is nothing safe to
-            // patch. Run it unmirrored rather than corrupt a style (NFR-13).
-            //
-            // SAFETY: as for the `DialogBoxParamW` below.
-            return unsafe {
-                DialogBoxParamW(
-                    Some(instance),
-                    resource_id(template),
-                    Some(owner),
-                    proc,
-                    param,
-                )
-            };
-        }
-
-        // SAFETY: `copy` is a live buffer of this frame holding a whole compiled template, and
-        // the call is modal — it does not return until `EndDialog`, so the buffer outlives every
-        // use the dialog manager makes of it. Its address is aligned for the `u32` fields of a
-        // `DLGTEMPLATE` **by the type of the buffer** since task T-42-8, rather than by what the
-        // allocator happens to hand out. The other three arguments are the caller's, under the
-        // contract above.
-        return unsafe {
-            DialogBoxIndirectParamW(Some(instance), copy.as_ptr(), Some(owner), proc, param)
-        };
-    }
-
-    // SAFETY: as above, with the template named by its integer identifier in the
-    // `MAKEINTRESOURCE` form — a value below 65536 carried inside the pointer and never
-    // dereferenced as a string.
-    unsafe {
-        DialogBoxParamW(
-            Some(instance),
-            resource_id(template),
-            Some(owner),
-            proc,
-            param,
-        )
-    }
-}
-
 /// The **modeless twin** of [`show_modal_dialog`] — task Т-32-3, FR-101.
 ///
 /// Same template, same mirror, same fallbacks; `CreateDialogIndirectParamW` in place of
@@ -6435,59 +6322,6 @@ pub mod testing {
         let _restore = Restore(FORCED.with(|forced| forced.replace(step)));
 
         body()
-    }
-
-    /// **The settings window, hidden and modeless** — the door of задача T-118-5.
-    ///
-    /// The product's own window: the template `IDD_SETTINGS` of `module`, the procedure
-    /// `dialog_proc`, the state built by `new_dialog_cell` — the body [`super::show_dialog`]
-    /// builds it with. Two differences, both of the door and not of the window: it is created by
-    /// [`super::show_modeless_dialog`] (the test drives it with messages of its own thread and has
-    /// no modal loop to sit in), and the template carries no `WS_VISIBLE`, so it is never shown.
-    /// `apply` is the test's own record of what «Применить» and «ОК» publish; it is leaked, as
-    /// the window needs it for its whole life and a test process is short.
-    pub fn open_settings_hidden(
-        owner: super::HWND,
-        module: windows::Win32::Foundation::HMODULE,
-        config: &super::Config,
-        apply: Box<dyn FnMut(&super::Config)>,
-    ) -> Option<HiddenSettings> {
-        super::ensure_list_view_class().ok()?;
-
-        let apply: &'static mut dyn FnMut(&super::Config) = Box::leak(apply);
-        let cell = Box::new(super::new_dialog_cell(config, apply, super::Opening::Fresh));
-
-        // SAFETY: `module` carries `IDD_SETTINGS`; `owner` is a live window of this thread; the
-        // parameter names the boxed state, which `HiddenSettings` keeps until after the window is
-        // destroyed in its `Drop`.
-        let window = unsafe {
-            super::show_modeless_dialog(
-                windows::Win32::Foundation::HINSTANCE(module.0),
-                super::IDD_SETTINGS,
-                owner,
-                Some(super::dialog_proc),
-                super::LPARAM(std::ptr::from_ref(&*cell) as isize),
-            )
-        }?;
-
-        Some(HiddenSettings { window, cell })
-    }
-
-    /// The window of [`open_settings_hidden`] and the state it reads; the window goes first.
-    pub struct HiddenSettings {
-        /// The settings window.
-        pub window: super::HWND,
-        cell: Box<super::DialogCell<'static>>,
-    }
-
-    impl Drop for HiddenSettings {
-        fn drop(&mut self) {
-            // SAFETY: the window of this value, on this thread, destroyed once; the state it reads
-            // is dropped only after this call, with `cell`.
-            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.window) };
-            super::DIALOG_WINDOW.with(|window| window.set(0));
-            let _ = &self.cell;
-        }
     }
 }
 
@@ -7324,154 +7158,6 @@ pub enum DialogOutcome {
     Reopen(Option<RECT>),
 }
 
-/// What `EndDialog` is called with on the reopen path — task Т-31-2.
-///
-/// Ninety-nine is the number of the решение that introduced this outcome. It has to be none of
-/// the values the manager and this window already use: `IDOK` is 1, `IDCANCEL` is 2, and −1 is
-/// what `DialogBoxParamW` itself answers when the window could not be created at all.
-const DIALOG_REOPEN: isize = 99;
-
-/// **The state of one settings window, before the window exists** — what [`show_dialog`] built on
-/// its own frame until задача T-118-5 moved it here, unchanged, so that the hidden window of
-/// `testing::open_settings_hidden` is built by the very same body and not by a copy of it.
-fn new_dialog_cell<'a>(
-    config: &Config,
-    apply: &'a mut dyn FnMut(&Config),
-    opening: Opening,
-) -> DialogCell<'a> {
-    let session = layouts::enumerate().unwrap_or_default();
-
-    // Task T-55-8: the list as it opens, kept beside the one the person edits, so that «ОК» can
-    // tell an untouched cycle from an edited one.
-    let rows = layout_rows(&config.layouts, &session);
-
-    // Решение 202.7: the order of the language combo, asked of the machine at every opening.
-    let languages = language_order_on_this_machine(&session);
-
-    // FR-92а, task T-11-4: the palette of this dialog, resolved once at initialisation —
-    // the setting comes from the configuration the dialog was opened with, and the system
-    // switch is read exactly once, so the first paint is one consistent palette. Who
-    // re-resolves and when is written down in `refresh_in_place` (a pressed «Применить») and in
-    // task T-11-9 (`WM_SETTINGCHANGE`), not here.
-    let palette = theme::resolve(config.general.theme, theme::system_is_light());
-
-    DialogCell {
-        // Task T-11-5b-2: every glyph element starts «снят» here; `fill_dialog` writes the
-        // configuration in on `WM_INITDIALOG`, before the dialog is first painted.
-        checks: GlyphChecks::new(),
-        state: RefCell::new(DialogState {
-            working: config.clone(),
-            // Задача T-118-5: replaced by the read of the window on `WM_INITDIALOG`.
-            applied: config.clone(),
-            rows_at_open: rows.clone(),
-            rows,
-            cycle_at_open: config.layouts.cycle.clone(),
-            session,
-            languages,
-            apply,
-            capture: None,
-            combination_taken: false,
-            palette,
-            // `None` — some `CreateSolidBrush` refused — is survived, not escalated: the dialog
-            // opens and works with the system colours, because not painting is better than not
-            // opening (NFR-13). Nothing is journaled on that path: `Brushes::new` documents
-            // why, and the vocabulary of `diag` is closed (reviews\T-11-1.md).
-            brushes: theme::Brushes::new(palette),
-            // Empty until `WM_INITDIALOG`: the map is geometry of live windows, and there are
-            // no windows yet. Filled exactly once — see the field's own documentation.
-            panel_children: Vec::new(),
-            // `None` until `WM_INITDIALOG` for the same reason: the faces are made out of the
-            // font the dialog manager gives the window, and there is no window yet.
-            fonts: None,
-            // `None` until the first `WM_ERASEBKGND`, which is where the picture is built.
-            background: None,
-            // Task T-42-12: `None` until `WM_INITDIALOG` finds the window taller than the
-            // monitor it opened on — which at 100 % it never is.
-            scroll: None,
-            // FR-92а, task T-12-1: loaded before the window exists, because a resource does
-            // not need one; shown on `WM_INITDIALOG`, which is where a window does.
-            icon: CaptionIcons::load(),
-            // Решение 99.1, task Т-31-2: the caller's, read once on `WM_INITDIALOG`.
-            opening,
-            // …and the answer that travels back out, written only by `reopen_in_place`.
-            reopen_at: None,
-            // Task T-100-3: nothing counts until «Выбрать окно программы» is pressed.
-            exclusion_pick: None,
-        }),
-    }
-}
-
-pub fn show_dialog(
-    owner: HWND,
-    instance: HINSTANCE,
-    config: &Config,
-    apply: &mut dyn FnMut(&Config),
-    opening: Opening,
-) -> windows::core::Result<DialogOutcome> {
-    // ⚠ One dialog at a time. A modal dialog runs a message loop that keeps dispatching to the
-    // *other* windows of this thread, so the tray icon can be clicked while this window is up
-    // and would otherwise open a second copy of it on top of the first — two windows editing
-    // two copies of one configuration, of which the last one applied would win. The guard is a
-    // thread-local because the dialog belongs to the UI thread and to no other (section 6.1).
-    //
-    // ⚠ The reopen loop of task Т-31-2 does **not** meet this guard: it calls this function
-    // again only after the previous call has returned, and the guard is given up by
-    // `DialogSession::drop` on the way out. Measured before the task was written — посылка П2,
-    // `scratchpad-Э31\посылки-п2.log`: two showings out of one call, and `with_tray` answering
-    // between them.
-    if dialog_is_open() {
-        return Ok(DialogOutcome::Closed);
-    }
-
-    // The list view of the cycle lives in `comctl32`, whose window classes are registered on
-    // demand. Without this the whole dialog fails to be created — one missing class takes the
-    // template with it — so the result is examined (NFR-13) before anything is shown.
-    ensure_list_view_class()?;
-
-    // Raised here and lowered however this function leaves, panic on the way through
-    // included — see [`DialogSession`].
-    let _open = DialogSession::open();
-
-    let state = new_dialog_cell(config, apply, opening);
-
-    // SAFETY: `instance` is a module handle whose resources carry `IDD_SETTINGS`. `owner` is a
-    // live window of this thread. The parameter is a pointer to `state`, which lives on this
-    // frame: the call is modal and does not return until `EndDialog`, so the pointer cannot
-    // outlive the value it names. `dialog_proc` is the only reader of it; the guarded half is
-    // read through the `RefCell` of the `state` field, so no two borrows can overlap however the
-    // dialog manager re-enters, and the check store beside it is `Cell`-based — mutation through
-    // a shared reference, no borrow to collide with (task T-11-5b-2).
-    //
-    // Task Т-30-2: through `show_modal_dialog`, which mirrors the window for a right-to-left
-    // interface locale and is a plain `DialogBoxParamW` for the other twelve.
-    let result = unsafe {
-        show_modal_dialog(
-            instance,
-            IDD_SETTINGS,
-            owner,
-            Some(dialog_proc),
-            LPARAM(std::ptr::from_ref(&state) as isize),
-        )
-    };
-
-    // NFR-13. `DialogBoxParamW` answers -1 when the dialog could not be created at all — a
-    // missing template, a control class that is not registered — and that is the one outcome
-    // that is a failure. Everything else is what `EndDialog` was called with.
-    if result == -1 {
-        return Err(WinError::from_thread());
-    }
-
-    // Task Т-31-2. The window is gone by now — `EndDialog` unwound the manager's loop and the
-    // manager destroyed it — so the rectangle it asked to be rebuilt in cannot be read off it
-    // any more. It was written into the state, which lives on **this** frame and outlived the
-    // call, and this is where it is taken out.
-    if result == DIALOG_REOPEN {
-        return Ok(DialogOutcome::Reopen(state.state.borrow().reopen_at));
-    }
-
-    Ok(DialogOutcome::Closed)
-}
-
 /// Whether a settings dialog of FR-92 is on the screen of **this** thread — task T-13-14.
 ///
 /// The published half of [`DIALOG_OPEN`], and the whole of what leaves this module about it:
@@ -7510,6 +7196,13 @@ impl DialogSession {
     pub fn open() -> Self {
         DIALOG_OPEN.with(|open| open.set(true));
         Self
+    }
+
+    /// Records the window this session names — `ui::windows::settings::open` once the host has
+    /// made it (T-120-20), so that a second start of the program brings it forward
+    /// ([`open_window`]).
+    pub fn record(hwnd: HWND) {
+        DIALOG_WINDOW.with(|window| window.set(hwnd.0 as isize));
     }
 }
 
@@ -7609,99 +7302,12 @@ thread_local! {
     static ABOUT_WINDOW: Cell<isize> = const { Cell::new(0) };
 }
 
-// ---------------------------------------------------------------------------------------
-// The system theme changing under an open window — FR-92а, tasks T-11-9 and T-13-17
-// ---------------------------------------------------------------------------------------
-
-/// The one string of `WM_SETTINGCHANGE` this program reacts to — FR-92а, task T-11-9.
+/// The windows' own «системная тема сменилась» nudge — `WM_APP + 14`. The windows of the letters
+/// (`letters`) answer it by resolving their palette afresh; the windows of the shell follow the
+/// system theme on their own and are not sent it.
 ///
-/// Windows broadcasts a `WM_SETTINGCHANGE` naming this word when the personalization switch
-/// `AppsUseLightTheme` moves. SEC-05 allows exactly the comparison against it and forbids
-/// using the message's content any further.
-pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
-
-/// The windows' own «системная тема сменилась» nudge — FR-92а, tasks T-11-9 and T-13-17.
-///
-/// `WM_APP + 14`, the next free number of the program-wide row: `+ 1` is the wake-up of
-/// [`crate::app`] and `+ 5` its configuration nudge, `+ 2` the tray callback, `+ 3` and
-/// `+ 4` belong to [`crate::hook`], `+ 6`, `+ 7` and `+ 9` to [`crate::watchdog`], `+ 8` is
-/// [`crate::switch::WM_APP_SWITCH`], `+ 10` and `+ 11` are [`crate::guard`]'s pair, and
-/// `+ 12` and `+ 13` are [`crate::selection`]'s.
-///
-/// SEC-05: the message carries nothing and decides nothing. Its handler in [`dialog_proc`]
-/// re-resolves the palette out of this program's own setting and its own read of the system
-/// switch ([`refresh_palette`]), and an unchanged resolution repaints nothing — so a forged
-/// message buys the sender one reading of the personalization switch and one comparison of two
-/// pointers, and at worst one repaint of our own window with the palette it already ought to
-/// wear.
+/// SEC-05: the message carries nothing and decides nothing.
 pub const WM_APP_SYSTEM_THEME: u32 = WM_APP + 14;
-
-/// «Перекрашивать?» — the pure decision of task T-11-9, closed by a table in
-/// `tests\settings.rs`.
-///
-/// Yes exactly when three facts line up: the message named the theme switch — the string of
-/// the `WM_SETTINGCHANGE` is exactly [`IMMERSIVE_COLOR_SET`], a null `lParam` having read as
-/// `None` long before this point; the setting in force is `system` — under `light` and
-/// `dark` FR-92а fixes the palette and the system has no say; and the palette the system now
-/// resolves to differs from the one on the screen. Identity is the comparison because
-/// [`theme::resolve`] answers `&'static` identity — the same test [`refresh_palette`] runs
-/// again before repainting, which is what settles the batch Windows sends of these into one
-/// repaint.
-pub fn repaint_for_system_theme(
-    setting_string: Option<&str>,
-    setting: ThemeSetting,
-    current: &theme::Palette,
-    by_system: &theme::Palette,
-) -> bool {
-    setting_string == Some(IMMERSIVE_COLOR_SET)
-        && setting == ThemeSetting::System
-        && !std::ptr::eq(current, by_system)
-}
-
-/// The far end of the tray's `WM_SETTINGCHANGE` and `WM_THEMECHANGED` arms — FR-92а,
-/// task T-11-9.
-///
-/// `setting_string` is what the message named, already read within the bounds SEC-05
-/// prescribes — the reading belongs to the module that owns the receiving window.
-///
-/// **The settings dialog of FR-92 is the one window told this way.** It does not listen for
-/// `WM_SETTINGCHANGE` itself — the broadcast reaches the tray's hidden window (§6.2). The
-/// windows of the shell (`ui::host`) — «О программе» among them — follow the system theme on
-/// their own and are not on this road: their record holds no state of this module, and
-/// nothing may be read out of their windows as if it did.
-///
-/// A dialog that is not up is the cheap exit and costs one thread-local read: it will resolve
-/// the fresh system switch when it opens ([`show_dialog`] reads it at that moment), so there is
-/// nothing to tell it now. Otherwise the decision is [`repaint_for_system_theme`] over the
-/// dialog's own state, and a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to it —
-/// posted, never sent, like everything this program tells its own windows (the implication of
-/// FR-72).
-///
-/// A message arriving while the state is borrowed — a re-entrant dispatch inside a handler —
-/// finds `with_state` answering `None` and does nothing; Windows sends these in a batch, and a
-/// later arrival of the batch finds the borrow free.
-pub fn on_system_theme_message(setting_string: Option<&str>) {
-    // The settings dialog of FR-92 — task T-11-9.
-    if let Some(hwnd) = live_window(&DIALOG_WINDOW) {
-        // SAFETY: a non-zero record names the live modal dialog of this thread — recorded on
-        // `WM_INITDIALOG`, cleared however `show_dialog` leaves — so `hwnd` is the window of a
-        // dialog created by `show_dialog`, which is the contract of `with_state`.
-        let repaint = unsafe {
-            with_state(hwnd, |state| {
-                repaint_for_system_theme(
-                    setting_string,
-                    state.working.general.theme,
-                    state.palette,
-                    theme::resolve(ThemeSetting::System, theme::system_is_light()),
-                )
-            })
-        };
-
-        if repaint == Some(true) {
-            post_system_theme(hwnd);
-        }
-    }
-}
 
 /// The window a record names, or `None` when the record is empty — FR-92а, task T-13-17.
 ///
@@ -7716,681 +7322,6 @@ fn live_window(record: &'static std::thread::LocalKey<Cell<isize>>) -> Option<HW
     }
 
     Some(HWND(raw as *mut std::ffi::c_void))
-}
-
-/// Posts the empty [`WM_APP_SYSTEM_THEME`] nudge to the settings dialog — FR-92а.
-///
-/// SEC-05: the message carries two plain zeros. Nothing of the `WM_SETTINGCHANGE` that
-/// started this — no string, no pointer, no length — travels with it; the receiving handler
-/// asks the system itself what the theme now is.
-fn post_system_theme(hwnd: HWND) {
-    // SAFETY: `hwnd` came from the live record of the settings dialog of this thread, a window
-    // this program created and unable to outlive its record; the message carries two plain
-    // zeros and no pointer, so `PostMessageW` queues them by value and returns.
-    if let Err(error) =
-        unsafe { PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME, WPARAM(0), LPARAM(0)) }
-    {
-        // NFR-13. Not fatal: the palette catches up on the next occasion — the next message
-        // of the batch, or a pressed «Применить», or the next opening of the window — and
-        // the journal is told.
-        crate::app::report_non_critical("PostMessageW", &error);
-    }
-}
-
-/// The six owner-drawn check boxes and radio buttons whose check state the dialog keeps
-/// itself — FR-92а, task T-11-5b-2. The storage-side list, beside the drawing-side list of
-/// [`glyph_kind`]: both name the same six controls of the template.
-///
-/// Eight until task Т-21-5 added the sound switch of FR-100, nine with it, and six since
-/// task Т-23-2 took the three method radios of «Замена» off the window. In template order:
-/// the three check boxes of «Общие», the one radio run that is left, and the journal switch.
-///
-/// Public for the same reason the colour tables are: `tests\settings.rs` exercises the
-/// store over these very identifiers, without a live window.
-pub const GLYPH_CHECK_CONTROLS: [i32; 7] = [
-    IDC_AUTOSTART,
-    IDC_SOUND,
-    IDC_SELECTION_ENABLED,
-    IDC_TRAY_FLAG,
-    IDC_MODE_PAIR,
-    IDC_MODE_CYCLE,
-    IDC_LOG_ENABLED,
-];
-
-/// The check state of the six owner-drawn check boxes and radio buttons — FR-92а,
-/// task T-11-5b-2.
-///
-/// A button of type `BS_OWNERDRAW` keeps no check state of its own: the button-message
-/// pair that stores and answers it for the automatic types ignores the write and answers
-/// «снят» for an owner-drawn one — which the final sweep of the live acceptance saw as
-/// all the glyphs drawn unchecked whatever the configuration said. This store is that
-/// state, kept by the dialog itself: a fixed array of «идентификатор → взведён» pairs —
-/// the elements are six and known, so no map — and it is the *only* truth about the
-/// six: nothing asks the controls, so nothing can quietly disagree with it.
-///
-/// The flag sits in a [`Cell`] so that a shared reference reads and writes it, and that
-/// interior mutability is load-bearing, not convenience: `fill_dialog` writes the store
-/// from inside the `WM_INITDIALOG` borrow of [`DialogState`] and `read_dialog` reads it
-/// from inside the «Применить» borrow, where a nested `RefCell` borrow would be refused —
-/// the store must answer at every depth, which is what [`DialogCell`] and
-/// [`with_glyph_checks`] arrange.
-///
-/// A write to an identifier the store does not carry is dropped and a read answers «снят»
-/// (NFR-13: a wrong identifier misdraws one glyph, it does not fall). The answer for a
-/// store that does not exist *yet* is the caller's business: [`with_glyph_checks`] says
-/// `None`, and [`is_checked`] turns that into «снят».
-pub struct GlyphChecks {
-    /// The pairs, in template order. The identifier column never changes after [`Self::new`].
-    entries: [(i32, Cell<bool>); 7],
-}
-
-impl GlyphChecks {
-    /// The six known identifiers, every one «снят» — the state of the dialog before
-    /// `fill_dialog` writes the configuration in.
-    pub fn new() -> Self {
-        Self {
-            entries: GLYPH_CHECK_CONTROLS.map(|control| (control, Cell::new(false))),
-        }
-    }
-
-    /// Writes one element's state. An identifier outside the six is dropped — see the
-    /// type's own documentation.
-    pub fn set(&self, control: i32, on: bool) {
-        if let Some((_, cell)) = self.entries.iter().find(|(id, _)| *id == control) {
-            cell.set(on);
-        }
-    }
-
-    /// Reads one element's state; «снят» for an identifier outside the six.
-    pub fn get(&self, control: i32) -> bool {
-        self.entries
-            .iter()
-            .find(|(id, _)| *id == control)
-            .is_some_and(|(_, cell)| cell.get())
-    }
-
-    /// Arms `chosen` and quenches every other identifier of `first..=last` — the store
-    /// half of what the automatic radio types did for themselves: the walk is the same
-    /// contiguous identifier range, the template's `WS_GROUP` runs.
-    pub fn check_radio(&self, first: i32, last: i32, chosen: i32) {
-        for (id, cell) in &self.entries {
-            if (first..=last).contains(id) {
-                cell.set(*id == chosen);
-            }
-        }
-    }
-}
-
-impl Default for GlyphChecks {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// What `GWLP_USERDATA` of the settings dialog points at: the check store beside the
-/// guarded state, both on the frame of [`show_dialog`] — task T-11-5b-2.
-///
-/// The store sits *beside* the `RefCell`, not inside it, deliberately. The writers and
-/// readers of check state run at every depth — `fill_dialog` inside the `WM_INITDIALOG`
-/// borrow, `read_dialog` inside the «Применить» borrow, `restore_self_switching` and
-/// `draw_glyph_element` outside any — and a store behind the `RefCell` would answer the
-/// nested callers with a refusal: «Применить» would then read every element «снят» and
-/// erase the very configuration it was asked to keep. `Cell`-based state behind a shared
-/// reference has no borrow to refuse.
-struct DialogCell<'a> {
-    /// The check state of the eight glyph elements — [`with_glyph_checks`] is the road in.
-    checks: GlyphChecks,
-    /// Everything else the dialog procedure needs — [`with_state`] is the road in, and
-    /// its `RefCell` is what refuses re-entrant mutation.
-    state: RefCell<DialogState<'a>>,
-}
-
-/// Everything the dialog procedure needs, for as long as the dialog is up.
-///
-/// Lives on the frame of [`show_dialog`], inside a [`DialogCell`], and is reached through
-/// that cell's `RefCell` behind a raw pointer, which is the standard shape of a Win32
-/// dialog: the manager gives the procedure one `LPARAM` and nothing else. The `RefCell` is
-/// not decoration — a message dispatched while another message is being handled would
-/// otherwise alias a `&mut`, and here it is refused at run time instead.
-struct DialogState<'a> {
-    /// The configuration being edited. Starts as a copy of the caller's and is never anything
-    /// but a copy: nothing outside this dialog sees it until `apply` is called.
-    working: Config,
-    /// **What the window applied last, as the window reads it** — задача T-118-5, слово владельца
-    /// 208.77 «А — серая без изменений».
-    ///
-    /// «Применить» is enabled exactly while [`on_screen`] differs from this value
-    /// ([`refresh_apply`]). Taken off the screen on `WM_INITDIALOG`, right after `fill_dialog` —
-    /// the read of the window and not the caller's value, so that a spelling the file had and the
-    /// window writes otherwise (a layout, a cycle) is not a difference nobody made — and again by
-    /// [`apply_now`] after every publication.
-    applied: Config,
-    /// The layout list of FR-31, in display order.
-    rows: Vec<LayoutRow>,
-    /// The list as the dialog opened, before any tick or move — task T-55-8. «ОК» compares
-    /// `rows` against it to know whether the cycle was touched at all ([`cycle_after_dialog`]).
-    rows_at_open: Vec<LayoutRow>,
-    /// `[layouts] cycle` as the file had it when the dialog opened — task T-55-8, the string that
-    /// goes back byte for byte when nobody touched its ticks.
-    cycle_at_open: Vec<String>,
-    /// The layouts of this session, as `layouts::enumerate` gave them — FR-35 has already
-    /// removed the IMEs.
-    session: Vec<LayoutId>,
-    /// The rows of the combo «Язык интерфейса» — решение 202.7, worked out once per opening
-    /// ([`language_order_on_this_machine`]); `fill_dialog` fills the combo from it, `read_dialog`
-    /// reads the language back out of it, and the line under the group on top is drawn after
-    /// its `top`.
-    languages: LanguageOrder,
-    /// What to do with a configuration the user asked to apply.
-    apply: &'a mut dyn FnMut(&Config),
-    /// The capture of FR-94, while one is armed. `Some` is the whole of "armed": the value
-    /// suspends the conversion path for as long as it lives and restores it when it is dropped.
-    capture: Option<CaptureSession>,
-    /// **A combination has just been captured** — task T-93-2, the mock-up of 157.5: the line
-    /// under the field says once which half stays with the programs ([`IDS_CAPTURE_COMBO_NOTE`])
-    /// instead of the line at rest, until the window closes or the next capture is armed. A
-    /// change of language on «Применить» says it again in the new language rather than dropping
-    /// it. Since task T-95-2 the double press of `Shift` raises it too, and the line it says once
-    /// is [`IDS_CAPTURE_DOUBLE_NOTE`] (the mock-up of 157.18).
-    combination_taken: bool,
-    /// The palette every colour answer of this dialog is chosen from — FR-92а, task T-11-4.
-    ///
-    /// Resolved once when the dialog is created — the setting from the configuration, the
-    /// system switch read exactly once — and replaced in exactly one place: a pressed
-    /// «Применить» that resolves to the other palette (see [`refresh_in_place`]). `&'static`
-    /// because `theme::resolve` answers identity, not a copy, and identity is what
-    /// [`title_bar_is_dark`] and the change test in [`refresh_palette`] compare by.
-    palette: &'static theme::Palette,
-    /// The brushes of `palette`, owned for as long as the window can be asked to paint.
-    ///
-    /// `None` when [`theme::Brushes::new`] was refused: every `WM_CTLCOLOR*` then answers
-    /// «not handled» and the dialog lives on with the system colours — not painting is
-    /// better than not opening (NFR-13). On a palette change the set is recreated whole,
-    /// never mutated in place — see the type's own documentation for why.
-    brushes: Option<theme::Brushes>,
-    /// Identifiers of the controls that lie on one of the eight group panels — FR-92а,
-    /// task T-11-5c. The `WM_CTLCOLORSTATIC` and `WM_CTLCOLORBTN` answers for these
-    /// controls take the `panel_bg` brush instead of the window one, so their erased
-    /// background matches the panel they sit on.
-    ///
-    /// Built exactly once, on `WM_INITDIALOG`, by [`collect_panel_children`] — geometry
-    /// of the template's rectangles and nothing else. Deliberately *not* rebuilt on a
-    /// palette change: rectangles do not move when colours change, which is why
-    /// [`refresh_in_place`] recreates the brushes and leaves this map alone.
-    panel_children: Vec<i32>,
-    /// The two faces this dialog sets **its own** text in — FR-92а, task T-11-17.
-    ///
-    /// Owned for as long as the dialog is up and freed in `Drop`, exactly as the brushes are
-    /// and for the same reason: a font selected into a DC must outlive the paint. `None` —
-    /// the dialog font could not be read or the faces could not be made — leaves every
-    /// drawing to the manager's own font, which is what every task before this one drew in
-    /// (NFR-13).
-    fonts: Option<DialogFonts>,
-    /// The whole background of the window, drawn once and kept as a picture — task T-11-17.
-    ///
-    /// `WM_ERASEBKGND` then costs one `BitBlt` instead of eight rounded panels with their
-    /// letter-spaced captions and seven rounded field frames. Rebuilt — not repainted in
-    /// place — when the picture no longer fits the window: another client size, or another
-    /// palette after [`refresh_palette`]. `None` before the first paint and after a refused
-    /// build, which [`on_erase_background`] answers by painting straight into the message's
-    /// DC as it did before this task.
-    background: Option<BackgroundCache>,
-    /// How far the contents are scrolled, when the window had to be shortened — task T-42-12,
-    /// finding 124б.1.
-    ///
-    /// `None` is a window that fits its monitor whole, which is every window at 100 % and the
-    /// only case that existed before this task. `Some` carries the scroll position in pixels
-    /// and the height the contents really need, and the window then wears `WS_VSCROLL`.
-    scroll: Option<ScrollView>,
-    /// The icon the caption is shown by `WM_SETICON` — task T-12-1.
-    ///
-    /// Owned here for exactly the reason [`CaptionIcons`] gives: the handles must outlive the
-    /// window that displays them, and this value is dropped only after the modal call has
-    /// returned. `None` — a refused `LoadImageW` — leaves the caption without an icon, which
-    /// is the caption every task before this one had (NFR-13).
-    icon: Option<CaptionIcons>,
-    /// Why this window is being shown — решение 99.1, task Т-31-2. Read once, on
-    /// `WM_INITDIALOG`, and never written.
-    opening: Opening,
-    /// Where this window stood when it asked to be shown again — the other half of the same
-    /// решение, and the only field of this state the *caller* reads.
-    ///
-    /// Written by [`reopen_in_place`] immediately before `EndDialog`, and read by
-    /// [`show_dialog`] after the modal call has returned, off the value on its own frame.
-    /// `None` while the window has not asked, and `None` too when `GetWindowRect` refused
-    /// (NFR-13) — the new window then goes where `DS_CENTER` puts it, which is a worse place
-    /// but not a lost window.
-    reopen_at: Option<RECT>,
-    /// The seconds left of «Выбрать окно программы» while it counts — task T-100-3. `Some` is the
-    /// whole of «counting»: [`toggle_exclusion_pick`] sets it with the timer, the tick counts it
-    /// down, and the second press, the ceiling, the capture and the end of the window take it
-    /// away. A tick that finds `None` is a tick of nobody's count and does nothing (SEC-05).
-    exclusion_pick: Option<u32>,
-}
-
-/// The dialog procedure of FR-92.
-///
-/// # Safety
-///
-/// Called by the dialog manager with the arguments of a window message. `hwnd` names the live
-/// dialog, and on `WM_INITDIALOG` `lparam` is the pointer [`show_dialog`] passed and nothing
-/// else — the manager forwards it unchanged and no other sender can reach this procedure,
-/// because it is not registered as a window class anybody can create (SEC-05).
-unsafe extern "system" fn dialog_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> isize {
-    match message {
-        WM_INITDIALOG => {
-            // SAFETY: `hwnd` is the live dialog and `GWLP_USERDATA` is a field every window
-            // has, which the dialog manager does not use for itself — its own storage is the
-            // `DWLP_*` range. The value stored is the pointer the manager forwarded from
-            // `DialogBoxParamW`; it is only ever read back by `with_state` and
-            // `with_glyph_checks`, below.
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
-
-            // FR-92а, task T-11-9: the record `on_system_theme_message` finds the dialog
-            // by. Cleared by the guard of `show_dialog` however that function leaves, so
-            // it never outlives the window it names.
-            DIALOG_WINDOW.with(|window| window.set(hwnd.0 as isize));
-
-            // SAFETY: the pointer has just been stored and names the `DialogCell` on the frame
-            // of `show_dialog`, which outlives this modal call.
-            unsafe {
-                with_state(hwnd, |state| {
-                    // FR-92а, task T-11-17: the two faces this dialog sets its own text in,
-                    // made out of the font the manager gave the window and asked to render
-                    // with grey antialiasing instead of ClearType. Once, here — a face is a
-                    // property of the window, not of a paint — and freed with the state.
-                    //
-                    // ⚠ **Before `fill_dialog`, and that ordering is task T-11-20's.** Since
-                    // that task the text face is not only selected into DCs by our own
-                    // drawing: it is handed to the five input fields and to the layout list,
-                    // which draw their own text and have to be holding it before anything is
-                    // put into them. `fill_dialog` does the handing over and then the
-                    // filling; it can only do the first of those if the face already exists.
-                    state.fonts = DialogFonts::new(hwnd, GROUP_BOXES[0]);
-
-                    fill_dialog(hwnd, state);
-
-                    // Задача T-118-5: what is applied, as this window reads it — the base
-                    // «Применить» is compared against.
-                    state.applied = on_screen(hwnd, state);
-
-                    // FR-92а, task T-11-5c: the panel map — which controls lie on one of
-                    // the eight group panels — is geometry of the just-created windows,
-                    // read here once and never again: rectangles do not move when the
-                    // palette changes, so «Применить» has nothing to rebuild.
-                    state.panel_children = collect_panel_children(hwnd);
-
-                    // FR-92а, task T-11-4: the non-client title bar follows the resolved
-                    // palette from the first showing. The client area needs no call — the
-                    // `WM_CTLCOLOR*` answers below paint it as soon as anything paints.
-                    apply_title_bar_theme(hwnd, state.palette);
-                })
-            };
-
-            // FR-92а, task T-12-1: the icon of the caption, taken out of the state as two
-            // plain handles and posted only after the borrow has ended — the discipline every
-            // handler of this file keeps, whatever the message costs.
-            //
-            // SAFETY: as above — the pointer was stored just now and the value it names is
-            // alive for the whole of this modal call.
-            let frames =
-                unsafe { with_state(hwnd, |state| state.icon.as_ref().map(CaptionIcons::frames)) };
-
-            if let Some(Some(frames)) = frames {
-                // SAFETY: `hwnd` is the live dialog, and the handles belong to the value the
-                // state keeps, which is dropped only after this modal call returns.
-                unsafe { CaptionIcons::show_on(hwnd, frames) };
-            }
-
-            // ⭐ Задача T-118-5: the window opens with «Применить» grey — nothing on it differs
-            // from what is applied yet.
-            set_apply_enabled(hwnd, false);
-
-            // FR-92а, task T-11-5a: «ОК» lost `BS_DEFPUSHBUTTON` to owner drawing — a
-            // button *type* occupies the low nibble the default style lived in — so the
-            // default identifier is handed to the dialog manager by the documented
-            // replacement, `DM_SETDEFID`. On Enter the manager asks `DM_GETDEFID` and
-            // clicks the button this message named, which is what keeps Enter landing on
-            // «ОК».
-            //
-            // *Posted*, not sent: everything this program tells its own windows goes
-            // through `PostMessageW` — a bare `SendMessage` is banned program-wide by the
-            // implication of FR-72, and a test sweeps `src\` for it. Nothing is lost by
-            // the queue: posted messages are retrieved ahead of input, this one is queued
-            // before the dialog is even shown, so the default is in force before the
-            // first keystroke that could ask for it.
-            //
-            // SAFETY: `hwnd` is the live dialog; the message carries two plain integers
-            // and no pointer — `PostMessageW` queues them by value and returns.
-            if let Err(error) = unsafe {
-                PostMessageW(
-                    Some(hwnd),
-                    DM_SETDEFID,
-                    WPARAM(usize::try_from(OK_COMMAND).unwrap_or(0)),
-                    LPARAM(0),
-                )
-            } {
-                // NFR-13. Not fatal: the one consequence would be Enter answered by the
-                // fallback of the dialog manager rather than by the named default, and
-                // the journal is told.
-                crate::app::report_non_critical("PostMessageW", &error);
-            }
-
-            // Решение 99.1(б), task Т-31-2: a window rebuilt because the direction of writing
-            // changed sits down where the previous one stood, and takes the focus back to the
-            // combo the hand was on.
-            //
-            // Task T-42-12, finding 124б.1: a window taller than the monitor it opened on is
-            // shortened to it and given a scroll bar. **Before** the move of решение 99.1(б)
-            // below, so that a window reopened in place is measured against the monitor it is
-            // about to stand on; at 100 % this call does nothing at all.
-            //
-            // SAFETY: as above — the pointer was stored at the top of this arm.
-            unsafe { fit_window_to_work_area(hwnd) };
-
-            // SAFETY: as above — the pointer was stored at the top of this arm.
-            let opening = unsafe { with_state(hwnd, |state| state.opening) };
-
-            if let Some(Opening::Again(at)) = opening {
-                // The place. `DS_CENTER` has already centred the window — the manager positions
-                // it before this message — and the window is not on the screen yet: it is shown
-                // when this procedure returns. So the move lands before the first paint, and
-                // there is no blink. Measured both ways in посылка П3.
-                //
-                // Stage E108, the stand (7.4): the place is the previous window's and the size is
-                // this window's own — [`reopened_window`]. Moved first, so that the work area is
-                // asked of the monitor it now stands on; lifted second, only if it grew past it.
-                if let Some(rect) = at {
-                    let mut own = RECT::default();
-
-                    // SAFETY: `hwnd` is the live dialog being initialised and `own` a live local.
-                    if unsafe { move_window_to(hwnd, rect.left, rect.top) }
-                        && unsafe { GetWindowRect(hwnd, &raw mut own) }.is_ok()
-                        && let Some(work_area) = monitor_work_rect(hwnd)
-                    {
-                        let place = reopened_window(rect, own, work_area);
-
-                        if place.top != own.top {
-                            // SAFETY: as above.
-                            unsafe { move_window_to(hwnd, place.left, place.top) };
-                        }
-                    }
-                }
-
-                // The focus. `focus_control` is the one road to a control's focus in this file —
-                // see it for why `SetFocus` and not `WM_NEXTDLGCTL`.
-                focus_control(hwnd, IDC_LANGUAGE);
-
-                // FALSE: the focus is ours, the manager must not put it somewhere else.
-                return 0;
-            }
-
-            // TRUE: let the dialog manager choose the focus.
-            1
-        }
-
-        // FR-94, task Т-23-5, решение 82.6 — «клик мимо — отмена», the half `WM_KILLFOCUS`
-        // cannot see.
-        //
-        // A click on another *control* moves the keyboard focus and the field's own procedure
-        // ends the capture there. A click on the window's own ground moves nothing: the
-        // statics of this dialog take no focus and answer `HTTRANSPARENT`, so the press
-        // arrives here, at the dialog, and the capture would otherwise stay armed under a
-        // person who has plainly stopped looking at it.
-        //
-        // SEC-05: nothing is taken out of the message at all — not the coordinates, not the
-        // button state. Reaching this arm *is* the whole of the information, because the
-        // manager sends it to the dialog only for a press that landed on no child that wanted
-        // it. A forged message therefore buys its sender one cancelled capture, which is the
-        // safe direction: the conversion path comes back on.
-        WM_LBUTTONDOWN | WM_RBUTTONDOWN => {
-            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
-            // alive for the whole of this modal call.
-            unsafe { run_capture_step(hwnd, CaptureEvent::ClickBeside) };
-
-            0
-        }
-
-        // FR-92а, task T-11-4: the five colour questions the dialog manager asks while the
-        // window and its controls are painted. Answered with the brushes of the resolved
-        // palette; zero — the system colours — when there is nothing to answer with.
-        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX
-        | WM_CTLCOLORBTN => {
-            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
-            // and the value it names is alive for the whole of this modal call.
-            unsafe { on_ctl_color(hwnd, message, wparam, lparam) }
-        }
-
-        // FR-92а, task T-11-13: the whole background of the window — the ground, the eight
-        // panels with their captions, and the frames of the fields and lists. The one thing
-        // taken out of the message is the DC to paint into (SEC-05), and the window of time
-        // is the same as for `WM_DRAWITEM` below.
-        WM_ERASEBKGND => {
-            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
-            // and the value it names is alive for the whole of this modal call.
-            unsafe { on_erase_background(hwnd, wparam) }
-        }
-
-        // Task T-42-12, finding 124б.1 — the scroll of a window that had to be shortened.
-        //
-        // Both arms do nothing at all in a window that fits its monitor: `state.scroll` is
-        // `None` there, and `scroll_contents_to` returns on its first line. ⚠ SEC-05: neither
-        // message carries a pointer, and the only thing either can buy a forger is one scroll
-        // of a window this program is already showing.
-        WM_VSCROLL => {
-            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG`.
-            unsafe { on_vertical_scroll(hwnd, wparam) };
-            0
-        }
-
-        WM_MOUSEWHEEL => {
-            // SAFETY: as above.
-            unsafe { on_mouse_wheel(hwnd, wparam) };
-            0
-        }
-
-        // FR-92а, task T-11-5a: the nine owner-drawn buttons. Handled here and nowhere
-        // else — the dialog window exists exactly while the program itself holds the
-        // dialog on the screen, which is the gate the last sentence of SEC-05 names.
-        WM_DRAWITEM => {
-            // SAFETY: as for `WM_COMMAND` below — the pointer was stored on `WM_INITDIALOG`
-            // and the value it names is alive for the whole of this modal call.
-            unsafe { on_draw_item(hwnd, lparam) }
-        }
-
-        // FR-92а, task T-11-6: the item height of the four owner-drawn combo boxes. No gate
-        // beyond the window itself is needed — the message arrives at the procedure of the
-        // live dialog, and the dialog exists exactly while the program holds it on the
-        // screen, which is what SEC-05 asks; a foreign `CtlType` or identifier is answered
-        // with «not handled», which sends the message down the dialog manager's default
-        // path.
-        WM_MEASUREITEM => {
-            // SAFETY: the sender owns the struct `lparam` names for the length of the send,
-            // and this procedure is inside that send.
-            unsafe { on_measure_item(hwnd, lparam) }
-        }
-
-        // FR-92а, task T-11-7: the custom-draw questions of the layout list. The gate SEC-05
-        // asks for is the handler's first act — `hwndFrom` and `code` are compared before
-        // any work — and the window of time is the same as for `WM_DRAWITEM` above.
-        WM_NOTIFY => {
-            // SAFETY: the sender owns the struct `lparam` names for the length of the send,
-            // and this procedure is inside that send.
-            let answer = unsafe { on_notify(hwnd, lparam) };
-
-            // Задача T-118-5: a tick of the cycle went in or out — «Применить» follows. The
-            // header alone is read, as in `on_notify`.
-            //
-            // SAFETY: as above.
-            if unsafe { cycle_list_item_changed(hwnd, lparam) } {
-                refresh_apply(hwnd);
-            }
-
-            answer
-        }
-
-        // Task T-39-11, решение 122.5: the first timer of this window takes «Журнал сохранён» off
-        // the button. SEC-05: nothing is taken out of the message but the identifier, and a
-        // forged `WM_TIMER` carrying it buys its sender the button's own caption put back — the
-        // safe direction. Any other identifier is not this window's, and it is left alone.
-        //
-        // Task T-95-2: the second timer — the window of the double press ran out. A forged one
-        // buys its sender the invitation back in the field of an open pair: the safe direction
-        // too.
-        WM_TIMER => {
-            if wparam.0 == JOURNAL_SAVED_TIMER {
-                end_journal_saved(hwnd);
-            } else if wparam.0 == CAPTURE_PAIR_TIMER {
-                // SAFETY: called from this dialog's own procedure with its own `hwnd`, which is
-                // the contract of the callee.
-                unsafe { run_capture_step(hwnd, CaptureEvent::PairTimeout) };
-            } else if wparam.0 == EXCLUSION_PICK_TIMER {
-                // Task T-100-3: one second of «Выбрать окно программы». A forged tick buys its
-                // sender one second off a count that is running, and nothing at all when none is
-                // (`exclusion_pick_tick` asks the state first) — the capture it can bring forward
-                // is the one the person asked for.
-                exclusion_pick_tick(hwnd);
-            }
-
-            // Задача T-118-5: «Выбрать окно программы» adds its program on a tick.
-            refresh_apply(hwnd);
-
-            0
-        }
-
-        WM_COMMAND => {
-            let control = i32::from(low_word(wparam.0));
-            let notification = high_word(wparam.0);
-
-            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value it
-            // names is alive for the whole of this modal call.
-            unsafe { on_command(hwnd, control, notification) };
-
-            // ⭐ Задача T-118-5: after **every** command, whatever it was — a box, a radio, a
-            // combo, the list of exclusions, the order of the cycle, «Применить» itself. One place
-            // and not one call per kind of edit: a road left out would be a road where the button
-            // lies (решение 208.77, «иначе какой-нибудь путь правки будет пропущен»).
-            refresh_apply(hwnd);
-
-            0
-        }
-
-        // FR-92а, task T-11-14: the far half of the subclass pair. `WM_DESTROY` reaches the
-        // dialog while its children are still live windows — the manager destroys them only
-        // after this returns — so the four combo boxes are still there to be handed back
-        // their own procedure. The message carries nothing and is not dereferenced (SEC-05);
-        // a forged one would remove a subclass that is either already ours to remove or not
-        // installed at all, and `RemoveWindowSubclass` simply answers FALSE for the latter.
-        WM_DESTROY => {
-            unsubclass_combo_boxes(hwnd);
-            // Task T-12-5: the far half of the second subclass pair, on the same terms and for
-            // the same reason — the two lists are still live windows here.
-            unsubclass_lists(hwnd);
-            // Task T-12-8: and the third pair, the nine push buttons, on the very same terms.
-            unsubclass_buttons(hwnd, &PUSH_BUTTONS);
-
-            // Task T-100-3: «закрытие окна гасит таймер» — a count of «Выбрать окно программы»
-            // does not outlive its window. The window's timers would go with it anyway; this says
-            // so where a reader looks, and a refusal (no count running) is the ordinary case.
-            //
-            // SAFETY: `hwnd` is the dialog being destroyed; the call touches no memory of ours.
-            let _ = unsafe { KillTimer(Some(hwnd), EXCLUSION_PICK_TIMER) };
-
-            // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
-            0
-        }
-
-        // FR-92а, task T-11-9: the system theme moved while this dialog is up — the far end
-        // of the nudge `on_system_theme_message` posted. The message carries nothing and
-        // decides nothing (SEC-05): `refresh_palette` resolves the palette afresh out of
-        // this program's own setting and the system switch, and leaves everything alone
-        // when the resolution did not move — the check that settles the batch Windows sends
-        // of these into one repaint. A forged message therefore buys the sender one pointer
-        // comparison, at worst one repaint of our own dialog in its own palette.
-        WM_APP_SYSTEM_THEME => {
-            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value it
-            // names is alive for the whole of this modal call.
-            unsafe { with_state(hwnd, |state| refresh_palette(hwnd, state)) };
-
-            0
-        }
-
-        _ => 0,
-    }
-}
-
-/// Runs `f` against the dialog's state.
-///
-/// `None` when there is no state yet — messages do arrive before `WM_INITDIALOG` — or when the
-/// state is already borrowed, which is what makes a re-entrant message harmless instead of
-/// undefined.
-///
-/// # Safety
-///
-/// May only be called with the window of a dialog created by [`show_dialog`] — the `hwnd` its
-/// dialog procedure was called with, or the live window [`DIALOG_WINDOW`] records (task
-/// T-11-9) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that function
-/// stored.
-unsafe fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut DialogState<'_>) -> R) -> Option<R> {
-    // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
-    let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-
-    if raw == 0 {
-        return None;
-    }
-
-    // SAFETY: by this function's own contract, `raw` is the pointer `show_dialog` stored,
-    // which names the `DialogCell` on that function's frame — the call is modal, so the
-    // frame is alive for as long as any message of this dialog can be handled. A shared
-    // reference is all that is taken, and the `RefCell` of the `state` field is what
-    // governs the mutable access below.
-    let cell = unsafe { &*(raw as *const DialogCell<'_>) };
-
-    let mut state = cell.state.try_borrow_mut().ok()?;
-
-    Some(f(&mut state))
-}
-
-/// Runs `f` against the check store of the eight glyph elements — FR-92а, task T-11-5b-2.
-///
-/// The same road [`with_state`] takes — the `GWLP_USERDATA` pointer `WM_INITDIALOG`
-/// stored — but without the `RefCell` borrow at the end of it: the store is `Cell`-based,
-/// so a shared reference reads and writes it even while [`DialogState`] is mutably
-/// borrowed. That is the whole point — `fill_dialog` and `read_dialog` run inside such a
-/// borrow, and the check state must answer there too (see [`DialogCell`]).
-///
-/// `None` exactly when there is no state yet — messages, `WM_DRAWITEM` among them, do
-/// arrive before `WM_INITDIALOG` stores the pointer. The callers then degrade per
-/// NFR-13: [`is_checked`] answers «снят», [`set_check`] and [`check_radio`] drop the
-/// write, and the glyph is drawn unchecked rather than not drawn at all.
-///
-/// # Safety
-///
-/// Same contract as [`with_state`]: may only be called with the window of a dialog
-/// created by [`show_dialog`], whose `GWLP_USERDATA` therefore holds either zero or the
-/// pointer that function stored.
-unsafe fn with_glyph_checks<R>(hwnd: HWND, f: impl FnOnce(&GlyphChecks) -> R) -> Option<R> {
-    // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
-    let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-
-    if raw == 0 {
-        return None;
-    }
-
-    // SAFETY: by the contract above, `raw` is the pointer `show_dialog` stored, which
-    // names the `DialogCell` on that function's frame — alive for as long as any message
-    // of this dialog can be handled, because the call is modal. A shared reference is all
-    // that is taken, and every mutation behind it goes through the `Cell`s of the store —
-    // no borrow that could collide with `with_state`'s, however deep inside one of its
-    // closures this runs.
-    let cell = unsafe { &*(raw as *const DialogCell<'_>) };
-
-    Some(f(&cell.checks))
 }
 
 /// The role of one control identifier — the single place the list is written down.
@@ -8608,23 +7539,6 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
 // больше не могут спрашивать не то, что спрашивает пятое. Единственная строка без рамки —
 // `IDC_ABOUT_NAME`, и она написана там же, в таблице.
 
-/// The glyph kind of one control identifier, `None` for everything that is not one of the
-/// six owner-drawn check boxes and radio buttons — FR-92а, task T-11-5b.
-///
-/// The single place the six are listed on the drawing side; the `WM_DRAWITEM` handler
-/// branches on this before its push-button path. Eight until task Т-21-5 added the sound
-/// switch of FR-100, nine with it, six since task Т-23-2 took the method radios of «Замена»
-/// off the window — the layout mode is the one radio run the dialog has left.
-fn glyph_kind(control: i32) -> Option<GlyphKind> {
-    match control {
-        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_TRAY_FLAG | IDC_LOG_ENABLED => {
-            Some(GlyphKind::CheckBox)
-        }
-        IDC_MODE_PAIR | IDC_MODE_CYCLE => Some(GlyphKind::RadioButton),
-        _ => None,
-    }
-}
-
 /// The six group panels of FR-92 — FR-92а, tasks T-11-5c and T-11-13.
 ///
 /// The single place the six are listed. Since task T-11-13 they are not visible elements
@@ -8675,33 +7589,6 @@ pub fn controls_on_panels(panels: &[RECT], controls: &[(i32, RECT)]) -> Vec<i32>
         })
         .map(|(id, _)| *id)
         .collect()
-}
-
-/// Walks the dialog's children once and answers the panel map — the impure shell around
-/// [`controls_on_panels`], run on `WM_INITDIALOG` and never again.
-///
-/// The rectangles are `GetWindowRect` screen rectangles for panels and candidates alike —
-/// one coordinate space, which is all containment needs. Every child of the dialog is a
-/// candidate except the eight panels themselves (see [`controls_on_panels`] for why).
-///
-/// NFR-13: both calls are examined. `GetWindow` answering an error is the documented end
-/// of the walk — a window with no more children is not a failure of anything. A refused
-/// `GetWindowRect` skips that one control: it then keeps the window-coloured background it
-/// had before this task, which is the same degraded-but-alive answer the refused-brushes
-/// dialog gives (T-11-4), and the journal has no row for GDI refusals (reviews\T-11-1.md).
-fn collect_panel_children(hwnd: HWND) -> Vec<i32> {
-    let mut panels: Vec<RECT> = Vec::with_capacity(GROUP_BOXES.len());
-    let mut candidates: Vec<(i32, RECT)> = Vec::new();
-
-    for (control, rect) in child_rects(hwnd) {
-        if GROUP_BOXES.contains(&control) {
-            panels.push(rect);
-        } else {
-            candidates.push((control, rect));
-        }
-    }
-
-    controls_on_panels(&panels, &candidates)
 }
 
 /// Every child of the dialog, with its identifier and its **screen** rectangle, in Z order.
@@ -9100,117 +7987,6 @@ impl Drop for CaptionIcons {
 // первый повод, ради которого написана: до появления второго вызывающего это была
 // `repaint_after_palette_change`.
 
-/// The answer to one `WM_CTLCOLOR*` question — a colour choice and a brush, nothing else.
-///
-/// # SEC-05, last sentence, held to the letter
-///
-/// The whole of what this function takes out of the message is two handles: `wparam` — the
-/// DC the control is about to be painted with — and `lparam` — the window handle of the
-/// control, which is only asked for its identifier with `GetDlgCtrlID`. Nothing of the
-/// message is dereferenced as memory; the DC is only written to (`SetTextColor`,
-/// `SetBkColor`, `SetBkMode`), never read from; no privileged action starts here. A forged
-/// message from a process of the same integrity level therefore buys its sender a colour
-/// lookup and nothing else.
-///
-/// Zero — «not handled», the system colours — is the answer whenever the state is not
-/// reachable (no state yet, or a re-entrant message) or [`theme::Brushes::new`] was refused
-/// at initialisation: not painting is better than not opening (NFR-13).
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the arguments of the message.
-unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> isize {
-    // The two handles of the message — see above; this is all that is ever read out of it.
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-    let control = HWND(lparam.0 as *mut std::ffi::c_void);
-
-    // SAFETY: `control` is a window handle out of the message; asking for its identifier
-    // reads a field of that window and no memory of ours. For `WM_CTLCOLORDLG` the handle
-    // is the dialog itself and the identifier goes unused.
-    let control_id = unsafe { GetDlgCtrlID(control) };
-
-    // The colour choice, split from the painting: the borrow of the state ends before the
-    // DC is touched, and what leaves the closure is plain values — an ink, an optional
-    // opaque background, and a brush handle the state keeps alive until the dialog ends.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation, the dialog lives with
-            // the system colours (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            // FR-92а, task T-11-5c: the ground of this control — the panel brush for a
-            // control lying on one of the eight group panels, the window brush everywhere
-            // else. Geometry decided the list once, on `WM_INITDIALOG`; only the ground
-            // changes with it — the text roles and the field answers below do not.
-            let ground = if state.panel_children.contains(&control_id) {
-                brushes.panel_bg()
-            } else {
-                brushes.window_bg()
-            };
-
-            Some(match message {
-                // The background of the dialog itself: no text ever lands on this DC, so
-                // the brush is the whole answer — and it is always the window brush; the
-                // dialog is the ground the panels themselves sit on.
-                WM_CTLCOLORDLG => (None, None, brushes.window_bg()),
-
-                // Captions and notes — and the one read-only field the message files under
-                // static. The role decides the ink; the caption roles take no opaque
-                // background, so the text sits transparently on the ground brush instead
-                // of in a box of a slightly different colour.
-                //
-                // ⚠ Still answered for the eighteen labels since task T-11-18, even though
-                // they are `SS_OWNERDRAW` and paint themselves: a static asks this question
-                // before it hands the drawing over, the answer costs a table lookup, and the
-                // ground and the ink it names are the very ones `draw_label` paints with —
-                // `static_color_role` is asked by both, so the two cannot disagree. What the
-                // message is still load-bearing *for* is `IDC_HOTKEY`: a read-only `EDIT` is
-                // asked about with this message and has no owner drawing to take over from it.
-                WM_CTLCOLORSTATIC => match static_color_role(control_id) {
-                    StaticColorRole::Label => (Some(palette.text), None, ground),
-                    StaticColorRole::Muted => (Some(palette.text_muted), None, ground),
-                    StaticColorRole::Field => (
-                        // Task Т-23-5, решение 82.6: while a capture is armed this field holds
-                        // the invitation «Нажмите клавишу…» and not a value, so it is written
-                        // in the quiet ink every other invitation of this window is written
-                        // in. `IDC_HOTKEY` is the only control this role ever answers for.
-                        Some(if state.capture.is_some() {
-                            palette.text_muted
-                        } else {
-                            palette.text
-                        }),
-                        Some(palette.field_bg),
-                        brushes.field_bg(),
-                    ),
-                },
-
-                // Input fields, the exclusion list box — and the dropped-down list of
-                // every combo box, whose list window sends this message to the dialog too.
-                // Deliberately not panel-aware: a field is `field_bg` wherever it sits.
-                WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => (
-                    Some(palette.text),
-                    Some(palette.field_bg),
-                    brushes.field_bg(),
-                ),
-
-                // The erase under every owner-drawn button — the ground the glyphs of
-                // T-11-5b and the buttons of T-11-5a are painted over, and what the rounded
-                // corners of a button are cut from (task T-11-13). The eight panels no
-                // longer ask this question at all: an invisible window is never erased.
-                WM_CTLCOLORBTN => (None, None, ground),
-
-                // Unreachable: the caller only routes the five messages above here.
-                _ => return None,
-            })
-        })
-    };
-
-    apply_ctl_color(dc, choice.flatten())
-}
-
 /// One `WM_CTLCOLOR*` answer, chosen but not yet applied: the caption ink (`None` — no text
 /// on this DC), the opaque text background of a field (`None` — transparent), and the brush
 /// the control is erased with.
@@ -9327,220 +8103,8 @@ pub fn owner_drawn_item(ctl_type: u32, control: i32) -> bool {
     false
 }
 
-/// Answers `WM_MEASUREITEM` for the four owner-drawn combo boxes — FR-92а, task T-11-6.
-///
-/// # SEC-05, held to the letter
-///
-/// `lparam` points at the `MEASUREITEMSTRUCT` of the message. Two fields are read out of
-/// it — `CtlType` and `CtlID`, the checks that this is one of our four combo boxes,
-/// **both made before any work** — and exactly one is written: `itemHeight`, which is the
-/// documented protocol of the message. `itemData` is never read; no pointer of the message
-/// is followed anywhere. The window of time is the gate, as the last sentence of SEC-05
-/// words it: this message is handled by the dialog procedure alone, and the dialog window
-/// exists exactly while the program itself holds the dialog on the screen. A forged
-/// message therefore buys its sender a height written back into the sender's own struct,
-/// and nothing else.
-///
-/// # The height
-///
-/// The item height is [`combo_row_height`] with [`COMBO_LIST_ITEM_EXTRA`] mock-up pixels of
-/// air — the dialog font's height plus that air through [`scaled`] at the DPI of the dialog's
-/// own DC. The message arrives while the combo is being
-/// created — *before* `WM_INITDIALOG`, so
-/// before the dialog's state exists — but after the dialog has taken its `DS_SETFONT`
-/// font, which the dialog manager passes to the dialog before creating any control. The
-/// font's height is read through the documented `MapDialogRect`: the vertical dialog base
-/// unit is defined as the height of the dialog font and one vertical dialog unit as one
-/// eighth of it, so a rectangle 8 units tall maps to exactly one font height in pixels —
-/// no font handle changes hands and no message is sent.
-///
-/// ⚠ **What this height is, since task T-12-2, and what it is not.** One `WM_MEASUREITEM`
-/// reaches a `CBS_OWNERDRAWFIXED` combo box, and the height it answers is worn by both the
-/// closed part and every item of the dropped-down list. T-12-2 brought the *closed* part to
-/// the 12 dialog units of the mock-ups and left the *list* where it was, so what is answered
-/// here is the height of a **list item**, and [`set_combo_closed_height`] overrides the closed
-/// part afterwards with `CB_SETITEMHEIGHT`. Answering the closed part's smaller height here
-/// instead would shrink the rows of the dropped-down list with it — the thing that task was
-/// told not to touch.
-///
-/// Answers 1 — «measured» — for one of the four combos. 0 — «not handled», the dialog
-/// manager's default path — for a missing struct, a foreign `CtlType` or a foreign
-/// identifier, and for a refused `MapDialogRect` (NFR-13: examined in words and answered
-/// by falling back — the control's default item height is a legal, degraded-but-alive
-/// answer, and the journal has no row for GDI refusals, reviews\T-11-1.md).
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `lparam` of the message: the sender owns
-/// the struct for the length of the send, and this procedure is inside that send.
-unsafe fn on_measure_item(hwnd: HWND, lparam: LPARAM) -> isize {
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // The one dereference of the message: two fields read, `itemHeight` written at the
-    // end. `itemData` — never.
-    //
-    // SAFETY: see above.
-    let item = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
-
-    // SEC-05: the type and the identifier are checked before any work — the four combo boxes
-    // of task T-11-6 and, since task T-11-14, the one owner-drawn list box.
-    if !owner_drawn_item(item.CtlType.0, i32::try_from(item.CtlID).unwrap_or(-1)) {
-        return 0;
-    }
-
-    // The exclusion list has a row height of its own since task T-11-16: the generator gives
-    // its `'lbox'` rows `Y 11` — [`EXCLUSION_ROW_HEIGHT_DLU`] vertical dialog units. The
-    // generator states a combo box as `h = 12` units, and that is the CLOSED part, which
-    // [`set_combo_closed_height`] takes care of since task T-12-2; the dropped-down list it
-    // says nothing about, so its items keep the font-plus-air of T-11-15.
-    let measured = if item.CtlType.0 == ODT_LISTBOX.0 {
-        dialog_units(hwnd, 0, EXCLUSION_ROW_HEIGHT_DLU).map(|(_, row)| row)
-    } else {
-        // The rows of the dropped-down list, and only they, since task T-12-2 — see the ⚠ of
-        // the doc comment above.
-        //
-        // ⭐ **Task T-50-2, decision 115.2.** Asked of the common layer, which takes the larger
-        // of the mock-up height and the old font-derived one: the measure used to depend on the
-        // window's font, and a wizard carrying 9 pt got 24 px where this window's 10 pt got 26.
-        // This window is the reference and does not move — it had 26 and keeps 26.
-        crate::widgets::combo::list_row_height(hwnd)
-    };
-
-    let Some(measured) = measured else {
-        return 0;
-    };
-
-    // A negative or overflowing height cannot come out of a font measurement; if a broken
-    // one did, keeping the control's own default is the degraded-but-alive answer again.
-    let Ok(height) = u32::try_from(measured) else {
-        return 0;
-    };
-
-    item.itemHeight = height;
-
-    // TRUE — measured.
-    1
-}
-
-/// One row of a combo box: the dialog font's height plus `air` **mock-up** pixels of it, in the
-/// pixels of `hwnd`'s own monitor — the arithmetic [`on_measure_item`] and
-/// [`set_combo_closed_height`] share, written once (§6.2) rather than twice.
-///
-/// The font height comes through the documented `MapDialogRect`: eight vertical dialog units
-/// are one dialog-font height by the definition of the base units, so a rectangle
-/// [`DIALOG_FONT_HEIGHT_DLU`] units tall maps to exactly that height in pixels — no font handle
-/// changes hands and no message is sent. The air is a length of the mock-ups and travels
-/// through [`scaled`], as every length of the mock-ups in this file does.
-///
-/// `None` for a refused `MapDialogRect` (NFR-13: examined; both callers then keep the height
-/// the control had). A refused `GetDC` is survived one level down: [`dc_dpi`] answers 96 for a
-/// DC that will not say, which is the 100 % air and a legal height.
-// ⚠ **Тело уехало в `widgets::combo::row_height` — задача Т-45-2, решение 107.3.** Здесь имя
-// осталось тонкой обёрткой: вызовов у него два, оба в этом файле, и оба читаются как читались.
-// Мастер FR-104 зовёт слой напрямую — до Э45 он этой арифметики не звал вовсе и отвечал
-// `body_height + 8` без масштаба DPI.
-fn combo_row_height(hwnd: HWND, air: i32) -> Option<i32> {
-    widgets::combo::row_height(hwnd, air)
-}
-
 // ⚠ **`CB_SELECTION_FIELD` уехала в `widgets::combo` — задача Т-45-2.** Документированная −1,
 // названная беззнаковым словом, каким и бывает параметр сообщения; шлёт её теперь слой.
-
-/// Brings the closed part of the four combo boxes to the 12 dialog units of the mock-ups —
-/// FR-92, FR-92а, task T-12-2 (findings F3 and R-04 of the Э12 protocol).
-///
-/// # Why this and not a smaller item height
-///
-/// `WM_MEASUREITEM` reaches a `CBS_OWNERDRAWFIXED` combo box **once**, and the height it
-/// answers is worn by the closed part and by every item of the dropped-down list alike — read
-/// off the live stand rather than out of the documentation: before this task
-/// `CB_GETITEMHEIGHT(-1)` (the selection field) and `CB_GETITEMHEIGHT(0)` (one list item) both
-/// answered **24** on all four combo boxes, and the closed part measured 30 px on the screen,
-/// which is that 24 plus the six pixels the system and our own frame take. Shrinking the
-/// answer of [`on_measure_item`] would therefore have shrunk the rows of the dropped-down list
-/// by the same amount — and their height is not what task T-12-2 measured or was told to
-/// change. `CB_SETITEMHEIGHT` with `wParam = -1` is the documented lever that moves the
-/// selection field alone, so the two heights are set apart here and the list keeps its own.
-///
-/// # The height
-///
-/// [`combo_row_height`] with [`COMBO_CLOSED_ITEM_EXTRA`] — the font plus the air the generator's
-/// `h = 12` dialog units leave once the six pixels the system spends are taken off; the
-/// derivation is written out at that constant. At 96 DPI: 15 + 1 = 16, and the closed part
-/// stands 16 + 6 = 22 px against the mock-up's 22,5.
-///
-/// # NFR-13
-///
-/// Two refusals are possible and both are examined here. A refused `MapDialogRect` gives no
-/// height at all — nothing is sent, and the four combo boxes keep the height
-/// [`on_measure_item`] gave them, which is the look this dialog had before this task: taller
-/// than the mock-up, and alive. `CB_SETITEMHEIGHT` answers `CB_ERR` (−1) for a height it will
-/// not take; the answer is looked at for every combo box and counted, and a combo box that
-/// refused simply keeps its previous, taller closed part — the other three still take theirs.
-/// The refusal is deliberately **not** journaled, for the reason [`subclass_combo_boxes`]
-/// gives at its own dropped `BOOL`: the operation vocabulary of `diag` is closed
-/// (reviews\T-11-1.md), `src\diag.rs` is outside this task, and a combo box that stayed
-/// 30 px tall is a visible degradation rather than a silent one.
-///
-/// Answers how many of the four took the height — for the tests, and for the sentence above to
-/// be a measurement and not a hope.
-fn set_combo_closed_height(hwnd: HWND) -> usize {
-    // ⚠ **Само сообщение шлёт `widgets::combo::set_closed_height` — задача Т-45-2.** У окна
-    // осталось ровно то, что у окна и должно остаться: СПИСОК своих комбобоксов. Высота одна,
-    // арифметика одна, и мастер FR-104 получает ту же — через `widgets::combo::attach`, который
-    // ставит её сам и забыть её не даёт.
-    //
-    // `combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA)` спрашивается здесь же — числом оно
-    // никуда не идёт, но отказ `MapDialogRect` обязан дать тот же ноль, что давал раньше.
-    if combo_row_height(hwnd, COMBO_CLOSED_ITEM_EXTRA).is_none() {
-        return 0;
-    }
-
-    let mut taken = 0;
-
-    for control in COMBO_BOXES {
-        // NFR-13: examined right here — see the doc comment above.
-        if widgets::combo::set_closed_height(hwnd, control) {
-            taken += 1;
-        }
-    }
-
-    taken
-}
-
-/// Приводит РАСКРЫТУЮ высоту всех четырёх комбобоксов окна к правилу **118.1** — задача
-/// **T-53a-1**.
-///
-/// Дальняя половина пары к [`set_combo_closed_height`], и делит с ней разделение труда:
-/// арифметика и сообщение живут в `widgets::combo`, у окна остаётся **список своих
-/// комбобоксов**. Мастер FR-104 получает то же правило своим вызовом того же слоя.
-///
-/// ⚠ **Зовётся из [`relabel_dialog`], а не из [`fill_dialog`], и это выбор, а не случайность.**
-/// Правило требует задавать высоту после заполнения списка и заново при всяком изменении числа
-/// строк. `relabel_dialog` — единственное место, которое исполняет оба условия одним вызовом:
-/// на `WM_INITDIALOG` он идёт **последним** в `fill_dialog`, когда все четыре списка уже
-/// заполнены, и он же идёт отдельно при смене языка, когда список темы перезаполняется
-/// заново. В `widgets::combo::attach` эту высоту задать нельзя вовсе — там список ещё пуст.
-///
-/// Число строк ни один вызывающий не сообщает: его спрашивают у самого контрола.
-///
-/// Отказ не журналируется по той же причине, что у соседа выше (reviews\T-11-1.md): комбобокс,
-/// оставшийся при высоте шаблона, — деградация видимая, а не молчаливая. Отвечает, сколько из
-/// четырёх высоту взяли, — чтобы предложение выше было замером, а не надеждой.
-fn set_combo_dropped_heights(hwnd: HWND) -> usize {
-    let mut taken = 0;
-
-    for control in COMBO_BOXES {
-        // NFR-13: examined right here — see the doc comment above.
-        if widgets::combo::set_dropped_height(hwnd, control) {
-            taken += 1;
-        }
-    }
-
-    taken
-}
 
 /// Whether one item change of the layout list is refused — FR-31, task T-11-7-2: the pure
 /// half of the gate of [`on_notify`].
@@ -9640,606 +8204,6 @@ pub fn cycle_change_refusal(
     }
 
     None
-}
-
-/// How many rows of the cycle list carry a tick, not counting row `except` — task T-42-6.
-///
-/// Asked of the **control**, row by row, exactly as [`read_cycle_checks`] asks it: the answer
-/// has to be what the list really shows at this instant, and `LVN_ITEMCHANGING` arrives before
-/// the change goes in, so the row being ticked still reads as unticked and is skipped by name
-/// rather than by trusting that.
-fn ticked_rows_besides(hwnd: HWND, except: i32) -> usize {
-    let count = send_to(hwnd, IDC_CYCLE_LIST, LVM_GETITEMCOUNT, 0, 0);
-
-    (0..count.max(0))
-        .filter(|row| *row != isize::try_from(except).unwrap_or(-1))
-        .filter(|row| {
-            let state = send_to(
-                hwnd,
-                IDC_CYCLE_LIST,
-                LVM_GETITEMSTATE,
-                usize::try_from(*row).unwrap_or(0),
-                isize::try_from(LVIS_STATEIMAGEMASK.0).unwrap_or(0),
-            );
-
-            u32::try_from(state).unwrap_or(0) == CHECKED_IMAGE
-        })
-        .count()
-}
-
-/// Answers the two notifications of the layout list — FR-92а: `NM_CUSTOMDRAW` (task T-11-7,
-/// the row paints of the palette; task T-11-7-2, the muted rows of the pair mode) and
-/// `LVN_ITEMCHANGING` (task T-11-7-2, the gate of FR-31 — in the pair mode a click changes
-/// nothing).
-///
-/// # SEC-05 — the checks come before any work
-///
-/// The first dereference of the message takes the three fields of `NMHDR` and nothing else:
-/// `hwndFrom`, `idFrom`, `code`. All three are then compared — `code` against
-/// `NM_CUSTOMDRAW` and `LVN_ITEMCHANGING`, `idFrom` against `IDC_CYCLE_LIST`, and `hwndFrom`
-/// against the dialog's own `GetDlgItem` answer for that identifier — and only a message
-/// that passes every one goes any further.
-///
-/// ⚠ **`LVN_ITEMCHANGING` used to be decided on the header alone, and since task T-42-6 it is
-/// not.** The gate of FR-31 still is — the pair mode refuses every change and needs to know
-/// nothing else — but the gate of Н112 has to tell «ставят галочку» from «снимают», and the
-/// two are the same notification. So **four** fields of `NMLISTVIEW` are read after those
-/// gates: `uChanged`, `uOldState`, `uNewState` and `iItem`. Nothing else; no pointer of the
-/// message is followed; and the number of ticks the decision rests on is asked of the
-/// **control** ([`ticked_rows_besides`]), not taken from the message. A forged message
-/// therefore buys its sender one refused change of its own list — the same purchase the
-/// paragraph below describes. The sentence is corrected here rather than left standing: a doc
-/// that describes what the code no longer does is the defect Э49 paid for.
-///
-/// Only `NM_CUSTOMDRAW` reads on, as the
-/// `NMLVCUSTOMDRAW` a list view's `NM_CUSTOMDRAW` documents.
-/// Out of that structure exactly four fields are read — `dwDrawStage`, `dwItemSpec`,
-/// `uItemState`, `hdc` — and three written — `clrText`, `clrTextBk`, `uItemState` — the
-/// documented answer protocol of item prepaint; the `hdc` is the DC of the paint the
-/// notification is inside of and is painted into, **the rectangle of the message is not read
-/// at all** (a list view never fills it — see below), and no pointer of the message is
-/// followed. Neither is anything else taken from the message: whether the row is selected,
-/// whether its tick is set and where the row lies are all the list's own answers —
-/// `LVM_GETITEMSTATE` twice and `LVM_GETITEMRECT` through [`row_bounds`], asked by identifier
-/// through [`send_to`], the reading [`read_cycle_checks`] already does for the
-/// ticks. A forged message can therefore recolour one repaint of its own list, or refuse
-/// one change of it, and nothing else — no privileged action starts here, and the window of
-/// time is the same gate as for `WM_DRAWITEM`: outside the modal call there is no procedure
-/// to arrive at.
-///
-/// # The gate of the pair mode — task T-11-7-2
-///
-/// Since task T-11-7-2 the list is never `EnableWindow`-disabled (see [`enable_by_mode`]),
-/// so the control answers clicks and keys in every mode — and `LVN_ITEMCHANGING` is the one
-/// point where it *asks before it moves*: a TRUE answer refuses the change before it
-/// happens. That is the gate: with the mode read through [`with_state`] — the same road the
-/// palette takes — [`cycle_list_change_is_refused`] refuses every change in the pair mode,
-/// which closes ticks (mouse and space bar) and selection (mouse and arrow keys) in one
-/// move, before any action. An unreachable state — `None` — allows: that is a programmatic
-/// fill running under the held borrow ([`fill_layouts`], [`move_cycle_row`] write the list
-/// from inside `with_state`), and the program's own writes pass in either mode. The cycle
-/// mode is untouched: the answer there is «not handled», as it always was.
-///
-/// # The manoeuvre for the row paints, and the two answers
-///
-/// `CDDS_PREPAINT` is answered with `CDRF_NOTIFYITEMDRAW` — «ask me again for each item» —
-/// the documented door to item prepaint. There the row's paints are the answer of the pure
-/// [`cycle_row_paint`] table: in the cycle mode a selected row takes `sel_bg`/`sel_fg` and
-/// an ordinary one is left to the control's own colours (task T-11-7 as it was); in the
-/// pair mode every row takes `field_bg`/`text_muted` — the logical «выключенность» of task
-/// T-11-7-2, a selected row wearing the same muted paints as the rest. Wherever the table
-/// says so, the `CDIS_SELECTED` bit is *removed* from `uItemState`: while that bit stands
-/// the control paints the selection ground itself (the system highlight, or the theme's),
-/// and the paints of this handler lose to it. Clearing the bit in the item-prepaint answer is
-/// the documented custom-draw lever for exactly this — the control then draws the row as an
-/// ordinary one; the row still *is* selected (`LVIS_SELECTED` is untouched,
-/// `LVS_SHOWSELALWAYS` stays a style of the template). The answer is
-/// `CDRF_DODEFAULT` — «draw it yourself, with the fields I set»; `CDRF_NEWFONT` is the
-/// answer of a handler that swapped a font into the `hdc`, which this one never does.
-/// Chosen by the documentation — the product is not launched by the executor; the eye check
-/// is the controller's, at the final acceptance.
-///
-/// # Why the ground stopped being a colour field — task T-11-25
-///
-/// Only the **ink** of the table reaches the message now (`clrText`). The ground reaches the
-/// window instead, through [`draw_cycle_row`], because the mock-ups do not fill the row: they
-/// inset a rounded stripe into it, and a rectangle of `clrTextBk` cannot have a corner radius
-/// any more than the `FrameRect` of a check-box glyph could. The lever that lets a handler paint
-/// under a control's own drawing is the documented transparent text background — `CLR_NONE`,
-/// sent to the whole control by [`paint_cycle_list`] and written into `clrTextBk` here as well:
-/// with it the control fills no rectangle at all and only lays the letters down, over whatever
-/// this handler has painted a moment before.
-///
-/// The tick travels the same road and for a measured reason. It used to be a picture in the
-/// state image list, and the edge of that picture could not be smoothed: `ImageList_AddMasked`
-/// makes a hole of a pixel that is **exactly** the key colour, so a half-covered edge pixel — a
-/// blend of the key and the fill — would have shown as a coloured fringe on every row. The
-/// documented replacement the task proposed, an `ILC_COLOR32` list without `ILC_MASK` carrying
-/// per-pixel alpha, was measured on this machine and **does not blend**: the comctl32 this
-/// program runs on is 5.82 (no `Microsoft.Windows.Common-Controls` v6 assembly in either
-/// manifest), its `ImageList_Draw` copies the image opaquely and the alpha byte is ignored — the
-/// air came out black rather than transparent. So the cell of the image list is now nothing but
-/// the key colour — a hole edge to edge, kept for the row height and the state-icon column it
-/// still measures — and the tick itself is drawn on the row by [`draw_cycle_row`], smoothed like
-/// every other figure of this dialog and blended into whichever ground the row actually wears.
-///
-/// # Where the row is — task T-11-25-2
-///
-/// Both of those paints need a rectangle, and the rectangle the message appears to offer —
-/// `NMCUSTOMDRAW::rc` — is the one thing a list view does **not** fill at item prepaint. It
-/// arrives `{0, 0, 0, 0}`, measured on the live control; T-11-25 painted into it and so painted
-/// into nothing: no ground, no stripe, and every row's tick on the same nine scan lines at the
-/// top-left corner of the list, one glyph over the other. The rectangle is therefore asked of
-/// the control, by [`row_bounds`], exactly as the two state readings above are — and for the
-/// same reason.
-///
-/// Answers through [`answer_notify`] — a dialog procedure hands a `WM_NOTIFY` result back
-/// in two moves, not by return value. 0 — «not handled» — for every stage this handler has
-/// no word for, for a message that fails the gate, and for the state being unreachable.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `lparam` of the message: the sender owns the
-/// structure for the length of the send, and this procedure is inside that send.
-unsafe fn on_notify(hwnd: HWND, lparam: LPARAM) -> isize {
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // The first dereference: the three header fields, copied out as plain values.
-    //
-    // SAFETY: see above.
-    let header = unsafe { &*(lparam.0 as *const NMHDR) };
-    let (from_window, from_id, code) = (header.hwndFrom, header.idFrom, header.code);
-
-    // SEC-05: the three comparisons, before any work. ⚠ `NM_SETFOCUS` joined the two of task
-    // T-11-7-2 with task T-42-12: the layout list is the one control of this window that
-    // announces its focus through `WM_NOTIFY` rather than `WM_COMMAND`, and a shortened window
-    // has to scroll to whatever the Tab key just reached.
-    if (code != NM_CUSTOMDRAW && code != LVN_ITEMCHANGING && code != NM_SETFOCUS)
-        || from_id != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX)
-    {
-        return 0;
-    }
-
-    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
-    // ours, and answers a handle or an error.
-    if unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() != Some(from_window) {
-        return 0;
-    }
-
-    // Task T-42-12: the Tab key reached the layout list, and in a shortened window the list may
-    // be below the bottom edge. Nothing is read out of the payload — the header is the whole
-    // message here.
-    if code == NM_SETFOCUS {
-        // SAFETY: see the caller.
-        unsafe { show_control_whole(hwnd, IDC_CYCLE_LIST) };
-
-        return 0;
-    }
-
-    // Task T-11-7-2, the gate of FR-31 — decided on the header alone, before any action
-    // and without reading a byte of the payload (see the doc comment).
-    if code == LVN_ITEMCHANGING {
-        // SAFETY: see the caller.
-        let mode = unsafe { with_state(hwnd, |state| state.working.layouts.mode) };
-
-        // The pair mode refuses on the header alone and needs nothing else — task T-11-7-2.
-        // Everything below is task T-42-6 (finding Н112) and reads **four** fields of the
-        // payload, because «ставят галочку» and «снимают» are the same notification and differ
-        // only in the state words. No pointer of the message is followed, and the count of
-        // ticks the decision rests on is asked of the **control** ([`ticked_rows_besides`]),
-        // not taken from the message: a forged message buys its sender one refused change of
-        // its own list.
-        //
-        // SAFETY: the header just checked is the head of an `NMLISTVIEW` — that is what a list
-        // view sends with `LVN_ITEMCHANGING`, and the three gates above have established both
-        // the code and the sender.
-        let change = unsafe { &*(lparam.0 as *const NMLISTVIEW) };
-        let (item, changed, old_state, new_state) = (
-            change.iItem,
-            change.uChanged,
-            change.uOldState,
-            change.uNewState,
-        );
-
-        let refusal = cycle_change_refusal(
-            mode,
-            changed.0 & LVIF_STATE.0 != 0,
-            old_state,
-            new_state,
-            ticked_rows_besides(hwnd, item),
-        );
-
-        match refusal {
-            Some(CycleRefusal::Aloud) => {
-                // The refusal is **heard** as well as seen — FR-100, the third tone of Э49.
-                // ⛔ And heard only if the user kept `[feedback] sound` on: with the sound off
-                // this call is silent and the tick still does not go in, which is the
-                // invariant of решение 124.3.
-                crate::app::sound_refusal();
-            }
-            Some(CycleRefusal::Silent) | None => {}
-        }
-
-        if refusal.is_some() {
-            // TRUE — the change is refused; the list stays exactly as drawn, and a tick the
-            // ceiling would not honour simply does not appear.
-            return answer_notify(hwnd, 1);
-        }
-
-        // «Not handled» — the change proceeds: the cycle mode as it always was, and the
-        // program's own writes under the held borrow.
-        return 0;
-    }
-
-    // Only now the payload. The mutable reference is the answer protocol of the message:
-    // the control reads the colour fields back when the send returns.
-    //
-    // SAFETY: see above — the header just checked is the head of this very structure.
-    let draw = unsafe { &mut *(lparam.0 as *mut NMLVCUSTOMDRAW) };
-
-    if draw.nmcd.dwDrawStage == CDDS_PREPAINT {
-        return answer_notify(hwnd, isize::try_from(CDRF_NOTIFYITEMDRAW).unwrap_or(0));
-    }
-
-    if draw.nmcd.dwDrawStage != CDDS_ITEMPREPAINT {
-        return 0;
-    }
-
-    // The list's own answer, not the message's: whether the row `dwItemSpec` names is
-    // selected. An out-of-range index answers 0 — not selected — and costs nothing.
-    let selected = u32::try_from(send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_GETITEMSTATE,
-        draw.nmcd.dwItemSpec,
-        isize::try_from(LVIS_SELECTED.0).unwrap_or(0),
-    ))
-    .unwrap_or(0)
-        & LVIS_SELECTED.0
-        != 0;
-
-    // And whether its tick is set — the state image index of FR-31, read exactly the way
-    // [`read_cycle_checks`] reads it. The tick is drawn by this handler since task T-11-25, so
-    // the bits that used to pick a picture out of the image list now pick a picture to paint.
-    let checked = u32::try_from(send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_GETITEMSTATE,
-        draw.nmcd.dwItemSpec,
-        isize::try_from(LVIS_STATEIMAGEMASK.0).unwrap_or(0),
-    ))
-    .unwrap_or(0)
-        == CHECKED_IMAGE;
-
-    // And **where** the row is — asked of the list, never taken from the message. See the
-    // doc comment: a list view leaves `NMCUSTOMDRAW::rc` empty at item prepaint, so the
-    // documented request is [`row_bounds`]. FALSE means the control does not place the row it
-    // is asking about, and then there is nowhere honest to paint (NFR-13): the row keeps the
-    // `LVM_SETBKCOLOR` erase and the ink of the table, and loses its stripe and its tick for
-    // that repaint rather than taking them somewhere invented.
-    let bounds = row_bounds(hwnd, draw.nmcd.dwItemSpec);
-
-    // The choice, split from the write-back as everywhere in this file: the borrow of the
-    // state ends before the message structure is touched. The palette is a `&'static`, so
-    // copying the reference out of the borrow is sound.
-    //
-    // SAFETY: see the caller.
-    let read = unsafe { with_state(hwnd, |state| (state.working.layouts.mode, state.palette)) };
-
-    let Some((mode, palette)) = read else {
-        // No state to choose from — «not handled», the control draws with its own colours
-        // (NFR-13).
-        return 0;
-    };
-
-    let paint = cycle_row_paint(mode, selected, palette);
-
-    if let Some((_, ink)) = paint.colours {
-        draw.clrText = ink;
-    }
-
-    // The ground of the row is **not** written into the structure any more (task T-11-25): the
-    // one value that goes there is `CLR_NONE`, the documented transparent text background, and
-    // the ground itself is the figure [`draw_cycle_row`] paints below. Written here as well as
-    // sent to the whole control by [`paint_cycle_list`], because the structure arrives carrying
-    // the control's own colours and this handler is the one place that could put an opaque one
-    // back by accident.
-    draw.clrTextBk = COLORREF(CLR_NONE as u32);
-
-    // The ground, the selection figure on it and the tick — everything the control no longer
-    // draws for itself. Here and not after the answer, so that what the control still draws
-    // (the label, and a state image that is now a hole edge to edge) lands on top of it.
-    //
-    // `draw.nmcd.hdc` is the DC of the paint this notification is inside of; it belongs to the
-    // sender for the length of the send, and this procedure is inside that send. The rectangle
-    // is `bounds`, the control's own answer — **not** `draw.nmcd.rc`, which a list view never
-    // fills. SEC-05: the DC is painted into and no pointer of the message is followed.
-    if let Some(row) = bounds {
-        draw_cycle_row(
-            draw.nmcd.hdc,
-            &row,
-            mode,
-            selected,
-            checked,
-            palette,
-            drawing_dpi(draw.nmcd.hdc),
-        );
-    }
-
-    if paint.strip_selected {
-        // The lever of the doc comment: without `CDIS_SELECTED` the control paints the row as
-        // ordinary — no system highlight over the selection figure just drawn, and the ink of
-        // the table instead of the system's.
-        draw.nmcd.uItemState =
-            NMCUSTOMDRAW_DRAW_STATE_FLAGS(draw.nmcd.uItemState.0 & !CDIS_SELECTED.0);
-    }
-
-    answer_notify(hwnd, isize::try_from(CDRF_DODEFAULT).unwrap_or(0))
-}
-
-/// Hands one `WM_NOTIFY` answer to the dialog manager — task T-11-7.
-///
-/// A dialog procedure cannot answer `WM_NOTIFY` by return value alone: the documented
-/// result protocol of a DLGPROC is two moves — the answer goes into the `DWLP_MSGRESULT`
-/// field of the dialog window, and the return of TRUE says «handled, the result is there».
-/// `DWLP_MSGRESULT` is a `DWLP_*` field — the dialog manager's own storage, the very range
-/// the `GWLP_USERDATA` comment of `WM_INITDIALOG` sets this file's pointer apart from.
-fn answer_notify(hwnd: HWND, result: isize) -> isize {
-    // SAFETY: `hwnd` is the live dialog and `DWLP_MSGRESULT` is the field every dialog
-    // reserves for exactly this; the previous value is dropped — the field is an answer
-    // slot, not state of ours.
-    unsafe {
-        SetWindowLongPtrW(
-            hwnd,
-            WINDOW_LONG_PTR_INDEX(i32::try_from(DWLP_MSGRESULT).unwrap_or(0)),
-            result,
-        )
-    };
-
-    // TRUE — handled; the manager reads the answer back from the field.
-    1
-}
-
-/// The rectangle of one row of the layout list, in the client pixels its own paint DC is in —
-/// task T-11-25-2.
-///
-/// # Why this is asked and not taken from the message
-///
-/// Because the message does not carry it. `NMCUSTOMDRAW` has an `rc` field, and for a list
-/// view it is **not** filled at the item prepaint stage: measured on the live control through
-/// the stand, every row of the layout list arrives with `rc` = `{0, 0, 0, 0}`. Painting into
-/// that rectangle is painting into nothing at the top-left corner of the list — an empty
-/// `FillRect`, an empty selection stripe, and every row's tick stacked on the same nine
-/// scan lines above the first row, which is exactly the regression this task repairs.
-///
-/// The documented request for the geometry is `LVM_GETITEMRECT`: the **left** field of the
-/// rectangle carries the code on the way in, the whole rectangle comes back in client
-/// coordinates on the way out, and `LVIR_BOUNDS` is the code for «the entire item» — in a
-/// report list view, the row across every column, from the state image to the end of the
-/// last one. Client coordinates are the coordinates of the DC the control hands this
-/// handler, so the answer needs no mapping.
-///
-/// `None` is FALSE from the control — an index it does not place. The callers' answer to it
-/// is NFR-13 degradation, stated where they use it.
-fn row_bounds(hwnd: HWND, item: usize) -> Option<RECT> {
-    let mut rect = RECT {
-        // The one field that is an argument rather than an answer.
-        left: i32::try_from(LVIR_BOUNDS).unwrap_or(0),
-        ..Default::default()
-    };
-
-    // SAFETY: `rect` is a fully initialised `RECT` owned by this frame; the message writes
-    // through the pointer for the length of the send and keeps nothing. `LVM_GETITEMRECT`
-    // takes the item index in `wParam` and the rectangle in `lParam`, which is what is passed.
-    let answered = send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_GETITEMRECT,
-        item,
-        std::ptr::from_mut(&mut rect) as isize,
-    );
-
-    (answered != 0).then_some(rect)
-}
-
-/// Draws one owner-drawn button of the dialog — FR-92а, task T-11-5a; since task T-11-5b
-/// the eight check boxes and radio buttons arrive here too, recognised by identifier and
-/// handed to [`draw_glyph_element`] before the push-button path below, and since task
-/// T-11-6 the items of the four combo boxes, recognised by `CtlType` and handed to
-/// [`draw_combo_item`] first of all.
-///
-/// # SEC-05, last sentence, held to the letter
-///
-/// `lparam` points at the `DRAWITEMSTRUCT` of the message. Exactly seven fields are read
-/// out of it, all in one place at the top of this function: `CtlType` (button or combo),
-/// `CtlID` (the identifier), `itemID` (which item of a combo), `itemState` (pressed,
-/// disabled, focused, closed part), `hDC` (the DC to paint into), `rcItem` (the rectangle
-/// to paint) and `hwndItem` (the window the message claims to speak for — only ever
-/// *compared* with the dialog's own control, never followed; see [`draw_combo_item`]) —
-/// the identifier and the drawing rectangle SEC-05 words the allowance around, plus the
-/// plain values that say what to paint. **The pointer-sized `itemData` is never read**:
-/// no pointer of the incoming message is dereferenced beyond that one struct read, and
-/// nothing in it is followed further. The caption is *not* taken from the message either —
-/// it is read from the dialog's own control by identifier (`get_text` →
-/// `GetDlgItemTextW`; a combo item's text by `CB_GETLBTEXT` from the dialog's own combo).
-/// The window of time is the gate: this message is handled by the
-/// dialog procedure alone, and the dialog window exists exactly while the program itself
-/// holds the dialog on the screen — a forged message outside that window has no procedure
-/// to arrive at.
-///
-/// # What is drawn
-///
-/// Face by `FillRect`, single-pixel frame by `FrameRect`, caption by `DrawTextW` centred
-/// both ways in the dialog's own font (already selected into the DC the manager hands
-/// over); the colour choice is the closed table of [`button_color_roles`]. `ODS_FOCUS`
-/// adds the dotted `DrawFocusRect` frame inside the border, over any face — unless the
-/// manager says the focus cue is hidden (`ODS_NOFOCUSRECT`, the keyboard-cues setting),
-/// which is how a native button behaves.
-///
-/// Answers 1 — «drawn» — for a button, and 0 for anything else. 0 is also the answer when
-/// the state is unreachable or [`theme::Brushes::new`] was refused at initialisation: an
-/// owner-drawn control has no system drawing to fall back to, but painting would need
-/// colour numbers this module is not allowed to hold (§6.2 — the palette lives in `theme`
-/// alone), and the refused-brushes dialog is already living degraded by the decision of
-/// T-11-4.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `lparam` of the message: the dialog manager
-/// sends `WM_DRAWITEM` with a pointer to a `DRAWITEMSTRUCT` that lives for the length of
-/// the send.
-unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // The one dereference of the message, and the whole of what is taken out of it: seven
-    // fields, copied out as plain values before anything else runs. `itemData` — never.
-    //
-    // SAFETY: see above — the dialog manager owns the struct for the length of the send,
-    // and this procedure is inside that send.
-    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    let (ctl_type, ctl_id, item_id, item_state, dc, rect, item_window) = (
-        item.CtlType,
-        item.CtlID,
-        item.itemID,
-        item.itemState,
-        item.hDC,
-        item.rcItem,
-        item.hwndItem,
-    );
-
-    let control = i32::try_from(ctl_id).unwrap_or(-1);
-
-    // FR-92а, task T-11-6: the items of the four combo boxes, by control type — a combo
-    // item is not a button, so this branch comes before the button check. SEC-05: the
-    // identifier is checked against the four before any work.
-    if ctl_type == ODT_COMBOBOX {
-        if !owner_drawn_item(ctl_type.0, control) {
-            return 0;
-        }
-
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
-        // only to paint into for the length of this send; `item_window` is compared and
-        // never followed.
-        return unsafe {
-            draw_combo_item(hwnd, control, item_id, item_state.0, dc, rect, item_window)
-        };
-    }
-
-    // FR-92а, task T-11-14: the rows of the exclusion list, by control type — the same gate,
-    // the same seven fields, and the same «not handled» for anything the gate refuses.
-    if ctl_type == ODT_LISTBOX {
-        if !owner_drawn_item(ctl_type.0, control) {
-            return 0;
-        }
-
-        // SAFETY: as for the combo branch above.
-        return unsafe {
-            draw_list_item(hwnd, control, item_id, item_state.0, dc, rect, item_window)
-        };
-    }
-
-    // FR-92а, task T-11-18: the labels of the template, by control type — a static is not a
-    // button, so this branch comes before the button check, exactly as the two above do. SEC-05:
-    // the identifier is checked against [`OWNER_DRAWN_LABELS`] before any work, and the state of
-    // the message is never even looked at — a label takes no focus and none of them is ever
-    // disabled, so `itemState` says nothing about how a label is painted.
-    if ctl_type == ODT_STATIC {
-        if !OWNER_DRAWN_LABELS.contains(&control) {
-            return 0;
-        }
-
-        // SAFETY: as for the combo branch above — `dc` and `rect` are the values of the
-        // message, used only to paint into for the length of this send.
-        return unsafe { draw_label(hwnd, control, dc, rect) };
-    }
-
-    if ctl_type != ODT_BUTTON {
-        return 0;
-    }
-
-    let pressed = item_state.0 & ODS_SELECTED.0 != 0;
-    let disabled = item_state.0 & ODS_DISABLED.0 != 0;
-    let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
-
-    // FR-92а, task T-12-8: the fourth state, and the one the message does not carry — Windows
-    // has no `ODS_HOTLIGHT` for an owner-drawn button. It is this program's own record, kept by
-    // [`button_proc`], and the window of the message is **compared** against it and never
-    // followed, exactly as the combo and list branches above compare theirs (SEC-05). A forged
-    // message naming the control the cursor really is on buys the sender the face that control
-    // is already wearing.
-    let hot = is_hot(item_window);
-
-    // FR-92а, task T-11-5b: the check boxes and radio buttons, by identifier, ahead of the
-    // push-button path. Everything they take out of the message is already on this frame —
-    // the same seven fields, nothing else; the check state is deliberately *not* a field of
-    // the message at all, it is read from the dialog's own store (see the function).
-    if let Some(kind) = glyph_kind(control) {
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
-        // only to paint into for the length of this send.
-        return unsafe { draw_glyph_element(hwnd, kind, control, dc, rect, disabled, focused) };
-    }
-
-    // ⚠ There is deliberately **no branch for the eight group panels here** — task T-11-13.
-    // A panel used to be drawn from this message, and being drawable from a message meant
-    // being an element: it covered the whole area of its block, took every click that landed
-    // on the block's empty ground, redrew itself on the click, and laid its own fill over
-    // its neighbours, which were never invalidated and did not come back. The panels are the
-    // *background* of their blocks now — `on_erase_background` draws them, and the eight
-    // controls are invisible in the template, so no `WM_DRAWITEM` names them any more. A
-    // forged message that named one would fall through to the push-button path below and
-    // paint a button face inside the rectangle it named, which is the same nothing every
-    // other forged identifier buys (SEC-05).
-    //
-    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
-    // borrow of the state ends before the DC is touched, and what leaves the closure is
-    // plain values — a brush handle the state keeps alive until the dialog ends, and two
-    // inks.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-
-            // The ground the button stands on, and what the corners the rounding cuts away
-            // are erased with — the very rule this dialog answers `WM_CTLCOLORBTN` with
-            // (task T-12-6; `draw_combo_closed_part` asks the same question for its own
-            // corners). «Задать», «Удалить», «Добавить», «Выше», «Ниже» and «Открыть папку
-            // журнала» lie on a panel; the three buttons of the bottom row do not.
-            let ground = if state.panel_children.contains(&control) {
-                brushes.panel_bg()
-            } else {
-                brushes.window_bg()
-            };
-
-            let (colors, hot_brush) = resolve_button_colors(
-                button_color_roles(control, hot, pressed, disabled),
-                ground,
-                brushes,
-                state.palette,
-            );
-
-            Some((
-                colors,
-                hot_brush,
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
-    };
-
-    // `_hot_brush` is named and not discarded on purpose: it owns the transient brush the hot
-    // face is filled with, and a `_` would have freed it before the first pixel was drawn.
-    let Some(Some((colors, _hot_brush, face))) = choice else {
-        return 0;
-    };
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
-    // to paint into for the length of this send; `face` is a face the state owns for longer.
-    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
 
 /// Paints one owner-drawn push button: the ground of the whole rectangle, the rounded face
@@ -10426,110 +8390,6 @@ pub(crate) unsafe fn paint_push_button(
     1
 }
 
-/// Draws one owner-drawn label of the settings dialog — FR-92а, task T-11-18.
-///
-/// The choosing half: the ground the label stands on, the ink its role asks for and the face
-/// this window sets its own text in. The painting half is the shared [`paint_label`], which
-/// the about window uses too (§6.2: one body, not a copy).
-///
-/// # SEC-05, and FR-94
-///
-/// Nothing here dereferences the message: [`on_draw_item`] copied the allowed fields out as
-/// plain values and passed two of them in — `dc` to paint into and `rect` to paint within —
-/// and the identifier was checked against [`OWNER_DRAWN_LABELS`] before this function was
-/// called at all. **The text is not in the message either**: it is read from the dialog's own
-/// control by identifier (`get_text` → `GetDlgItemTextW`), which is the whole of why the
-/// language switch of FR-94 keeps working — `SetDlgItemTextW` writes the string of the locale
-/// into the control, the control invalidates itself, and the very next `WM_DRAWITEM` reads
-/// back what was written. There is no second source of the caption to fall out of step with it.
-///
-/// Answers 1 — «drawn» — and 0 when the state is unreachable or [`theme::Brushes::new`] was
-/// refused at initialisation, for the reason [`on_draw_item`] gives.
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] only, with values copied out of the `WM_DRAWITEM` message it
-/// is inside of: the sender owns `dc` for the length of the send.
-unsafe fn draw_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
-    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
-    // borrow of the state ends before the DC is touched, and what leaves the closure is plain
-    // values — a brush and a face the state keeps alive until the dialog ends, and an ink.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13). The label then
-            // keeps whatever the system painted, which is the degraded-but-alive answer of
-            // T-11-4.
-            let brushes = state.brushes.as_ref()?;
-
-            // The very ground `WM_CTLCOLORSTATIC` answers for this control: the panel brush
-            // for a label lying on one of the eight panels, the window brush everywhere else.
-            // The map is `panel_children`, built once on `WM_INITDIALOG` — not a second
-            // opinion about the geometry.
-            let ground = if state.panel_children.contains(&control) {
-                brushes.panel_bg()
-            } else {
-                brushes.window_bg()
-            };
-
-            Some((
-                ground,
-                label_ink(static_color_role(control), state.palette),
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
-    };
-
-    let Some(Some((ground, ink, face))) = choice else {
-        return 0;
-    };
-
-    // Read after the borrow ends: `get_text` sends a message to a control, and a message sent
-    // while the state is borrowed can come back into the procedure.
-    //
-    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
-    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
-    // `face` are objects the dialog's state owns for longer than this call.
-    unsafe {
-        paint_label(
-            dc,
-            rect,
-            &mut caption,
-            theme::LabelStyle {
-                ground,
-                ink,
-                face,
-                pitch: None,
-                reading: label_reading(control),
-            },
-        )
-    }
-}
-
-/// Which owner-drawn labels of this dialog are **islands of Latin text** — решение 97.2, task
-/// Т-30-4.
-///
-/// One control, and the list is short on purpose. The rule решение 97.2 lays down is not «Latin
-/// text reads left to right» — bidi already does that inside a sentence, and the mixed lines of
-/// the «Состояние» block, with their numbers and their registry path, are explicitly **left to
-/// bidi**. What an island is, is a run that is *entirely* somebody else's alphabet and is read
-/// as an object rather than as a sentence: a path, a key name, a process name.
-///
-/// [`IDC_LOG_DIR`] is the one such run this dialog draws itself. The key-name field and the
-/// process-name field are controls that draw their own text, so they are turned round by
-/// [`unmirror_control`] instead; the process list draws through `draw_list_item`, which asks
-/// this question in its own place.
-const fn label_reading(control: i32) -> theme::Reading {
-    if control == IDC_LOG_DIR {
-        theme::Reading::LatinIsland
-    } else {
-        theme::Reading::Native
-    }
-}
-
 /// Which way a **name** reads — решение 97.2 (г), task Т-30-4.
 ///
 /// The rule the user gave in so many words: by the **first strong character**. A name is not
@@ -10626,445 +8486,6 @@ pub fn reading_of_name(name: &str) -> theme::Reading {
     theme::Reading::Native
 }
 
-/// Draws one item of an owner-drawn combo box — a row of the dropped-down list or the
-/// closed face with the chosen value — FR-92а, task T-11-6.
-///
-/// # SEC-05, last sentence, held to the letter
-///
-/// Nothing here dereferences the message: [`on_draw_item`] copied the seven allowed
-/// fields of `DRAWITEMSTRUCT` out as plain values and passed five of them in — the item
-/// index and state, `dc` to paint into, `rect` to paint within, and `item_window`. The
-/// last one is only ever *compared*: the window the message claims to speak for must be
-/// the dialog's own combo, the one `GetDlgItem` answers for the already-checked
-/// identifier, or nothing is painted at all — a forged message that names our identifier
-/// but somebody else's window buys its sender nothing. The item's text is then read from
-/// the dialog's own combo by identifier (`CB_GETLBTEXTLEN`/`CB_GETLBTEXT` through
-/// `SendDlgItemMessageW`) — never through the handle of the message, which would also be
-/// the bare `SendMessage` FR-72 bans program-wide. `itemData` is never read: the four
-/// combos keep their strings in the control itself (`CBS_HASSTRINGS`), and nothing was
-/// ever stored in their item data.
-///
-/// # What is drawn
-///
-/// The ground by `FillRect`, chosen by the closed table of [`combo_item_color_roles`]:
-/// `field_bg` for an ordinary item and for the closed face, the selection pair
-/// `sel_bg`/`sel_fg` for the highlighted item of the dropped-down list. An empty combo
-/// asks for its closed face with no item to name — `itemID` is −1 — and the filled
-/// ground is the whole of that answer. Otherwise the item's own text follows, in the
-/// dialog's font the DC already holds, vertically centred behind [`FIELD_TEXT_INSET_DLU`]
-/// pixels of air;
-/// and the dotted `DrawFocusRect` over the closed part while it holds the focus — unless
-/// the manager says the focus cue is hidden (`ODS_NOFOCUSRECT`), exactly as the buttons
-/// of T-11-5a behave.
-///
-/// Answers 1 — «drawn». 0 when the identifier and the window of the message disagree,
-/// when the state is unreachable, or when `theme::Brushes::new` was refused at
-/// initialisation, for the reason [`on_draw_item`] gives: painting would need colour
-/// numbers this module is not allowed to hold (§6.2), and the refused-brushes dialog
-/// already lives degraded by the decision of T-11-4.
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] only, with values copied out of the message it is inside
-/// of: `dc` and `rect` are owned by the sender for the length of the send.
-unsafe fn draw_combo_item(
-    hwnd: HWND,
-    control: i32,
-    item_id: u32,
-    item_state: u32,
-    dc: HDC,
-    rect: RECT,
-    item_window: HWND,
-) -> isize {
-    // The comparison SEC-05 allows and nothing more: the window the message claims to
-    // speak for must be the dialog's own combo. `GetDlgItem` refusing — no such control —
-    // fails the same way a mismatch does.
-    //
-    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
-    // ours, and answers a handle or an error.
-    if unsafe { GetDlgItem(Some(hwnd), control) }.ok() != Some(item_window) {
-        return 0;
-    }
-
-    let closed_part = item_state & ODS_COMBOBOXEDIT.0 != 0;
-    let highlighted = item_state & ODS_SELECTED.0 != 0;
-    let focused = item_state & ODS_FOCUS.0 != 0 && item_state & ODS_NOFOCUSRECT.0 == 0;
-
-    // The colour choice, split from the painting exactly as everywhere in this file: the
-    // borrow of the state ends before the DC is touched, and what leaves the closure is
-    // plain values — a brush the state keeps alive until the dialog ends, and an ink.
-    //
-    // SAFETY: see the caller of `on_draw_item`.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            let colors = combo_item_color_roles(closed_part, highlighted);
-
-            // Решение 202.7: the line under the group on top of the language combo — in the
-            // dropped list only, under the last row of the group, and only when rows follow it.
-            let line_under = control == IDC_LANGUAGE
-                && !closed_part
-                && state.languages.top < state.languages.languages.len()
-                && usize::try_from(item_id).is_ok_and(|row| row + 1 == state.languages.top);
-
-            Some((
-                combo_fill_brush(colors.fill, brushes),
-                combo_text_ink(colors.text, palette),
-                state.fonts.as_ref().map(DialogFonts::text),
-                line_under.then_some(palette.field_border),
-            ))
-        })
-    };
-
-    let Some(Some((fill, ink, face, line_under))) = choice else {
-        return 0;
-    };
-
-    // NFR-13, for the paint calls below: each answers a success flag or a previous value,
-    // and every answer is deliberately dropped for the same reason `on_ctl_color` drops
-    // its own — the manager never hands a dead DC, only a forged message could (SEC-05),
-    // and the right reaction to a forgery is indifference: no read-back, no
-    // `debug_assert` handing the forger a crash of a debug build, and no journal row for
-    // GDI refusals (reviews\T-11-1.md).
-
-    // SAFETY: `dc` and `rect` are the values of the message, used only to paint into for
-    // the length of this send; `fill` is a live brush of the dialog's state.
-    unsafe { FillRect(dc, &rect, fill) };
-
-    // −1 — an empty combo asking for its closed face with no item to name: the filled
-    // ground above is the whole of the answer.
-    if item_id == u32::MAX {
-        return 1;
-    }
-
-    // The item's text, from the dialog's own combo by identifier — never through the
-    // handle of the message. `CB_GETLBTEXTLEN` sizes the buffer; either message answering
-    // the error value skips the text and keeps the filled ground (NFR-13: a row without
-    // its word is degraded but alive, and the journal has no row for it —
-    // reviews\T-11-1.md).
-    let index = usize::try_from(item_id).unwrap_or(usize::MAX);
-    let length = send_to(hwnd, control, CB_GETLBTEXTLEN, index, 0);
-
-    if let Ok(length) = usize::try_from(length) {
-        // One for the terminator the control writes and never counts.
-        let mut buffer = vec![0u16; length + 1];
-
-        // SAFETY: `buffer` is owned by this frame and holds the length the combo has just
-        // reported plus the terminator, which is exactly what `CB_GETLBTEXT` writes; the
-        // pointer is not retained by the call.
-        let copied = send_to(
-            hwnd,
-            control,
-            CB_GETLBTEXT,
-            index,
-            buffer.as_mut_ptr() as isize,
-        );
-
-        let copied = usize::try_from(copied).unwrap_or(0).min(length);
-
-        if copied > 0 {
-            // The same three dialog units the closed face above it uses — an item of the
-            // dropped-down list stands directly under the closed part and shares its left
-            // edge, so a second inset would make the word jump on opening (task T-11-16).
-            let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
-                .map(|(horizontal, _)| horizontal)
-                .unwrap_or(FIELD_TEXT_INSET_DLU);
-
-            // ⭐ **Тело строки переехало в `widgets::combo::draw_row` — задача Т-46-4,
-            // решение 109.4.** Оно стояло здесь с задачи T-11-6 и не изменилось ни на пиксель;
-            // уехало потому, что таких тел в программе было ДВА, и второе — у мастера —
-            // рисовало слово `theme::paint_label`, то есть форматом `DT_TOP`. Замер Т-46-1:
-            // в строке списка мастера воздух 3 сверху и 9 снизу против 8 и 5 здесь. Эталон
-            // механики — это окно (решение 109.1), поэтому мастер встал на его тело.
-            //
-            // SAFETY: `dc` is the DC of the message; `face` is a live font the dialog's state
-            // owns for longer than this call; the slice is a live local of this frame.
-            unsafe {
-                widgets::combo::draw_row(dc, rect, &mut buffer[..copied], ink, face, inset);
-            }
-        }
-    }
-
-    // Решение 202.7, вариант 1 of the mock-up: one pixel of `field_border` along the bottom edge
-    // of the last row of the group on top, inset by the air of the text on both sides. The rows
-    // of a `CBS_OWNERDRAWFIXED` list are all one height, so the line is a part of a row and not a
-    // row of its own.
-    if let Some(colour) = line_under {
-        let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
-            .map(|(horizontal, _)| horizontal)
-            .unwrap_or(FIELD_TEXT_INSET_DLU);
-        let area = RECT {
-            left: rect.left + inset,
-            top: rect.bottom - 1,
-            right: rect.right - inset,
-            bottom: rect.bottom,
-        };
-
-        theme::paint_caption_underline(dc, &area, colour);
-    }
-
-    if closed_part && focused {
-        // Over the whole closed face, which is where a native combo puts its cue.
-        //
-        // NFR-13: the `BOOL` is examined and deliberately dropped — the block comment
-        // above the paint calls says why.
-        //
-        // SAFETY: `dc` is the DC of the message and `rect` is a live local of this frame;
-        // the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(dc, &rect) };
-    }
-
-    // TRUE — the item is drawn.
-    1
-}
-
-/// Draws one row of the exclusion list — FR-92а, task T-11-14.
-///
-/// # Why the list draws its own rows at all
-///
-/// `WM_CTLCOLORLISTBOX` has coloured the ground of this list since task T-11-4, but a list
-/// box paints its **selection stripe** itself, out of the system `COLOR_HIGHLIGHT` — the blue
-/// bar the mock-ups do not have in either palette. There is no message that recolours it:
-/// the documented way to own the stripe is to own the row, which is what `LBS_OWNERDRAWFIXED`
-/// in `app.rc` and this function are. `LBS_HASSTRINGS` stays beside it, so the population
-/// (`LB_ADDSTRING`) and the reading (`LB_GETTEXT` in [`list_items`]) of FR-84 are untouched —
-/// the strings still live in the control.
-///
-/// # SEC-05, last sentence, held to the letter
-///
-/// Nothing here dereferences the message, exactly as in [`draw_combo_item`]: the seven
-/// allowed fields were copied out as plain values by [`on_draw_item`], `item_window` is only
-/// ever *compared* against the dialog's own control, and the row's text is then read from the
-/// dialog's own list by identifier through `SendDlgItemMessageW`. `itemData` is never read:
-/// the list keeps its strings in the control itself and nothing was ever stored in its item
-/// data.
-///
-/// # What is drawn
-///
-/// The ground by `FillRect`, chosen by [`list_item_color_roles`] — `field_bg`/`text` for an
-/// ordinary row, the palette's own `sel_bg`/`sel_fg` for the selected one — then the row's
-/// text behind [`LIST_TEXT_INSET`] mock-up pixels of air, and the dotted `DrawFocusRect` when
-/// the manager says
-/// this row carries the focus and the focus cues are not hidden, exactly as everywhere else
-/// in this dialog. An empty list asks for the cue with no row to name (`itemID` is −1); the
-/// filled ground and the cue are then the whole of the answer.
-///
-/// Answers 1 — «drawn» — or 0 for the reasons [`draw_combo_item`] answers 0.
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] only, with values copied out of the message it is inside of:
-/// `dc` and `rect` are owned by the sender for the length of the send.
-unsafe fn draw_list_item(
-    hwnd: HWND,
-    control: i32,
-    item_id: u32,
-    item_state: u32,
-    dc: HDC,
-    rect: RECT,
-    item_window: HWND,
-) -> isize {
-    // The comparison SEC-05 allows and nothing more — see `draw_combo_item`.
-    //
-    // SAFETY: `hwnd` is the live dialog; the call reads a window field and no memory of
-    // ours, and answers a handle or an error.
-    if unsafe { GetDlgItem(Some(hwnd), control) }.ok() != Some(item_window) {
-        return 0;
-    }
-
-    let selected = item_state & ODS_SELECTED.0 != 0;
-    let focused = item_state & ODS_FOCUS.0 != 0 && item_state & ODS_NOFOCUSRECT.0 == 0;
-
-    // The colour choice, split from the painting exactly as everywhere in this file.
-    //
-    // SAFETY: see the caller of `on_draw_item`.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let colors = list_item_color_roles(selected);
-
-            Some((
-                // The ground of the row itself — the field the list is, whatever the row is
-                // doing. The selection is a figure *on* it since task T-11-16.
-                brushes.field_bg(),
-                combo_fill_brush(colors.fill, brushes),
-                match colors.fill {
-                    ComboFillRole::FieldBg => state.palette.field_bg,
-                    ComboFillRole::SelBg => state.palette.sel_bg,
-                    // Unreachable by construction — `list_item_color_roles` answers the two
-                    // above and nothing else — and written out rather than folded into the
-                    // first arm, so that the day a row does grow a hot state the compiler
-                    // has already named the colour it would take.
-                    ComboFillRole::HoverBg => state.palette.hover_bg,
-                },
-                combo_text_ink(colors.text, state.palette),
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
-    };
-
-    let Some(Some((ground, fill, fill_ink, ink, face))) = choice else {
-        return 0;
-    };
-
-    let dpi = drawing_dpi(dc);
-
-    // NFR-13, for the paint calls below: every answer is deliberately dropped, for the reason
-    // `draw_combo_item` states for its own.
-
-    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
-    // and the same cure task T-15-1 gave the push buttons. Measured on the стенд with a self-check
-    // raised by a click — the стимул a row's selection is raised by: an intermediate state reached
-    // the screen in **13 of 30** transitions in «Графите» and **9 of 30** in «Тумане», the stripe
-    // laid down with the label of the row **not yet on it**. ⚠ The instrument in `tools\` reported
-    // a zero here and refused to certify it (`THIS ZERO IS UNCONFIRMED`, exit code 4) because its
-    // self-check is raised by a press and this state by a click; the unconfirmed zero was hiding a
-    // real defect.
-    //
-    // ⚠ `rect` of a list row is **offset** inside the control — it is not a client rectangle
-    // starting at the origin — and the buffer is built for exactly that: it moves its own logical
-    // origin onto the corner of `rect`, so every step below names the same rectangles it named
-    // before.
-    //
-    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself and
-    // every step below paints where it painted before this task, flicker and all.
-    //
-    // SAFETY: `dc` is the DC of the message the caller is inside of; the buffer reads it for its
-    // colour depth and its face, writes to it only in the blit at the foot of this body, and frees
-    // its own DC and bitmap when this frame ends.
-    // ⚠ Named `surface` and not `buffer`, unlike the other bodies of this task: the text of a row
-    // is read into a `buffer` of its own a few lines below, and two `buffer`s in one body — one
-    // shadowing the other inside a block — is a thing to read twice and get wrong once.
-    let surface = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = surface.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // ⚠ **Since task T-15-1б this erase also grounds the buffer** — the corner smoothing of the
-    // stripe below reads the ground of each corner back **out of** the DC it draws into, and the
-    // pixels of a fresh `CreateCompatibleBitmap` are undefined.
-    //
-    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message; `rect`
-    // is a value of the message; `ground` is a live brush of the dialog's state.
-    unsafe { FillRect(target, &rect, ground) };
-
-    // The selection stripe of the mock-ups — the one figure both lists of the dialog wear
-    // since task T-11-25, drawn by [`paint_selection_stripe`].
-    if selected {
-        paint_selection_stripe(target, &rect, fill_ink, fill, dpi);
-    }
-
-    // −1 — an empty list asking for the focus cue with no row to name.
-    if item_id != u32::MAX {
-        let index = usize::try_from(item_id).unwrap_or(usize::MAX);
-        let length = send_to(hwnd, control, LB_GETTEXTLEN, index, 0);
-
-        // `LB_ERR` is negative and fails the conversion, which skips the text and keeps the
-        // filled ground (NFR-13, as in `draw_combo_item`).
-        if let Ok(length) = usize::try_from(length) {
-            // One for the terminator the control writes and never counts.
-            let mut buffer = vec![0u16; length + 1];
-
-            // SAFETY: `buffer` is owned by this frame and holds the length the list has just
-            // reported plus the terminator, which is exactly what `LB_GETTEXT` writes; the
-            // pointer is not retained by the call.
-            let copied = send_to(
-                hwnd,
-                control,
-                LB_GETTEXT,
-                index,
-                buffer.as_mut_ptr() as isize,
-            );
-
-            let copied = usize::try_from(copied).unwrap_or(0).min(length);
-
-            if copied > 0 {
-                // SAFETY: `target` is a handle passed by value; both calls write an attribute of
-                // that DC and touch no memory of this process.
-                unsafe { SetBkMode(target, TRANSPARENT) };
-                // SAFETY: as above.
-                unsafe { SetTextColor(target, ink) };
-
-                // `TxtPx $g $it $F $brFg ($px + 7) ($ry + 2)` of the `'lbox'` arm: seven
-                // mock-up pixels in from the left edge of the list, two below the top of the
-                // row — task T-11-16, п. 3. Measured in the pixels of the picture and not in
-                // dialog units, because that is the unit the generator states them in; and
-                // top-aligned rather than `DT_VCENTER`, because the picture places the line
-                // and does not centre it.
-                let mut text_rect = RECT {
-                    left: rect.left + scaled(LIST_TEXT_INSET, dpi),
-                    top: rect.top + scaled(LIST_TEXT_TOP, dpi),
-                    right: rect.right,
-                    bottom: rect.bottom,
-                };
-
-                // Our own face, grey-antialiased — task T-11-17.
-                //
-                // ⚠ Into `target` and never into `dc`: the face has to be selected into the very
-                // DC `DrawTextW` writes through. Selecting it into the DC of the message while
-                // drawing into the buffer left the buffer wearing the font the CONTROL was
-                // created with — `DEFAULT_QUALITY` — instead of the face this window names for
-                // itself. Caught by the 24 frames: `excl-dark` moved 197 levels on one row (task
-                // T-15-1б, and the reason that number is not allowed to be waved through as
-                // "one level on text").
-                //
-                // ⚠ **Since решение 88 this defect no longer shows itself.** The symptom was the
-                // row coming out in ClearType against the grey antialiasing of the rest of the
-                // dialog; now the rest of the dialog is ClearType too, and a buffer wearing the
-                // control's own font would look right by accident. The bug would still be a bug —
-                // the face of a window must not depend on which DC a buffer was born from — so
-                // the line below stays where it is, and this note is why it may not be «tidied».
-                //
-                // SAFETY: `target` is the buffer or the DC of the message and `face` is a live
-                // font the dialog's state owns for longer than this call.
-                let previous_face = unsafe { select_face(target, face) };
-
-                // Решение 97.2 (в), task Т-30-4: a row of the exclusion list is a **process
-                // name** — `game.exe`, `notepad.exe` — and reads left to right in a mirrored
-                // window as it does in any other. The bit comes from `theme::reading_order`,
-                // the one place this program decides reading order.
-                //
-                // SAFETY: the slice and `text_rect` are live locals of this frame; the format
-                // has no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text
-                // and writes only pixels of the DC.
-                let format =
-                    DT_SINGLELINE | theme::reading_order(unsafe { theme::dc_is_rtl(target) }, true);
-
-                unsafe { DrawTextW(target, &mut buffer[..copied], &mut text_rect, format) };
-
-                // SAFETY: `previous_face` is what `select_face` answered for this same DC.
-                unsafe { restore_face(target, previous_face) };
-            }
-        }
-    }
-
-    if focused {
-        // NFR-13: the `BOOL` is examined and deliberately dropped — see above.
-        //
-        // SAFETY: `target` is the buffer or the DC of the message and `rect` is a live local of
-        // this frame; the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(target, &rect) };
-    }
-
-    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
-    // erase has touched the window, so what DWM can sample is the row as it was or the row as it
-    // now is, and there is no third state for the eye to catch.
-    //
-    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
-    // gives for its own blit.
-    //
-    // SAFETY: `dc` is the DC of the message, painted into for the length of this send; `surface`
-    // is this frame's own, and its DC and bitmap are freed as it goes out of scope on this line.
-    if let Some(surface) = surface {
-        let _ = unsafe { surface.blit(dc) };
-    }
-
-    // TRUE — the row is drawn.
-    1
-}
-
 /// The check mark of a dialog check box — `(PtF ($px+4.5) ($by+8.6))`, `(PtF ($px+7.3)
 /// ($by+11.8))`, `(PtF ($px+12.5) ($by+5.2))` and `[single]2.1` of the `'check'` arm.
 pub const GLYPH_CHECK_MARK: CheckMark = CheckMark {
@@ -11078,377 +8499,6 @@ pub const LIST_CHECK_MARK: CheckMark = CheckMark {
     points_tenths: [(34, 66), (56, 90), (96, 40)],
     pen_tenths: LIST_CHECK_PEN_TENTHS,
 };
-
-/// One glyph mark, resolved to the currency its drawing needs: the check strokes take an
-/// ink for a transient pen, the dot takes a live brush of the dialog's state.
-enum GlyphMarkPaint {
-    /// The two strokes of a check mark, in this ink.
-    Check(COLORREF),
-    /// The dot of a radio button, filled with this brush.
-    Dot(HBRUSH),
-}
-
-/// Draws one owner-drawn check box or radio button — FR-92а, task T-11-5b.
-///
-/// # SEC-05, last sentence, held to the letter
-///
-/// Nothing here reads the message: [`on_draw_item`] copied the seven allowed fields of
-/// `DRAWITEMSTRUCT` out as plain values and passed two of them in — `dc` to paint into and
-/// `rect` to paint within. The check state is deliberately *not* taken from the message
-/// either — `itemState` carries no check bit worth trusting and `itemData` is never read —
-/// it is the dialog's own answer, read from its own store by the identifier
-/// ([`is_checked`] → [`GlyphChecks`], task T-11-5b-2: an owner-drawn control keeps no
-/// check state, so the control cannot be asked), and the caption is the control's own text
-/// ([`get_text`] → `GetDlgItemTextW`). A forged message can therefore misdraw nothing but
-/// the rectangle it names.
-///
-/// # What is drawn
-///
-/// The ground of the whole rectangle first — the brush `WM_CTLCOLORBTN` answers for this
-/// control — because an owner-drawn control is responsible for the whole of its rectangle and
-/// a repaint has to be idempotent (task T-12-6; see the fill itself for the measurement).
-///
-/// The glyph is a [`GLYPH_SIZE`]-sided square (check box) or circle (radio button) at the
-/// left edge of the rectangle, centred vertically; the colour choice is the closed table
-/// of [`glyph_color_roles`]. A checked box is filled whole with the accent and crossed by
-/// the two pen strokes of the check mark; an unchecked one is the field fill under the
-/// single-pixel `box_border` frame — `FrameRect` takes a brush, which is what the eighth
-/// brush of `theme::Brushes` exists for. The circle of a radio button is one `Ellipse` —
-/// outline of the frame ink, interior of the fill brush — and the checked dot is an inner
-/// `Ellipse` of the mark brush. The caption sits to the right in the dialog's own font
-/// (already selected into the DC), and focus adds the dotted `DrawFocusRect` frame around
-/// the caption — the caller already folded `ODS_NOFOCUSRECT` into `focused`, so the cue
-/// behaves as the native one does under the keyboard-cues setting.
-///
-/// Answers 1 — «drawn». 0 when the state is unreachable or `theme::Brushes::new` was
-/// refused at initialisation, for the reason [`on_draw_item`] gives: painting would need
-/// colour numbers this module is not allowed to hold (§6.2), and the refused-brushes
-/// dialog already lives degraded by the decision of T-11-4.
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] only, with the `hDC` and `rcItem` of the message it is
-/// inside of: both are owned by the dialog manager for the length of the send.
-unsafe fn draw_glyph_element(
-    hwnd: HWND,
-    kind: GlyphKind,
-    control: i32,
-    dc: HDC,
-    rect: RECT,
-    disabled: bool,
-    focused: bool,
-) -> isize {
-    // The dialog's own answer, not the message's: the store of task T-11-5b-2, read by
-    // the identifier the message names — an owner-drawn control keeps no check state of
-    // its own, so the control cannot be asked. Before the state exists — `WM_DRAWITEM`
-    // does arrive ahead of full initialisation — the answer is «снят» and the element is
-    // drawn unchecked rather than not at all (NFR-13).
-    let checked = is_checked(hwnd, control);
-
-    // The colour choice, split from the painting as everywhere in this file: the borrow of
-    // the state ends before the DC is touched, and what leaves the closure is plain
-    // values — brushes the state keeps alive until the dialog ends, and inks.
-    //
-    // SAFETY: see the caller of `on_draw_item`.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            // The ground this element stands on — the very rule `on_ctl_color` answers
-            // `WM_CTLCOLORBTN` with: the panel brush for a control lying on one of the eight
-            // group panels, the window brush elsewhere. All eight glyph elements do lie on a
-            // panel, but the rule is asked and not assumed, exactly as `draw_combo_closed_part`
-            // asks it. See the fill below for why it is needed at all (task T-12-6).
-            let ground = if state.panel_children.contains(&control) {
-                brushes.panel_bg()
-            } else {
-                brushes.window_bg()
-            };
-
-            let colors = glyph_color_roles(kind, checked, disabled);
-
-            // The single place the glyph roles become brushes and colours of the resolved
-            // palette — the drawing below never sees a role.
-            let fill = match colors.fill {
-                GlyphFillRole::FieldBg => brushes.field_bg(),
-                GlyphFillRole::AccentBg => brushes.accent_bg(),
-            };
-
-            // The same fill as a colour. Task T-11-14 rounded the square off, and `RoundRect`
-            // draws fill and frame in one figure: the cell that has no frame — the checked,
-            // enabled check box — is outlined in its own fill instead, so nothing shows.
-            let fill_ink = match colors.fill {
-                GlyphFillRole::FieldBg => palette.field_bg,
-                GlyphFillRole::AccentBg => palette.accent_bg,
-            };
-
-            // The frame role as an ink: both figures are now drawn with a pen — the rounded
-            // square of task T-11-14 and the circle of the radio button.
-            let frame = colors
-                .frame
-                .map(|GlyphFrameRole::BoxBorder| palette.box_border);
-
-            let mark = colors.mark.map(|role| match kind {
-                GlyphKind::CheckBox => GlyphMarkPaint::Check(match role {
-                    GlyphMarkRole::AccentFg => palette.accent_fg,
-                    GlyphMarkRole::AccentBg => palette.accent_bg,
-                    GlyphMarkRole::BoxBorder => palette.box_border,
-                }),
-                GlyphKind::RadioButton => GlyphMarkPaint::Dot(match role {
-                    GlyphMarkRole::AccentBg => brushes.accent_bg(),
-                    GlyphMarkRole::BoxBorder => brushes.box_border(),
-                    // The closed table never marks a radio with the check-mark ink — the
-                    // 2×2×2 table test is what holds this arm unreachable. Answered with
-                    // the accent brush rather than a panic: a wrong dot colour would be a
-                    // cosmetic defect, a crash of the UI thread would not (NFR-13).
-                    GlyphMarkRole::AccentFg => brushes.accent_bg(),
-                }),
-            });
-
-            let ink = match colors.text {
-                GlyphTextRole::Text => palette.text,
-                GlyphTextRole::TextMuted => palette.text_muted,
-            };
-
-            Some((
-                ground,
-                fill,
-                fill_ink,
-                frame,
-                mark,
-                ink,
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
-    };
-
-    let Some(Some((ground, fill, fill_ink, frame, mark, ink, face))) = choice else {
-        return 0;
-    };
-
-    let dpi = drawing_dpi(dc);
-
-    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
-    // and the same cure task T-15-1 gave the push buttons. Measured on the стенд with a self-check
-    // raised by a click, the стимул this element's own state is raised by: an intermediate state
-    // reached the screen in **22 of 30** transitions in «Графите» and **18 of 30** in «Тумане» —
-    // the ground erased and the caption **not yet drawn**, a line of the dialog standing blank for
-    // one frame. ⚠ The instrument in `tools\` reported a zero here and refused to certify it
-    // (`THIS ZERO IS UNCONFIRMED`, exit code 4) exactly because its self-check is raised by a
-    // press and this state by a click; the unconfirmed zero was hiding a real defect, which is the
-    // whole reason that refusal exists.
-    //
-    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of the message itself and
-    // every step below paints where it painted before this task, flicker and all.
-    //
-    // ⚠ `dpi` is taken one line above off the DC of the **message** and never off the buffer:
-    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and the
-    // glyph's radius, its square and its check mark are all scaled through it.
-    //
-    // SAFETY: `dc` is the DC of the message the caller is inside of; the buffer reads it for its
-    // colour depth and its face, writes to it only in the blit at the foot of this body, and frees
-    // its own DC and bitmap when this frame ends.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // ⚠ **The ground, before anything is drawn on it — task T-12-6.**
-    //
-    // An owner-drawn button is responsible for the whole of its rectangle, exactly as the
-    // owner-drawn static of [`paint_label`] is: `WM_CTLCOLORBTN` names the brush, but nothing
-    // promises that the system lays it down before handing the drawing over — and the measured
-    // answer is that it does not. A check box that is repainted **over itself** without this
-    // fill draws its caption a second time on top of the first, and since `SetBkMode` is
-    // `TRANSPARENT`, the half-tone pixels of the antialiasing blend with what is already there
-    // instead of replacing it: an edge pixel of the caption's halo went 179,182,186 →
-    // 225,228,231 on the stand, ≈74 % → ≈98 % of the ink, and the text visibly thickened. The
-    // cores never moved, which is what said it was a second pass and not a different drawing.
-    //
-    // The repaint that does it is an ordinary one: the element loses the focus to whatever the
-    // person clicked — pressing «Задать» is the case the defect was found in — and the system
-    // button invalidates itself **without** erasing (`bErase = FALSE`), because an owner-drawn
-    // control has no background of its own to erase.
-    //
-    // Filling here is right under either behaviour — a second fill over the same colour is
-    // invisible and costs one `FillRect` — and skipping it is right under only one. It is the
-    // same erase `draw_combo_closed_part` does for the closed part of a combo box and
-    // `paint_label` for a caption.
-    //
-    // NFR-13: the answer is examined in words and deliberately dropped, for the reason the
-    // block comment below the glyph rectangle gives for every other paint call here.
-    //
-    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
-    // The corner smoothing of the glyph reads the ground of each corner back **out of** the DC it
-    // draws into, and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill,
-    // standing exactly where it stood, is what makes the buffer hold under the corners the same
-    // colour the screen held there.
-    //
-    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of the message; `rect`
-    // is a value of the message, and `ground` is a live brush the dialog's state owns for longer
-    // than this call.
-    unsafe { FillRect(target, &rect, ground) };
-
-    // The glyph: at the left edge, centred vertically, [`GLYPH_SIZE`] mock-up pixels a side
-    // through the scale — the `$bs = 17` of the generator, and `$by = $py + [int](($ph -
-    // $bs)/2)` for the centring (task T-11-16).
-    //
-    // ⚠ Задача Т-45-2: арифметика клетки уехала в `widgets::glyph::cell` — она была тождественна
-    // у этого окна и у мастера, слово в слово, и потому слита. Всё остальное в этом теле
-    // (земля, подпись, рамка фокуса, перо круга) у двух окон различается и оставлено; чем
-    // именно — сказано в доктексте `widgets::glyph`.
-    let glyph = widgets::glyph::cell(rect, dpi);
-
-    // NFR-13, for every paint call below: each answers a success flag or a previous
-    // value, and every answer is deliberately dropped for the reason `on_draw_item` gives
-    // for its own — the manager never hands a dead DC, only a forged message could
-    // (SEC-05), and the right reaction to a forgery is indifference: no read-back, no
-    // `debug_assert` handing the forger a crash of a debug build, and no journal row for
-    // GDI refusals (reviews\T-11-1.md).
-    match kind {
-        GlyphKind::CheckBox => {
-            // п. 2 of task T-11-14: the square of the mock-ups is rounded off by
-            // [`GLYPH_CORNER_RADIUS`], and a square `FillRect` under a square `FrameRect`
-            // cannot have a corner radius at all. One `RoundRect` draws both — the frame with
-            // the pen, the interior with the brush — so the frameless cell of the closed
-            // table is outlined in its own fill.
-            paint_rounded(
-                target,
-                &glyph,
-                scaled(GLYPH_CORNER_RADIUS, dpi),
-                frame.unwrap_or(fill_ink),
-                fill,
-                dpi,
-            );
-
-            if let Some(GlyphMarkPaint::Check(mark_ink)) = mark {
-                draw_check_mark(target, &glyph, mark_ink, GLYPH_CHECK_MARK, dpi);
-            }
-        }
-        GlyphKind::RadioButton => {
-            paint_ellipse(target, &glyph, frame, fill, dpi);
-
-            if let Some(GlyphMarkPaint::Dot(dot_brush)) = mark {
-                // The 4,6 mock-up pixels of the generator; the 7,8 of the dot's own diameter
-                // then falls out of the circle around it, as it does there.
-                let dot_inset = scaled_tenths_offset(GLYPH_DOT_INSET_TENTHS, dpi);
-
-                let dot = RECT {
-                    left: glyph.left + dot_inset,
-                    top: glyph.top + dot_inset,
-                    right: glyph.right - dot_inset,
-                    bottom: glyph.bottom - dot_inset,
-                };
-
-                paint_ellipse(target, &dot, None, dot_brush, dpi);
-            }
-        }
-    }
-
-    // The caption, from the dialog's own control by identifier — never from the message.
-    // Without the trailing NUL: `DrawTextW` takes the length of the slice it is given.
-    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
-
-    if !caption.is_empty() {
-        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that
-        // DC and touch no memory of this process.
-        unsafe { SetBkMode(target, TRANSPARENT) };
-        // SAFETY: as above.
-        unsafe { SetTextColor(target, ink) };
-
-        // Twelve dialog units from the **left edge of the element** — the `($c.x + 12)` of both
-        // the `'check'` and the `'radio'` arm of the generator, task T-11-16. A refused
-        // `MapDialogRect` keeps the bare unit count, which is the fallback
-        // [`draw_panel_caption`] takes for its own inset (NFR-13).
-        let caption_inset = dialog_units(hwnd, GLYPH_TEXT_INSET_DLU, 0)
-            .map(|(horizontal, _)| horizontal)
-            .unwrap_or(GLYPH_TEXT_INSET_DLU);
-
-        let mut text_rect = RECT {
-            left: rect.left + caption_inset,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-        };
-
-        // Our own face, grey-antialiased — task T-11-17. Selected before the measurement as
-        // well as before the drawing: `DT_CALCRECT` below measures with whatever font the DC
-        // holds, and a cue measured in one face around a caption drawn in another would sit
-        // wrong.
-        //
-        // SAFETY: `target` is the buffer or the DC of the message and `face` is a live font the
-        // dialog's state owns for longer than this call; the previous handle is put back below.
-        let previous_face = unsafe { select_face(target, face) };
-
-        // SAFETY: `caption` and `text_rect` are live locals of this frame; the format has
-        // no `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the caption and
-        // writes only pixels of the DC.
-        unsafe {
-            DrawTextW(
-                target,
-                &mut caption,
-                &mut text_rect,
-                DT_VCENTER | DT_SINGLELINE,
-            )
-        };
-
-        if focused {
-            // The dotted frame goes around the caption, not the glyph — as the native
-            // control draws it. The width is measured with `DT_CALCRECT` into a scratch
-            // rectangle; the height is the control's own, the caption being vertically
-            // centred in it. (An element with no caption gets no cue — none of the eight
-            // is captionless, and a frame around nothing would be noise.)
-            let mut measured = text_rect;
-
-            // SAFETY: as above — `DT_CALCRECT` writes the measured extent into
-            // `measured`, a live local of this frame, and draws nothing.
-            unsafe {
-                DrawTextW(
-                    target,
-                    &mut caption,
-                    &mut measured,
-                    DT_CALCRECT | DT_SINGLELINE,
-                )
-            };
-
-            let focus_rect = RECT {
-                left: text_rect.left - FOCUS_CUE_TEXT_INSET,
-                top: rect.top,
-                right: (measured.right + FOCUS_CUE_INSET).min(rect.right),
-                bottom: rect.bottom,
-            };
-
-            // NFR-13: the `BOOL` is examined and deliberately dropped — see the block
-            // comment above the glyph painting.
-            //
-            // SAFETY: `target` is the buffer or the DC of the message and `focus_rect` is a
-            // live local of this frame; the call keeps no pointer.
-            let _ = unsafe { DrawFocusRect(target, &focus_rect) };
-        }
-
-        // SAFETY: `previous_face` is what `select_face` answered for this same DC, and
-        // nothing between the two calls selected another font.
-        unsafe { restore_face(target, previous_face) };
-    }
-
-    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
-    // erase has touched the window, so what DWM can sample is the element as it was or the element
-    // as it now is, and there is no third state for the eye to catch — in particular no frame in
-    // which the ground is erased and the caption is not yet on it.
-    //
-    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
-    // gives for its own blit. A refused blit leaves the element showing the picture the window
-    // already had there — its previous state and never a hole.
-    //
-    // SAFETY: `dc` is the DC of the message, painted into for the length of this send; `buffer` is
-    // this frame's own, and its DC and bitmap are freed as it goes out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-
-    // TRUE — the element is drawn.
-    1
-}
 
 // =========================================================================================
 // The lengths of the mock-ups, and the way this dialog turns its own numbers into pixels —
@@ -11764,10 +8814,6 @@ pub const DIALOG_FONT_HEIGHT_DLU: i32 = 8;
 /// from the frame it is supposed to sit just inside of.
 const FOCUS_CUE_INSET: i32 = 2;
 
-/// The same air on the left of a cue that goes around a **line of text** rather than a figure —
-/// one pixel, because there is no frame on that side for the cue to clear.
-const FOCUS_CUE_TEXT_INSET: i32 = 1;
-
 /// Letter spacing of a panel caption, in **tenths** of a mock-up pixel — п. 2.1, «≈ 1,1 px».
 ///
 /// Tenths because the number is not whole and the difference shows: rounding 1,1 px up to
@@ -11872,307 +8918,6 @@ pub const FRAMED_LISTS: [i32; 2] = [IDC_EXCLUSIONS, IDC_CYCLE_LIST];
 /// halves.
 pub const FIELD_BOX_DLU: i32 = 12;
 
-/// The colours one whole background pass needs, taken out of the state in one borrow.
-///
-/// The same split every drawing handler of this file makes: the borrow ends before the DC
-/// is touched, and what leaves the closure is plain values — three brushes the state keeps
-/// alive until the dialog ends, and three inks.
-#[derive(Clone, Copy)]
-struct BackgroundColors {
-    /// [`theme::Palette::window_bg`] — the ground the whole client area starts as.
-    window: HBRUSH,
-    /// [`theme::Palette::panel_bg`] — the fill of a panel.
-    panel: HBRUSH,
-    /// [`theme::Palette::field_bg`] — the fill under a field or a list.
-    field: HBRUSH,
-    /// [`theme::Palette::panel_border`] — the single-pixel frame of a panel.
-    panel_border: COLORREF,
-    /// [`theme::Palette::field_border`] — the single-pixel frame of a field.
-    field_border: COLORREF,
-    /// The frame of **the hotkey field alone** — task Т-23-5, решение 82.6.
-    ///
-    /// [`theme::Palette::field_border`] like every other field at rest, and
-    /// [`theme::Palette::box_border`] while a capture is armed: the frame is what shows the
-    /// state of the capture on the window, and it is the one thing the mock-up changes about
-    /// the field besides its text. A field of its own colour and not a flag, because the
-    /// picture this value paints is cached and keyed on the colours it was painted with —
-    /// see [`BackgroundCache::shows`].
-    hotkey_frame: COLORREF,
-    /// [`theme::Palette::cap`] — the ink of a panel caption since task T-12-11.
-    caption: COLORREF,
-}
-
-/// Draws the whole background of the settings dialog — FR-92а, task T-11-13.
-///
-/// # Why the panels live here and not in `WM_DRAWITEM`
-///
-/// Until this task each of the eight panels was an owner-drawn `Button` covering the whole
-/// area of its block. That made the panel an *element*: it took every click that landed on
-/// the empty ground of the block, redrew itself on the click, and — no control of a dialog
-/// carries `WS_CLIPSIBLINGS` — laid its own fill straight over its neighbours, which were
-/// never told to repaint. One click emptied a whole block. A panel is not an element; a
-/// panel **is** the background of its block, and this is where a background is drawn. The
-/// eight controls stay in the template, invisible (`NOT WS_VISIBLE` in `app.rc`): an
-/// invisible window takes no click, paints nothing and covers nobody, while it keeps the
-/// identifier FR-94 sets the caption on and the rectangle that says where the panel goes.
-///
-/// # What is drawn, in this order
-///
-/// 1. the whole client area in `window_bg` — the ground the dialog stands on;
-/// 2. every panel, in the rectangle of its own hidden control: the rounded fill and frame
-///    of [`BackgroundFigure::Panel`], then the caption — upper case, smaller and bolder
-///    than the dialog font, letter-spaced, in `cap` since task T-12-11 — read off that same
-///    hidden control with `GetDlgItemTextW`, which is what keeps FR-94 working with no
-///    second source of truth for the eight strings;
-/// 3. every field and list, outside its own rectangle: the rounded fill and frame of
-///    [`BackgroundFigure::Field`] — one thickness around a list, and the centred
-///    [`FIELD_BOX_DLU`] box of the generator around a field (task T-12-3).
-///
-/// Panels before fields, in two passes over one walk of the children: a field can lie on a
-/// panel and a panel never lies on a field, so the order is the answer whatever the Z order
-/// of the two happens to be. The children themselves paint after this message, on top of
-/// all of it — which is what a background is for.
-///
-/// Answers 1 — «erased» — when the background was drawn, and 0 when the state is
-/// unreachable (no state yet, or a re-entrant message) or `theme::Brushes::new` was refused
-/// at initialisation: the dialog manager then erases with the answer of `WM_CTLCOLORDLG`,
-/// exactly as it did before this task (NFR-13, T-11-4).
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `wparam` of the message — the DC the manager
-/// owns for the length of the send.
-unsafe fn on_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
-    // The one thing taken out of the message (SEC-05): the DC to paint into. It is written
-    // to and never read from, and no pointer of the message is followed.
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-
-    let mut client = RECT::default();
-
-    // NFR-13: examined — a refused `GetClientRect` means no rectangle to paint in, and the
-    // manager's own erase is the degraded-but-alive answer.
-    //
-    // SAFETY: `hwnd` is the live dialog and `client` is a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return 0;
-    }
-
-    let width = client.right - client.left;
-    let height = client.bottom - client.top;
-
-    // SAFETY: see the caller — the pointer was stored on `WM_INITDIALOG` and the value it
-    // names is alive for the whole of this modal call.
-    let choice = unsafe {
-        with_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            // Task T-11-17, criterion 12: is the picture in hand still a picture of *this*
-            // window in *this* palette? Both halves are compared before anything is drawn —
-            // the size, because the window may have moved to a screen at another scale, and
-            // the palette by identity, because `theme::resolve` answers `&'static` and
-            // [`refresh_palette`] is the one place it can change.
-            // Task Т-23-5, решение 82.6: the one frame of this window that is not a function
-            // of the palette alone. An armed capture draws it in `box_border`, which is what
-            // shows on the window that the program is waiting for a key.
-            let hotkey_frame = if state.capture.is_some() {
-                palette.box_border
-            } else {
-                palette.field_border
-            };
-
-            let ready = state
-                .background
-                .as_ref()
-                .is_some_and(|picture| picture.shows(width, height, palette, hotkey_frame));
-
-            Some((
-                BackgroundColors {
-                    window: brushes.window_bg(),
-                    panel: brushes.panel_bg(),
-                    field: brushes.field_bg(),
-                    panel_border: palette.panel_border,
-                    field_border: palette.field_border,
-                    hotkey_frame,
-                    caption: palette.cap,
-                },
-                ready,
-                palette,
-                state.fonts.as_ref().map(DialogFonts::caption),
-            ))
-        })
-    };
-
-    let Some(Some((colors, ready, palette, caption_face))) = choice else {
-        return 0;
-    };
-
-    let dpi = drawing_dpi(dc);
-
-    if !ready {
-        // Built **outside** every borrow of the state, exactly as the drawing of every other
-        // handler of this file happens outside its own: painting a panel asks the panel for
-        // its caption, and a `GetDlgItemTextW` is a send.
-        //
-        // SAFETY: `dc` is the DC of the message, owned by the manager for the length of this
-        // send and read here only for its colour depth; `hwnd` is the live dialog, and
-        // `caption_face` a face the state owns for longer than this call.
-        let built = unsafe {
-            BackgroundCache::build(hwnd, dc, &client, palette, colors, caption_face, dpi)
-        };
-
-        // The stale picture is dropped by the assignment; a refused build stores `None`, which
-        // the direct painting below answers (NFR-13).
-        //
-        // SAFETY: as for the borrow above.
-        unsafe { with_state(hwnd, |state| state.background = built) };
-    }
-
-    // SAFETY: as above. The blit reads the picture's own memory DC and writes the message's.
-    let shown = unsafe {
-        with_state(hwnd, |state| {
-            state
-                .background
-                .as_ref()
-                .is_some_and(|picture| picture.show(dc))
-        })
-    };
-
-    if shown != Some(true) {
-        // No picture — straight into the DC of the message, which is what this handler did
-        // before task T-11-17 and is still the right answer when GDI will not give a surface.
-        //
-        // SAFETY: `dc` is the DC of the message, painted into for the length of this send,
-        // and `caption_face` is a face the state owns for longer than this call.
-        unsafe { paint_background(hwnd, dc, &client, colors, caption_face, dpi) };
-    }
-
-    // TRUE — the background is drawn; the manager must not erase over it.
-    1
-}
-
-/// The whole background of the dialog, drawn into `dc` — the body [`on_erase_background`] had
-/// before task T-11-17, called now against the picture of [`BackgroundCache`] and, when there
-/// is no picture, against the DC of the message itself.
-///
-/// `area` is the rectangle to fill, in the coordinates the children are measured in:
-/// `GetClientRect` answers from zero, and [`child_rects_in_client`] answers in the same
-/// system, so the picture and the window use one set of numbers.
-///
-/// # Safety
-///
-/// `dc` is painted into for the length of the call and is owned by the caller — the DC of the
-/// message, or the memory DC of a picture the caller keeps alive; `caption_face` is a face
-/// somebody else owns for longer than this call.
-unsafe fn paint_background(
-    hwnd: HWND,
-    dc: HDC,
-    area: &RECT,
-    colors: BackgroundColors,
-    caption_face: Option<HFONT>,
-    dpi: i32,
-) {
-    // SAFETY: `dc` is painted into for the length of this call; `colors.window` is a live
-    // brush of the dialog's state.
-    unsafe { FillRect(dc, area, colors.window) };
-
-    // Task T-12-1, п. 4: the line the mock-ups draw under the title bar. Laid straight after
-    // the ground and before every figure, so that a panel or a field which ever reached the
-    // top of the client area would paint over it rather than lose its own first row. None
-    // does today — the topmost figure of this template starts well below — and the
-    // acceptance probe of the row says so in numbers.
-    paint_caption_underline(dc, area, colors.field_border);
-
-    let children = child_rects_in_client(hwnd);
-
-    // Pass one — the panels. See the doc comment of `on_erase_background` for why they go
-    // first.
-    for (control, rect) in &children {
-        if background_figure(*control) != Some(BackgroundFigure::Panel) {
-            continue;
-        }
-
-        paint_rounded(
-            dc,
-            rect,
-            scaled(CORNER_RADIUS, dpi),
-            colors.panel_border,
-            colors.panel,
-            dpi,
-        );
-
-        if let Some(face) = caption_face {
-            // SAFETY: `dc` is the caller's; `face` is a live font the dialog's state owns for
-            // longer than this call, and `draw_panel_caption` puts the previous one back.
-            unsafe { draw_panel_caption(hwnd, *control, dc, *rect, colors.caption, dpi, face) };
-        }
-    }
-
-    // Pass two — the fields and lists, one frame's thickness outside each rectangle (п. 2.3
-    // of T-11-13; the thickness is [`BORDER_THICKNESS`] through the scale since task
-    // T-11-15, so the frame stands outside the control at every DPI and not only at 96,
-    // where it is the single pixel it always was).
-    //
-    // …except above a list, where the mock-ups leave [`LIST_FIRST_ROW_TOP`] of their own
-    // pixels between the frame and the first row (`$ry = $py + 3 + …` in both list arms of the
-    // generator). A list box lays its rows out from the top of its client area and no message
-    // moves them, so the air of the picture is made by lifting the frame instead — task
-    // T-11-16, п. 5.
-    //
-    // Both numbers come from [`list_frame_air`] since task T-12-5, and not from two `scaled`
-    // calls written out here: the same frame is now named a second time from inside each list
-    // ([`list_frame_box`]), and a copy of this arithmetic there is exactly how the arc and the
-    // end of the interior would drift apart.
-    let (list_top, border) = list_frame_air(dpi);
-
-    // …and except for a field, whose frame is not hung on the control at all: the box of the
-    // mock-ups is [`FIELD_BOX_DLU`] tall and the template gives the control one font height,
-    // so the frame is drawn round the control **centred** and the leftover air falls above and
-    // below the text in equal halves — task T-12-3. `None` is a refused `MapDialogRect`, and
-    // [`field_frame_air`] answers the old one-thickness frame to it (NFR-13).
-    let field_box = dialog_units(hwnd, 0, FIELD_BOX_DLU).map(|(_, height)| height);
-
-    for (control, rect) in &children {
-        if background_figure(*control) != Some(BackgroundFigure::Field) {
-            continue;
-        }
-
-        // A list keeps its own two distances — the air of the picture above, one thickness
-        // below — because its rows are laid out by the control from the top of its client
-        // area and centring the frame would move the frame away from the first row.
-        // ⭐ **Коробка стала 26 вместо 25 — задача Т-46-5, решение 109.6.** Арифметика воздуха
-        // переехала в `widgets::field::air` задачей Т-45-2 с параметром `OddPixel`, которым и
-        // различались два окна: здесь остаток делился поровну и лишний пиксель **терялся**
-        // (задача T-12-3, `theme::field_frame_air`), у мастера уходил вниз. Слово пользователя
-        // 2026-09-05: «нужен общий вариант, мы же приводим все к одному стандарту, а не
-        // подстраиваемся под мастера». Параметра больше нет; коробка каждого однострочного поля
-        // этого окна стала равна заказанным 12 единицам диалога — на этой машине 26 px вместо
-        // 25 (замер `scratchpad-Э46\красное-коробки-e45.log`). Это **единственная намеренная
-        // перемена пикселей окна настроек** за этап Э46.
-        //
-        // Задача T-118-1: арифметика коробки вынесена в [`field_frame`] — её же спрашивает
-        // [`repaint_capture`], чтобы перерисовать ровно ту рамку, которая здесь нарисована.
-        let frame = field_frame(*control, rect, field_box, (list_top, border));
-
-        paint_rounded(
-            dc,
-            &frame,
-            scaled(CORNER_RADIUS, dpi),
-            // Task Т-23-5: every field of this window wears `field_border`, and the hotkey
-            // field wears whatever the capture says — the two colours are the same until a
-            // capture is armed, and the caller is the one place that decides.
-            if *control == IDC_HOTKEY {
-                colors.hotkey_frame
-            } else {
-                colors.field_border
-            },
-            colors.field,
-            dpi,
-        );
-    }
-}
-
 /// **Коробка одного поля или списка — так, как её рисует фон окна** вокруг контрола: воздух
 /// [`list_frame_air`] над списком, центрированные [`FIELD_BOX_DLU`] вокруг поля.
 ///
@@ -12276,200 +9021,6 @@ pub fn repaint_capture(hwnd: HWND) {
 // Стоимость фона: одна готовая картинка вместо восьми панелей на каждую перерисовку —
 // FR-92а, task T-11-17, criterion 12
 // =========================================================================================
-
-/// The background of the dialog as a finished picture, owned: memory DC and bitmap created
-/// together, freed together in `Drop` — NFR-13.
-///
-/// # Why there is one at all
-///
-/// `WM_ERASEBKGND` arrives on every repaint, and the background of this dialog is not cheap:
-/// eight rounded panels, eight captions set character by character with fractional letter
-/// spacing, seven rounded field frames — and since task T-11-17 every one of those figures
-/// smooths four corners through an off-screen surface. Doing that work again for a repaint
-/// that changed nothing would be paying it for nothing. The picture is built once, and every
-/// later erase is one `BitBlt` of the whole client area.
-///
-/// # When it is rebuilt
-///
-/// Never repainted in place — rebuilt whole, exactly as `theme::Brushes` is, and for the same
-/// reason: a half-updated picture is worse than an old one. [`BackgroundCache::shows`] is the
-/// whole test, and it has three halves — two until task Т-23-5 added the third:
-///
-/// * the **client size**, because a window that moved to a screen at another scale has other
-///   lengths in it and a picture of the old size would be stretched or clipped;
-/// * the **palette**, by identity — `theme::resolve` answers `&'static`, and
-///   [`refresh_palette`] is the one place in this file the answer can change. A pressed
-///   «Применить» and the system switch flipping under `theme = "system"` both go through it,
-///   both end in [`repaint_whole_window`], and the erase that follows finds the
-///   picture painted in the previous palette and builds a new one;
-/// * the **frame colour of the hotkey field**, since task Т-23-5: an armed capture draws that
-///   one frame in `box_border` instead of `field_border`, and the frame is part of this
-///   picture like every other. `toggle_capture` and `run_capture_step` end in the same repaint
-///   the palette change does, and the erase then finds a picture painted for the other state.
-///
-/// The interface language is deliberately **not** part of the test: the captions come from the
-/// hidden panels ([`draw_panel_caption`] → [`get_text`]), those are written exactly once by
-/// [`localise_dialog`] inside `WM_INITDIALOG`, and FR-94 makes a language change take effect
-/// on the next start — so no caption of an open dialog can change under the picture.
-struct BackgroundCache {
-    /// The memory DC the picture is held in, with `bitmap` selected and ready to blit.
-    dc: HDC,
-    /// The picture itself — compatible with the **window's** DC, not with `dc`: a bitmap
-    /// compatible with a memory DC would be monochrome (the trap `build_check_frames` words).
-    bitmap: HBITMAP,
-    /// The bitmap the fresh memory DC was born with, put back in `Drop` before `bitmap` is
-    /// deleted — a bitmap still selected into a DC cannot be freed.
-    previous: HGDIOBJ,
-    /// Width of the picture, in pixels of the window.
-    width: i32,
-    /// Height of the picture, in pixels of the window.
-    height: i32,
-    /// The palette the picture was painted in — compared by identity, see the type's own
-    /// documentation.
-    palette: &'static theme::Palette,
-    /// The colour the frame of the hotkey field was painted with — task Т-23-5. The one
-    /// colour of this picture the palette does not settle on its own: an armed capture asks
-    /// for `box_border` where the resting window asks for `field_border`.
-    hotkey_frame: COLORREF,
-}
-
-impl BackgroundCache {
-    /// Makes the surface and paints the background onto it. `None` on every refusal of GDI
-    /// (NFR-13): the caller then paints straight into the DC of the message.
-    ///
-    /// # Safety
-    ///
-    /// `target` is the DC of the window the picture is for — read for its colour depth and
-    /// never written to; `hwnd` is the live dialog whose children are measured, and
-    /// `caption_face` a face the dialog's state owns for longer than this call.
-    unsafe fn build(
-        hwnd: HWND,
-        target: HDC,
-        client: &RECT,
-        palette: &'static theme::Palette,
-        colors: BackgroundColors,
-        caption_face: Option<HFONT>,
-        dpi: i32,
-    ) -> Option<Self> {
-        let width = client.right - client.left;
-        let height = client.bottom - client.top;
-
-        if width <= 0 || height <= 0 {
-            return None;
-        }
-
-        // SAFETY: a memory DC over the window's DC; deleted in `Drop` and on every failing
-        // path below.
-        let dc = unsafe { CreateCompatibleDC(Some(target)) };
-
-        // NFR-13: examined — no DC, no picture.
-        if dc.is_invalid() {
-            return None;
-        }
-
-        // SAFETY: compatible with the *window's* DC — see the field's ⚠ — and owned by this
-        // value until `Drop`.
-        let bitmap = unsafe { CreateCompatibleBitmap(target, width, height) };
-
-        // NFR-13: examined.
-        if bitmap.is_invalid() {
-            // SAFETY: deletes exactly the DC made above, once; nothing of ours is in it.
-            let _ = unsafe { DeleteDC(dc) };
-            return None;
-        }
-
-        // SAFETY: both handles are live and ours; the bitmap the memory DC was born with is
-        // kept and put back in `Drop`.
-        let previous = unsafe { SelectObject(dc, bitmap.into()) };
-
-        // NFR-13: examined — a refused selection would leave the drawing going nowhere.
-        if previous.is_invalid() {
-            // SAFETY: the bitmap is selected into nothing, so it is free to delete; each
-            // handle is freed exactly once.
-            let _ = unsafe { DeleteObject(bitmap.into()) };
-            let _ = unsafe { DeleteDC(dc) };
-            return None;
-        }
-
-        let picture = Self {
-            dc,
-            bitmap,
-            previous,
-            width,
-            height,
-            palette,
-            // Task Т-23-5: remembered from the colours it is about to be painted with, so the
-            // test in `shows` compares like with like and no third source of the number exists.
-            hotkey_frame: colors.hotkey_frame,
-        };
-
-        let area = RECT {
-            left: 0,
-            top: 0,
-            right: width,
-            bottom: height,
-        };
-
-        // SAFETY: `picture.dc` holds the bitmap just selected and is alive for as long as
-        // `picture` is; the caller's contract carries `hwnd` and `caption_face`.
-        unsafe { paint_background(hwnd, picture.dc, &area, colors, caption_face, dpi) };
-
-        Some(picture)
-    }
-
-    /// Whether this picture is still a picture of a window this size, in this palette, with
-    /// the hotkey field's frame in this colour.
-    fn shows(
-        &self,
-        width: i32,
-        height: i32,
-        palette: &theme::Palette,
-        hotkey_frame: COLORREF,
-    ) -> bool {
-        self.width == width
-            && self.height == height
-            && std::ptr::eq(self.palette, palette)
-            && self.hotkey_frame == hotkey_frame
-    }
-
-    /// Hands the picture to `dc` — the whole of what a repaint costs once the picture exists.
-    ///
-    /// Answers whether it was handed over; `false` (NFR-13) sends the caller to the direct
-    /// painting, so a refused blit is a slow erase and never an unpainted window.
-    fn show(&self, dc: HDC) -> bool {
-        // SAFETY: `dc` is the caller's, painted into for the length of the send it is inside
-        // of; `self.dc` holds this value's own bitmap. Neither call touches memory of ours.
-        unsafe {
-            BitBlt(
-                dc,
-                0,
-                0,
-                self.width,
-                self.height,
-                Some(self.dc),
-                0,
-                0,
-                SRCCOPY,
-            )
-        }
-        .is_ok()
-    }
-}
-
-impl Drop for BackgroundCache {
-    fn drop(&mut self) {
-        // SAFETY: `self.previous` is the bitmap this DC was born with, kept since `build`;
-        // putting it back frees `self.bitmap` to be deleted. The answers are dropped for the
-        // reason `theme::Brushes` gives for its own cleanup — there is no journal row for GDI.
-        unsafe { SelectObject(self.dc, self.previous) };
-
-        // SAFETY: both came from the successful calls in `build`, were handed to nobody, and
-        // are freed exactly once — the type is neither `Copy` nor `Clone`, its fields are
-        // private and never reassigned, and `drop` runs once.
-        let _ = unsafe { DeleteObject(self.bitmap.into()) };
-        let _ = unsafe { DeleteDC(self.dc) };
-    }
-}
 
 // =========================================================================================
 // Сглаживание нашего текста — FR-92а, task T-11-17 п. 2, поправлено решением 88
@@ -12797,90 +9348,6 @@ pub(crate) fn dialog_logfont(hwnd: HWND, control: i32) -> Option<LOGFONTW> {
     Some(logical)
 }
 
-/// The **two** faces the settings dialog sets **its own** text in, owned: created together, freed
-/// together in `Drop` — FR-92а, task T-11-17.
-///
-/// Owned rather than made per paint for the reason `theme::Brushes` gives for the brushes: a
-/// face selected into a DC has to outlive the drawing, and a paint that makes and deletes a
-/// font on every message pays for a face lookup on every message as well. Both faces are made
-/// once, on `WM_INITDIALOG`, and die with the window's state.
-///
-/// # Where it lives — section 6.1
-///
-/// On the UI thread and nowhere else, exactly as `theme::Brushes`: the faces are selected into
-/// DCs by window procedures, the windows of this program live on the UI thread, and GDI objects
-/// are not shared across threads. Nothing enforces the thread beyond the fact that no other
-/// thread ever sees the value.
-struct DialogFonts {
-    /// The dialog's own face with grey antialiasing — button captions, list rows, combo text,
-    /// the captions of the glyph elements.
-    text: HFONT,
-    /// The same face smaller and bolder, for the eight panel captions.
-    caption: HFONT,
-}
-
-impl DialogFonts {
-    /// Both faces out of the font `control` was given, every handle examined.
-    ///
-    /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, any
-    /// `CreateFontIndirectW` declining. The window then draws in the manager's own face, which
-    /// is what it drew in before task T-11-17: degraded-but-alive, and the whole loss is the
-    /// smoothing (NFR-13).
-    ///
-    /// ⚠ A half-built set is unwound here and not leaked: the handles already created are freed
-    /// on the failing path, because a constructor that answers `None` leaves no value for `Drop`
-    /// to run on — the same discipline [`CaptionIcons::load`] keeps.
-    fn new(hwnd: HWND, control: i32) -> Option<Self> {
-        let base = dialog_logfont(hwnd, control)?;
-
-        let wanted = [smoothed_logfont(base), caption_logfont(base)];
-        let mut made: Vec<HFONT> = Vec::with_capacity(wanted.len());
-
-        for logical in wanted {
-            let Some(face) = create_font(logical) else {
-                for face in made {
-                    // SAFETY: each was created by the loop above, handed to nobody, and is
-                    // freed exactly once here — the failed constructor answers `None` and no
-                    // `Drop` will run.
-                    let _ = unsafe { DeleteObject(face.into()) };
-                }
-
-                return None;
-            };
-
-            made.push(face);
-        }
-
-        Some(Self {
-            text: made[0],
-            caption: made[1],
-        })
-    }
-
-    /// The face of the window's own text, borrowed — the owner frees it, nobody else.
-    fn text(&self) -> HFONT {
-        self.text
-    }
-
-    /// The face of a panel caption, borrowed — the owner frees it, nobody else.
-    fn caption(&self) -> HFONT {
-        self.caption
-    }
-}
-
-impl Drop for DialogFonts {
-    fn drop(&mut self) {
-        for face in [self.text, self.caption] {
-            // SAFETY: each came from a successful `CreateFontIndirectW` in `new` and is freed
-            // exactly once: the type is neither `Copy` nor `Clone`, its fields are private and
-            // never reassigned, and `drop` runs once. Every drawing that selected a face put
-            // the previous one back before it returned, so none is in a DC any more. The
-            // `BOOL` is dropped for the reason `theme::Brushes` gives for its own cleanup.
-            let _ = unsafe { DeleteObject(face.into()) };
-        }
-    }
-}
-
 /// Draws the caption of one panel, character by character — п. 2.1 of task T-11-13.
 ///
 /// The text is the **hidden control's own**, read by identifier ([`get_text`] →
@@ -13064,207 +9531,6 @@ const COMBO_SUBCLASS_ID: usize = 1;
 /// the thing it named would be a use-after-free reachable from a window message.
 pub(crate) const COMBO_FOREIGN: usize = 1;
 
-/// Puts [`combo_box_proc`] in front of one combo box of **another** window of this program —
-/// task Т-32-8, the wizard of FR-104.
-///
-/// The far half is [`unsubclass_foreign_combo`], and the procedure additionally takes itself
-/// off on `WM_NCDESTROY`, exactly as it does for the four of this dialog.
-pub(crate) fn subclass_foreign_combo(hwnd: HWND, control: i32) {
-    // SAFETY: `hwnd` is a live window of this thread; the crate turns a missing control into
-    // an error.
-    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // SAFETY: `combo` is a live control created by the dialog manager on this thread, and
-    // `combo_box_proc` has exactly the signature `SUBCLASSPROC` names. The reference datum is a
-    // plain number. ⚠ NFR-13: the `BOOL` is dropped for the reason `subclass_combo_boxes`
-    // gives at its own — a refusal leaves that one combo box painted by the system, which is
-    // visible rather than silent.
-    let _ = unsafe {
-        SetWindowSubclass(
-            combo,
-            Some(combo_box_proc),
-            COMBO_SUBCLASS_ID,
-            COMBO_FOREIGN,
-        )
-    };
-}
-
-/// Takes [`combo_box_proc`] back off a combo box of another window — the far half of the pair.
-pub(crate) fn unsubclass_foreign_combo(hwnd: HWND, control: i32) {
-    // SAFETY: as above.
-    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        return;
-    };
-
-    // SAFETY: the procedure and the identifier are the pair the subclass was installed with;
-    // a window that no longer carries it answers `FALSE` and nothing happens.
-    let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
-}
-
-/// Puts [`combo_box_proc`] in front of each of the four combo boxes — FR-92а, task T-11-14.
-///
-/// **The pair.** Called exactly once, from [`fill_dialog`] on `WM_INITDIALOG`; the other half
-/// is [`unsubclass_combo_boxes`], called exactly once, from the `WM_DESTROY` branch of
-/// [`dialog_proc`], while the children are still alive. Both walk the same [`COMBO_BOXES`]
-/// list with the same procedure and the same [`COMBO_SUBCLASS_ID`], so every install has its
-/// removal by construction rather than by discipline. [`combo_box_proc`] additionally removes
-/// itself on `WM_NCDESTROY`, which is the belt to that pair's braces: a control destroyed by
-/// any road other than the dialog's own `WM_DESTROY` still lets go of the procedure. The two
-/// removals cannot double-free anything — `RemoveWindowSubclass` on a window that no longer
-/// carries the subclass answers `FALSE` and does nothing.
-///
-/// A refused install is survived (NFR-13): that combo then paints itself the way it did before
-/// this task — the system's own frame and arrow — which is visibly wrong rather than silently
-/// broken, and the dialog still opens. Why the refusal is not journaled is written at the call.
-fn subclass_combo_boxes(hwnd: HWND) {
-    for control in COMBO_BOXES {
-        // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-        let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-            crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-            continue;
-        };
-
-        // SAFETY: `combo` is a live control of this dialog, created by the dialog manager on
-        // this thread, and `combo_box_proc` is a function of exactly the signature
-        // `SUBCLASSPROC` names. The reference data is zero — this subclass keeps no state of
-        // its own; everything it needs it reads off the dialog through `with_state`.
-        // ⚠ NFR-13: the `BOOL` is examined right here, in words, and deliberately dropped —
-        // and the reason it is not journaled is not indifference. The operation vocabulary of
-        // `diag` is closed (reviews\T-11-1.md) and has no row for this call; adding one would
-        // mean editing `src\diag.rs`, which is outside the bounds of this task, and a test of
-        // `tests\diag.rs` guards that closure. The consequence of a refusal is visible rather
-        // than silent — that one combo box then paints itself the way it did before this task,
-        // with the system's own frame and arrow — and the dialog opens and works either way.
-        // No `debug_assert` either: a machine that refused is a legal state, not a violation
-        // of ownership, and crashing a debug build over a cosmetic degradation is what NFR-13
-        // exists to prevent.
-        let _ = unsafe { SetWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID, 0) };
-    }
-}
-
-/// Takes [`combo_box_proc`] back off the four combo boxes — the far half of the pair
-/// [`subclass_combo_boxes`] describes.
-///
-/// The refusal is deliberately **not** journaled: this runs on `WM_DESTROY`, where a `FALSE`
-/// means the subclass was already gone (never installed, or removed by the `WM_NCDESTROY` arm
-/// of the procedure), and neither is a fault worth a journal row.
-fn unsubclass_combo_boxes(hwnd: HWND) {
-    for control in COMBO_BOXES {
-        // SAFETY: `hwnd` is the live dialog — `WM_DESTROY` reaches it before its children are
-        // destroyed — and the crate turns a missing control into an error.
-        let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-            continue;
-        };
-
-        // SAFETY: `combo` is the live control the subclass was installed on, and the
-        // procedure and identifier are the very pair `SetWindowSubclass` was given.
-        let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
-    }
-}
-
-/// The procedure that stands in front of each combo box while this dialog is up — FR-92а,
-/// task T-11-14.
-///
-/// Three messages are its own; everything else goes straight on to [`DefSubclassProc`], so a
-/// combo box behaves in every other way exactly as it did before the subclass — the list still
-/// drops down, the keyboard still chooses, `CB_*` still works, and the dropped-down list is
-/// still coloured by `WM_CTLCOLORLISTBOX` and drawn item by item by `WM_DRAWITEM`.
-///
-/// ⚠ **`WM_PAINT` does not reach the original procedure.** The arm ends in `return`, not in a
-/// fall-through: the control's own painting — the frame and the pale system button with the
-/// arrow — never runs. The one road back to it is a refused `BeginPaint`, and then nothing of
-/// ours could have been drawn either; letting the message through is what keeps the window
-/// validated instead of asking for a paint for ever (NFR-13).
-///
-/// # Safety
-///
-/// Called by the window manager with the arguments of a window message, on one of the four
-/// controls [`subclass_combo_boxes`] installed it on.
-unsafe extern "system" fn combo_box_proc(
-    combo: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _subclass_id: usize,
-    reference_data: usize,
-) -> LRESULT {
-    match message {
-        // The whole reason this procedure exists — see the ⚠ above.
-        //
-        // SAFETY: `combo` is the control this procedure is installed on, and the call is
-        // inside the window's own `WM_PAINT`, which is where `BeginPaint` may be used.
-        WM_PAINT => {
-            if unsafe { paint_combo_closed_part(combo, reference_data) } {
-                return LRESULT(0);
-            }
-        }
-
-        // «Erased» without erasing anything: the closed face is repainted whole by the arm
-        // above, and an erase before it is exactly the two-step repaint that flickers.
-        WM_ERASEBKGND => return LRESULT(1),
-
-        // ⚠ Task T-12-8, the response of the cursor — the two arms the same procedure of the
-        // buttons has, and for the same reason. Neither *answers* the message: both fall
-        // through to `DefSubclassProc` below, so the control's own hot-tracking, its click and
-        // its keyboard are untouched — in particular **the list does not drop down**, which is
-        // what a swallowed `WM_MOUSEMOVE` would have been the shortest road to breaking. The
-        // repaint the flag asks for goes through `WM_PAINT` and the arm above it, and the
-        // colour is chosen by `combo_closed_color_roles`.
-        WM_MOUSEMOVE => enter_hot(combo),
-
-        WM_MOUSELEAVE => leave_hot(combo),
-
-        // The belt to the braces of the pair — see `subclass_combo_boxes`. Forwarded on
-        // afterwards: `WM_NCDESTROY` must reach every procedure of the chain.
-        //
-        // SAFETY: `combo` is that control, and the procedure and identifier are the pair the
-        // subclass was installed with.
-        WM_NCDESTROY => {
-            // Task T-12-8: the record cannot outlive the window it names — see `HOT_CONTROL`.
-            forget_hot(combo);
-            let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
-        }
-
-        _ => {}
-    }
-
-    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
-    // unchanged; this is what `DefSubclassProc` exists for.
-    unsafe { DefSubclassProc(combo, message, wparam, lparam) }
-}
-
-/// Answers one `WM_PAINT` of a combo box; `false` when `BeginPaint` refused and the message
-/// has to go on to the control's own procedure — see [`combo_box_proc`].
-///
-/// # Safety
-///
-/// Called from [`combo_box_proc`] alone, inside the `WM_PAINT` of the window it names.
-unsafe fn paint_combo_closed_part(combo: HWND, reference_data: usize) -> bool {
-    let mut paint = PAINTSTRUCT::default();
-
-    // SAFETY: `combo` is the live control inside its own `WM_PAINT`, and `paint` is a live
-    // local of this frame that the call fills in.
-    let dc = unsafe { BeginPaint(combo, &mut paint) };
-
-    if dc.is_invalid() {
-        // NFR-13: examined. Nothing of ours can be drawn without a DC, and the window still
-        // has to be validated — which the control's own procedure will do.
-        return false;
-    }
-
-    // SAFETY: `dc` is the DC `BeginPaint` has just answered, owned until `EndPaint` below.
-    unsafe { draw_combo_closed_part(combo, dc, reference_data) };
-
-    // SAFETY: the same window and the very `PAINTSTRUCT` `BeginPaint` filled in. The `BOOL`
-    // is dropped for the reason the paint calls of this file drop theirs.
-    let _ = unsafe { EndPaint(combo, &paint) };
-
-    true
-}
-
 /// Draws the closed part of one combo box the way the mock-ups draw it — FR-92а, task T-11-14.
 ///
 /// # What is drawn
@@ -13347,271 +9613,6 @@ fn combo_look(
         },
         face,
     )
-}
-
-unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC, reference_data: usize) {
-    // The dialog is the parent of its own control; everything below is read through it, by
-    // identifier, exactly as every other drawing of this file reads what it draws.
-    //
-    // SAFETY: `combo` is the live control; a window with no parent answers an error.
-    let Ok(dialog) = (unsafe { GetParent(combo) }) else {
-        return;
-    };
-
-    // SAFETY: reading a window's identifier reads a field of that window and no memory of
-    // ours.
-    let control = unsafe { GetDlgCtrlID(combo) };
-
-    let foreign = reference_data == COMBO_FOREIGN;
-
-    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
-    // be reached on a window it was installed on: one list of four, checked before any work.
-    //
-    // ⛔ A combo of **another** window of this program is exempt from the list and from
-    // nothing else — and the exemption is the reference datum the subclass was installed with,
-    // which no message can forge: `SetWindowSubclass` is the only thing that writes it.
-    if !foreign && !COMBO_BOXES.contains(&control) {
-        return;
-    }
-
-    let mut area = RECT::default();
-
-    // SAFETY: `combo` is the live control and `area` is a live local the call fills.
-    if unsafe { GetClientRect(combo, &mut area) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `combo` is the live control; the call reads a window style and answers a flag.
-    let disabled = !unsafe { IsWindowEnabled(combo) }.as_bool();
-
-    // The focus cue on the same terms as the buttons of task T-11-5a: shown while the control
-    // holds the focus, hidden while the window manager says the keyboard cues are hidden —
-    // which is what `ODS_NOFOCUSRECT` carries into an owner-draw message and what
-    // `WM_QUERYUISTATE` answers outside one.
-    //
-    // SAFETY: the call reads the focus of this thread and touches no memory of ours.
-    let has_focus = unsafe { GetFocus() } == combo;
-    let cues_hidden =
-        send_to(dialog, control, WM_QUERYUISTATE, 0, 0) & (UISF_HIDEFOCUS as isize) != 0;
-    let focused = has_focus && !cues_hidden;
-
-    // Task T-12-8: the cursor standing on the closed part, out of this program's own record —
-    // the very question the push buttons ask, asked here about the control that is painting
-    // itself rather than about the window of a message.
-    let roles = combo_closed_color_roles(is_hot(combo), disabled);
-
-    // The colour choice, split from the painting exactly as everywhere in this file: the
-    // borrow of the state ends before the DC is touched, and what leaves the closure is plain
-    // values — a brush the state keeps alive until the dialog ends, three inks, and (only while
-    // the closed part is hot) the transient brush of the response, which the binding below
-    // holds alive until this function returns.
-    //
-    // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
-    // window `show_dialog` created — the contract of `with_state`.
-    // A combo of another window builds its look out of the palette the configuration resolves
-    // to — the very palette that window built itself from — and owns the brushes for the
-    // length of this paint. Nothing of this dialog's state is touched, which is what makes the
-    // borrow above safe to skip: `with_state` would reinterpret **another** window's user data.
-    let borrowed = if foreign {
-        let setting = crate::tray::with_tray(|tray| tray.config().general.theme)
-            .unwrap_or(theme::ThemeSetting::System);
-        let palette = theme::resolve(setting, theme::system_is_light());
-
-        theme::Brushes::new(palette).map(|brushes| (palette, brushes))
-    } else {
-        None
-    };
-
-    let choice = if let Some((palette, brushes)) = borrowed.as_ref() {
-        Some(combo_look(
-            roles,
-            palette,
-            brushes,
-            brushes.window_bg(),
-            None,
-        ))
-    } else {
-        // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the
-        // window `show_dialog` created — the contract of `with_state`.
-        unsafe {
-            with_state(dialog, |state| {
-                // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-                let brushes = state.brushes.as_ref()?;
-                let palette = state.palette;
-
-                // The ground the corners the rounding cuts away are left standing on — the very
-                // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with: the panel brush for a
-                // control lying on one of the eight group panels, the window brush elsewhere.
-                // All four combo boxes do lie on a panel, but the rule is asked and not assumed.
-                //
-                // ⚠ The fill, the hot brush and the three inks are **not** chosen here since task
-                // Т-32-8: they are `combo_look`'s, and the wizard of FR-104 asks the same body for
-                // the same answers. What is still this dialog's own is the ground and the face.
-                let ground = if state.panel_children.contains(&control) {
-                    brushes.panel_bg()
-                } else {
-                    brushes.window_bg()
-                };
-
-                Some(combo_look(
-                    roles,
-                    palette,
-                    brushes,
-                    ground,
-                    state.fonts.as_ref().map(DialogFonts::text),
-                ))
-            })
-        }
-        .flatten()
-    };
-
-    // `_hot` is named and not discarded on purpose: it owns the transient brush `fill` may name,
-    // and a `_` would have freed it before the first pixel was drawn.
-    let Some((ground, fill, _hot, border, ink, chevron_ink, face)) = choice else {
-        return;
-    };
-
-    let dpi = drawing_dpi(dc);
-
-    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
-    // and the same cure task T-15-1 gave the push buttons: a string of separate GDI calls
-    // straight into the DC of a control is not atomic, and DWM samples the surface of a window
-    // sixty times a second. Measured on the стенд against the closed part of `IDC_THEME`, thirty
-    // hover transitions in each palette: an intermediate state reached the screen in **30 of 30**,
-    // its bounding box exactly this control's rectangle, holding the hot fill, the frame ink and
-    // **100 px of the ground of the panel** — the four 5×5 corner squares of raw ground standing
-    // where the smoothed arcs were not yet drawn. Off-screen there is no screen for that state to
-    // appear on, and the finished field crosses over in the single blit at the foot of this body.
-    //
-    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of this paint itself and
-    // every step below paints where it painted before this task, flicker and all: the honest
-    // degradation [`BackgroundCache`] answers a refusal with.
-    //
-    // ⚠ `dpi` is taken one line above off the DC of **this paint** and never off the buffer.
-    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and a
-    // radius scaled off the buffer would be wrong at every scale but 100 % with no test going red.
-    //
-    // SAFETY: `dc` is the DC `BeginPaint` answered for this window, owned until `EndPaint`; the
-    // buffer reads it for its colour depth and its face, writes to it only in the blit below, and
-    // frees its own DC and bitmap when this frame ends.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &area) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // 1. The ground, then the field on top of it. `WM_ERASEBKGND` deliberately erases
-    // nothing (see `combo_box_proc`), so this is the one erase of the closed part — and it
-    // is what the four corners the rounding cuts away are filled with. Without it those
-    // corners would hold whatever the parent last painted there, which is right only for as
-    // long as the dialog carries no `WS_CLIPCHILDREN`.
-    //
-    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
-    // The corner smoothing reads the ground of each corner back **out of** the DC it draws into,
-    // and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill, standing
-    // exactly where it stood, is what makes the buffer hold under the corners the same colour the
-    // screen held there, and the halftones of the arcs come out unmoved.
-    //
-    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of this paint;
-    // `area` is a live local of this frame; `ground` is a live brush of the dialog's state.
-    unsafe { FillRect(target, &area, ground) };
-
-    paint_rounded(target, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
-
-    // 2. The chevron, in place of the system button.
-    let chevron = combo_chevron_points(&area, dpi);
-    draw_combo_chevron(target, chevron, chevron_ink, dpi);
-
-    // 3. The chosen value, from the control by identifier — never from anywhere else.
-    let mut value = combo_selected_text(dialog, control);
-
-    if !value.is_empty() {
-        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that DC
-        // and touch no memory of this process.
-        unsafe { SetBkMode(target, TRANSPARENT) };
-        // SAFETY: as above.
-        unsafe { SetTextColor(target, ink) };
-
-        // The face for the length of the drawing — see the doc comment. Since task T-11-17 it
-        // is the dialog's own grey-antialiased face; the control's own font, which the manager
-        // created and renders with ClearType, is the fallback for a window whose faces could
-        // not be made (NFR-13).
-        let font = match face {
-            Some(face) => face,
-            None => HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void),
-        };
-
-        // NFR-13: examined. A control with no font of its own answers zero, and the stock
-        // font of the DC is then the degraded-but-alive answer.
-        let previous_font = if font.is_invalid() {
-            None
-        } else {
-            // SAFETY: `target` is the buffer or the DC of this paint, and `font` is either a live
-            // face the dialog's state owns for longer than this call or the live font of the
-            // control, owned by the manager; the previous handle is put back below.
-            Some(unsafe { SelectObject(target, font.into()) })
-        };
-
-        // Three dialog units from the left edge — the `($c.x + 3)` of the `'combo'` arm of the
-        // generator (task T-11-16). The dialog is the window the units belong to; a refused
-        // `MapDialogRect` keeps the bare unit count, as everywhere else (NFR-13).
-        let inset = dialog_units(dialog, FIELD_TEXT_INSET_DLU, 0)
-            .map(|(horizontal, _)| horizontal)
-            .unwrap_or(FIELD_TEXT_INSET_DLU);
-
-        let mut text_rect = RECT {
-            left: area.left + inset,
-            top: area.top,
-            right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
-            bottom: area.bottom,
-        };
-
-        // SAFETY: `value` and `text_rect` are live locals of this frame; the format has no
-        // `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text and writes only
-        // pixels of the DC.
-        unsafe {
-            DrawTextW(
-                target,
-                &mut value,
-                &mut text_rect,
-                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-            )
-        };
-
-        if let Some(previous) = previous_font {
-            // SAFETY: `previous` is the font that was in the DC a moment ago; putting it back
-            // ends this function's use of it.
-            unsafe { SelectObject(target, previous) };
-        }
-    }
-
-    // 4. The focus cue, on the terms of task T-11-5a.
-    if focused {
-        let focus_rect = RECT {
-            left: area.left + FOCUS_CUE_INSET,
-            top: area.top + FOCUS_CUE_INSET,
-            right: area.right - FOCUS_CUE_INSET,
-            bottom: area.bottom - FOCUS_CUE_INSET,
-        };
-
-        // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
-        //
-        // SAFETY: `target` is the buffer or the DC of this paint and `focus_rect` is a live local
-        // of this frame; the call keeps no pointer.
-        let _ = unsafe { DrawFocusRect(target, &focus_rect) };
-    }
-
-    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
-    // erase has touched the window, so what DWM can sample is the closed part as it was or as it
-    // now is, and there is no third state for the eye to catch.
-    //
-    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
-    // gives for its own blit. A refused blit leaves the control showing the picture the window
-    // already had there — its previous state and never a hole — and painting the body a second
-    // time into the DC of the paint is the very flicker this task removes.
-    //
-    // SAFETY: `dc` is the DC of this paint, owned until `EndPaint`; `buffer` is this frame's own,
-    // and its DC and bitmap are freed as it goes out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
 }
 
 /// The text of the item a combo box currently shows, as UTF-16 without the terminator — read
@@ -13779,39 +9780,6 @@ fn invalidate_hot(window: HWND) {
     // cursor is a legal state and not a violation of ownership.
     let _ = unsafe { InvalidateRect(Some(window), None, false) };
 }
-
-/// The nine owner-drawn **push buttons** of the settings dialog — task T-12-8.
-///
-/// The single place they are listed, and the list [`subclass_buttons`] and
-/// [`unsubclass_buttons`] both walk, so every install has its removal by construction — the
-/// discipline [`subclass_combo_boxes`] set for the four combo boxes.
-///
-/// ⚠ **Push buttons and nothing else.** The check boxes, the radio buttons and the eight group
-/// panels are `BS_OWNERDRAW` too and are therefore «кнопки» to the window manager, but they are
-/// not what this response is about: the colours of a push button are the closed table of
-/// [`button_color_roles`], which task T-12-8 widened, while a glyph element answers
-/// [`glyph_color_roles`] — a table with no hot state and no palette field waiting to be its
-/// ground — and a panel is the *background* of its block since task T-11-13 and takes no
-/// clicks at all. Subclassing either would arm a notification for a repaint that changes
-/// nothing.
-///
-/// Twelve since task T-100-3: «Выбрать окно программы» is a push button of this list like every
-/// other, and wearing the one table of [`button_color_roles`] (Э80) is what that buys it — the
-/// subclass, the hot face, the drawing and the removal, by this one line.
-const PUSH_BUTTONS: [i32; 12] = [
-    IDC_HOTKEY_CAPTURE,
-    IDC_CYCLE_UP,
-    IDC_CYCLE_DOWN,
-    IDC_EXCLUSION_REMOVE,
-    IDC_EXCLUSION_PICK,
-    IDC_EXCLUSION_ADD,
-    IDC_LOG_OPEN,
-    IDC_LOG_SAVE,
-    IDC_WRITE_AUTHOR,
-    OK_COMMAND,
-    CANCEL_COMMAND,
-    IDC_APPLY,
-];
 
 /// Whether `control` is the **name of the program** — the one button of this program with no
 /// frame of its own, and the one that opens the page of the application.
@@ -13982,280 +9950,6 @@ unsafe extern "system" fn button_proc(
 // down after the control has finished drawing — and only those four squares, so that nothing
 // the control drew between them is touched.
 
-/// The **window** rectangle of a control, in that control's own **client** coordinates — task
-/// T-12-5.
-///
-/// The two rectangles are not the same one, and the difference is exactly the non-client
-/// furniture: a list showing a vertical scroll bar has a client area 17 px narrower than its
-/// window, and a control with a border would have its client origin at a positive offset from
-/// the window's. `GetClientRect` answers the first from zero and says nothing about either.
-///
-/// Worked out the documented way — `GetWindowRect` speaks screen coordinates, `ScreenToClient`
-/// carries a screen point into the client coordinates of a named window — rather than assumed to
-/// be `(0, 0, client_width, client_height)`, which is what it happens to be for a control with no
-/// border and no scroll bar and is what made the scroll-bar case wrong.
-///
-/// `None` on a refused call (NFR-13): the caller then paints nothing, which leaves the corners as
-/// the control drew them rather than putting a figure at a guessed place.
-///
-/// ⚠ **Task Т-30-2: both corners are carried across, not one corner plus a width.** Adding the
-/// window's width to a converted origin assumes the two coordinate systems run the same way, and
-/// in a mirrored control they run opposite: the converted top-left is the *logical right*, and
-/// the sum overshot the control by its own width — the rounded patch would have been drawn
-/// entirely outside the list. [`screen_rect_in_client`] does the conversion and puts the corners
-/// back in order.
-pub(crate) fn window_rect_in_client(control: HWND) -> Option<RECT> {
-    let mut window = RECT::default();
-
-    // SAFETY: `control` is the live control and `window` is a live local the call fills.
-    unsafe { GetWindowRect(control, &mut window) }.ok()?;
-
-    screen_rect_in_client(control, &window)
-}
-
-/// Identifier of the subclass this section puts on the two lists — the pair (procedure,
-/// identifier) that names it, exactly as [`COMBO_SUBCLASS_ID`] names the combo boxes'.
-///
-/// A number of its own and not the combos' 1: the key is per window and no window carries both,
-/// but two subclasses of one file sharing an identifier is a trap for whoever adds the third.
-const LIST_SUBCLASS_ID: usize = 2;
-
-/// Puts [`list_proc`] in front of both lists — FR-92а, task T-12-5.
-///
-/// **The pair.** Called exactly once, from [`fill_dialog`] on `WM_INITDIALOG`; the other half is
-/// [`unsubclass_lists`], called exactly once, from the `WM_DESTROY` branch of [`dialog_proc`],
-/// while the children are still alive. Both walk the same [`FRAMED_LISTS`] list with the same
-/// procedure and the same [`LIST_SUBCLASS_ID`], so every install has its removal by construction
-/// rather than by discipline; [`list_proc`] additionally removes itself on `WM_NCDESTROY`, the
-/// belt to that pair's braces. The two removals cannot double-free anything —
-/// `RemoveWindowSubclass` on a window that no longer carries the subclass answers `FALSE` and
-/// does nothing. Every sentence of this paragraph is [`subclass_combo_boxes`]'s, because this is
-/// deliberately the same shape: one more procedure of the same kind, and not a second way of
-/// doing it.
-///
-/// A refused install is survived (NFR-13): that list then keeps the square corners it has had
-/// since T-11-13 — visibly imperfect rather than silently broken — and the dialog still opens.
-/// Not journaled, for the reason [`subclass_combo_boxes`] writes down at its own dropped answer.
-fn subclass_lists(hwnd: HWND) {
-    for control in FRAMED_LISTS {
-        // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-        let Ok(list) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-            crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-            continue;
-        };
-
-        // SAFETY: `list` is a live control of this dialog, created by the dialog manager on this
-        // thread, and `list_proc` is a function of exactly the signature `SUBCLASSPROC` names.
-        // The reference data is zero — this subclass keeps no state of its own; everything it
-        // needs it reads off the dialog through `with_state`.
-        let _ = unsafe { SetWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID, 0) };
-    }
-}
-
-/// Takes [`list_proc`] back off both lists — the far half of the pair [`subclass_lists`]
-/// describes.
-///
-/// The refusal is deliberately **not** journaled: this runs on `WM_DESTROY`, where a `FALSE`
-/// means the subclass was already gone (never installed, or removed by the `WM_NCDESTROY` arm of
-/// the procedure), and neither is a fault worth a journal row.
-fn unsubclass_lists(hwnd: HWND) {
-    for control in FRAMED_LISTS {
-        // SAFETY: `hwnd` is the live dialog — `WM_DESTROY` reaches it before its children are
-        // destroyed — and the crate turns a missing control into an error.
-        let Ok(list) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-            continue;
-        };
-
-        // SAFETY: `list` is the live control the subclass was installed on, and the procedure
-        // and identifier are the very pair `SetWindowSubclass` was given.
-        let _ = unsafe { RemoveWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID) };
-    }
-}
-
-/// The procedure that stands in front of each of the two lists while this dialog is up —
-/// FR-92а, task T-12-5.
-///
-/// ⚠ **Nothing is intercepted.** Every message, `WM_PAINT` included, reaches the control's own
-/// procedure first and unchanged, and its answer is the answer this procedure gives back. The
-/// control still erases its ground, lays out its rows, draws its selection, moves its scroll bar
-/// and answers every `LB_*`, `LVM_*` and keyboard message exactly as it did before the subclass —
-/// which is what keeps the ⛔ list of this task (the selection stripe of T-11-25, the ticks of
-/// T-11-25-2, the scrolling, the row insets and the row height) untouched by construction rather
-/// than by inspection. The one thing added is four corner squares painted *after* the control
-/// has finished a `WM_PAINT`.
-///
-/// `WM_NCDESTROY` is answered before the forwarding and forwarded on afterwards: the message
-/// must reach every procedure of the chain.
-///
-/// # Safety
-///
-/// Called by the window manager with the arguments of a window message, on one of the two
-/// controls [`subclass_lists`] installed it on.
-unsafe extern "system" fn list_proc(
-    list: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _subclass_id: usize,
-    _reference_data: usize,
-) -> LRESULT {
-    if message == WM_NCDESTROY {
-        // The belt to the braces of the pair — see `subclass_lists`.
-        //
-        // SAFETY: `list` is that control, and the procedure and identifier are the pair the
-        // subclass was installed with.
-        let _ = unsafe { RemoveWindowSubclass(list, Some(list_proc), LIST_SUBCLASS_ID) };
-    }
-
-    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
-    // unchanged; this is what `DefSubclassProc` exists for.
-    let answer = unsafe { DefSubclassProc(list, message, wparam, lparam) };
-
-    if message == WM_PAINT {
-        // SAFETY: `list` is the control this procedure is installed on, and its own `WM_PAINT`
-        // has just returned — the update region is validated and the drawing is finished, which
-        // is the moment the patch is for.
-        unsafe { patch_list_corners(list) };
-    }
-
-    answer
-}
-
-/// Lays the four rounded corners of the list's frame over the interior the control has just
-/// painted flat — the whole of what [`list_proc`] adds, and the whole of task T-12-5.
-///
-/// # The DC
-///
-/// `GetDC` and not `BeginPaint`: the control's own `WM_PAINT` has already run and validated the
-/// window, and a second `BeginPaint` on a window with nothing left to update hands back an empty
-/// clip — the corners would simply not be painted.
-///
-/// ⚠ Everything that can refuse is settled **before** the DC is taken — the parent, the
-/// identifier, the client rectangle, the window rectangle, the colours — so that between `GetDC`
-/// and `ReleaseDC` there is exactly one path and no way off it. The one `return` inside that
-/// stretch is the refusal of `GetDC` itself, where no DC was taken and there is nothing to
-/// release. A leaked DC gives neither an error nor a red test, so the shape is held by a test
-/// that reads it out of this source rather than by care.
-///
-/// # The figure
-///
-/// [`list_frame_box`] in the control's own client coordinates — the very frame
-/// [`paint_background`] draws around this control from the other side, named through the same
-/// [`list_frame_air`] — and [`CORNER_RADIUS`] through [`scaled`], the radius every panel, button
-/// and field of this dialog wears. Not one number of the figure is invented here.
-///
-/// Nothing is drawn at all when the state is unreachable or `theme::Brushes::new` was refused at
-/// initialisation — the reason [`draw_combo_closed_part`] gives for its own silence (NFR-13).
-///
-/// # Safety
-///
-/// Called from [`list_proc`] alone, on one of the two controls [`subclass_lists`] installed it on.
-unsafe fn patch_list_corners(list: HWND) {
-    // The dialog is the parent of its own control; the colours are read through it, by
-    // identifier, exactly as every other drawing of this file reads what it draws.
-    //
-    // SAFETY: `list` is the live control; a window with no parent answers an error.
-    let Ok(dialog) = (unsafe { GetParent(list) }) else {
-        return;
-    };
-
-    // SAFETY: reading a window's identifier reads a field of that window and no memory of ours.
-    let control = unsafe { GetDlgCtrlID(list) };
-
-    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
-    // be reached on a window it was installed on: one list of two, checked before any work.
-    if !FRAMED_LISTS.contains(&control) {
-        return;
-    }
-
-    let mut client = RECT::default();
-
-    // SAFETY: `list` is the live control and `client` is a live local the call fills.
-    if unsafe { GetClientRect(list, &mut client) }.is_err() {
-        return;
-    }
-
-    // ⚠ And the **window** rectangle as well, which is not the same rectangle and was measured
-    // not to be: a list that grows more rows than it can show puts up a vertical scroll bar, the
-    // scroll bar is non-client, and the client area then ends 17 px short of the window's right
-    // edge. The frame [`paint_background`] draws is hung on the *window*, so basing the patch on
-    // the client alone drew a perfectly good rounded corner 17 px inside the list, hard against
-    // the scroll bar — measured on the stand with nine exclusions: an arc at columns 583, 584,
-    // 585 where the list is still list. The frame is asked for where it really is instead.
-    let Some(window) = window_rect_in_client(list) else {
-        return;
-    };
-
-    // The colour choice, split from the painting exactly as everywhere in this file: the borrow
-    // of the state ends before any DC is taken, and what leaves the closure is plain values —
-    // two brushes the state keeps alive until the dialog ends, and one ink.
-    //
-    // SAFETY: `dialog` is the parent of one of this dialog's own controls, which is the window
-    // `show_dialog` created — the contract of `with_state`.
-    let choice = unsafe {
-        with_state(dialog, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13, T-11-4).
-            let brushes = state.brushes.as_ref()?;
-
-            Some(CornerColors {
-                // The ground the corners the rounding cuts away are left standing on — the very
-                // rule `on_ctl_color` answers `WM_CTLCOLORBTN` with, and the one
-                // `draw_combo_closed_part` asks for its own corners. Both lists do lie on a
-                // panel, but the rule is asked and not assumed.
-                ground: if state.panel_children.contains(&control) {
-                    brushes.panel_bg()
-                } else {
-                    brushes.window_bg()
-                },
-                outline: state.palette.field_border,
-                fill: brushes.field_bg(),
-            })
-        })
-    };
-
-    let Some(Some(colors)) = choice else {
-        return;
-    };
-
-    // SAFETY: `list` is the live control; the call answers its DC or an invalid handle, and the
-    // DC is released below — the single road out of this function from here on.
-    let dc = unsafe { GetDC(Some(list)) };
-
-    // NFR-13: examined. Nothing of ours can be drawn without a DC, and there is nothing to
-    // release either — the list keeps the square corners of before this task for that repaint.
-    if dc.is_invalid() {
-        return;
-    }
-
-    let dpi = drawing_dpi(dc);
-
-    // The figure is the frame of the **window**; `client` is only the licence — what of that
-    // figure this DC is allowed to write. A corner that falls wholly in the non-client scroll bar
-    // is clamped to nothing and left to the system, which is the honest answer: those pixels are
-    // not this program's to paint from a client DC.
-    paint_rounded_corners(
-        dc,
-        &list_frame_box(&window, dpi),
-        &client,
-        scaled(CORNER_RADIUS, dpi),
-        colors,
-        dpi,
-    );
-
-    // ⚠ The one `ReleaseDC` of this function, and it is reached from every path that took a DC:
-    // there is no `?`, no early `return` and no `panic!` between the two calls — only pure
-    // arithmetic and drawing that swallows its own refusals. A leaked DC gives neither an error
-    // nor a red test, which is why this is written down rather than assumed (NFR-13).
-    //
-    // SAFETY: releases exactly the DC taken above, once, for the window it was taken for.
-    let released = unsafe { ReleaseDC(Some(list), dc) };
-
-    debug_assert_eq!(
-        released, 1,
-        "ReleaseDC отказал на DC, взятом этой же функцией — это утечка"
-    );
-}
-
 /// Air between the text of the closed part and the chevron, in mock-up pixels.
 pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
 
@@ -14267,44 +9961,6 @@ pub const COMBO_CHEVRON_TEXT_GAP: i32 = 4;
 /// a native edit would. Five until task Т-23-2 took the three millisecond fields off the
 /// window.
 const TEXT_FIELDS: [i32; 2] = [IDC_HOTKEY, IDC_EXCLUSION_NAME];
-
-/// Puts [`FIELD_TEXT_INSET_DLU`] dialog units of air on both sides of the text of every input
-/// field — п. 2 of task T-11-16, the first of the three places that inset lives.
-///
-/// `EM_SETMARGINS` is the documented message for exactly this and the only one there is: an
-/// edit control positions its own text, and no `WM_CTLCOLOREDIT` or owner-draw of ours can
-/// move it (an `EDITTEXT` has no owner-draw at all). `EC_LEFTMARGIN | EC_RIGHTMARGIN` in the
-/// `wparam` names both margins; the `lparam` carries the left one in the low word and the
-/// right one in the high word, which is what the shift by 16 is.
-///
-/// Both margins get the same number: the mock-ups inset the text of a field from both edges,
-/// and a right margin also keeps the caret of a full field off the rounded frame.
-///
-/// The unit is the dialog's own: [`dialog_units`] maps three units through `MapDialogRect`,
-/// whose base units come from the dialog font the manager created at the window's DPI — so a
-/// field on a 150 % monitor gets the inset that monitor's pixels ask for, with no arithmetic
-/// of ours in the middle. A refused `MapDialogRect` keeps the bare unit count (NFR-13): a
-/// field looking slightly tight and nothing worse.
-fn set_field_margins(hwnd: HWND) {
-    let inset = dialog_units(hwnd, FIELD_TEXT_INSET_DLU, 0)
-        .map(|(horizontal, _)| horizontal)
-        .unwrap_or(FIELD_TEXT_INSET_DLU);
-
-    // The two margins in one `lparam`, low word left and high word right — the documented
-    // shape of the message. Both fit in a word: the inset is a dozen pixels even at 400 %.
-    let margins =
-        isize::try_from((inset.max(0) as u32) | ((inset.max(0) as u32) << 16)).unwrap_or(0);
-
-    for control in TEXT_FIELDS {
-        send_to(
-            hwnd,
-            control,
-            EM_SETMARGINS,
-            usize::try_from(EC_LEFTMARGIN | EC_RIGHTMARGIN).unwrap_or(0),
-            margins,
-        );
-    }
-}
 
 /// The three controls that draw their **own** text and are therefore the only ones a face has
 /// to be handed to — the two input fields of [`TEXT_FIELDS`] and the layout list.
@@ -14319,343 +9975,6 @@ fn set_field_margins(hwnd: HWND) {
 /// added to the template later cannot quietly stay behind on the manager's ClearType.
 pub const CONTROLS_THAT_DRAW_THEIR_OWN_TEXT: [i32; TEXT_FIELDS.len() + 1] =
     [IDC_HOTKEY, IDC_EXCLUSION_NAME, IDC_CYCLE_LIST];
-
-/// Hands [`DialogFonts::text`] to the three controls of [`CONTROLS_THAT_DRAW_THEIR_OWN_TEXT`] —
-/// FR-92а, task T-11-20, the last text of the window still set on the manager's ClearType.
-///
-/// # Why this is not a change of metrics — the measurement, not the argument
-///
-/// The face is the dialog's own `LOGFONTW` with `lfQuality` moved to `ANTIALIASED_QUALITY` and
-/// **nothing else touched** ([`smoothed_logfont`]): same type face, same character height,
-/// same weight, same character set, same escapement. `GetTextMetricsW` answers the same height,
-/// ascent, descent, internal and external leading, average and maximum character width and
-/// weight for it as for the manager's own face, and real strings measure the same number of
-/// pixels — so no field's text moves by a pixel and no row of the list changes height. Both
-/// halves are tests in `tests\settings.rs`; the change was measured before it was made.
-///
-/// # Why `send_to` and not a bare send — FR-72
-///
-/// `send_to` is `SendDlgItemMessageW`, «the one way this module sends anything to its own
-/// controls», and a bare `SendMessage` is banned program-wide by the implication of FR-72: to a
-/// window whose thread is not pumping it blocks the caller for ever. `tests\guard.rs` sweeps the
-/// whole of `src\` for the name and this file adds none.
-///
-/// # The `lparam`
-///
-/// `TRUE` — redraw. The controls are handed the face on `WM_INITDIALOG`, before the window is
-/// on the screen, so the repaint it asks for costs nothing; asking for it is what keeps the
-/// call correct if it is ever made again while the window is visible.
-///
-/// `None` — the faces could not be made — hands over nothing and leaves all three on the
-/// manager's own face, which is what they were on before this task (NFR-13).
-fn hand_our_face_to_the_controls_that_draw_their_own_text(hwnd: HWND, face: Option<HFONT>) {
-    let Some(face) = face else {
-        return;
-    };
-
-    for control in CONTROLS_THAT_DRAW_THEIR_OWN_TEXT {
-        // `WM_SETFONT` answers nothing — it is documented to return zero — so there is no
-        // result to examine here beyond the one `send_to` describes.
-        send_to(hwnd, control, WM_SETFONT, face.0 as usize, 1);
-    }
-}
-
-/// Puts the interface strings of the locale in force into the window — FR-94.
-///
-/// Runs before anything is filled in, so that a control is never seen carrying the literal the
-/// template shipped with. In the Russian locale the result is the same text the template
-/// already had — the table and the template are identical by construction, and a test asserts
-/// it — which is what makes this loop safe to run unconditionally rather than only for English.
-fn localise_dialog(hwnd: HWND) {
-    let caption = wide(&text(IDS_DIALOG_CAPTION));
-
-    // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer owned by
-    // this frame, neither moved nor dropped until the call returns; the call copies it.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    for (control, string) in LOCALISED_CONTROLS {
-        set_text(hwnd, *control, &text(*string));
-    }
-}
-
-/// Puts the interface strings of the locale in force into the window — FR-94, решение 99.1,
-/// task Т-31-2.
-///
-/// **One body, two occasions.** It runs at the end of [`fill_dialog`], while the window is
-/// being built and before it is first painted, and it runs again when «Применить» changed the
-/// language of a window that is already up and the direction of writing did not change. That
-/// is the whole of механизм (а) решения 99.1: the window keeps its handle, its place, its
-/// selections and the focus, and puts on the other language.
-///
-/// What is in it is exactly what is a *string of the interface*: the caption, the thirty
-/// `(IDC, IDS)` pairs of FR-94, the items of the appearance combo, the note under the hotkey
-/// field, the note of the layouts section, the journal folder line and the three lines of
-/// «Состояние». What is deliberately **not** in it: the fourteen entries of the language combo
-/// (every language names itself — [`Language::native_name`]), the names of the layouts (the
-/// system gives those), the process names of FR-84 and every check box's *state*.
-///
-/// ⚠ **The caller repaints, this function does not.** Two of the three ways text of this window
-/// reaches the screen answer differently to a write, and both were measured on a live window
-/// before this task was written (`scratchpad-Э31\посылки-п4-механизм.log`):
-///
-/// * an `SS_OWNERDRAW` static invalidates itself on `WM_SETTEXT` and comes back repainted —
-///   636 pixels moved with nobody asking;
-/// * a **panel caption** does not move at all, and does not move on an invalidation of the
-///   whole window either. It is not drawn by a control: [`on_erase_background`] draws it into a
-///   **cached picture** out of the group box's text, and the key of that cache is the size, the
-///   palette and the frame of the hotkey field — never the text. Invalidating merely blits the
-///   old picture back.
-///
-/// So the picture has to be thrown away, and that is what [`relabel_in_place`] does around this
-/// call. It is not written here because [`fill_dialog`] must not do it: on `WM_INITDIALOG`
-/// there is no picture yet.
-fn relabel_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
-    localise_dialog(hwnd);
-
-    // The appearance combo is the one list of this window whose items are translated, and
-    // `CB_RESETCONTENT` takes the selection away with them — so the chosen position is read
-    // first and put back after. The **setting** is the source of it, not `CB_GETCURSEL`: the
-    // working configuration is what the window is showing, and it has just been read back by
-    // `read_dialog` on the «Применить» path.
-    let chosen = theme_combo_index(state.working.general.theme);
-
-    send_to(hwnd, IDC_THEME, CB_RESETCONTENT, 0, 0);
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_SYSTEM));
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_LIGHT));
-    combo_add(hwnd, IDC_THEME, &text(IDS_THEME_DARK));
-    send_to(hwnd, IDC_THEME, CB_SETCURSEL, chosen, 0);
-
-    // The key name is not a string of the interface; the note under it is — FR-94, and it is
-    // also what a capture writes into. A capture cannot be armed here: `apply_now` cancels one
-    // before it publishes, and on `WM_INITDIALOG` there is nothing to cancel.
-    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
-
-    show_layout_note(hwnd, state);
-    show_log_dir(hwnd);
-
-    fill_state_lines(hwnd, state);
-
-    // Правило 118.1, задача T-53a-1 — ПОСЛЕДНИМ и здесь, а не в `fill_dialog`: списки к этому
-    // мгновению заполнены на обеих дорогах — и на `WM_INITDIALOG`, где `fill_dialog` кончается
-    // этим вызовом, и при смене языка, где список темы только что перезаполнен. Почему именно
-    // это место — в доке `set_combo_dropped_heights`.
-    let _taken = set_combo_dropped_heights(hwnd);
-}
-
-/// The note of the layouts section — the sentence FR-92 asks for when a layout named in
-/// section 7 is not in this session.
-///
-/// Its own function since task Т-31-2 because it is a string of the interface and has to be
-/// put in again when the language changes, while everything else [`fill_layouts`] does is a
-/// value or a selection and must not be touched.
-fn show_layout_note(hwnd: HWND, state: &DialogState<'_>) {
-    let source = LayoutSpec::parse(&state.working.layouts.pair_source);
-    let target = LayoutSpec::parse(&state.working.layouts.pair_target);
-
-    let unresolved = [
-        (source, IDS_LAYOUT_WORD_SOURCE),
-        (target, IDS_LAYOUT_WORD_TARGET),
-    ]
-    .into_iter()
-    .filter(|(spec, _)| spec.resolve(&state.session).is_none())
-    .map(|(_, word)| text(word))
-    .collect::<Vec<_>>();
-
-    set_text(
-        hwnd,
-        IDC_LAYOUT_NOTE,
-        &if unresolved.is_empty() {
-            String::new()
-        } else {
-            // The separator is a string since T-L10N-10: «, » in every table, a translation's own
-            // where its language has one («،»).
-            format_text(
-                IDS_LAYOUT_NOTE,
-                &[&unresolved.join(&text(IDS_LIST_SEPARATOR))],
-            )
-        },
-    );
-}
-
-/// The journal folder line — a path, which no locale changes, or the one sentence that says
-/// there is nowhere to write, which every locale does. Task Т-31-2, for the reason above.
-fn show_log_dir(hwnd: HWND) {
-    set_text(
-        hwnd,
-        IDC_LOG_DIR,
-        &crate::diag::log_dir().map_or_else(
-            || text(IDS_LOG_DIR_MISSING),
-            |dir| dir.display().to_string(),
-        ),
-    );
-}
-
-/// Puts the configuration into the controls — the whole of `WM_INITDIALOG`.
-///
-/// Three parts in this order since task Т-31-2, and the order is load-bearing: the **structure**
-/// (subclasses, margins, the closed height of the combo boxes, the faces of the controls that
-/// draw their own text), then the **values**, then the **text** — [`relabel_dialog`], the half
-/// that runs a second time when the language changes under an open window. The structural part
-/// has to be first because two of its steps say so in their own documentation («before anything
-/// is put into any of them»), and the text part is last because it is the one that also stands
-/// alone.
-fn fill_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
-    // Решение 97.2, task Т-30-4 — the two islands that are **input fields**. Everything else in
-    // this window reads the way the window does; these two hold Latin text the user types or
-    // reads letter by letter (`Ctrl + Alt + Q`, `game.exe`), and a caret that walks leftwards
-    // through `game.exe` is not a stylistic matter. See [`unmirror_control`]: the field keeps
-    // its mirrored place against the right edge and only its inside turns round.
-    //
-    // The other two islands of решение 97.2 are drawn by this program rather than by a control,
-    // so they are turned round where they are drawn instead: the journal path and the process
-    // list ask `theme::label_format` for `Reading::LatinIsland`.
-    unmirror_control(hwnd, IDC_HOTKEY);
-    unmirror_control(hwnd, IDC_EXCLUSION_NAME);
-    subclass_hotkey_field(hwnd);
-    // FR-92а, task T-11-14. The other half of this pair — `unsubclass_combo_boxes` — is the
-    // `WM_DESTROY` branch of `dialog_proc`, and nothing else in the file installs or removes
-    // this subclass. See `subclass_combo_boxes` for why the pairing is written that way.
-    subclass_combo_boxes(hwnd);
-    // FR-92а, task T-12-5, finding R-06. The other half of this pair — `unsubclass_lists` — is
-    // the same `WM_DESTROY` branch of `dialog_proc` the combo boxes' removal stands in, and
-    // nothing else in the file installs or removes this subclass either.
-    subclass_lists(hwnd);
-    // Task T-12-8: the response of the cursor on the nine push buttons. The other half of this
-    // pair — `unsubclass_buttons` — stands in the same `WM_DESTROY` branch as the two above,
-    // walking the same `PUSH_BUTTONS` list.
-    subclass_buttons(hwnd, &PUSH_BUTTONS);
-    // п. 2 of task T-11-15: the text of the five input fields, off the frame by the inset of
-    // the mock-ups. Once, here — a margin is a property of the control, not of a paint.
-    set_field_margins(hwnd);
-    // Task T-12-2: the closed part of the four combo boxes, brought to the 12 dialog units of
-    // the mock-ups apart from the items of their dropped-down lists. Once, here — a height is
-    // a property of the control like the margin above, and this is the first moment all four
-    // controls exist: `WM_MEASUREITEM` arrived before this window had a `WM_INITDIALOG` at
-    // all. Before anything is put into any of them, so no combo box is ever holding a list at
-    // one height and about to be measured at another.
-    //
-    // ⚠ NFR-13: the answer of every send is examined inside the function — a `CB_ERR` there
-    // leaves that one combo box at the taller closed part it already had, and the other three
-    // still take theirs. The count comes back so that the examination is a number rather than
-    // a promise; nothing in this window depends on it, and no `debug_assert` stands on it
-    // either, for the reason `subclass_combo_boxes` writes down at its own dropped answer: a
-    // machine that refused is a legal, degraded state and not a broken invariant.
-    let _taken = set_combo_closed_height(hwnd);
-
-    // FR-92а, task T-11-20: the six controls that draw their own text get the face this
-    // window draws all its other text in, so the whole window is on one smoothing. Once,
-    // here — a face is a property of the control, exactly as the margin above is — and
-    // **before anything is put into any of them**, so no control is ever holding text it was
-    // given in one face and is about to redraw in another.
-    hand_our_face_to_the_controls_that_draw_their_own_text(
-        hwnd,
-        state.fonts.as_ref().map(DialogFonts::text),
-    );
-
-    // Section «Общие» of FR-92.
-    set_check(hwnd, IDC_AUTOSTART, state.working.general.autostart);
-    // FR-100, task Т-21-5.
-    set_check(hwnd, IDC_SOUND, state.working.feedback.sound);
-    // FR-61, FR-65 — a row of «Общие» since task Т-23-2, решение 82.2. The two clipboard
-    // timings that stood beside it are in `config.toml` and on no control (решение 81).
-    set_check(hwnd, IDC_SELECTION_ENABLED, state.working.selection.enabled);
-    // FR-90б, task T-119-2.
-    set_check(hwnd, IDC_TRAY_FLAG, state.working.general.tray_flag);
-    // FR-94, task Т-28-2, решение 93 and вопрос 97: each language named in its own language.
-    // ⭐ Stage E108, решение 202.7: the rows are `state.languages` — the group on top, the line,
-    // the rest by name — worked out once per opening; `read_dialog` reads the language back out of
-    // the same vector, so the selected row and the stored value cannot come apart.
-    send_to(hwnd, IDC_LANGUAGE, CB_RESETCONTENT, 0, 0);
-    for language in &state.languages.languages {
-        combo_add(hwnd, IDC_LANGUAGE, language.native_name());
-    }
-    let in_force = state.working.general.language.in_force();
-    send_to(
-        hwnd,
-        IDC_LANGUAGE,
-        CB_SETCURSEL,
-        state
-            .languages
-            .languages
-            .iter()
-            .position(|language| *language == in_force)
-            .unwrap_or(0),
-        0,
-    );
-
-    // Section «Раскладки» of FR-92 — FR-30, FR-31, FR-35.
-    fill_layouts(hwnd, state);
-
-    // Section «Исключения» of FR-92 — FR-84.
-    send_to(hwnd, IDC_EXCLUSIONS, LB_RESETCONTENT, 0, 0);
-    for name in &state.working.exclusions.processes {
-        list_add(hwnd, IDC_EXCLUSIONS, name);
-    }
-    limit_text(hwnd, IDC_EXCLUSION_NAME, EXCLUSION_NAME_CHARS);
-
-    // Task T-42-7, finding Н29: a window opened on a full list shows it full — the field and
-    // «Добавить» are dark from the first paint, not from the first click.
-    show_exclusion_ceiling(hwnd);
-
-    // Section «Диагностика» of FR-92 — SEC-07.
-    set_check(hwnd, IDC_LOG_ENABLED, state.working.diagnostics.log_enabled);
-
-    // The text half, and the one part of this function that also stands alone — task Т-31-2.
-    // It carries the appearance combo (whose items are localised, unlike the language combo's),
-    // the note under the hotkey field, the note of the layouts section, the journal folder line
-    // and the three lines of «Состояние». Last, so that the faces and the closed heights above
-    // are already on the controls it writes into.
-    relabel_dialog(hwnd, state);
-}
-
-/// Fills the layouts section and the list view of the cycle.
-fn fill_layouts(hwnd: HWND, state: &mut DialogState<'_>) {
-    let mode = match state.working.layouts.mode {
-        LayoutMode::Pair => IDC_MODE_PAIR,
-        LayoutMode::Cycle => IDC_MODE_CYCLE,
-    };
-    check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, mode);
-
-    // Both combo boxes show the session in the session's own order, so the labels are built
-    // once for the two: the rule of решение 82.1 is a property of the list, and two lists
-    // built apart could in principle disagree about a collision.
-    let labels = layout_labels(&state.session, &state.session);
-
-    for control in [IDC_PAIR_SOURCE, IDC_PAIR_TARGET] {
-        send_to(hwnd, control, CB_RESETCONTENT, 0, 0);
-
-        for label in &labels {
-            combo_add(hwnd, control, label);
-        }
-    }
-
-    let source = LayoutSpec::parse(&state.working.layouts.pair_source);
-    let target = LayoutSpec::parse(&state.working.layouts.pair_target);
-
-    select_layout(hwnd, IDC_PAIR_SOURCE, source, &state.session);
-    select_layout(hwnd, IDC_PAIR_TARGET, target, &state.session);
-
-    // The note of FR-92 for this section — a field of section 7 that names no layout of this
-    // session is otherwise silent — lives in [`show_layout_note`] since task Т-31-2, because a
-    // string of the interface has to be written again when the language changes and everything
-    // else here is a value or a selection that must not be touched. [`relabel_dialog`] calls
-    // it, and this function is called from [`fill_dialog`], which ends with that call.
-
-    prepare_cycle_list(hwnd);
-
-    // FR-92а, task T-11-7: the list carries palette state of its own — the three colours,
-    // set here for the first showing and again by `refresh_in_place` on every palette change —
-    // and a state image list, which since task T-11-25 carries no colour at all and is therefore
-    // built once, here. After `prepare_cycle_list`: the extended style must exist before the
-    // system pair it creates can be replaced.
-    paint_cycle_list(hwnd, state.palette);
-    install_check_images(hwnd);
-
-    fill_cycle_list(hwnd, &state.rows, &state.session, 0);
-    enable_by_mode(hwnd, state.working.layouts.mode);
-}
 
 /// What the program is doing now — the subject of the first line of «Состояние», task T-34-5,
 /// findings Н80 and Н84.
@@ -14759,665 +10078,8 @@ pub fn acting_line(acting: &Acting, refusals: u32) -> String {
     format_text(IDS_STATE_JOINED, &[&what, &refused])
 }
 
-/// The four read-only lines of the «Состояние» group.
-///
-/// **Every number here comes from another module's public reader** — `watchdog`, `layouts`,
-/// `guard`, `diag` — and nothing is written back to any of them. Section 6.2: the dialog shows
-/// their state, it does not own it. SEC-07: counts and a folder path, never a stroke.
-///
-/// Since task T-34-5 the first line says what the program does **now**, in the words a person
-/// uses ([`program_state`]), and the health of the hook follows it only when the journal is on:
-/// those two numbers are for the reader of the dump. `silent_removals` and not `recoveries`
-/// (finding С1): the latter grows on every thirty-second tick of the FR-80 timer and read as
-/// trouble where there was none.
-fn fill_state_lines(hwnd: HWND, state: &DialogState<'_>) {
-    let health = crate::watchdog::health();
-
-    let program = program_state(
-        crate::hook::is_installed(),
-        crate::watchdog::hook_down(),
-        crate::hook::is_active(),
-        crate::hook::fail_safe(),
-    );
-    let first = if state.working.diagnostics.log_enabled {
-        format_text(
-            IDS_STATE_JOINED,
-            &[
-                &text(program.string_id()),
-                &format_text(
-                    IDS_STATE_HEALTH,
-                    &[
-                        &health.silent_removals.to_string(),
-                        &health.install_failures.to_string(),
-                        // **Task T-36-4, finding Н40 — the third number.** Presses the user
-                        // made that reached nobody: the callback recognised one, FR-95 had
-                        // already swallowed the key, and the handoff failed. A row of its own
-                        // was the other way to show it, and the appearance is frozen (слово
-                        // владельца 2026-09-10) — so it joins the line the panel already has.
-                        //
-                        // ⚠ `hook::lost_hotkeys` and not `hook::post_failures`: that counter is
-                        // shared with the layout probe of FR-21, whose failure costs a re-read
-                        // and nothing a person would care about. A number that summed the two
-                        // would mean nothing.
-                        &crate::hook::lost_hotkeys().to_string(),
-                    ],
-                ),
-            ],
-        )
-    } else {
-        text(program.string_id())
-    };
-    set_text(hwnd, IDC_STATE_HOOK, &first);
-
-    set_text(
-        hwnd,
-        IDC_STATE_LAYOUTS,
-        &format_text(
-            IDS_STATE_LAYOUTS,
-            &[
-                &state.session.len().to_string(),
-                &crate::guard::counters().exclusions.to_string(),
-                &crate::diag::recorded().to_string(),
-            ],
-        ),
-    );
-
-    set_text(
-        hwnd,
-        IDC_STATE_AUTOSTART,
-        &format_text(
-            IDS_STATE_AUTOSTART,
-            &[&match autostart_value() {
-                Some(command) => format_text(IDS_AUTOSTART_PRESENT, &[&command]),
-                None => text(IDS_AUTOSTART_ABSENT),
-            }],
-        ),
-    );
-
-    // Task T-34-6, finding Н102: what acts when the key is pressed — the very selection the
-    // hotkey makes, `layouts::cycle_for` over the published configuration and the layouts of
-    // this session (the first `MAX_SESSION` of them, which is what the hotkey sees too), named
-    // the way the lists above name them — and how often the choice was refused, out of the five
-    // counters the dump already prints. Nothing here decides anything: `MAX_SESSION` and the
-    // choice of the pair belong to `layouts`, this line only reads them back.
-    let available: Vec<LayoutId> = state
-        .session
-        .iter()
-        .copied()
-        .take(layouts::MAX_SESSION)
-        .collect();
-    let session = layouts::Session::of(available.len(), state.session.len());
-    let acting = match layouts::cycle_for(layouts::published(), &available, session) {
-        Ok(cycle) => {
-            let names = layout_labels(cycle.layouts(), &state.session);
-
-            match (layouts::published().mode(), names.as_slice()) {
-                (LayoutMode::Pair, [source, target]) => {
-                    Acting::Pair(source.clone(), target.clone())
-                }
-                (_, names) if names.len() >= 2 => Acting::Cycle(names.to_vec()),
-                _ => Acting::None,
-            }
-        }
-        Err(_) => Acting::None,
-    };
-
-    let failures = layouts::selection_failures();
-    let refusals = failures
-        .ime_layout
-        .saturating_add(failures.no_layouts)
-        .saturating_add(failures.origin_outside)
-        .saturating_add(failures.too_many_layouts)
-        .saturating_add(failures.pair_variant_missing);
-
-    set_text(hwnd, IDC_STATE_PAIR, &acting_line(&acting, refusals));
-}
-
-/// Reads every control back into the working configuration.
-///
-/// The configuration it writes into is the one the dialog was opened with, so a field FR-92
-/// does not show survives the round trip untouched. That is not a detail: writing the file
-/// replaces it whole.
-///
-/// The family used to be three — `general.enabled`, `[buffer] capacity`, `schema_version` —
-/// and task Т-23-2 (решения 81 и 82) made it seven: `[replacement] method` of FR-42/FR-42а,
-/// `[replacement] inter_event_delay_ms` of FR-44 and the two timings of §4.7,
-/// `[selection] clipboard_timeout_ms` and `clipboard_restore_delay_ms`, are now edited in
-/// `config.toml` and shown on no control. They are safe here precisely because **this
-/// function does not name them**: an absent control answers «снят» to `is_checked` and an
-/// empty string to `get_text`, so a line left behind would quietly write a default over the
-/// user's own number on the first press of «ОК». `tests\settings.rs` sweeps this function's
-/// body for the four names for that reason.
-fn read_dialog(hwnd: HWND, state: &mut DialogState<'_>) {
-    state.working.general.autostart = is_checked(hwnd, IDC_AUTOSTART);
-    // FR-100, task Т-21-5.
-    state.working.feedback.sound = is_checked(hwnd, IDC_SOUND);
-    // FR-61, FR-65 — a row of «Общие» since task Т-23-2.
-    state.working.selection.enabled = is_checked(hwnd, IDC_SELECTION_ENABLED);
-    // FR-90б, task T-119-2.
-    state.working.general.tray_flag = is_checked(hwnd, IDC_TRAY_FLAG);
-    // Stage E108, решение 202.7: the item index is a position in `state.languages`, the vector
-    // `fill_dialog` filled the combo from. `CB_ERR` is −1 and every other stray answer is out of
-    // range, and both leave the language as it was — the same way the appearance combo beside
-    // it treats a state the dialog cannot reach. The row of the language in force keeps the
-    // file's own word, so a language the build does not carry is not overwritten by the English
-    // that stands in for it (`Language::in_force`).
-    let picked = usize::try_from(send_to(hwnd, IDC_LANGUAGE, CB_GETCURSEL, 0, 0))
-        .ok()
-        .and_then(|index| state.languages.languages.get(index).copied());
-    if let Some(picked) = picked
-        && picked != state.working.general.language.in_force()
-    {
-        state.working.general.language = picked;
-    }
-    state.working.general.theme =
-        theme_from_combo_index(send_to(hwnd, IDC_THEME, CB_GETCURSEL, 0, 0));
-
-    state.working.layouts.mode = if is_checked(hwnd, IDC_MODE_CYCLE) {
-        LayoutMode::Cycle
-    } else {
-        LayoutMode::Pair
-    };
-
-    // A combo box with nothing selected leaves the field as the file had it. The user cannot
-    // empty a `CBS_DROPDOWNLIST`, so this is the case of a file naming a layout the session
-    // does not have: the note in the dialog says so, and the value is kept rather than
-    // silently replaced by whatever happens to be first in the list.
-    if let Some(layout) = selected_layout(hwnd, IDC_PAIR_SOURCE, &state.session) {
-        state.working.layouts.pair_source = spec_text(layout, &state.session);
-    }
-    if let Some(layout) = selected_layout(hwnd, IDC_PAIR_TARGET, &state.session) {
-        state.working.layouts.pair_target = spec_text(layout, &state.session);
-    }
-
-    read_cycle_checks(hwnd, &mut state.rows);
-    // Task T-55-8, findings С54 and С55: the cycle of the file goes back byte for byte unless its
-    // ticks were touched — an empty session or a list nobody edited rewrites nothing.
-    state.working.layouts.cycle = cycle_after_dialog(
-        &state.cycle_at_open,
-        &state.rows_at_open,
-        &state.rows,
-        &state.session,
-    );
-
-    state.working.exclusions.processes = list_items(hwnd, IDC_EXCLUSIONS);
-
-    state.working.diagnostics.log_enabled = is_checked(hwnd, IDC_LOG_ENABLED);
-}
-
-/// The self-switching `BS_OWNERDRAW` displaced, returned by hand — FR-92а, task T-11-5b.
-///
-/// `BS_OWNERDRAW` is a button *type*: it displaced `BS_AUTOCHECKBOX` and
-/// `BS_AUTORADIOBUTTON` in the template, and the flip on a click and on the arrow keys
-/// died with them. This function is that behaviour, spelled out again:
-///
-/// - **a check box flips on a click**: [`set_check`] of the opposite of its own stored
-///   state — the write lands in the dialog's [`GlyphChecks`] store and the repaint rides
-///   in `set_check` itself (task T-11-5b-2). `BN_DBLCLK` counts as
-///   the click it is: an owner-drawn button folds the second press of a double click into
-///   `BN_DBLCLK` instead of a second `BN_CLICKED`, and the automatic type answered both
-///   presses with a toggle — dropping one would make a fast double click flip the box and
-///   leave it flipped;
-/// - **a radio button checks itself and unchecks its group**: [`check_radio`] over the
-///   very range the rest of the dialog already uses — `IDC_MODE_PAIR..IDC_MODE_CYCLE`, the
-///   template's one remaining `WS_GROUP` run since task Т-23-2 took the method radios of
-///   «Замена» off the window — which quenches the run in the store, arms the chosen one and
-///   repaints the whole range: the neighbour that just lost the dot must lose it on the
-///   same message;
-/// - **`BN_SETFOCUS` is the arrow keys**: the dialog manager answers an arrow key inside
-///   a `WS_GROUP` run by moving the focus, and an automatic radio button then checked
-///   itself on arrival — `BS_NOTIFY` in the template is what makes the arrival audible
-///   here. Answered **only while an arrow key is actually down**: focus also arrives by
-///   Tab, and Tab enters the group at its first tab stop, not at the checked element —
-///   nothing juggles `WS_TABSTOP` for a non-automatic type the way the automatic types
-///   did for themselves — so checking on every arrival would silently move the user's
-///   choice to the first radio of the group on a mere walk through the dialog.
-///
-/// The check state lives in the dialog's own [`GlyphChecks`] store — task T-11-5b-2. An
-/// owner-drawn button keeps none of its own: the button-message pair that serves the
-/// automatic types ignores the write and answers «снят» for a `BS_OWNERDRAW` one, which
-/// the final sweep of the live acceptance saw as every glyph drawn unchecked. So
-/// [`set_check`], [`is_checked`] and [`check_radio`] — their signatures untouched — write
-/// and read the store, and everything that reads the dialog keeps reading the one truth.
-fn restore_self_switching(hwnd: HWND, control: i32, notification: u16) {
-    use crate::widgets::glyph::{Answer, Kind, answer};
-
-    // ⭐ **Правило нажатия переехало в слой — задача Т-46-2, решение 109.1.** Тело, стоявшее
-    // здесь с задачи T-11-5b, теперь живёт в `widgets::glyph::answer` и служит всем окнам
-    // программы: мастер FR-104 и «От автора» зовут его же. Поведение этого окна не менялось —
-    // замер Т-46-1 на 44 щелчках настоящей дорогой дал 0 несработавших и 0 сдвинутых соседок
-    // и до переноса, и после.
-    match control {
-        IDC_AUTOSTART | IDC_SOUND | IDC_SELECTION_ENABLED | IDC_TRAY_FLAG | IDC_LOG_ENABLED
-            if answer(Kind::Check, notification) == Answer::Toggle =>
-        {
-            set_check(hwnd, control, !is_checked(hwnd, control));
-        }
-
-        IDC_MODE_PAIR | IDC_MODE_CYCLE if answer(Kind::Radio, notification) == Answer::Choose => {
-            check_radio(hwnd, IDC_MODE_PAIR, IDC_MODE_CYCLE, control);
-        }
-
-        _ => {}
-    }
-}
-
 // ⚠ **`arrow_key_is_down` переехал в `widgets::glyph` — задача Т-46-2.** Он был частью правила
 // нажатия, а правило теперь одно на все окна: тело стоит рядом с `answer`, которое его зовёт.
-
-/// One command from the dialog.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `hwnd` of the dialog it belongs to.
-unsafe fn on_command(hwnd: HWND, control: i32, notification: u16) {
-    // FR-92а, task T-11-5b. ⚠ First, before the match below reads anything: the flip of
-    // the self-switching must land before any logic that reads `is_checked` — the mode
-    // branch below reads the state of `IDC_MODE_CYCLE`, and it must see the state as this
-    // very click has just made it, not as it was before.
-    restore_self_switching(hwnd, control, notification);
-
-    // Task T-42-12: in a window that had to be shortened, the Tab key must not walk the focus
-    // off the bottom edge. Four of the five kinds of control this window has announce their own
-    // focus — a button, an edit, a combo and a list box — and the fifth, the layout list, does
-    // it through `NM_SETFOCUS` in [`on_notify`]. In a window that fits, this call returns at
-    // once: there is no scroll to move.
-    //
-    // SAFETY: see the caller.
-    if matches!(
-        u32::from(notification),
-        BN_SETFOCUS | EN_SETFOCUS | CBN_SETFOCUS | LBN_SETFOCUS
-    ) {
-        unsafe { show_control_whole(hwnd, control) };
-    }
-
-    match control {
-        // Applying and leaving are one operation followed by the other, which is why «ОК»
-        // makes the same call «Применить» makes and then ends the dialog.
-        //
-        // Решение 99: «ОК» — записать и закрыть, ничего сверх. The answer `apply_now` gives
-        // about the language is deliberately dropped here: this window has a moment to live,
-        // and relabelling or rebuilding it in that moment would be a flash and nothing else.
-        // Everything opened afterwards — the menu, «О программе», these settings again — is
-        // built in the new locale, which task Т-31-1 published before this line was reached.
-        //
-        // Решение 144.1, задача T-85-1: nor is the window repainted — `refresh_in_place` is
-        // «Применить»'s alone. A new palette here only marked the window, `EndDialog` took the
-        // focus off this button, and the button drew itself at once in the new theme, corners of
-        // the new ground included, a moment before the window was hidden
-        // (`scratchpad-E85\probe-ok-mechanism.log`). The window leaves in the theme it had.
-        OK_COMMAND => {
-            // SAFETY: see the caller.
-            let _ = unsafe { apply_now(hwnd) };
-            end_dialog(hwnd, isize::try_from(OK_COMMAND).unwrap_or(0));
-        }
-
-        // …and «Применить» is the button that stays in the window, so the window has to become
-        // the one the new settings ask for: first the palette and the state lines, as it always
-        // was, then the language — решение 99.1, the two mechanisms.
-        IDC_APPLY => {
-            // SAFETY: see the caller.
-            let switch = unsafe { apply_now(hwnd) };
-
-            // SAFETY: see the caller.
-            unsafe { refresh_in_place(hwnd) };
-
-            match switch {
-                // The language did not move. Pressing «Применить» twice must not blink.
-                LanguageSwitch::Unchanged => {}
-                // SAFETY: see the caller.
-                LanguageSwitch::Relabel => unsafe { relabel_in_place(hwnd) },
-                LanguageSwitch::Reopen => reopen_in_place(hwnd),
-            }
-        }
-
-        // Nothing was written to the file and nothing was published, so there is nothing to
-        // undo: the working configuration was a copy from the first line of `show_dialog`.
-        CANCEL_COMMAND => end_dialog(hwnd, isize::try_from(CANCEL_COMMAND).unwrap_or(0)),
-
-        IDC_MODE_PAIR | IDC_MODE_CYCLE => {
-            let mode = if is_checked(hwnd, IDC_MODE_CYCLE) {
-                LayoutMode::Cycle
-            } else {
-                LayoutMode::Pair
-            };
-
-            // FR-92а, task T-11-7-2: the mode the gate and the row paints of the layout
-            // list read through `with_state` — kept current on the very click, the same
-            // road the palette takes. Nothing is decided early: `read_dialog` still reads
-            // the radio buttons afresh on «Применить», and «Отмена» still drops the whole
-            // working copy.
-            //
-            // SAFETY: see the caller.
-            unsafe { with_state(hwnd, |state| state.working.layouts.mode = mode) };
-
-            enable_by_mode(hwnd, mode);
-
-            // The muted or full row paints are custom-draw state, not window state: with
-            // `EnableWindow` gone from the list (task T-11-7-2) nothing else would repaint
-            // it on a mode flip.
-            widgets::repaint::control(hwnd, IDC_CYCLE_LIST);
-        }
-
-        // FR-94. The one button of the dialog that is a mode and not an action: pressing it
-        // arms the capture, pressing it again cancels it.
-        //
-        // SAFETY: see the caller.
-        IDC_HOTKEY_CAPTURE => unsafe { toggle_capture(hwnd) },
-
-        IDC_EXCLUSION_ADD => add_exclusion(hwnd),
-        IDC_EXCLUSION_REMOVE => remove_exclusion(hwnd),
-        // Task T-100-3, вопрос 172: the automatic way — a press starts the five seconds, a press
-        // while they run cancels them.
-        IDC_EXCLUSION_PICK => toggle_exclusion_pick(hwnd),
-
-        // SAFETY: see the caller.
-        IDC_CYCLE_UP => unsafe { move_cycle_row(hwnd, -1) },
-        // SAFETY: see the caller.
-        IDC_CYCLE_DOWN => unsafe { move_cycle_row(hwnd, 1) },
-
-        IDC_LOG_OPEN => open_log_folder(),
-        IDC_LOG_SAVE => save_journal(hwnd),
-
-        // FR-104, task Т-32-8: the third way into the wizard, beside the tray entry and the
-        // «От автора» window. It opens a **modeless** window and returns at once — the settings
-        // dialog stays where it is, which is what a person who is about to describe a defect
-        // needs: the two windows are side by side and the settings can be read off while the
-        // appeal is written.
-        IDC_WRITE_AUTHOR => {
-            // SAFETY: `hwnd` is the live dialog; asking for its owner reads a field of that
-            // window and no memory of ours.
-            let owner = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetWindow(
-                    hwnd,
-                    windows::Win32::UI::WindowsAndMessaging::GW_OWNER,
-                )
-            };
-
-            crate::letters::open_wizard(owner.unwrap_or(hwnd));
-        }
-
-        _ => {}
-    }
-}
-
-/// Re-resolves the palette and repaints the dialog if the resolution moved — FR-92а, the
-/// common tail of a pressed «Применить» (task T-11-4) and of the system theme changing under
-/// the open dialog (task T-11-9).
-///
-/// The palette is resolved afresh — the setting may have changed, and under `system` the
-/// system switch may have flipped while the dialog was up — and only a *changed* resolution
-/// repaints: `resolve` answers `&'static` identity, so pointer equality is the whole test,
-/// and an unchanged palette costs nothing here. That same comparison is the debounce of
-/// T-11-9: Windows sends `WM_SETTINGCHANGE` in a batch, the first arrival repaints, and
-/// every later one finds the palette already current and leaves.
-fn refresh_palette(hwnd: HWND, state: &mut DialogState<'_>) {
-    let fresh = theme::resolve(state.working.general.theme, theme::system_is_light());
-
-    // The brushes are recreated from the new palette, never rewritten in place:
-    // the new set is built first and the old one is dropped by the assignment, as
-    // the documentation of `Brushes` prescribes. A refusal of `Brushes::new`
-    // (NFR-13) leaves palette and brushes exactly as they were — the previous
-    // consistent palette on screen is better than half a new one — and is not
-    // journaled (reviews\T-11-1.md).
-    if !std::ptr::eq(fresh, state.palette)
-        && let Some(brushes) = theme::Brushes::new(fresh)
-    {
-        state.palette = fresh;
-        state.brushes = Some(brushes);
-
-        apply_title_bar_theme(hwnd, fresh);
-
-        // FR-92а, task T-11-7: the list view holds palette state of its own —
-        // the three `LVM_SET*COLOR` colours — which no brush recreation reaches,
-        // and it is handed the fresh palette here, so the repaint below shows one
-        // whole dialog. The state image list is *not* rebuilt with it since task
-        // T-11-25: its cells carry no colour any more, only the size of the row,
-        // and the tick they used to hold is painted from the palette on every
-        // repaint by `draw_cycle_row`.
-        paint_cycle_list(hwnd, fresh);
-
-        widgets::repaint::whole(hwnd);
-    }
-}
-
-/// Reads the controls and hands the result to the caller of [`show_dialog`].
-///
-/// Answers **what the language did**, and nothing more: acting on it is [`on_command`]'s, because
-/// the two buttons that come here want different things of it. «Применить» relabels or rebuilds
-/// the window (решение 99.1); «ОК» does neither — it writes and closes, and everything opened
-/// afterwards is in the new language anyway.
-///
-/// Nor does it repaint anything — решение 144.1, задача T-85-1. The palette and the state lines
-/// are [`refresh_in_place`]'s, which only «Применить» calls: a repaint made here reached the
-/// window «ОК» was closing, too.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only.
-unsafe fn apply_now(hwnd: HWND) -> LanguageSwitch {
-    // FR-94. A capture still armed when «Применить» is pressed is a capture the user has
-    // abandoned, and it has to end here rather than survive the publication: `apply` publishes
-    // `general.enabled` into the callback, and a capture ending afterwards would then publish
-    // its own idea of that flag back over it.
-    //
-    // SAFETY: see the caller.
-    let cancelled = unsafe {
-        with_state(hwnd, |state| {
-            let armed = state.capture.is_some();
-            cancel_capture(hwnd, state);
-            armed
-        })
-    }
-    .unwrap_or(false);
-
-    // ⭐ Задача T-118-1: захват, оборванный «Применить», — тоже конец захвата, и рамка с кнопкой
-    // обязаны вернуться к покою. До неё здесь не перерисовывалось ничего: замер на 1.6.0 — после
-    // «Применить» посреди захвата кнопка оставалась «Отмена», а рамка — цвета захвата. Outside the
-    // borrow: see `repaint_capture`.
-    if cancelled {
-        repaint_capture(hwnd);
-    }
-
-    // Task Т-31-2: the locale this window was **built** in, read before the publication below
-    // moves it. `ui_language()` and not a field of the state, because it is the atomic the
-    // whole process renders by, and the window on the screen is a picture of it.
-    let was = ui_language();
-
-    // The callback runs inside the borrow because it *is* part of the state — see
-    // `DialogState`. It writes a file, stores into atomics and touches the registry; it does
-    // not pump messages, and a re-entrant message would in any case be refused by the
-    // `RefCell` rather than alias anything.
-    //
-    // SAFETY: see the caller.
-    unsafe {
-        with_state(hwnd, |state| {
-            read_dialog(hwnd, state);
-
-            let updated = state.working.clone();
-            (state.apply)(&updated);
-
-            // Задача T-118-5: what is applied now is the base «Применить» is compared against —
-            // the caller of this function refreshes the button (`WM_COMMAND`).
-            state.applied = updated;
-        })
-    };
-
-    language_switch(was, ui_language())
-}
-
-/// **What the window says the configuration is** — the very read «Применить» makes
-/// ([`read_dialog`]), without keeping it: the working copy is put back as it was. Задача T-118-5.
-///
-/// The hotkey is not on the window but in the working copy (a capture writes it there), so the
-/// copy this starts from carries it, and a captured key is a difference like any other.
-fn on_screen(hwnd: HWND, state: &mut DialogState<'_>) -> Config {
-    let kept = state.working.clone();
-
-    read_dialog(hwnd, state);
-
-    std::mem::replace(&mut state.working, kept)
-}
-
-/// **«Применить» доступна, пока экран расходится с применённым** — задача T-118-5, Q-208-23
-/// п. 2, обращение SKHCQ3SA: «кнопка Применить подсвечивается (остается активной) даже если в
-/// настройках программы не было сделано никаких изменений, что иной раз сбивает с толку». Слово
-/// владельца 208.77: «А — серая без изменений».
-///
-/// **Сравнение, а не флаг «что-то трогали»:** вся конфигурация на экране ([`on_screen`]) против
-/// применённой ([`DialogState::applied`]). Правка, после которой они расходятся, зажигает кнопку;
-/// значение, возвращённое рукой, гасит её снова — флаг этого не умел бы, и путь правки, забытый
-/// флагом, остался бы с врущей кнопкой.
-///
-/// Called by the procedure after every command, timer and change of a tick of the cycle, and by
-/// [`run_capture_step`] after a key — outside every borrow. A borrow already held (a notification
-/// sent while the window is being filled) is answered by doing nothing: the base is taken when
-/// the filling is over.
-fn refresh_apply(hwnd: HWND) {
-    // SAFETY: `hwnd` is the live dialog of `show_dialog`; the pointer behind it was stored on
-    // `WM_INITDIALOG` and names a value alive for the whole of the modal call.
-    let differs = unsafe { with_state(hwnd, |state| on_screen(hwnd, state) != state.applied) };
-
-    if let Some(differs) = differs {
-        set_apply_enabled(hwnd, differs);
-    }
-}
-
-/// Lights or greys «Применить» — задача T-118-5.
-///
-/// ⚠ **The focus first.** A disabled button cannot hold the focus, and `EnableWindow` of the
-/// focused one leaves the keyboard with nothing at all: after «Применить» pressed by the keyboard
-/// Tab and Enter would go nowhere. So when the button that is about to go grey has the focus, the
-/// focus moves to «ОК» first — the default button of the window (`DM_SETDEFID`).
-///
-/// The look of the grey button is the owner-drawn one every disabled push button of this window
-/// already has («Выше» and «Ниже» in the pair mode): `ODS_DISABLED` in `WM_DRAWITEM`.
-fn set_apply_enabled(hwnd: HWND, enabled: bool) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, IsWindowEnabled};
-
-    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-    let Ok(apply) = (unsafe { GetDlgItem(Some(hwnd), IDC_APPLY) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // SAFETY: `apply` is the live control just found; the calls read window fields.
-    if unsafe { IsWindowEnabled(apply) }.as_bool() == enabled {
-        return;
-    }
-
-    // SAFETY: as above; `GetFocus` answers the focus of this thread's queue.
-    if !enabled && unsafe { GetFocus() } == apply {
-        focus_control(hwnd, OK_COMMAND);
-    }
-
-    enable(hwnd, IDC_APPLY, enabled);
-}
-
-/// Whether a `WM_NOTIFY` is the layout list saying one of its rows changed — задача T-118-5, the
-/// tick of the cycle that «Применить» has to follow. SEC-05: the three header fields and nothing
-/// else, as [`on_notify`] reads them.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `lparam` of the message, inside its send.
-unsafe fn cycle_list_item_changed(hwnd: HWND, lparam: LPARAM) -> bool {
-    if lparam.0 == 0 {
-        return false;
-    }
-
-    // SAFETY: the sender owns the header for the length of the send; copied out as plain values.
-    let header = unsafe { &*(lparam.0 as *const NMHDR) };
-
-    if header.code != LVN_ITEMCHANGED
-        || header.idFrom != usize::try_from(IDC_CYCLE_LIST).unwrap_or(usize::MAX)
-    {
-        return false;
-    }
-
-    // SAFETY: `hwnd` is the live dialog; the call reads a window field.
-    unsafe { GetDlgItem(Some(hwnd), IDC_CYCLE_LIST) }.ok() == Some(header.hwndFrom)
-}
-
-/// The window that stays open puts on what was just applied — the half of «Применить» that «ОК»
-/// does not have (решение 144.1, задача T-85-1).
-///
-/// # Safety
-///
-/// Called from [`on_command`] only, with the `hwnd` of the dialog it belongs to, after
-/// [`apply_now`] has published.
-unsafe fn refresh_in_place(hwnd: HWND) {
-    // FR-92а, task T-11-4 — the half of position 25 this dialog owns: the person who chose
-    // «Тёмное» and pressed «Применить» sees the change now, not on the next opening. Task T-11-9
-    // runs the same refresh from its own message, which is why the body lives in
-    // `refresh_palette` rather than here.
-    //
-    // SAFETY: see the caller.
-    unsafe { with_state(hwnd, |state| refresh_palette(hwnd, state)) };
-
-    // The state lines show what the modules answer *after* the publication, and reading them
-    // needs no state of the dialog beyond the session list.
-    //
-    // SAFETY: see the caller.
-    unsafe { with_state(hwnd, |state| fill_state_lines(hwnd, state)) };
-}
-
-/// Механизм (а) решения 99.1 — the window keeps its handle, its place and its selections, and
-/// puts on the other language.
-///
-/// Two steps, and the second is the one that was **measured** rather than reasoned about
-/// (`scratchpad-Э31\посылки-п4-механизм.log`, and see [`relabel_dialog`]): the cached picture of
-/// the background has to be thrown away, because the eight panel captions are drawn into it out
-/// of the group boxes' text and the key of the cache knows nothing about text. Without this line
-/// «Применить» would leave a window translated by halves — every label new, every panel caption
-/// old — and invalidating the whole window would not have mended it.
-///
-/// # Safety
-///
-/// Called from [`on_command`] only, with the `hwnd` of the dialog it belongs to.
-unsafe fn relabel_in_place(hwnd: HWND) {
-    // SAFETY: see the caller.
-    unsafe {
-        with_state(hwnd, |state| {
-            relabel_dialog(hwnd, state);
-            state.background = None;
-        })
-    };
-
-    widgets::repaint::whole(hwnd);
-}
-
-/// Механизм (б) решения 99.1 — the direction of writing changed, so the window is rebuilt.
-///
-/// The mirror of task Т-30-2 is a style of the **template the window was created from**, and a
-/// child inherits the layout at creation: there is no later moment to put `WS_EX_LAYOUTRTL` on
-/// forty-four controls. So the window goes and another comes in its place, in the same screen
-/// rectangle — and nothing is lost by it, because the configuration has already been written
-/// and the new window reads it back.
-///
-/// Nothing here shows a window: `EndDialog` unwinds the manager's loop, [`show_dialog`] answers
-/// [`DialogOutcome::Reopen`], and the loop that shows it again is in
-/// [`crate::tray::open_settings`] — at the depth the first showing was made from, with no borrow
-/// of the tray held (посылка П2).
-fn reopen_in_place(hwnd: HWND) {
-    let mut rect = RECT::default();
-
-    // SAFETY: `hwnd` is the live dialog and `rect` is a live local the call fills.
-    let at = if unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok() {
-        Some(rect)
-    } else {
-        // NFR-13: a window whose rectangle cannot be read is still rebuilt — losing the place
-        // is a blemish, losing the window would be the defect. The journal is told.
-        crate::app::report_non_critical("GetWindowRect", &WinError::from_thread());
-        None
-    };
-
-    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is alive for the
-    // whole of this modal call — `show_dialog` reads this field after the call returns.
-    unsafe { with_state(hwnd, |state| state.reopen_at = at) };
-
-    end_dialog(hwnd, DIALOG_REOPEN);
-}
 
 /// Where a window rebuilt by [`LanguageSwitch::Reopen`] stands — stage E108, the stand (7.4).
 ///
@@ -15445,75 +10107,6 @@ pub fn reopened_window(previous: RECT, own: RECT, work_area: RECT) -> RECT {
         right: previous.left + width,
         bottom: top + height,
     }
-}
-
-/// Moves the window to a screen point and leaves its size alone — the size of a dialog being
-/// initialised is the one `fit_window_to_work_area` decided. `false` when the move failed.
-///
-/// # Safety
-///
-/// `hwnd` must be a live window of this thread.
-unsafe fn move_window_to(hwnd: HWND, left: i32, top: i32) -> bool {
-    // SAFETY: the caller's; the call is given plain numbers and keeps no pointer.
-    match unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            left,
-            top,
-            0,
-            0,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE,
-        )
-    } {
-        Ok(()) => true,
-        Err(error) => {
-            // NFR-13: the window opens where `DS_CENTER` left it, which is a worse place and not
-            // a lost window.
-            crate::app::report_non_critical("SetWindowPos", &error);
-            false
-        }
-    }
-}
-
-/// Adds the name in the edit field to the exclusion list — FR-84.
-///
-/// A blank field and a name already in the list are both "nothing to do": a list with the same
-/// process twice would publish the same name twice and cost one of the thirty-two rows
-/// `guard::MAX_EXCLUSIONS` allows.
-fn add_exclusion(hwnd: HWND) {
-    let name = get_text(hwnd, IDC_EXCLUSION_NAME).trim().to_owned();
-
-    if name.is_empty() {
-        return;
-    }
-
-    let existing = list_items(hwnd, IDC_EXCLUSIONS);
-
-    // Task T-42-7, finding Н29 — what the window does with this name, in one rule.
-    match exclusion_verdict(&name, &existing) {
-        ExclusionVerdict::Add => {
-            list_add(hwnd, IDC_EXCLUSIONS, &name);
-            set_text(hwnd, IDC_EXCLUSION_NAME, "");
-        }
-        ExclusionVerdict::Duplicate => {
-            // The name is already there under another spelling. Nothing is added and nothing is
-            // said: the person asked for a state the list is already in, and getting it is not
-            // a refusal. The field is cleared, as it always was.
-            set_text(hwnd, IDC_EXCLUSION_NAME, "");
-        }
-        ExclusionVerdict::Refuse => {
-            // ⛔ **The field is NOT cleared.** A refused name stays where the hand typed it —
-            // clearing it would take the person's text away and leave them guessing what
-            // happened. What is added is the dull knock of FR-100, the same door T-42-6 opened
-            // for the ninth tick: the refusal is heard as well as seen.
-            crate::app::sound_refusal();
-        }
-    }
-
-    // The ceiling may have been reached by the addition above — the field and the button go
-    // dark the moment it is (finding Н29, вариант 1).
-    show_exclusion_ceiling(hwnd);
 }
 
 /// What the window does with a name typed into the exclusion field — [`add_exclusion`].
@@ -15573,35 +10166,6 @@ pub fn exclusion_verdict(name: &str, existing: &[String]) -> ExclusionVerdict {
 /// ceiling of its own is the defect this pair of functions exists to prevent.
 pub fn exclusions_are_full(count: usize) -> bool {
     count >= crate::guard::MAX_EXCLUSIONS
-}
-
-/// Lights or darkens the field and the «Добавить» button by the ceiling — task T-42-7.
-///
-/// The visible half of finding Н29 (вариант 1, «заглушить ввод на потолке»): at
-/// `guard::MAX_EXCLUSIONS` names there is nothing a thirty-third name could do but be dropped on
-/// publication, so the window stops taking one. Removing a name lights them again — the pair is
-/// called from both ends, and from the fill, so the state is right the moment the window opens
-/// on a full list.
-///
-/// ⚠ Both controls together, and that is the substance: a lit field over a dark button invites
-/// typing that leads nowhere.
-///
-/// ⭐ **Three since task T-100-3: «Выбрать окно программы» goes dark with them** — a lit button
-/// over a full list would count five seconds towards a name the list cannot take. And a count
-/// that is running when the list fills up (a name typed by hand meanwhile) is stopped here, with
-/// the button's own caption put back: the button is dark, and a dark button does not count.
-///
-/// Public for `tests\settings.rs`, which stands a panel of its own in for the dialog.
-pub fn show_exclusion_ceiling(hwnd: HWND) {
-    let full = exclusions_are_full(list_items(hwnd, IDC_EXCLUSIONS).len());
-
-    for control in [IDC_EXCLUSION_NAME, IDC_EXCLUSION_ADD, IDC_EXCLUSION_PICK] {
-        enable(hwnd, control, !full);
-    }
-
-    if full && stop_exclusion_pick(hwnd) {
-        show_pick_caption(hwnd, None);
-    }
 }
 
 /// The identifier of the timer that counts the five seconds of «Выбрать окно программы» — task
@@ -15680,237 +10244,6 @@ pub fn exclusion_pick(captured: Option<&str>, existing: &[String]) -> ExclusionP
     }
 }
 
-/// **Puts the answer of [`exclusion_pick`] where it is seen** — task T-100-3.
-///
-/// `Added` — the name becomes the last row of the list and that row is selected; `AlreadyListed` —
-/// its row is selected and nothing is added; both say so under the button. `NotPicked` and
-/// `Refused` touch the list not at all and say «Окно не выбрано». The ceiling is asked again after
-/// an addition, exactly as [`add_exclusion`] asks it.
-///
-/// The window is **not** brought forward (§0 п. 3 of TZ-E100): the person comes back to it
-/// themselves. Nothing applies before «ОК» or «Применить» — the list is the working copy the
-/// whole window edits, and «Отмена» drops it with everything else.
-///
-/// The refusal's sound is not made here but by [`exclusion_pick_tick`], beside the capture: this
-/// half is what a test drives on a panel of its own, silently.
-///
-/// Public for `tests\settings.rs`.
-pub fn apply_exclusion_pick(hwnd: HWND, pick: &ExclusionPick) {
-    let note = match pick {
-        ExclusionPick::Added(name) => {
-            list_add(hwnd, IDC_EXCLUSIONS, name);
-
-            let last = send_to(hwnd, IDC_EXCLUSIONS, LB_GETCOUNT, 0, 0) - 1;
-            select_only_row(hwnd, usize::try_from(last).unwrap_or(0));
-
-            format_text(IDS_EXCLUSION_ADDED, &[name.as_str()])
-        }
-        ExclusionPick::AlreadyListed(row, name) => {
-            select_only_row(hwnd, *row);
-
-            format_text(IDS_EXCLUSION_ALREADY, &[name.as_str()])
-        }
-        ExclusionPick::NotPicked | ExclusionPick::Refused => text(IDS_EXCLUSION_NOT_PICKED),
-    };
-
-    set_text(hwnd, IDC_EXCLUSION_PICK_NOTE, &note);
-    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK_NOTE);
-
-    if matches!(pick, ExclusionPick::Added(_)) {
-        show_exclusion_ceiling(hwnd);
-    }
-}
-
-/// «Выбрать окно программы» — a press that starts the five seconds, or a press while they run that
-/// cancels them and gives the button its own caption back (§0 п. 3 of TZ-E100).
-///
-/// The count is on the button itself — «Переключитесь в нужную программу… 5» — and the line under
-/// it says what the button does; a cancelled count puts both back at rest.
-fn toggle_exclusion_pick(hwnd: HWND) {
-    if stop_exclusion_pick(hwnd) {
-        show_pick_caption(hwnd, None);
-        show_pick_rest_note(hwnd);
-        return;
-    }
-
-    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is alive for the
-    // whole of this modal call.
-    unsafe {
-        with_state(hwnd, |state| {
-            state.exclusion_pick = Some(crate::guard::CAPTURE_SECONDS);
-        })
-    };
-
-    // SAFETY: `hwnd` is the live dialog; no timer procedure is given, so the ticks arrive as
-    // `WM_TIMER` at the dialog's own procedure, and the call keeps no pointer.
-    if unsafe { SetTimer(Some(hwnd), EXCLUSION_PICK_TIMER, 1000, None) } == 0 {
-        // NFR-13: without the timer the count would stand on the button for good — so the button
-        // is given back at once, and the refusal is journaled.
-        crate::app::report_non_critical("SetTimer", &WinError::from_thread());
-        stop_exclusion_pick(hwnd);
-        show_pick_caption(hwnd, None);
-        return;
-    }
-
-    show_pick_caption(hwnd, Some(crate::guard::CAPTURE_SECONDS));
-    show_pick_rest_note(hwnd);
-}
-
-/// Stops a count of «Выбрать окно программы» — the timer and the state — and answers whether one
-/// was running.
-fn stop_exclusion_pick(hwnd: HWND) -> bool {
-    // SAFETY: as in [`toggle_exclusion_pick`].
-    let was = unsafe { with_state(hwnd, |state| state.exclusion_pick.take()) }
-        .flatten()
-        .is_some();
-
-    // SAFETY: `hwnd` is the live dialog; killing a timer that is not set is a harmless refusal.
-    let _ = unsafe { KillTimer(Some(hwnd), EXCLUSION_PICK_TIMER) };
-
-    was
-}
-
-/// One second of «Выбрать окно программы» — and at the end of the five, the capture.
-///
-/// The capture is the one body of task T-100-2, asked as the exclusions ask it: every window of
-/// this program is no answer, a Store frame is answered by the program inside it (решение 172.20),
-/// and no title is read. The rule of [`exclusion_pick`] decides, the refusal is heard (the third
-/// tone of FR-100, as the manual way's), and [`apply_exclusion_pick`] shows the answer. The window
-/// stays where it is — no `SetForegroundWindow`: the person is in the program they chose and comes
-/// back when they like.
-fn exclusion_pick_tick(hwnd: HWND) {
-    // SAFETY: as in [`toggle_exclusion_pick`].
-    let left = unsafe {
-        with_state(hwnd, |state| {
-            let left = state.exclusion_pick?.saturating_sub(1);
-            state.exclusion_pick = Some(left);
-            Some(left)
-        })
-    }
-    .flatten();
-
-    // A tick of nobody's count — the count was stopped, or the message is forged (SEC-05).
-    let Some(left) = left else {
-        return;
-    };
-
-    if left > 0 {
-        show_pick_caption(hwnd, Some(left));
-        return;
-    }
-
-    stop_exclusion_pick(hwnd);
-    show_pick_caption(hwnd, None);
-
-    let captured = crate::guard::capture_foreground(crate::guard::Asker::Process)
-        .and_then(|found| found.process);
-    let pick = exclusion_pick(captured.as_deref(), &list_items(hwnd, IDC_EXCLUSIONS));
-
-    if pick == ExclusionPick::Refused {
-        crate::app::sound_refusal();
-    }
-
-    apply_exclusion_pick(hwnd, &pick);
-}
-
-/// The caption of «Выбрать окно программы» — the count while there is one, its own words otherwise.
-///
-/// The caption is read back by the drawing from the control itself (see [`paint_push_button`]), so
-/// writing it and repainting the one button is the whole of a step of the count — the way
-/// «Журнал сохранён» takes its two seconds on its own button.
-fn show_pick_caption(hwnd: HWND, left: Option<u32>) {
-    let caption = match left {
-        Some(seconds) => format_text(IDS_EXCLUSION_PICK_COUNT, &[seconds.to_string().as_str()]),
-        None => text(IDS_EXCLUSION_PICK),
-    };
-
-    set_text(hwnd, IDC_EXCLUSION_PICK, &caption);
-    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK);
-}
-
-/// The line under «Выбрать окно программы» at rest — what the button does.
-fn show_pick_rest_note(hwnd: HWND) {
-    set_text(
-        hwnd,
-        IDC_EXCLUSION_PICK_NOTE,
-        &text(IDS_EXCLUSION_PICK_NOTE),
-    );
-    widgets::repaint::control(hwnd, IDC_EXCLUSION_PICK_NOTE);
-}
-
-/// Removes **every marked name** from the exclusion list — «Удалить».
-///
-/// ⭐ **Several at once since task T-100-6, решение 172.24.** The list carries `LBS_MULTIPLESEL`: a
-/// click marks a row or takes the mark off, and the owner asked for «удалить сразу несколько
-/// пунктов, а не удалять по одному». A list of several does not answer `LB_GETCURSEL` with a
-/// selection at all — it answers with the row of the caret, marked or not — so the marks are read
-/// with `LB_GETSELITEMS`, and the rows go **from the bottom up**: an index above a deleted row
-/// would otherwise name its neighbour. Nothing marked is nothing to do.
-///
-/// Public for `tests\settings.rs`, which stands a panel of its own in for the dialog.
-pub fn remove_exclusion(hwnd: HWND) {
-    let count = send_to(hwnd, IDC_EXCLUSIONS, LB_GETSELCOUNT, 0, 0);
-
-    // `LB_ERR` (−1) answers a list of one selection, which this list is not; zero is nothing
-    // marked.
-    let Ok(count) = usize::try_from(count) else {
-        return;
-    };
-
-    if count == 0 {
-        return;
-    }
-
-    let mut rows = vec![0i32; count];
-
-    // The marked rows in ascending order, at most `count` of them, into a buffer of exactly that
-    // many `INT`s — the documented shape of the message; the pointer is not kept by the control.
-    let got = send_to(
-        hwnd,
-        IDC_EXCLUSIONS,
-        LB_GETSELITEMS,
-        count,
-        rows.as_mut_ptr() as isize,
-    );
-
-    rows.truncate(usize::try_from(got).unwrap_or(0).min(count));
-
-    for row in rows.iter().rev() {
-        send_to(
-            hwnd,
-            IDC_EXCLUSIONS,
-            LB_DELETESTRING,
-            usize::try_from(*row).unwrap_or(usize::MAX),
-            0,
-        );
-    }
-
-    // The other end of the pair — task T-42-7: a name taken out lights the field and the button
-    // again, whatever the list stood at before.
-    show_exclusion_ceiling(hwnd);
-}
-
-/// Marks `row` of the exclusion list and **only** it, and brings it into view — task T-100-6.
-///
-/// The answer of «Выбрать окно программы» selects the row it names; in a list of several marks
-/// (решение 172.24) that is three steps — every mark off, this row's on, the caret and the view to
-/// it — because `LB_SETCURSEL`, the one step of a single-selection list, is refused by this one.
-/// Marks the person made by hand before the capture go: «Удалить» right after the answer takes
-/// exactly the row the line under the button names.
-fn select_only_row(hwnd: HWND, row: usize) {
-    // `wParam` FALSE with `lParam` −1: every row loses its mark.
-    send_to(hwnd, IDC_EXCLUSIONS, LB_SETSEL, 0, -1);
-    send_to(
-        hwnd,
-        IDC_EXCLUSIONS,
-        LB_SETSEL,
-        1,
-        isize::try_from(row).unwrap_or(-1),
-    );
-    // `lParam` FALSE: the row is scrolled until it is fully visible.
-    send_to(hwnd, IDC_EXCLUSIONS, LB_SETCARETINDEX, row, 0);
-}
-
 // ---------------------------------------------------------------------------------------
 // The one door out of this program — finding С26, task T-41-4
 // ---------------------------------------------------------------------------------------
@@ -15979,82 +10312,6 @@ pub fn open_in_the_shell(target: &str) -> bool {
     true
 }
 
-/// Opens the journal folder in the shell — the button of the «Диагностика» section.
-///
-/// The folder is not created if it is absent: an empty folder appearing because somebody
-/// pressed a button is a side effect nobody asked for, and the folder exists as soon as
-/// anything has been written to it.
-fn open_log_folder() {
-    let Some(dir) = crate::diag::log_dir() else {
-        return;
-    };
-
-    if !dir.is_dir() {
-        return;
-    }
-
-    // Finding С26, task T-41-4: through the one door, like the two in `letters.rs`.
-    open_in_the_shell(&dir.display().to_string());
-}
-
-/// Writes the journal to its file **now** — the button «Сохранить журнал» of «Диагностика»,
-/// task T-34-3, finding С48.
-///
-/// The neighbouring button opens the folder, and until this task the only file in it was the
-/// dump of the previous run, written at its shutdown and telling nothing of the session the
-/// person is looking at. This button writes the same dump while the session runs; the header
-/// says so (`journal.session  continues`) and carries the wall clock of the moment.
-///
-/// It writes and says so, and it is not the thing С26 found next door: nothing is launched,
-/// no shell is asked, no folder is opened. The saying is [`show_journal_saved`] — task T-39-11,
-/// решение 122.5: the live acceptance of `e56` found a press that wrote the file and showed
-/// nothing, and a press with no answer looks unfinished. `diag::write_to` creates the folder if
-/// it is absent, writes a temporary file beside the target and renames it over — the file is
-/// whole or untouched (task T-34-1). It writes whether or not the journal is switched on: a
-/// press of the button is a request, and the setting of section 7 governs what happens at
-/// shutdown, not what happens when somebody asks.
-///
-/// A refusal is shown to the person as well as recorded (NFR-13): `write_to` has already put
-/// it into the ring with the code the system gave, and the box here says the one sentence a
-/// person can act on. `MessageBoxW` and not a window of our own: this is the error path, the
-/// box is modal to this dialog, and a second owner-drawn window for one sentence is not worth
-/// what it would cost to keep.
-fn save_journal(hwnd: HWND) {
-    let Some(target) = crate::diag::log_path() else {
-        return;
-    };
-
-    if crate::diag::write_to(&target).is_ok() {
-        show_journal_saved(hwnd);
-        return;
-    }
-
-    // A refusal must not stand under «Журнал сохранён» of a press before it.
-    end_journal_saved(hwnd);
-
-    let sentence = wide(&text(IDS_LOG_SAVE_FAILED));
-    let caption = wide(crate::APP_NAME);
-
-    // SAFETY: both buffers are NUL-terminated UTF-16 vectors owned by this frame and neither
-    // is moved nor dropped until the call returns; `hwnd` is the live dialog, which becomes
-    // the owner of the box. The call blocks until the person closes it — on the UI thread,
-    // which is the one thread a modal box may block (section 6.1).
-    let result = unsafe {
-        MessageBoxW(
-            Some(hwnd),
-            PCWSTR(sentence.as_ptr()),
-            PCWSTR(caption.as_ptr()),
-            MB_OK | MB_ICONWARNING,
-        )
-    };
-
-    if result.0 == 0 {
-        // NFR-13: zero is the documented failure value. The refusal of the write is already
-        // in the ring; this one joins it.
-        crate::app::report_non_critical("MessageBoxW", &WinError::from_thread());
-    }
-}
-
 /// How long «Журнал сохранён» stands on the button after a write that succeeded — task T-39-11,
 /// решение 122.5: «кнопка на 2 с говорит „Журнал сохранён“».
 pub const JOURNAL_SAVED_MS: u32 = 2_000;
@@ -16110,39 +10367,6 @@ pub fn end_journal_saved(dialog: HWND) {
     widgets::repaint::control(dialog, IDC_LOG_SAVE);
 }
 
-/// Moves the selected row of the cycle list by `step` and keeps it selected — FR-31's «задание
-/// порядка».
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only.
-unsafe fn move_cycle_row(hwnd: HWND, step: i32) {
-    // SAFETY: see the caller.
-    unsafe {
-        with_state(hwnd, |state| {
-            // The ticks live in the control and the order lives in `state.rows`, so the ticks
-            // are taken back before the order is changed. Otherwise a tick made since the list
-            // was filled would be lost by the refill below.
-            read_cycle_checks(hwnd, &mut state.rows);
-
-            let Some(from) = selected_row(hwnd) else {
-                return;
-            };
-
-            let Some(to) = from.checked_add_signed(step as isize) else {
-                return;
-            };
-
-            if to >= state.rows.len() {
-                return;
-            }
-
-            state.rows.swap(from, to);
-            fill_cycle_list(hwnd, &state.rows, &state.session, to);
-        })
-    };
-}
-
 // -----------------------------------------------------------------------------------------
 // FR-94 — the capture, as the dialog runs it
 // -----------------------------------------------------------------------------------------
@@ -16155,16 +10379,6 @@ thread_local! {
     /// there is never more than one field to remember. Re-opening the dialog builds a new
     /// control and stores its own procedure over this one.
     static HOTKEY_FIELD_PROC: Cell<WNDPROC> = const { Cell::new(None) };
-}
-
-/// Puts the hotkey's name and the line that belongs under it into the two controls of the section.
-///
-/// The name is [`effective_hotkey_name`] since task T-93-1 — `Ctrl + F12` for a combination, and
-/// the default that really acts for a name this build does not know, with the note saying so.
-/// The line is [`hotkey_line`].
-fn show_hotkey(hwnd: HWND, hotkey: &Hotkey, combination_taken: bool) {
-    set_text(hwnd, IDC_HOTKEY, &effective_hotkey_name(hotkey));
-    set_note(hwnd, &hotkey_line(hotkey, combination_taken));
 }
 
 /// The line under the hotkey field when no capture is armed — task T-93-2, вопрос 157.
@@ -16217,294 +10431,6 @@ pub fn hotkey_line(hotkey: &Hotkey, combination_taken: bool) -> String {
 fn set_note(hwnd: HWND, note: &str) {
     set_text(hwnd, IDC_HOTKEY_NOTE, note);
     widgets::repaint::control(hwnd, IDC_HOTKEY_NOTE);
-}
-
-/// Puts this module's window procedure in front of the hotkey field's own.
-///
-/// # Where the keystrokes of a capture come from, and why from here
-///
-/// Not from the low-level hook. That callback is bound by NFR-01 to NFR-05 — no allocation, no
-/// blocking, no input-output, under a hundred microseconds — and everything a capture does is
-/// exactly what those rules forbid: build a string, set the text of two controls, decide what to
-/// show. It also lives in `src\hook.rs`, which this task must not change, and teaching the hot
-/// path of every keystroke in the machine about a window that is open once in a blue moon would
-/// be the wrong trade whatever the rules said.
-///
-/// So the keys arrive the ordinary way — as window messages, on the UI thread, to the control
-/// that has the focus — and this procedure reads them there. The dialog manager is the only
-/// thing in the way, because `IsDialogMessage` keeps Tab, Escape, Enter and the arrows for
-/// itself; answering `WM_GETDLGCODE` with `DLGC_WANTALLKEYS` while a capture is armed is what
-/// asks it to hand them over.
-///
-/// A thread-wide `WH_KEYBOARD` hook would have worked too and was rejected for the first reason
-/// above: it would make a *hook callback* out of code that sets window text, and NFR-05 forbids
-/// that in a hook callback whether the hook is global or not.
-fn subclass_hotkey_field(hwnd: HWND) {
-    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-    let Ok(field) = (unsafe { GetDlgItem(Some(hwnd), IDC_HOTKEY) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // SAFETY: `field` is the live edit control of this dialog, created by the dialog manager on
-    // this thread, and `GWLP_WNDPROC` is the documented way to put a procedure in front of its
-    // own. The value stored is a function of exactly the signature the window manager calls.
-    // The control is destroyed with the dialog, so there is no window left afterwards for the
-    // displaced procedure to be missing from.
-    let previous =
-        unsafe { SetWindowLongPtrW(field, GWLP_WNDPROC, hotkey_field_proc as *const () as isize) };
-
-    if previous == 0 {
-        // NFR-13. Not fatal: the field then behaves as it did before this task, showing the key
-        // and refusing to capture one, which is visible rather than silent.
-        crate::app::report_non_critical("SetWindowLongPtrW", &WinError::from_thread());
-        return;
-    }
-
-    // SAFETY: `previous` is what the window manager has just handed back as this control's
-    // window procedure. It is a pointer to a function of that exact signature, and it is not
-    // null — checked above — which is what makes the `Option` `Some`. The transmute converts
-    // between two representations of the same pointer and nothing else.
-    let previous = unsafe { std::mem::transmute::<isize, WNDPROC>(previous) };
-
-    HOTKEY_FIELD_PROC.with(|slot| slot.set(previous));
-}
-
-/// The window procedure the hotkey field runs while this dialog is up.
-///
-/// Everything it does is confined to `armed`: with no capture in progress every message goes
-/// straight to the procedure it displaced, so the field behaves exactly as an ordinary
-/// read-only edit control.
-///
-/// # Safety
-///
-/// Called by the window manager with the arguments of a window message, on the control
-/// [`subclass_hotkey_field`] installed it on.
-unsafe extern "system" fn hotkey_field_proc(
-    field: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    // SAFETY: `field` is that control, and the parent of a control of a dialog is the dialog.
-    // A window with no parent answers an error, which the default below turns into "no dialog"
-    // and therefore into "not armed".
-    let dialog = unsafe { GetParent(field) }.unwrap_or_default();
-
-    // SAFETY: `dialog` is the dialog `show_dialog` created, whose `GWLP_USERDATA` holds either
-    // zero or the pointer that function stored — the contract of `with_state`.
-    let armed = unsafe { with_state(dialog, |state| state.capture.is_some()) }.unwrap_or(false);
-
-    if armed {
-        match message {
-            // The whole reason this procedure exists. Without it `IsDialogMessage` takes Tab,
-            // Escape, Enter and the arrows for itself and the capture never sees them.
-            WM_GETDLGCODE => return LRESULT(DLGC_WANTALLKEYS as isize),
-
-            // ⚠ **Не передаётся дальше** — task Т-23-5, решение 82.6, and this one line is
-            // half of what the user complained about. The edit control's own `WM_SETFOCUS`
-            // handler is what creates the blinking caret and selects the whole of its text in
-            // the system's selection colours — «выделяется Pause белым цветом на тёмном
-            // фоне… начинает моргать вертикальная линия». Both are a **false affordance**:
-            // there is nothing to edit in this field, the key is captured and not typed.
-            //
-            // Swallowing the message costs the capture nothing. The control still holds the
-            // focus as far as the window manager is concerned — which is all that matters,
-            // because every key message is answered above and none of them ever reaches the
-            // edit. What the edit loses is its own idea that it is focused, and the caret and
-            // the selection are exactly what that idea is for.
-            //
-            // No `EM_SETSEL` anywhere: unselecting after the fact would still let the
-            // selection flash for one paint, and a test sweeps this module for the message.
-            WM_SETFOCUS => return LRESULT(0),
-
-            WM_KEYDOWN | WM_SYSKEYDOWN => {
-                // `wparam` of a key message is the virtual-key code, which is the whole of what
-                // the capture reads. **SEC-01:** no character is asked for, no layout is
-                // consulted and `lparam` — where the scan code and the repeat count live — is
-                // not looked at.
-                //
-                // SAFETY: as above.
-                unsafe {
-                    run_capture_step(
-                        dialog,
-                        CaptureEvent::KeyDown(wparam.0 as u16, Modifiers::held_now()),
-                    )
-                };
-
-                return LRESULT(0);
-            }
-
-            // ⭐ Task T-95-2: the release of a key is an event of the capture — the release of
-            // `Shift` ends a tap of the double press (посылка П6, measured: the modal loop hands
-            // both forms to this procedure). Swallowed still, rather than forwarded: the release
-            // of a key whose press was taken must not reach the control. **SEC-01:** the virtual
-            // code and nothing else, as for the press.
-            WM_KEYUP | WM_SYSKEYUP => {
-                // SAFETY: as above.
-                unsafe { run_capture_step(dialog, CaptureEvent::KeyUp(wparam.0 as u16)) };
-
-                return LRESULT(0);
-            }
-
-            // `WM_CHAR` is the message that would put a *character* into a field this program
-            // promises never to show one in.
-            WM_CHAR | WM_SYSCHAR => return LRESULT(0),
-
-            // Clicking somewhere else abandons the capture, because a capture nobody can see is
-            // a program with its conversion switched off for no visible reason. The window the
-            // focus goes to decides, and the decision itself is [`capture_step`]'s.
-            WM_KILLFOCUS => {
-                let taking = HWND(std::ptr::without_provenance_mut(wparam.0));
-
-                // SAFETY: as above.
-                unsafe {
-                    run_capture_step(
-                        dialog,
-                        CaptureEvent::FocusLost {
-                            to_capture_button: is_capture_button(dialog, taking),
-                        },
-                    )
-                };
-            }
-
-            _ => {}
-        }
-    } else {
-        // ⛔ **Вне захвата поле — ТОЛЬКО ПОКАЗ, задача Т-33а-3, решение 104.3.**
-        //
-        // Слово пользователя: «При нажатии на окно горячей клавиши появляется черта, как будто
-        // текст можно стереть и ввести новый, это неправильное поведение». Он прав дважды:
-        // стереть и ввести там нечего — поле `ES_READONLY`, клавиша берётся захватом, — и сама
-        // каретка обещает то, чего не будет. Решение 82.6 убрало её В захвате; здесь та же
-        // болезнь оставалась ВНЕ него, и нашёл её опять глаз.
-        //
-        // Прибор до лечения (`красное-до-3-каретка.log`): щелчок в поле → `GetGUIThreadInfo`
-        // отвечает `GUI_CARETBLINKING`, `hwndCaret` — это поле, `hwndFocus` — это поле.
-        //
-        // ⚠ **Щелчок НЕ взводит захват** — это отдельный вопрос, и он задан пользователю прямо:
-        // «должен ли щелчок по полю клавиши сам взводить захват вместо „Задать“». Ответ —
-        // «нет» (решение 104.3). Единственный вход в захват остаётся кнопка «Задать» и Enter
-        // на ней.
-        match message {
-            // Мышь до контрола не доходит вовсе: `WM_LBUTTONDOWN` у `EDIT` зовёт `SetFocus` на
-            // себя, и всё остальное — следствие. Проглатываются обе половины каждого щелчка:
-            // отпускание без нажатия оставило бы контрол в состоянии «тащу выделение».
-            WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP
-            | WM_RBUTTONDBLCLK | WM_MBUTTONDOWN => return LRESULT(0),
-
-            // Вторая дверь: фокус может прийти и не от мыши. Проглатывается ровно тем же
-            // движением, что и в захвате, и по той же причине — каретку и выделение создаёт
-            // собственный обработчик контрола.
-            WM_SETFOCUS => return LRESULT(0),
-
-            // Третья дверь — клавиатура. `DLGC_STATIC` говорит менеджеру диалога, что это
-            // подпись, а не поле; Tab через него не останавливается. `WS_TABSTOP` снят и в
-            // шаблоне (`app.rc`), так что это второй замок на той же двери, а не единственный.
-            WM_GETDLGCODE => return LRESULT(DLGC_STATIC as isize),
-
-            _ => {}
-        }
-    }
-
-    match HOTKEY_FIELD_PROC.with(Cell::get) {
-        // SAFETY: `previous` is the procedure this one displaced on this very control, and the
-        // four arguments are the ones the window manager passed in, forwarded unchanged. This
-        // is what `CallWindowProcW` exists for.
-        previous @ Some(_) => unsafe { CallWindowProcW(previous, field, message, wparam, lparam) },
-
-        // Unreachable: this procedure is only ever installed together with the slot being
-        // filled. Answering the default rather than zero keeps a message from being silently
-        // eaten if it ever became reachable.
-        //
-        // SAFETY: the same four arguments, forwarded unchanged.
-        None => unsafe { DefWindowProcW(field, message, wparam, lparam) },
-    }
-}
-
-/// Whether `window` is the button that arms the capture.
-fn is_capture_button(dialog: HWND, window: HWND) -> bool {
-    // SAFETY: `dialog` is the live dialog; the crate turns a missing control into an error.
-    unsafe { GetDlgItem(Some(dialog), IDC_HOTKEY_CAPTURE) }.is_ok_and(|button| button == window)
-}
-
-/// Arms the capture, or cancels the one already armed — the button of the section.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] only, with the `hwnd` of the dialog it belongs to.
-unsafe fn toggle_capture(hwnd: HWND) {
-    // SAFETY: see the caller.
-    let armed = unsafe {
-        with_state(hwnd, |state| {
-            if state.capture.is_some() {
-                cancel_capture(hwnd, state);
-                false
-            } else {
-                arm_capture(hwnd, state);
-                true
-            }
-        })
-    }
-    .unwrap_or(false);
-
-    // ⚠ **Outside the borrow, and that is load-bearing** — task Т-23-5. `SetFocus` sends
-    // `WM_SETFOCUS` *synchronously*, the field's own procedure answers it, and the first thing
-    // that procedure does is ask the state whether a capture is armed. Asked from inside this
-    // borrow the question comes back «нет» — `with_state` refuses a nested borrow and the
-    // caller reads the refusal as «not armed» — and the field would then hand the message to
-    // the edit control, which is precisely the caret and the selection решение 82.6 is against.
-    if armed {
-        focus_control(hwnd, IDC_HOTKEY);
-    }
-
-    // The frame of the field is drawn by the window's own background, and the background is a
-    // cached picture: arming changes the colour that picture is painted with, so the picture
-    // has to be built again. Both directions — the frame goes to `box_border` on arming and
-    // back to `field_border` on cancelling.
-    //
-    // ⭐ Задача T-118-1 (Q-208-23 п. 1, SKHCQ3SA): перерисовывается **только рамка** — до неё здесь
-    // стояла перерисовка всего окна со всеми детьми, и окно моргало целиком на каждом «Задать» и
-    // «Стоп». Outside the borrow, as the `SetFocus` above: see `repaint_capture`.
-    repaint_capture(hwnd);
-}
-
-/// Arms a capture: the conversion path stops, the field shows the invitation, the note shows
-/// the way out, and the button offers to take it back.
-///
-/// ⚠ The field is **not** focused here — [`toggle_capture`] does that after this borrow ends;
-/// see the ⚠ there.
-fn arm_capture(hwnd: HWND, state: &mut DialogState<'_>) {
-    state.capture = Some(CaptureSession::arm(state.working.hotkey.clone()));
-    // Task T-93-2: the line said once after a combination lasts until the next capture.
-    state.combination_taken = false;
-
-    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_STOP));
-    // Решение 82.6: the invitation stands **in the field**, where the key name was — the field
-    // has nothing to show while the capture waits, and a name left there looks like a value
-    // that could be edited. The ink is `text_muted` (`on_ctl_color`), the frame `box_border`
-    // (`on_erase_background`).
-    set_text(hwnd, IDC_HOTKEY, &text(IDS_CAPTURE_PROMPT));
-    show_capture_note(hwnd, None);
-}
-
-/// The note under the field while a capture is armed — the hint, or the reason the last press
-/// was refused.
-///
-/// ⚠ **One line and not two, and the reason is geometry.** The mock-up of решение 82.6 draws
-/// the warning and the hint one under the other; this static is `IDC_HOTKEY_NOTE`, sixteen
-/// dialog units — two lines of text — and every refusal of [`Refusal`] takes both of them on
-/// its own. A second static would grow the «Горячая клавиша» block, and with it the left
-/// column and the window, which is the geometry the user chose by eye at контрольная точка К-1
-/// (решение 83) and this task has no business moving. So the two share the line: the hint
-/// while the capture is simply waiting, the refusal the moment there is one to tell.
-fn show_capture_note(hwnd: HWND, refusal: Option<Refusal>) {
-    let note = match refusal {
-        Some(refusal) => text(refusal.string_id()),
-        None => text(IDS_CAPTURE_HINT),
-    };
-
-    set_note(hwnd, &note);
 }
 
 /// The identifier of the one-shot timer of the double press — task T-95-2, вопрос 159.
@@ -16570,56 +10496,6 @@ fn kill_pair_timer(dialog: HWND) {
     let _ = unsafe { KillTimer(Some(dialog), CAPTURE_PAIR_TIMER) };
 }
 
-/// Abandons the capture and puts back the key that stood there before it was armed.
-///
-/// Dropping the session is what restores the callback's `general.enabled`; the assignment below
-/// is what restores the *configuration*, and it matters even though nothing else has written to
-/// that field: a capture that was accepted and then armed again remembers the accepted name,
-/// and cancelling the second capture has to go back to it and not to the file's original.
-fn cancel_capture(hwnd: HWND, state: &mut DialogState<'_>) {
-    let Some(session) = state.capture.take() else {
-        return;
-    };
-
-    // Task T-95-2: a pair open when the capture is cancelled goes with it — nothing ticks at rest.
-    kill_pair_timer(hwnd);
-
-    let previous = session.previous().clone();
-
-    drop(session);
-
-    state.working.hotkey = previous;
-
-    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
-    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
-}
-
-/// Takes the captured hotkey: the field shows its name and the configuration carries it — the key
-/// and, since task T-93-2, the modifiers held with it, which replace whatever the file had.
-///
-/// A combination says once which half stays with the programs (the mock-up of 157.5): «F12 без
-/// Ctrl остаётся программам.» stands under the field until the window closes or the next capture
-/// is armed ([`hotkey_line`]).
-///
-/// Nothing is published to the hook from here. The dialog edits a copy and publishes on
-/// «Применить» like every other field — through `app::publish_configuration`, which is the one
-/// caller of `hook::set_hotkey` there has ever been.
-fn accept_capture(hwnd: HWND, state: &mut DialogState<'_>, hotkey: Hotkey) {
-    // Ends the capture and publishes the callback's previous `general.enabled` back.
-    state.capture = None;
-
-    // Task T-95-2: the double press is taken on the release that completes it, with its timer
-    // still armed for the hold of that tap — and a combination may be taken out of an open pair.
-    kill_pair_timer(hwnd);
-
-    // The line said once — after a combination, and since task T-95-2 after the double press.
-    state.combination_taken = !hotkey.modifiers.is_empty() || hotkey.is_double_tap();
-    state.working.hotkey = hotkey;
-
-    show_hotkey(hwnd, &state.working.hotkey, state.combination_taken);
-    set_text(hwnd, IDC_HOTKEY_CAPTURE, &text(IDS_HOTKEY_SET));
-}
-
 /// Presses a hotkey capture refused — task T-71-3, backlog line Э36-Б-3 (finding Н9 of stage Э36).
 ///
 /// Each one is a key a person pressed to make it the hotkey and the program did not take. The
@@ -16657,131 +10533,9 @@ pub fn note_capture_refused() {
     );
 }
 
-/// Carries out what [`capture_step`] decides about one event — task Т-23-5.
-///
-/// The decision is taken in a borrow of its own and the second borrow only performs it: the
-/// machine is a pure function of the capture's memory and the event — [`CapturePair::step`] since
-/// task T-95-2, which keeps the double press of `Shift` between two events — and everything Win32
-/// about it lives here. The time of the event is the time of the message being handled
-/// (`GetMessageTime`): this runs inside the handling of the key message or of the timer.
-///
-/// # Safety
-///
-/// Called from [`hotkey_field_proc`] and [`dialog_proc`] only, with the `hwnd` of the dialog
-/// the field belongs to.
-unsafe fn run_capture_step(dialog: HWND, event: CaptureEvent) {
-    // SAFETY: takes no arguments and reads a value the system keeps for the message this thread
-    // is dispatching; it cannot fail. The cast is the documented reading of a tick count.
-    let time = (unsafe { GetMessageTime() }) as u32;
-
-    // SAFETY: see the caller. The pair is asked **before** the step: whether the field said
-    // «Shift…» when this event came is what a refusal has to undo.
-    let decided = unsafe {
-        with_state(dialog, |state| match state.capture.as_mut() {
-            Some(session) => {
-                let pair_was_open = session.pair_open();
-
-                (session.step(event, time), pair_was_open)
-            }
-            None => (capture_step(false, event), false),
-        })
-    };
-
-    let Some((step, pair_was_open)) = decided else {
-        return;
-    };
-
-    // The frame of the field is part of the window's cached background, so the two steps that
-    // end a capture have to make the picture again — see `toggle_capture`.
-    let ends = matches!(step, CaptureStep::Cancel | CaptureStep::Take(_));
-
-    // SAFETY: see the caller.
-    unsafe {
-        with_state(dialog, |state| match step {
-            CaptureStep::Ignore => {}
-            CaptureStep::Cancel => cancel_capture(dialog, state),
-            CaptureStep::Take(hotkey) => accept_capture(dialog, state, hotkey),
-
-            // The capture stays armed: a refusal is a "not that one", not an end to the
-            // question. The note says which reason it was, in place of the hint — and first,
-            // since task T-71-3 (Э36-Б-3), the refusal is counted and journaled: here, where it is
-            // carried out, and not in `capture_step`, which only decides. Task T-95-2: a refusal
-            // ends an open pair, so the field says the invitation again.
-            CaptureStep::Refuse(refusal) => {
-                note_capture_refused();
-                if pair_was_open {
-                    end_pair_wait(dialog);
-                }
-                show_capture_note(dialog, Some(refusal));
-            }
-
-            // Task T-95-2 — the moments 3 and 4 of the mock-up of 157.18.
-            CaptureStep::AwaitShift => await_second_shift(dialog),
-            CaptureStep::ShiftLapsed => end_pair_wait(dialog),
-        })
-    };
-
-    // Задача T-118-1: только рамка поля, а не всё окно — см. `toggle_capture`. Принятая клавиша,
-    // Esc, щелчок мимо и уход фокуса кончают захват здесь.
-    if ends {
-        repaint_capture(dialog);
-
-        // Задача T-118-5: a key taken is an edit like any other — the keys of the capture come
-        // through the field's own procedure, past the refresh of `WM_COMMAND`.
-        refresh_apply(dialog);
-    }
-}
-
-/// Moves the keyboard focus to one control of the dialog.
-///
-/// `SetFocus` and not the `WM_NEXTDLGCTL` message the dialog manager also understands, for a
-/// reason that has nothing to do with focus: **`SendMessage` is forbidden anywhere in `src\`**
-/// by acceptance point 17 of FR-72, and `tests\guard.rs` sweeps the whole directory for it. The
-/// call this window would make is to a window of its own thread and could not block — but the
-/// rule is a rule about the program and not about one call site, and a task that carved an
-/// exception into it would be weakening a guard the watcher thread depends on.
-///
-/// What is given up is small and named: the dialog manager's idea of the default button is not
-/// updated. While a capture is armed that costs nothing, because the field answers
-/// `DLGC_WANTALLKEYS` and Enter never reaches the manager in the first place.
-fn focus_control(hwnd: HWND, control: i32) {
-    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-    let Ok(window) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
-        return;
-    };
-
-    // SAFETY: `window` is the live control just found, on this thread, which is what `SetFocus`
-    // requires of its argument. NFR-13: the crate turns "no window had the focus" into an error,
-    // and that is not a failure — the dialog has only just been shown in that case — so the
-    // result is examined and deliberately not reported.
-    let _ = unsafe { SetFocus(Some(window)) };
-}
-
 // -----------------------------------------------------------------------------------------
 // The list view of the cycle
 // -----------------------------------------------------------------------------------------
-
-/// Registers the window classes of `comctl32` the template needs.
-fn ensure_list_view_class() -> windows::core::Result<()> {
-    let request = INITCOMMONCONTROLSEX {
-        dwSize: u32::try_from(size_of::<INITCOMMONCONTROLSEX>()).unwrap_or(0),
-        dwICC: ICC_LISTVIEW_CLASSES,
-    };
-
-    // SAFETY: `request` is a fully initialised structure owned by this frame, and its `dwSize`
-    // describes it, which is how the call knows what it was given. The call reads through the
-    // pointer and keeps nothing.
-    let registered = unsafe { InitCommonControlsEx(&request) };
-
-    if registered.as_bool() {
-        Ok(())
-    } else {
-        // NFR-13: without the class the dialog cannot be created at all, so this is fatal to
-        // the dialog and is reported as such rather than discovered later as a bare -1.
-        Err(WinError::from_thread())
-    }
-}
 
 /// The whole geometry of one cell of the state image list of the layout list, in the pixels
 /// of the window it is built for — task T-11-16, the pure half of [`check_glyph`].
@@ -16897,54 +10651,6 @@ pub fn cycle_row_paint(
             strip_selected: false,
         },
     }
-}
-
-/// Hands the layout list the three colours of the resolved palette — FR-92а, task T-11-7.
-///
-/// `LVM_SETBKCOLOR` is the ground of the control below and around the rows, `LVM_SETTEXTCOLOR`
-/// the ink of every label, `LVM_SETTEXTBKCOLOR` the ground directly behind the text — all
-/// three the documented colour messages of a list view, named by FR-92а («`LVM_SETBKCOLOR` и
-/// родственные»). They exist because a `SysListView32` asks its parent no `WM_CTLCOLOR*`
-/// question: the brushes of T-11-4 cannot reach it. Sent with [`send_to`] — the way this file
-/// already talks to its own list — on initialisation and again on every palette change.
-///
-/// # ⚠ The third colour is `CLR_NONE` since task T-11-25
-///
-/// «To make the text background transparent» is what the documentation of `LVM_SETTEXTBKCOLOR`
-/// says `CLR_NONE` is for, and transparency is exactly what this list now needs: the ground of a
-/// row is no longer a rectangle the control fills, it is the figure [`draw_cycle_row`] paints in
-/// the item prepaint — a rounded stripe inset into the row, which any opaque fill of the control
-/// would erase the moment the label went down over it. With `CLR_NONE` the control fills nothing
-/// and only writes the letters, so what stays behind them is the drawing this module made.
-///
-/// The ground *of the control* — `LVM_SETBKCOLOR`, the first row above — is untouched and stays
-/// `field_bg`: it is what the list wears below and around the rows, and it is also the erase
-/// every repaint starts from, which is the honest ground the stripe is inset into.
-fn paint_cycle_list(hwnd: HWND, palette: &theme::Palette) {
-    // NFR-13: each message answers a success flag, examined in words and dropped: a refused
-    // colour leaves the system one on exactly that surface — the dialog lives degraded, the
-    // precedent of the refused brushes of T-11-4 — and the journal has no row for cosmetics
-    // (reviews\T-11-1.md).
-    for (message, value) in [
-        (
-            LVM_SETBKCOLOR,
-            isize::try_from(palette.field_bg.0).unwrap_or(0),
-        ),
-        (
-            LVM_SETTEXTCOLOR,
-            isize::try_from(palette.text.0).unwrap_or(0),
-        ),
-        (LVM_SETTEXTBKCOLOR, isize::try_from(CLR_NONE).unwrap_or(0)),
-    ] {
-        send_to(hwnd, IDC_CYCLE_LIST, message, 0, value);
-    }
-
-    // `LVM_SETBKCOLOR` above just wrote `field_bg` into the cells of the state image list as
-    // well — measured, see [`clear_state_image_ground`] — so the ground comes out again here,
-    // and it has to come out **here** and not only where the list is installed: this is the
-    // whole of what a palette change sends the list, and after it the cells would otherwise be
-    // opaque again.
-    clear_state_image_ground(hwnd);
 }
 
 /// Takes the ground out of the cells of the state image list of the layout list — FR-92а,
@@ -17497,199 +11203,6 @@ fn draw_check_glyph(dc: HDC, glyph: &RECT, checked: bool, palette: &theme::Palet
     }
 }
 
-/// Gives the list view its one column and its check boxes.
-fn prepare_cycle_list(hwnd: HWND) {
-    // FR-31 asks for «галочки участия», which in a list view is an extended style rather than a
-    // control style, so it cannot be declared in the template and is set here.
-    send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_SETEXTENDEDLISTVIEWSTYLE,
-        0,
-        isize::try_from(LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT).unwrap_or(0),
-    );
-
-    // A report-mode list view shows nothing at all without a column, however many items it
-    // holds. The width is taken from the control so that the single column fills it.
-    let column = LVCOLUMNW {
-        mask: LVCF_WIDTH,
-        cx: cycle_column_width(hwnd),
-        ..Default::default()
-    };
-
-    // SAFETY: `column` is a fully initialised `LVCOLUMNW` owned by this frame; the message
-    // reads through the pointer for the length of the call and keeps nothing. `LVM_INSERTCOLUMNW`
-    // takes the index in `wParam` and the structure in `lParam`, which is what is passed.
-    send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_INSERTCOLUMNW,
-        0,
-        std::ptr::from_ref(&column) as isize,
-    );
-}
-
-/// The width the single column of the layout list is to have **right now** — the client width
-/// of the control, and nothing taken off it, task T-12-7 (backlog item T-11-26).
-///
-/// # The twenty pixels that were taken off here, and why they were a second helping
-///
-/// Until this task the column was created `client_width − 20`, with «room for the vertical
-/// scroll bar» for the reason. Measured on the stand, `dlgstand dark cycle`, the layout list of
-/// this dialog:
-///
-/// | state | `GetClientRect` | `GetWindowRect` | `WS_VSCROLL` |
-/// |---|---|---|---|
-/// | two rows | 249 | 249 | no |
-/// | twelve rows | **232** | 249 | yes |
-///
-/// `GetClientRect` **already** takes the scroll bar off — 17 px of it — because a scroll bar of
-/// a control is non-client area. Subtracting a second twenty left the selection stripe ending
-/// 21 px short of the frame with no scroll bar there to fill the gap, which is finding
-/// **BLIND-3** of the E12 protocol; the mock-ups pull the stripe in by 2 mock-up pixels
-/// ([`LIST_SELECTION_INSET`]) and by nothing else.
-///
-/// So the honest width is the client width itself, and the whole of the scroll-bar question is
-/// already answered by the number the control hands over. Measured the same way, with twelve
-/// rows and the column set to the client 232: `WS_HSCROLL` stays **off** — a column exactly as
-/// wide as the client scrolls nowhere — while a column of 400 puts a horizontal bar up at once
-/// and eats 17 px of the client height with it.
-///
-/// ⚠ **Order.** The client width is not a constant of the dialog: it changes the moment the
-/// vertical scroll bar appears, and that happens when the list is **filled**, long after the
-/// column was created. That is why [`fill_cycle_list`] asks again — see [`fit_cycle_column`].
-///
-/// A refused `GetClientRect` answers the 200 px the column was created with before this task
-/// (NFR-13), and the floor of 40 stays: a column narrower than that would hide the tick itself.
-fn cycle_column_width(hwnd: HWND) -> i32 {
-    client_width(hwnd, IDC_CYCLE_LIST).unwrap_or(200).max(40)
-}
-
-/// Puts the single column of the layout list back on the client width the control answers
-/// **now** — task T-12-7, the trap named in [`cycle_column_width`].
-///
-/// Called from [`fill_cycle_list`] and therefore after every change of the number of rows: the
-/// vertical scroll bar comes and goes with that number, and with it 17 px of client width. Both
-/// directions matter — a list that has just lost its scroll bar has 17 px of dead field on the
-/// right until the column is widened again, which is the same defect the other way round.
-fn fit_cycle_column(hwnd: HWND) {
-    // NFR-13: the answer is the flag `LVM_SETCOLUMNWIDTH` returns, examined in words and
-    // dropped — a refused width leaves the column as it was, which is a stripe that stops
-    // short rather than a list that does not work. No journal row for cosmetics
-    // (reviews\T-11-1.md).
-    send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_SETCOLUMNWIDTH,
-        0,
-        isize::try_from(cycle_column_width(hwnd)).unwrap_or(0),
-    );
-}
-
-/// Fills the list view from the rows and selects `focus`.
-///
-/// `session` is here for [`layout_labels`] and for nothing else: the rows are the session in
-/// the user's own order, and the identifier section 7 stores for a layout must not depend on
-/// where in that order the layout happens to stand.
-fn fill_cycle_list(hwnd: HWND, rows: &[LayoutRow], session: &[LayoutId], focus: usize) {
-    send_to(hwnd, IDC_CYCLE_LIST, LVM_DELETEALLITEMS, 0, 0);
-
-    let ordered: Vec<LayoutId> = rows.iter().map(|row| row.layout).collect();
-    let labels = layout_labels(&ordered, session);
-
-    for (index, row) in rows.iter().enumerate() {
-        let mut label = wide(&labels[index]);
-
-        let item = LVITEMW {
-            mask: LVIF_TEXT,
-            iItem: i32::try_from(index).unwrap_or(0),
-            pszText: PWSTR(label.as_mut_ptr()),
-            ..Default::default()
-        };
-
-        // SAFETY: `item` and the buffer its `pszText` points at are both owned by this frame
-        // and outlive the call, which copies the text into the control and keeps no pointer.
-        send_to(
-            hwnd,
-            IDC_CYCLE_LIST,
-            LVM_INSERTITEMW,
-            0,
-            std::ptr::from_ref(&item) as isize,
-        );
-
-        set_row_check(hwnd, index, row.checked);
-    }
-
-    // After the rows and not before them: the vertical scroll bar appears with the row that
-    // overflows the control, and it is the client width the column has to match — task T-12-7.
-    fit_cycle_column(hwnd);
-
-    if focus < rows.len() {
-        select_row(hwnd, focus);
-    }
-}
-
-/// Ticks or unticks one row.
-fn set_row_check(hwnd: HWND, index: usize, checked: bool) {
-    let state = LVITEMW {
-        mask: LVIF_STATE,
-        state: LIST_VIEW_ITEM_STATE_FLAGS(if checked {
-            CHECKED_IMAGE
-        } else {
-            UNCHECKED_IMAGE
-        }),
-        stateMask: LVIS_STATEIMAGEMASK,
-        ..Default::default()
-    };
-
-    // SAFETY: `state` is a fully initialised `LVITEMW` owned by this frame; the message reads
-    // through the pointer and keeps nothing. Only the state image bits are touched, which is
-    // what `stateMask` says.
-    send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_SETITEMSTATE,
-        index,
-        std::ptr::from_ref(&state) as isize,
-    );
-}
-
-/// Selects and focuses one row.
-fn select_row(hwnd: HWND, index: usize) {
-    // The two flags are one bit each and the crate's newtype carries no `BitOr`, so they are
-    // combined as the numbers they are.
-    let selected = LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0);
-
-    let state = LVITEMW {
-        mask: LVIF_STATE,
-        state: selected,
-        stateMask: selected,
-        ..Default::default()
-    };
-
-    // SAFETY: as in `set_row_check`.
-    send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_SETITEMSTATE,
-        index,
-        std::ptr::from_ref(&state) as isize,
-    );
-}
-
-/// The selected row of the list view, if any.
-fn selected_row(hwnd: HWND) -> Option<usize> {
-    let found = send_to(
-        hwnd,
-        IDC_CYCLE_LIST,
-        LVM_GETNEXTITEM,
-        usize::MAX,
-        isize::try_from(LVNI_SELECTED).unwrap_or(0),
-    );
-
-    usize::try_from(found).ok()
-}
-
 /// Copies the ticks out of the control and into the rows.
 ///
 /// ⚠ **Only when the control answers for every row — task T-43-13, finding Н113.** A message to
@@ -17788,120 +11301,6 @@ pub fn widened_for_scroll_bar(window_width: i32, bar: i32) -> i32 {
     window_width + bar.max(0)
 }
 
-/// Shortens the window to the monitor it opened on and gives it a scroll bar — task T-42-12,
-/// finding 124б.1, решение 124б.1.
-///
-/// # The defect
-///
-/// `IDD_SETTINGS` is 375 dialog units tall, and a dialog unit follows the font, which follows
-/// the display scale: 17 px at 100 % and **23 px at 125 %**. So the window is ~826 px on one
-/// and **~1113 px** on the other, against a work area of 1032 px on a 1080p screen — and the
-/// bottom row of buttons is off the edge of the screen.
-///
-/// ⚠ **375 is what the template said when this was measured; решение 142.5 made it 380** (task
-/// T-81-2 — the five units the unified bottom row needed under itself). The numbers above are
-/// left as the measurement of Э42, and five units more only make the case for this mechanism
-/// stronger: the cure below does not depend on the height, it depends on the window ceasing to
-/// be taller than the work area, whatever the height is. The owner met it on the live product:
-/// «нижняя часть окна приложения не вписывается в экран и у меня нет возможности нажать
-/// кнопки».
-///
-/// ⚠ **It is not a defect of the layout, and shrinking the layout would not cure it.** Twenty
-/// eight units would have to go for 125 %; at 150 % the window wants ~1330 px and at 200 %
-/// ~1770 px, and no amount of shrinking fits those on a 1080p screen. What cures it is the
-/// window ceasing to be taller than the work area — the contents scroll instead.
-///
-/// # What is done
-///
-/// The window keeps the size the template gave it whenever that size fits, so **the look at
-/// 100 % does not change by a pixel** (вид заморожен, решение 124.1). When it does not fit, the
-/// client area is cut to what fits, `WS_VSCROLL` goes on, and the scroll bar is given the real
-/// height of the contents.
-///
-/// # Safety
-///
-/// Called from the `WM_INITDIALOG` arm of [`dialog_proc`] only, after the state pointer has
-/// been stored.
-unsafe fn fit_window_to_work_area(hwnd: HWND) {
-    let mut window = RECT::default();
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live dialog and both buffers are live locals of this frame.
-    if unsafe { GetWindowRect(hwnd, &raw mut window) }.is_err()
-        || unsafe { GetClientRect(hwnd, &raw mut client) }.is_err()
-    {
-        return;
-    }
-
-    let wanted_client = client.bottom - client.top;
-    let frame = (window.bottom - window.top) - wanted_client;
-
-    // The work area of the monitor this window opened on — not of the primary one: a second
-    // monitor may be shorter, and `DS_CENTER` has already put the window on one of them.
-    let Some(work_area) = monitor_work_area(hwnd) else {
-        return;
-    };
-
-    let Some(page) = shortened_client_height(wanted_client, frame, work_area) else {
-        return;
-    };
-
-    // ⛔⛔ **The window grows WIDER by the width of the scroll bar** — task T-42-12a, the defect
-    // the owner met on `e61`: «прокрутка налезает на кнопки».
-    //
-    // `WS_VSCROLL` takes its width out of the **client area**, and every control of this window
-    // is laid out against the client width the template declared: «Применить» ends 7 units
-    // short of the right edge, and the bar is wider than those seven. So the bar was drawn over
-    // the bottom row of buttons and over the right-hand panels. Giving the window those pixels
-    // back leaves the client area exactly as wide as the template asked, and nothing is
-    // covered. 21 px at 125 %, and it follows the scale for the reason
-    // `tray::metric_at_window_dpi` gives: in a `PerMonitorV2` process the bare metric is the
-    // 96-DPI one whatever the monitor does.
-    let bar = crate::tray::metric_at_window_dpi(Some(hwnd), SM_CXVSCROLL, 17);
-
-    // SAFETY: `hwnd` is the live dialog being initialised; the call is given plain numbers and
-    // keeps no pointer. The window is not on the screen yet — it is shown when the procedure
-    // returns — so the change lands before the first paint.
-    if let Err(error) = unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            widened_for_scroll_bar(window.right - window.left, bar),
-            page + frame,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
-        )
-    } {
-        // NFR-13: the window stays as tall as the template asked, which is the defect this
-        // function exists to cure — but nothing is broken and the journal is told.
-        crate::app::report_non_critical("SetWindowPos", &error);
-        return;
-    }
-
-    let view = ScrollView {
-        offset: 0,
-        content: wanted_client,
-        page,
-    };
-
-    // SAFETY: see the contract — the state pointer was stored at the top of the arm.
-    unsafe { with_state(hwnd, |state| state.scroll = Some(view)) };
-
-    show_scroll_bar(hwnd, view);
-}
-
-/// The work area — the screen less the task bar — of the monitor `hwnd` is on, in pixels.
-///
-/// `MonitorFromWindow` with `MONITOR_DEFAULTTONEAREST` is the documented way to ask «which
-/// screen is this window on», and it answers a handle for every window, including one that has
-/// not been shown yet: the manager has already placed this one by `DS_CENTER`.
-///
-/// NFR-13: a refusal answers `None` and the caller leaves the window as the template made it.
-fn monitor_work_area(hwnd: HWND) -> Option<i32> {
-    monitor_work_rect(hwnd).map(|work| work.bottom - work.top)
-}
-
 /// The work area of the monitor `hwnd` is on, as a rectangle of the screen — the one body
 /// [`monitor_work_area`] answers the height of, and решение 143.10 needs the edges of.
 ///
@@ -17944,125 +11343,6 @@ pub fn grown_window_top(top: i32, height: i32, work_top: i32, work_bottom: i32) 
     (work_top + (work_bottom - work_top - height) / 2).max(work_top)
 }
 
-/// Puts the scroll bar on the window and tells it what it is scrolling — task T-42-12.
-fn show_scroll_bar(hwnd: HWND, view: ScrollView) {
-    let info = SCROLLINFO {
-        cbSize: u32::try_from(size_of::<SCROLLINFO>()).unwrap_or(0),
-        fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
-        nMin: 0,
-        // The range of a scroll bar is inclusive, and a page of `page` pixels covers
-        // `nMax - nPage + 1` of it — the documented arithmetic, written out rather than
-        // guessed at.
-        nMax: view.content.max(1) - 1,
-        nPage: u32::try_from(view.page.max(1)).unwrap_or(1),
-        nPos: view.offset,
-        nTrackPos: 0,
-    };
-
-    // SAFETY: `hwnd` is the live dialog and `info` is a live local this call only reads.
-    unsafe { SetScrollInfo(hwnd, SB_VERT, &raw const info, true) };
-}
-
-/// Scrolls the contents to `offset`, in pixels from the top — task T-42-12.
-///
-/// Everything in the window moves together, the bottom row of buttons included: the alternative
-/// — a fixed footer with a scrolling body — is a second layout to keep in step with the first,
-/// and решение 124.1 froze the look rather than opened it for a re-cut.
-///
-/// # Safety
-///
-/// Called from the message arms of [`dialog_proc`], with the `hwnd` of the dialog they belong
-/// to.
-unsafe fn scroll_contents_to(hwnd: HWND, offset: i32) {
-    // SAFETY: see the contract.
-    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
-        return;
-    };
-
-    let target = view.clamped(offset);
-    let delta = view.offset - target;
-
-    if delta == 0 {
-        return;
-    }
-
-    // SAFETY: as above. ⚠ The background is a **picture**, cached by client size and palette —
-    // neither of which a scroll changes — so it has to be dropped by hand, exactly as
-    // `relabel_in_place` drops it: the panels are drawn at the children's coordinates, and the
-    // children have just moved. Урок Э31: invalidating the window does not mend a stale cache.
-    unsafe {
-        with_state(hwnd, |state| {
-            state.scroll = Some(ScrollView {
-                offset: target,
-                ..view
-            });
-            state.background = None;
-        });
-    };
-
-    // SAFETY: `hwnd` is the live dialog; the three `None`s ask for the whole client area and
-    // for no region back. `SW_SCROLLCHILDREN` moves the controls with the picture — which is
-    // the whole of the scroll, since every control of this window is a child of it.
-    unsafe {
-        let _ = ScrollWindowEx(
-            hwnd,
-            0,
-            delta,
-            None,
-            None,
-            None,
-            None,
-            SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE,
-        );
-    };
-
-    show_scroll_bar(
-        hwnd,
-        ScrollView {
-            offset: target,
-            ..view
-        },
-    );
-
-    // The whole window, and not the uncovered strip alone: the background is one picture and
-    // the panels it draws now stand at new coordinates.
-    widgets::repaint::whole(hwnd);
-}
-
-/// Scrolls until `control` stands whole inside the window — task T-42-12.
-///
-/// The keyboard half of the scroll: Tab walks the focus through controls that may be below the
-/// bottom edge of a shortened window, and a focus nobody can see is worse than no scroll at
-/// all. Does nothing in a window that fits (`state.scroll` is `None` there) and nothing when
-/// the control is already whole inside.
-///
-/// # Safety
-///
-/// Called from [`on_command`] and [`on_notify`] with the `hwnd` of the dialog they belong to.
-unsafe fn show_control_whole(hwnd: HWND, control: i32) {
-    // SAFETY: see the contract.
-    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
-        return;
-    };
-
-    let Some(rect) = child_rect_in_client(hwnd, control) else {
-        return;
-    };
-
-    // The rectangle is in client coordinates, so it already carries the scroll: a control above
-    // the top edge has a negative `top`, one below the bottom has a `bottom` past the page.
-    let wanted = if rect.top < 0 {
-        view.offset + rect.top
-    } else if rect.bottom > view.page {
-        view.offset + (rect.bottom - view.page)
-    } else {
-        return;
-    };
-
-    // SAFETY: as above.
-    unsafe { scroll_contents_to(hwnd, wanted) };
-}
-
 /// How far one line of the scroll goes, in pixels — task T-42-12.
 ///
 /// A row of the layout list is twelve dialog units and the tallest thing in the window that a
@@ -18090,69 +11370,6 @@ pub fn scrolled_to(view: ScrollView, command: i32, track: i32) -> i32 {
     };
 
     view.clamped(offset)
-}
-
-/// Answers `WM_VSCROLL` — task T-42-12.
-///
-/// # Safety
-///
-/// Called from [`dialog_proc`] with the `hwnd` of the dialog it belongs to.
-unsafe fn on_vertical_scroll(hwnd: HWND, wparam: WPARAM) {
-    // SAFETY: see the contract.
-    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
-        return;
-    };
-
-    let command = i32::try_from(wparam.0 & 0xFFFF).unwrap_or(-1);
-    let track = i32::try_from((wparam.0 >> 16) & 0xFFFF).unwrap_or(0);
-
-    // SAFETY: as above.
-    unsafe { scroll_contents_to(hwnd, scrolled_to(view, command, track)) };
-}
-
-/// Answers `WM_MOUSEWHEEL` — task T-42-12.
-///
-/// The wheel moves the contents by whole lines of [`SCROLL_LINE`], the number of them taken
-/// from the system's own «lines per notch» setting through `SPI_GETWHEELSCROLLLINES`: a person
-/// who set their wheel to three lines gets three here too.
-///
-/// # Safety
-///
-/// As [`on_vertical_scroll`].
-unsafe fn on_mouse_wheel(hwnd: HWND, wparam: WPARAM) {
-    // SAFETY: see the contract.
-    let Some(Some(view)) = (unsafe { with_state(hwnd, |state| state.scroll) }) else {
-        return;
-    };
-
-    // The high word is a **signed** delta in multiples of `WHEEL_DELTA`: positive is away from
-    // the user, which scrolls the contents up.
-    let notches = i32::from(((wparam.0 >> 16) & 0xFFFF) as u16 as i16);
-
-    let mut lines = 0_u32;
-
-    // SAFETY: the buffer is a live local of this frame, and its size is what the documented
-    // signature of `SPI_GETWHEELSCROLLLINES` asks for.
-    let asked = unsafe {
-        SystemParametersInfoW(
-            SPI_GETWHEELSCROLLLINES,
-            0,
-            Some(std::ptr::from_mut(&mut lines).cast()),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-    };
-
-    // Three is what Windows ships with, and the fallback for a refused read (NFR-13).
-    let lines = if asked.is_ok() && lines > 0 && lines < 100 {
-        i32::try_from(lines).unwrap_or(3)
-    } else {
-        3
-    };
-
-    let delta = -notches * lines * SCROLL_LINE / 120;
-
-    // SAFETY: as above.
-    unsafe { scroll_contents_to(hwnd, view.offset + delta) };
 }
 
 /// Enables the half of the layouts section the mode of FR-30 and FR-31 is about.
@@ -18402,28 +11619,6 @@ pub fn capitalised(name: &str) -> String {
     }
 }
 
-/// Selects in `control` the session layout `spec` names, if the session has one.
-fn select_layout(hwnd: HWND, control: i32, spec: LayoutSpec, session: &[LayoutId]) {
-    let index = session.iter().position(|layout| spec.matches(*layout));
-
-    match index {
-        Some(index) => {
-            send_to(hwnd, control, CB_SETCURSEL, index, 0);
-        }
-        None => {
-            // `CB_ERR`, which is what "no selection" is spelled as.
-            send_to(hwnd, control, CB_SETCURSEL, usize::MAX, 0);
-        }
-    }
-}
-
-/// The session layout selected in `control`, if any.
-fn selected_layout(hwnd: HWND, control: i32, session: &[LayoutId]) -> Option<LayoutId> {
-    let index = send_to(hwnd, control, CB_GETCURSEL, 0, 0);
-
-    session.get(usize::try_from(index).ok()?).copied()
-}
-
 // -----------------------------------------------------------------------------------------
 // Control helpers
 // -----------------------------------------------------------------------------------------
@@ -18528,51 +11723,6 @@ pub(crate) fn get_text(hwnd: HWND, control: i32) -> String {
     String::from_utf16_lossy(&buffer[..copied.min(buffer.len())])
 }
 
-/// Ticks or unticks one check box — in the dialog's own store, task T-11-5b-2.
-///
-/// An owner-drawn button keeps no check state of its own — the button-message pair that
-/// stores it for the automatic types ignores the write for a `BS_OWNERDRAW` one — so the
-/// state goes into [`GlyphChecks`], and the element is repainted here, by the writer,
-/// because writing a store changes no pixels by itself. A dialog with no state yet has no
-/// store to write and nothing on screen to go stale: the write is dropped and the repaint
-/// skipped (NFR-13; in practice every caller runs after `WM_INITDIALOG` stored the
-/// pointer).
-fn set_check(hwnd: HWND, control: i32, checked: bool) {
-    // SAFETY: `hwnd` is the live dialog of `show_dialog` — every caller of this helper
-    // holds exactly that window.
-    let stored = unsafe { with_glyph_checks(hwnd, |checks| checks.set(control, checked)) };
-
-    if stored.is_some() {
-        widgets::repaint::control(hwnd, control);
-    }
-}
-
-/// Whether one check box or radio button is ticked — the dialog's own store answers,
-/// task T-11-5b-2.
-///
-/// «Снят» when the state is unreachable — before `WM_INITDIALOG` stores the pointer, or
-/// for an identifier the store does not carry: the degraded answer NFR-13 asks for, and
-/// the one [`draw_glyph_element`] draws when a `WM_DRAWITEM` outruns initialisation.
-fn is_checked(hwnd: HWND, control: i32) -> bool {
-    // SAFETY: as in `set_check` — `hwnd` is the live dialog of `show_dialog`.
-    unsafe { with_glyph_checks(hwnd, |checks| checks.get(control)) }.unwrap_or(false)
-}
-
-/// Ticks exactly one of a group of radio buttons — in the dialog's own store,
-/// task T-11-5b-2: every identifier of `first..=last` is quenched, `chosen` alone is
-/// armed, and the whole range is repainted — the neighbour that just lost the dot must
-/// lose it on the same occasion its winner gains it. The no-state path is `set_check`'s:
-/// write dropped, repaint skipped (NFR-13).
-fn check_radio(hwnd: HWND, first: i32, last: i32, chosen: i32) {
-    // SAFETY: as in `set_check` — `hwnd` is the live dialog of `show_dialog`.
-    let stored =
-        unsafe { with_glyph_checks(hwnd, |checks| checks.check_radio(first, last, chosen)) };
-
-    if stored.is_some() {
-        widgets::repaint::range(hwnd, first, last);
-    }
-}
-
 /// Enables or disables one control.
 fn enable(hwnd: HWND, control: i32, enabled: bool) {
     // SAFETY: `hwnd` is the live dialog and `control` names a control of its template; the
@@ -18591,86 +11741,6 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
 // здесь стояли `repaint_control` и `repaint_control_range`, теперь это
 // `widgets::repaint::control` и `widgets::repaint::range`. Таблица переименований — в
 // `reports\ИТОГ-Э45.md`.
-
-/// Limits how much text one edit control accepts.
-fn limit_text(hwnd: HWND, control: i32, characters: usize) {
-    send_to(hwnd, control, EM_LIMITTEXT, characters, 0);
-}
-
-/// The client width of one control, in pixels.
-fn client_width(hwnd: HWND, control: i32) -> Option<i32> {
-    // SAFETY: `hwnd` is the live dialog; the crate turns a missing control into an error.
-    let window = unsafe { GetDlgItem(Some(hwnd), control) }.ok()?;
-
-    let mut rect = windows::Win32::Foundation::RECT::default();
-
-    // SAFETY: `window` is the live control and `rect` is a live local the call fills; nothing
-    // else is written.
-    unsafe { GetClientRect(window, &mut rect) }.ok()?;
-
-    Some(rect.right - rect.left)
-}
-
-/// Appends one string to a combo box.
-fn combo_add(hwnd: HWND, control: i32, text: &str) {
-    let text = wide(text);
-
-    // SAFETY: `text` is a NUL-terminated UTF-16 buffer owned by this frame and outliving the
-    // call, which copies it into the control.
-    send_to(hwnd, control, CB_ADDSTRING, 0, text.as_ptr() as isize);
-}
-
-/// Appends one string to a list box.
-fn list_add(hwnd: HWND, control: i32, text: &str) {
-    let text = wide(text);
-
-    // SAFETY: as in `combo_add`.
-    send_to(hwnd, control, LB_ADDSTRING, 0, text.as_ptr() as isize);
-}
-
-/// Every string of a list box, in order.
-fn list_items(hwnd: HWND, control: i32) -> Vec<String> {
-    let count = send_to(hwnd, control, LB_GETCOUNT, 0, 0).max(0);
-    let mut items = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
-
-    for index in 0..usize::try_from(count).unwrap_or(0) {
-        let length = send_to(hwnd, control, LB_GETTEXTLEN, index, 0);
-
-        let Ok(length) = usize::try_from(length) else {
-            continue;
-        };
-
-        // One for the terminator the control writes and never counts.
-        let mut buffer = vec![0u16; length + 1];
-
-        // SAFETY: `buffer` is owned by this frame and holds the length the control has just
-        // reported plus the terminator, which is exactly what `LB_GETTEXT` writes. The pointer
-        // is not retained by the call.
-        let copied = send_to(
-            hwnd,
-            control,
-            LB_GETTEXT,
-            index,
-            buffer.as_mut_ptr() as isize,
-        );
-
-        let copied = usize::try_from(copied).unwrap_or(0).min(buffer.len());
-
-        items.push(String::from_utf16_lossy(&buffer[..copied]));
-    }
-
-    items
-}
-
-/// Ends the dialog with a result.
-fn end_dialog(hwnd: HWND, result: isize) {
-    // SAFETY: `hwnd` is the live dialog created by `DialogBoxParamW`, and this is the one call
-    // that ends it. It does not destroy the window immediately; the manager unwinds its own
-    // loop first, which is why nothing after this call touches the dialog.
-    if let Err(error) = unsafe { EndDialog(hwnd, result) } {
-        crate::app::report_non_critical("EndDialog", &error);
-    }
-}
 
 // =========================================================================================
 // What the old «О программе» window left for «От автора»
@@ -19137,3 +12207,355 @@ pub(crate) unsafe fn fit_program_name(hwnd: HWND, control: i32, face: Option<HFO
 // another the tools it already had. A test that wants any of it goes through the window using
 // it. (A `pub(crate) use` re-export was tried first and refused by the compiler — E0364/E0365:
 // a private item cannot be re-exported at a wider visibility, it has to *be* wider.)
+
+/// Puts [`combo_box_proc`] in front of one combo box of **another** window of this program —
+/// task Т-32-8, the wizard of FR-104.
+///
+/// The far half is [`unsubclass_foreign_combo`], and the procedure additionally takes itself
+/// off on `WM_NCDESTROY`, exactly as it does for the four of this dialog.
+pub(crate) fn subclass_foreign_combo(hwnd: HWND, control: i32) {
+    // SAFETY: `hwnd` is a live window of this thread; the crate turns a missing control into
+    // an error.
+    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        crate::app::report_non_critical("GetDlgItem", &WinError::from_thread());
+        return;
+    };
+
+    // SAFETY: `combo` is a live control created by the dialog manager on this thread, and
+    // `combo_box_proc` has exactly the signature `SUBCLASSPROC` names. The reference datum is a
+    // plain number. ⚠ NFR-13: the `BOOL` is dropped for the reason `subclass_combo_boxes`
+    // gives at its own — a refusal leaves that one combo box painted by the system, which is
+    // visible rather than silent.
+    let _ = unsafe {
+        SetWindowSubclass(
+            combo,
+            Some(combo_box_proc),
+            COMBO_SUBCLASS_ID,
+            COMBO_FOREIGN,
+        )
+    };
+}
+
+/// Takes [`combo_box_proc`] back off a combo box of another window — the far half of the pair.
+pub(crate) fn unsubclass_foreign_combo(hwnd: HWND, control: i32) {
+    // SAFETY: as above.
+    let Ok(combo) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
+        return;
+    };
+
+    // SAFETY: the procedure and the identifier are the pair the subclass was installed with;
+    // a window that no longer carries it answers `FALSE` and nothing happens.
+    let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
+}
+
+/// The procedure that stands in front of each combo box while this dialog is up — FR-92а,
+/// task T-11-14.
+///
+/// Three messages are its own; everything else goes straight on to [`DefSubclassProc`], so a
+/// combo box behaves in every other way exactly as it did before the subclass — the list still
+/// drops down, the keyboard still chooses, `CB_*` still works, and the dropped-down list is
+/// still coloured by `WM_CTLCOLORLISTBOX` and drawn item by item by `WM_DRAWITEM`.
+///
+/// ⚠ **`WM_PAINT` does not reach the original procedure.** The arm ends in `return`, not in a
+/// fall-through: the control's own painting — the frame and the pale system button with the
+/// arrow — never runs. The one road back to it is a refused `BeginPaint`, and then nothing of
+/// ours could have been drawn either; letting the message through is what keeps the window
+/// validated instead of asking for a paint for ever (NFR-13).
+///
+/// # Safety
+///
+/// Called by the window manager with the arguments of a window message, on one of the four
+/// controls [`subclass_combo_boxes`] installed it on.
+unsafe extern "system" fn combo_box_proc(
+    combo: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass_id: usize,
+    reference_data: usize,
+) -> LRESULT {
+    match message {
+        // The whole reason this procedure exists — see the ⚠ above.
+        //
+        // SAFETY: `combo` is the control this procedure is installed on, and the call is
+        // inside the window's own `WM_PAINT`, which is where `BeginPaint` may be used.
+        WM_PAINT => {
+            if unsafe { paint_combo_closed_part(combo, reference_data) } {
+                return LRESULT(0);
+            }
+        }
+
+        // «Erased» without erasing anything: the closed face is repainted whole by the arm
+        // above, and an erase before it is exactly the two-step repaint that flickers.
+        WM_ERASEBKGND => return LRESULT(1),
+
+        // ⚠ Task T-12-8, the response of the cursor — the two arms the same procedure of the
+        // buttons has, and for the same reason. Neither *answers* the message: both fall
+        // through to `DefSubclassProc` below, so the control's own hot-tracking, its click and
+        // its keyboard are untouched — in particular **the list does not drop down**, which is
+        // what a swallowed `WM_MOUSEMOVE` would have been the shortest road to breaking. The
+        // repaint the flag asks for goes through `WM_PAINT` and the arm above it, and the
+        // colour is chosen by `combo_closed_color_roles`.
+        WM_MOUSEMOVE => enter_hot(combo),
+
+        WM_MOUSELEAVE => leave_hot(combo),
+
+        // The belt to the braces of the pair — see `subclass_combo_boxes`. Forwarded on
+        // afterwards: `WM_NCDESTROY` must reach every procedure of the chain.
+        //
+        // SAFETY: `combo` is that control, and the procedure and identifier are the pair the
+        // subclass was installed with.
+        WM_NCDESTROY => {
+            // Task T-12-8: the record cannot outlive the window it names — see `HOT_CONTROL`.
+            forget_hot(combo);
+            let _ = unsafe { RemoveWindowSubclass(combo, Some(combo_box_proc), COMBO_SUBCLASS_ID) };
+        }
+
+        _ => {}
+    }
+
+    // SAFETY: the four arguments are the ones the window manager passed in, forwarded
+    // unchanged; this is what `DefSubclassProc` exists for.
+    unsafe { DefSubclassProc(combo, message, wparam, lparam) }
+}
+
+/// Answers one `WM_PAINT` of a combo box; `false` when `BeginPaint` refused and the message
+/// has to go on to the control's own procedure — see [`combo_box_proc`].
+///
+/// # Safety
+///
+/// Called from [`combo_box_proc`] alone, inside the `WM_PAINT` of the window it names.
+unsafe fn paint_combo_closed_part(combo: HWND, reference_data: usize) -> bool {
+    let mut paint = PAINTSTRUCT::default();
+
+    // SAFETY: `combo` is the live control inside its own `WM_PAINT`, and `paint` is a live
+    // local of this frame that the call fills in.
+    let dc = unsafe { BeginPaint(combo, &mut paint) };
+
+    if dc.is_invalid() {
+        // NFR-13: examined. Nothing of ours can be drawn without a DC, and the window still
+        // has to be validated — which the control's own procedure will do.
+        return false;
+    }
+
+    // SAFETY: `dc` is the DC `BeginPaint` has just answered, owned until `EndPaint` below.
+    unsafe { draw_combo_closed_part(combo, dc, reference_data) };
+
+    // SAFETY: the same window and the very `PAINTSTRUCT` `BeginPaint` filled in. The `BOOL`
+    // is dropped for the reason the paint calls of this file drop theirs.
+    let _ = unsafe { EndPaint(combo, &paint) };
+
+    true
+}
+
+unsafe fn draw_combo_closed_part(combo: HWND, dc: HDC, reference_data: usize) {
+    // The dialog is the parent of its own control; everything below is read through it, by
+    // identifier, exactly as every other drawing of this file reads what it draws.
+    //
+    // SAFETY: `combo` is the live control; a window with no parent answers an error.
+    let Ok(dialog) = (unsafe { GetParent(combo) }) else {
+        return;
+    };
+
+    // SAFETY: reading a window's identifier reads a field of that window and no memory of
+    // ours.
+    let control = unsafe { GetDlgCtrlID(combo) };
+
+    let foreign = reference_data == COMBO_FOREIGN;
+
+    // The same gate the owner-draw handlers keep (SEC-05), even though this procedure can only
+    // be reached on a window it was installed on: one list of four, checked before any work.
+    //
+    // ⛔ A combo of **another** window of this program is exempt from the list and from
+    // nothing else — and the exemption is the reference datum the subclass was installed with,
+    // which no message can forge: `SetWindowSubclass` is the only thing that writes it.
+    if !foreign && !COMBO_BOXES.contains(&control) {
+        return;
+    }
+
+    let mut area = RECT::default();
+
+    // SAFETY: `combo` is the live control and `area` is a live local the call fills.
+    if unsafe { GetClientRect(combo, &mut area) }.is_err() {
+        return;
+    }
+
+    // SAFETY: `combo` is the live control; the call reads a window style and answers a flag.
+    let disabled = !unsafe { IsWindowEnabled(combo) }.as_bool();
+
+    // The focus cue on the same terms as the buttons of task T-11-5a: shown while the control
+    // holds the focus, hidden while the window manager says the keyboard cues are hidden —
+    // which is what `ODS_NOFOCUSRECT` carries into an owner-draw message and what
+    // `WM_QUERYUISTATE` answers outside one.
+    //
+    // SAFETY: the call reads the focus of this thread and touches no memory of ours.
+    let has_focus = unsafe { GetFocus() } == combo;
+    let cues_hidden =
+        send_to(dialog, control, WM_QUERYUISTATE, 0, 0) & (UISF_HIDEFOCUS as isize) != 0;
+    let focused = has_focus && !cues_hidden;
+
+    // Task T-12-8: the cursor standing on the closed part, out of this program's own record —
+    // the very question the push buttons ask, asked here about the control that is painting
+    // itself rather than about the window of a message.
+    let roles = combo_closed_color_roles(is_hot(combo), disabled);
+
+    // Every combo box this draws belongs to a window of the letters — the settings window of FR-92
+    // is a window of the shell since T-120-20: its look is built out of the palette the
+    // configuration resolves to — the very palette that window built itself from — and the
+    // brushes are owned for the length of this paint.
+    let setting = crate::tray::with_tray(|tray| tray.config().general.theme)
+        .unwrap_or(theme::ThemeSetting::System);
+    let palette = theme::resolve(setting, theme::system_is_light());
+    let brushes = theme::Brushes::new(palette);
+    let choice = brushes
+        .as_ref()
+        .map(|brushes| combo_look(roles, palette, brushes, brushes.window_bg(), None));
+
+    // `_hot` is named and not discarded on purpose: it owns the transient brush `fill` may name,
+    // and a `_` would have freed it before the first pixel was drawn.
+    let Some((ground, fill, _hot, border, ink, chevron_ink, face)) = choice else {
+        return;
+    };
+
+    let dpi = drawing_dpi(dc);
+
+    // ⚠ **Один кадр вместо череды — task T-15-1б.** The surface the steps below are drawn onto,
+    // and the same cure task T-15-1 gave the push buttons: a string of separate GDI calls
+    // straight into the DC of a control is not atomic, and DWM samples the surface of a window
+    // sixty times a second. Measured on the стенд against the closed part of `IDC_THEME`, thirty
+    // hover transitions in each palette: an intermediate state reached the screen in **30 of 30**,
+    // its bounding box exactly this control's rectangle, holding the hot fill, the frame ink and
+    // **100 px of the ground of the panel** — the four 5×5 corner squares of raw ground standing
+    // where the smoothed arcs were not yet drawn. Off-screen there is no screen for that state to
+    // appear on, and the finished field crosses over in the single blit at the foot of this body.
+    //
+    // `None` — GDI refused the surface (NFR-13). `target` is then the DC of this paint itself and
+    // every step below paints where it painted before this task, flicker and all: the honest
+    // degradation [`BackgroundCache`] answers a refusal with.
+    //
+    // ⚠ `dpi` is taken one line above off the DC of **this paint** and never off the buffer.
+    // `GetDeviceCaps` of a memory surface answers for the memory and not for the window, and a
+    // radius scaled off the buffer would be wrong at every scale but 100 % with no test going red.
+    //
+    // SAFETY: `dc` is the DC `BeginPaint` answered for this window, owned until `EndPaint`; the
+    // buffer reads it for its colour depth and its face, writes to it only in the blit below, and
+    // frees its own DC and bitmap when this frame ends.
+    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &area) };
+    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
+
+    // 1. The ground, then the field on top of it. `WM_ERASEBKGND` deliberately erases
+    // nothing (see `combo_box_proc`), so this is the one erase of the closed part — and it
+    // is what the four corners the rounding cuts away are filled with. Without it those
+    // corners would hold whatever the parent last painted there, which is right only for as
+    // long as the dialog carries no `WS_CLIPCHILDREN`.
+    //
+    // ⚠ **And since task T-15-1б the erase carries a second duty: it is what grounds the buffer.**
+    // The corner smoothing reads the ground of each corner back **out of** the DC it draws into,
+    // and the pixels of a fresh `CreateCompatibleBitmap` are undefined — so this fill, standing
+    // exactly where it stood, is what makes the buffer hold under the corners the same colour the
+    // screen held there, and the halftones of the arcs come out unmoved.
+    //
+    // SAFETY: `target` is the buffer of this frame or, on a refusal, the DC of this paint;
+    // `area` is a live local of this frame; `ground` is a live brush of the dialog's state.
+    unsafe { FillRect(target, &area, ground) };
+
+    paint_rounded(target, &area, scaled(CORNER_RADIUS, dpi), border, fill, dpi);
+
+    // 2. The chevron, in place of the system button.
+    let chevron = combo_chevron_points(&area, dpi);
+    draw_combo_chevron(target, chevron, chevron_ink, dpi);
+
+    // 3. The chosen value, from the control by identifier — never from anywhere else.
+    let mut value = combo_selected_text(dialog, control);
+
+    if !value.is_empty() {
+        // SAFETY: `target` is a handle passed by value; both calls write an attribute of that DC
+        // and touch no memory of this process.
+        unsafe { SetBkMode(target, TRANSPARENT) };
+        // SAFETY: as above.
+        unsafe { SetTextColor(target, ink) };
+
+        // The face for the length of the drawing — see the doc comment. Since task T-11-17 it
+        // is the dialog's own grey-antialiased face; the control's own font, which the manager
+        // created and renders with ClearType, is the fallback for a window whose faces could
+        // not be made (NFR-13).
+        let font = match face {
+            Some(face) => face,
+            None => HFONT(send_to(dialog, control, WM_GETFONT, 0, 0) as *mut std::ffi::c_void),
+        };
+
+        // NFR-13: examined. A control with no font of its own answers zero, and the stock
+        // font of the DC is then the degraded-but-alive answer.
+        let previous_font = if font.is_invalid() {
+            None
+        } else {
+            // SAFETY: `target` is the buffer or the DC of this paint, and `font` is either a live
+            // face the dialog's state owns for longer than this call or the live font of the
+            // control, owned by the manager; the previous handle is put back below.
+            Some(unsafe { SelectObject(target, font.into()) })
+        };
+
+        // Three dialog units from the left edge — the `($c.x + 3)` of the `'combo'` arm of the
+        // generator (task T-11-16). The dialog is the window the units belong to; a refused
+        // `MapDialogRect` keeps the bare unit count, as everywhere else (NFR-13).
+        let inset = dialog_units(dialog, FIELD_TEXT_INSET_DLU, 0)
+            .map(|(horizontal, _)| horizontal)
+            .unwrap_or(FIELD_TEXT_INSET_DLU);
+
+        let mut text_rect = RECT {
+            left: area.left + inset,
+            top: area.top,
+            right: (chevron[0].0 - scaled(COMBO_CHEVRON_TEXT_GAP, dpi)).max(area.left),
+            bottom: area.bottom,
+        };
+
+        // SAFETY: `value` and `text_rect` are live locals of this frame; the format has no
+        // `DT_MODIFYSTRING` and no `DT_CALCRECT`, so the call reads the text and writes only
+        // pixels of the DC.
+        unsafe {
+            DrawTextW(
+                target,
+                &mut value,
+                &mut text_rect,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            )
+        };
+
+        if let Some(previous) = previous_font {
+            // SAFETY: `previous` is the font that was in the DC a moment ago; putting it back
+            // ends this function's use of it.
+            unsafe { SelectObject(target, previous) };
+        }
+    }
+
+    // 4. The focus cue, on the terms of task T-11-5a.
+    if focused {
+        let focus_rect = RECT {
+            left: area.left + FOCUS_CUE_INSET,
+            top: area.top + FOCUS_CUE_INSET,
+            right: area.right - FOCUS_CUE_INSET,
+            bottom: area.bottom - FOCUS_CUE_INSET,
+        };
+
+        // NFR-13: the `BOOL` is examined and deliberately dropped, as everywhere in this file.
+        //
+        // SAFETY: `target` is the buffer or the DC of this paint and `focus_rect` is a live local
+        // of this frame; the call keeps no pointer.
+        let _ = unsafe { DrawFocusRect(target, &focus_rect) };
+    }
+
+    // ⚠ **The one moment any of the above becomes visible — task T-15-1б.** Nothing since the
+    // erase has touched the window, so what DWM can sample is the closed part as it was or as it
+    // now is, and there is no third state for the eye to catch.
+    //
+    // NFR-13: the answer is examined in words and dropped, for the reason [`paint_push_button`]
+    // gives for its own blit. A refused blit leaves the control showing the picture the window
+    // already had there — its previous state and never a hole — and painting the body a second
+    // time into the DC of the paint is the very flicker this task removes.
+    //
+    // SAFETY: `dc` is the DC of this paint, owned until `EndPaint`; `buffer` is this frame's own,
+    // and its DC and bitmap are freed as it goes out of scope on this line.
+    if let Some(buffer) = buffer {
+        let _ = unsafe { buffer.blit(dc) };
+    }
+}

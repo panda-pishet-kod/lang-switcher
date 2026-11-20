@@ -54,6 +54,7 @@ BEGIN
     IDS_LOG_OPEN            "ಲಾಗ್ ಫೋಲ್ಡರ್ ತೆರೆಯಿರಿ"
     IDS_LOG_SAVE            "ಲಾಗ್ ಉಳಿಸಿ"
     IDS_LOG_SAVE_FAILED     "ಲಾಗ್ ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "ಲಾಗ್ ಉಳಿಸಲಾಗಿದೆ"
     IDS_LOG_DIR_LABEL       "ಲಾಗ್ ಫೋಲ್ಡರ್:"
     IDS_GROUP_STATE         "ಸ್ಥಿತಿ"

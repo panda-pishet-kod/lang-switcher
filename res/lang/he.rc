@@ -51,6 +51,7 @@ BEGIN
     IDS_LOG_OPEN            "פתיחת התיקייה"
     IDS_LOG_SAVE            "שמירת היומן"
     IDS_LOG_SAVE_FAILED     "לא ניתן היה לשמור את היומן."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "היומן נשמר"
     IDS_LOG_DIR_LABEL       "תיקייה:"
     IDS_GROUP_STATE         "מצב"

@@ -57,6 +57,7 @@ BEGIN
     IDS_LOG_OPEN            "خاتىرە قىسقۇچىنى ئېچىش"
     IDS_LOG_SAVE            "خاتىرىنى ساقلاش"
     IDS_LOG_SAVE_FAILED     "خاتىرىنى ساقلىغىلى بولمىدى."
+    IDS_SETTINGS_NOT_SAVED  "The settings could not be saved. The change was not applied."
     IDS_LOG_SAVED           "خاتىرە ساقلاندى"
     IDS_LOG_DIR_LABEL       "خاتىرە قىسقۇچى:"
     IDS_GROUP_STATE         "ھالەت"
