@@ -46,8 +46,8 @@ pub struct LetterView {
     /// The name of the key, in place of [`KEY_PLACEHOLDER`].
     pub key: String,
     /// The frame of the demonstration of «Привет» (`letters::demo_frame`): the window counts it
-    /// once it is given a tick (T-120-25); until then it stays at its first value and the example
-    /// stands still.
+    /// once it is given a tick (T-120-25); without one it stands at `letters::DEMO_STILL`, the
+    /// final frame.
     pub tick: u32,
     pub language: Language,
     pub theme: ThemeSetting,
@@ -317,7 +317,7 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
             letter,
             plan: letters::plan_in(language, letter, &context(true)),
             key: "Pause".to_owned(),
-            tick: 0,
+            tick: letters::DEMO_STILL,
             language,
             theme: ThemeSetting::Light,
         };

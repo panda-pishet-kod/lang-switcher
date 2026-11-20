@@ -2014,6 +2014,11 @@ pub const DEMO_TICK_MS: u32 = 130;
 /// How many frames one turn of the demonstration takes.
 pub const DEMO_FRAMES: u32 = 48;
 
+/// The frame the demonstration stands at while the window has no tick — Windows moves nothing
+/// (its animation is off) or the window is not shown: the word fixed, the key up, what the example
+/// is for (T-120-25: «анимация отключена — стоит итоговый кадр»).
+pub const DEMO_STILL: u32 = 20;
+
 /// One pair of the demonstration — the word as the wrong layout typed it, the word it becomes, and
 /// the two names of the layout indicator.
 ///
@@ -5408,7 +5413,7 @@ fn show_letter_in(
             letter,
             plan,
             key,
-            tick: 0,
+            tick: DEMO_STILL,
             language,
             theme,
         },

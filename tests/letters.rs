@@ -2362,6 +2362,29 @@ fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
     }
 }
 
+/// **The frame without a tick is the final one — T-120-25: «анимация отключена — стоит итоговый
+/// кадр».** Windows with its animation off gives the window no tick, and a window not shown has
+/// none either; the example then stands at `letters::DEMO_STILL` and must show what it is for:
+/// the word fixed, whole, the layout switched, the key up. Frame 0, where it stood before, is the
+/// first typed letter of the wrong word.
+#[test]
+fn the_demonstration_without_a_tick_stands_at_the_fixed_word() {
+    for language in Language::shipped() {
+        let pair = letters::demo_pair(language);
+        let still = letters::demo_frame(letters::DEMO_STILL, pair);
+
+        assert_eq!(
+            still.word_shown(),
+            pair.fixed,
+            "{language:?}: the still frame shows the fixed word, whole"
+        );
+        assert!(
+            still.converted && !still.pressed,
+            "{language:?}: the layout switched and the key up"
+        );
+    }
+}
+
 /// **The pairs of решение 178.6, written down here apart from the code** — `(language, typed,
 /// fixed, [badge before the press, after it])`.
 ///
