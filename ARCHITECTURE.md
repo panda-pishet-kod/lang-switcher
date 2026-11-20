@@ -30,7 +30,7 @@ brings them down in order.
 | Thread | Does | Does not |
 |---|---|---|
 | **Input** (`app.rs`, message-only window) | Owns `WH_KEYBOARD_LL` ([`src/hook.rs`](src/hook.rs)), the typing buffer ([`src/buffer.rs`](src/buffer.rs)), the layout cache ([`src/layouts.rs`](src/layouts.rs)); runs every `SendInput` ([`src/inject.rs`](src/inject.rs)) and the layout switch ([`src/switch.rs`](src/switch.rs)); the watchdog timer of the hook ([`src/watchdog.rs`](src/watchdog.rs)) | UI, file I/O, COM |
-| **UI** (`app.rs`, hidden top-level window) | The tray icon and menu ([`src/tray.rs`](src/tray.rs)), the settings window and the configuration file ([`src/settings.rs`](src/settings.rs)), the theme and drawing ([`src/theme.rs`](src/theme.rs), [`src/widgets.rs`](src/widgets.rs)), the letters and the "From the author" window ([`src/letters.rs`](src/letters.rs)) | The hook |
+| **UI** (`app.rs`, hidden top-level window) | The tray icon and menu ([`src/tray.rs`](src/tray.rs)), the settings ([`src/settings.rs`](src/settings.rs); the configuration file in [`src/config.rs`](src/config.rs), the capture of the hotkey in [`src/hotkey_capture.rs`](src/hotkey_capture.rs), both children of `settings` since T-120-23; the window itself in [`src/ui/windows/settings.rs`](src/ui/windows/settings.rs)), the theme and drawing ([`src/theme.rs`](src/theme.rs), [`src/widgets.rs`](src/widgets.rs)), the letters and the "From the author" window ([`src/letters.rs`](src/letters.rs)) | The hook |
 | **Watcher** (`app.rs`, message-only window, COM STA) | `SetWinEventHook` for the foreground window, the focus and the desktop switch; the password-field check through UI Automation and the exclusion list ([`src/guard.rs`](src/guard.rs)) | The hook, input |
 | **Focus events** (`app.rs`, COM MTA, since 1.5.0) | UI Automation focus-changed handler; it only posts a message to the watcher window (FR-71а) | The hook, input, UI, file I/O |
 | **Feed** (`feed.rs`, short-lived) | One WinHTTP request, the TOML parse, the signature check; puts the result into a mailbox and posts "look into the mailbox" to the UI thread | UI, input, the hook |
@@ -102,7 +102,7 @@ command.
 ## Settings and `schema_version`
 
 `%APPDATA%\Lang_Switcher\config.toml` (§7), read and written by the UI thread
-([`src/settings.rs`](src/settings.rs)) and published to the input thread. The current schema is
+([`src/config.rs`](src/config.rs), re-exported by `settings`) and published to the input thread. The current schema is
 10 (`CURRENT_SCHEMA_VERSION`). Unknown keys are ignored and missing ones take their defaults, so a
 new key alone does not raise the schema. The schema is raised when an older build would destroy
 something by rewriting the file — a new field it does not know, a new value of a closed list: a
