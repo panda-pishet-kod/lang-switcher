@@ -54,8 +54,10 @@ makes it look into an empty mailbox (SEC-05). No mutex on the hook path.
 ## The interface shell (`src/ui`, stage E120)
 
 Since 1.8.0 every window of the program is a window of one shell, drawn by the program itself; the
-dialog templates of `app.rc` are gone. Two windows stay on the older drawing of `theme.rs` and
-`widgets.rs`: "Already running" and "Could not save the journal".
+dialog templates of `app.rc` are gone. These stay on the older drawing of `theme.rs` and
+`widgets.rs`:
+- the windows "Already running" and "Could not save the journal";
+- the own list of layouts of stage E119.
 
 A window is a value, not code that paints:
 
