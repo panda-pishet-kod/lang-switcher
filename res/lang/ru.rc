@@ -104,7 +104,7 @@ BEGIN
     IDS_STATUS_COPY         "Копировать"
     IDS_SECTION_GENERAL_SUB "Запуск, звук, флаг в трее, язык и вид программы"
     IDS_SECTION_HOTKEY_SUB  "Одна клавиша исправляет набранный текст и переключает раскладку"
-    IDS_SECTION_LAYOUTS_SUB "Между какими раскладками переводить текст"
+    IDS_SECTION_LAYOUTS_SUB "Между какими раскладками исправлять текст"
     IDS_SECTION_EXCLUSIONS_SUB "Программы, в которых Lang Switcher не вмешивается"
     IDS_SECTION_DIAGNOSTICS_SUB "Журнал помогает автору разобраться, если что-то пошло не так"
     IDS_SETTINGS_EYEBROW    "Настройки"

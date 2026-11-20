@@ -105,7 +105,7 @@ BEGIN
     IDS_STATUS_COPY         "Copy"
     IDS_SECTION_GENERAL_SUB "Startup, sound, tray flag, language and look"
     IDS_SECTION_HOTKEY_SUB  "One key fixes the typed text and switches the layout"
-    IDS_SECTION_LAYOUTS_SUB "Which layouts the text is fixed between"
+    IDS_SECTION_LAYOUTS_SUB "Between which layouts to fix text"
     IDS_SECTION_EXCLUSIONS_SUB "Programs Lang Switcher stays out of"
     IDS_SECTION_DIAGNOSTICS_SUB "The journal helps the author see what went wrong"
     IDS_SETTINGS_EYEBROW    "Settings"

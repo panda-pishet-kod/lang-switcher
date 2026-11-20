@@ -6819,8 +6819,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
     ),
     (
         settings::IDS_SECTION_LAYOUTS_SUB,
-        "Между какими раскладками переводить текст",
-        "Which layouts the text is fixed between",
+        "Между какими раскладками исправлять текст",
+        "Between which layouts to fix text",
     ),
     (
         settings::IDS_SECTION_EXCLUSIONS_SUB,

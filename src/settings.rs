@@ -1608,7 +1608,7 @@ pub const IDS_STATUS_COPY: u16 = 3295;
 pub const IDS_SECTION_GENERAL_SUB: u16 = 3307;
 /// «Одна клавиша исправляет набранный текст и переключает раскладку» — the subtitle of «Горячая клавиша» (T-120-20, C3 of the controller).
 pub const IDS_SECTION_HOTKEY_SUB: u16 = 3308;
-/// «Между какими раскладками переводить текст» — the subtitle of «Раскладки» (T-120-20, C3 of the controller).
+/// «Между какими раскладками исправлять текст» — the subtitle of «Раскладки» (T-120-20, C3 of the controller).
 pub const IDS_SECTION_LAYOUTS_SUB: u16 = 3309;
 /// «Программы, в которых Lang Switcher не вмешивается» — the subtitle of «Исключения» (T-120-20, C3 of the controller).
 pub const IDS_SECTION_EXCLUSIONS_SUB: u16 = 3310;
