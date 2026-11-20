@@ -1731,8 +1731,44 @@ fn icon_bitmap(target: &ID2D1RenderTarget, side: i32) -> WinResult<ID2D1Bitmap> 
 
 /// `icon` as a bitmap of `target`, through WIC: the icon's own pixels, premultiplied; the icon is
 /// destroyed once copied.
+/// The bitmaps of icons made and refused since the start, for the tests (the testing build).
+#[cfg(feature = "testing")]
+static ICON_BITMAPS: [std::sync::atomic::AtomicUsize; 2] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+
+/// How many bitmaps of icons — the program's icon, the flags of the taskbar picture — were made and
+/// how many refused (the testing build).
+#[cfg(feature = "testing")]
+pub fn icon_bitmaps() -> (usize, usize) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (ICON_BITMAPS[0].load(Relaxed), ICON_BITMAPS[1].load(Relaxed))
+}
+
+/// A bitmap of `icon` for `target`, through WIC.
+///
+/// ⭐ COM is entered here, for the call: the thread of the windows enters no apartment of its own,
+/// and WIC refused there — the stand of 2026-11-20 (Windows 11): the window in the corner came
+/// without the program's icon and its picture of the taskbar without the flags. The program had
+/// got by on the multithreaded apartment another of its threads makes; a process without that
+/// thread (the entries of the stand) had none.
 fn bitmap_of_icon(target: &ID2D1RenderTarget, icon: HICON) -> WinResult<ID2D1Bitmap> {
-    // SAFETY: WIC of this thread (the window's COM); the icon is destroyed once copied.
+    let made = bitmap_of_icon_in_com(target, icon);
+    #[cfg(feature = "testing")]
+    ICON_BITMAPS[usize::from(made.is_err())].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    made
+}
+
+fn bitmap_of_icon_in_com(target: &ID2D1RenderTarget, icon: HICON) -> WinResult<ID2D1Bitmap> {
+    // Entered first, so that it is left last, after every interface of WIC below is let go.
+    let com = ComEntered::enter();
+    if let Err(error) = com {
+        // SAFETY: the icon handed over is destroyed once, here, as it would be once copied.
+        let _ = unsafe { DestroyIcon(icon) };
+        return Err(error);
+    }
+    // SAFETY: COM is entered on this thread above; the icon is destroyed once copied.
     unsafe {
         let wic: IWICImagingFactory =
             CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;

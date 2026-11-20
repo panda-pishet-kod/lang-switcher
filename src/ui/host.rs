@@ -1244,8 +1244,15 @@ impl<C: Content> Host<C> {
                 }
                 return Some(true);
             }
+            // Esc asks the content first, as in every window (T-120-15: the menu tells Esc from the
+            // loss of the foreground by it).
             k if k == VK_ESCAPE.0 => {
-                close_later(hwnd);
+                match self.content.escape() {
+                    Some(id) => {
+                        self.deliver(hwnd, Event::Pressed(id));
+                    }
+                    None => close_later(hwnd),
+                }
                 return Some(true);
             }
             _ => return None,

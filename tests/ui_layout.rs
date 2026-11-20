@@ -1227,3 +1227,121 @@ fn a_line_of_status_is_its_dot_and_its_words() {
         "paused — the dot of ink3"
     );
 }
+
+/// **What Rows hand on, and a field in a row** (T-120-20, the mock-up's `.grow` and `.inrow`): a fill
+/// inside Rows takes the room left, as in a Column — a list there shows more rows than its least; a
+/// field in a row takes what its button leaves, the button beside it at the bottom of the row; in a
+/// width too small for the field the button goes under it.
+#[test]
+fn rows_hand_on_their_room_and_a_field_shares_its_row_with_its_button() {
+    use lang_switcher::ui::scene::{FieldKind, ListItem};
+
+    let rows: Vec<ListItem> = (0..30)
+        .map(|row| ListItem {
+            label: format!("program{row}.exe"),
+            check: None,
+            mark: false,
+        })
+        .collect();
+    let window = bare(Node::Column(vec![
+        text(Role::Title, "Exceptions"),
+        Node::Fill(Box::new(Node::Rows(vec![
+            text(Role::Body, "The programs Lang Switcher leaves alone"),
+            Node::Fill(Box::new(Node::List {
+                id: Id::Language,
+                rows,
+                selected: 0,
+                first: 0,
+            })),
+        ]))),
+    ]));
+    let layout = lay(&window, usual());
+    let shown = rects_of(&layout, |part| matches!(part, Part::ListRow { .. })).len();
+    assert!(shown > 6, "the list took the room left: {shown} rows");
+
+    let row = bare(Node::Row(vec![
+        Node::Field {
+            id: Id::Sound,
+            label: String::new(),
+            value: "Pause".to_owned(),
+            hint: String::new(),
+            kind: FieldKind::Key { capturing: false },
+        },
+        button(Id::Copy, "Set", ButtonKind::Normal),
+    ]));
+    let layout = lay(&row, usual());
+    let field = rects_of(&layout, |part| matches!(part, Part::Input { .. }))[0];
+    let set = rects_of(&layout, |part| matches!(part, Part::Button { .. }))[0];
+    assert!(
+        close(set.x, field.right() + BUTTON_GAP.at(layout.b)),
+        "beside: {field:?} {set:?}"
+    );
+    assert!(
+        close(set.bottom(), field.bottom()),
+        "at the bottom of the row"
+    );
+    let content = usual().w - 2.0 * CONTENT_PAD.h.at(layout.b);
+    assert!(
+        field.w > content / 2.0,
+        "the field takes what the button leaves: {field:?}"
+    );
+
+    let (parts, _) =
+        lang_switcher::ui::layout::place_node(&row.body, 120.0, 14.0, Class::Ordinary, &MEASURE);
+    let narrow = |wanted: fn(&Part) -> bool| {
+        parts
+            .iter()
+            .find(|item| wanted(&item.part))
+            .expect("a part")
+            .rect
+    };
+    let (field, set) = (
+        narrow(|part| matches!(part, Part::Input { .. })),
+        narrow(|part| matches!(part, Part::Button { .. })),
+    );
+    assert!(
+        set.y >= field.bottom(),
+        "too narrow for the field: the button under it, {field:?} {set:?}"
+    );
+}
+
+/// **A list that takes the room left is no shortfall of its own** (T-120-20, stand of `e120-win-b`:
+/// «Исключения», 620×500, ml — four rows shown, everything above the rule, yet a shortfall of 28,9):
+/// what does not fit is measured with the list at its least, one row; the room left it shows.
+#[test]
+fn a_list_that_takes_the_room_left_is_no_shortfall_of_its_own() {
+    use lang_switcher::ui::scene::ListItem;
+
+    let rows: Vec<ListItem> = (0..30)
+        .map(|row| ListItem {
+            label: format!("program{row}.exe"),
+            check: None,
+            mark: false,
+        })
+        .collect();
+    let window = |lines: usize| {
+        let mut column: Vec<Node<Id>> = (0..lines).map(|_| text(Role::Body, "a line")).collect();
+        column.push(Node::Fill(Box::new(Node::List {
+            id: Id::Language,
+            rows: rows.clone(),
+            selected: 0,
+            first: 0,
+        })));
+        bare(Node::Column(column))
+    };
+    // Enough lines that the list's natural six rows would not fit, and its least one row would.
+    let layout = lay(&window(11), usual());
+    let shown = rects_of(&layout, |part| matches!(part, Part::ListRow { .. })).len();
+    assert!(
+        (1..6).contains(&shown),
+        "the list shows what the room holds: {shown} rows"
+    );
+    assert!(
+        layout.shortfall.fits(),
+        "no shortfall for the rows it does not need: {:?}",
+        layout.shortfall
+    );
+    // And a column that does not fit even with one row of the list says so.
+    let tall = lay(&window(40), usual());
+    assert!(!tall.shortfall.fits(), "{:?}", tall.shortfall);
+}

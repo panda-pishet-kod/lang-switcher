@@ -11,7 +11,9 @@ use lang_switcher::ui::tokens::{MENU_ROW_MIN_HEIGHT, Role};
 use std::cell::RefCell;
 use std::rc::Rc;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_END, VK_RETURN, VK_SPACE, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VK_DOWN, VK_END, VK_ESCAPE, VK_RETURN, VK_SPACE, VK_UP,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, IsWindow, MSG, PM_REMOVE, PeekMessageW, SendMessageW, WA_INACTIVE,
     WM_ACTIVATE, WM_CHAR, WM_CLOSE, WM_KEYDOWN, WM_PAINT,
@@ -194,6 +196,7 @@ fn the_items_of_the_menu_and_their_ends() {
 struct Menu {
     events: Rc<RefCell<Vec<Event<Id>>>>,
     feed: bool,
+    escape: Option<Id>,
 }
 
 impl Content for Menu {
@@ -225,6 +228,10 @@ impl Content for Menu {
     fn theme(&self) -> ThemeSetting {
         ThemeSetting::Light
     }
+
+    fn escape(&self) -> Option<Id> {
+        self.escape
+    }
 }
 
 fn send(hwnd: HWND, message: u32, wparam: usize, lparam: isize) -> isize {
@@ -247,10 +254,15 @@ fn alive(hwnd: HWND) -> bool {
 }
 
 fn open(keyboard: bool) -> (HWND, Rc<RefCell<Vec<Event<Id>>>>) {
+    open_with(keyboard, None)
+}
+
+fn open_with(keyboard: bool, escape: Option<Id>) -> (HWND, Rc<RefCell<Vec<Event<Id>>>>) {
     let events = Rc::new(RefCell::new(Vec::new()));
     let content = Menu {
         events: events.clone(),
         feed: false,
+        escape,
     };
     let hwnd =
         host::create_menu(content, None, POINT { x: 1800, y: 1000 }, keyboard).expect("the menu");
@@ -336,4 +348,25 @@ fn the_menu_goes_with_the_foreground_and_from_outside() {
         send(hwnd, WM_CLOSE, 0, 0);
     }
     assert!(gone, "host::close did not close the menu");
+}
+
+/// **Esc in the menu asks the content first, as in every window** (T-120-15): a content that names
+/// what Esc presses hears it as that press — so it tells Esc from the loss of the foreground; one
+/// that names nothing has the menu closed, as before.
+#[test]
+fn esc_in_the_menu_asks_the_content_first() {
+    let (hwnd, events) = open_with(true, Some(Id::Exit));
+    send(hwnd, WM_KEYDOWN, usize::from(VK_ESCAPE.0), 0);
+    assert_eq!(
+        events.borrow_mut().drain(..).collect::<Vec<_>>(),
+        vec![Event::Pressed(Id::Exit)],
+        "Esc is what the content names"
+    );
+    pump();
+
+    let (hwnd, events) = open(true);
+    send(hwnd, WM_KEYDOWN, usize::from(VK_ESCAPE.0), 0);
+    pump();
+    assert!(events.borrow().is_empty(), "nothing named: no event");
+    assert!(!alive(hwnd), "and the menu is closed");
 }
