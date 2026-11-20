@@ -4735,7 +4735,8 @@ pub fn dispatch_command(hwnd: HWND, command: u32) {
         // FR-93, task T-08-1.
         CMD_AUTOSTART => toggle_autostart(),
 
-        // Outside any borrow of the tray: the about dialog is modal and pumps messages.
+        // Outside any borrow of the tray, like the letters below: the window of FR-92а is made
+        // while the arm runs.
         CMD_ABOUT => show_about(hwnd),
 
         // FR-101 and FR-103, task Т-32-4 — the three entries of the letters from the author.
@@ -5178,55 +5179,21 @@ pub fn toggle_autostart_via(write_run_key: impl FnOnce(bool) -> WinResult<()>) {
 // The about box
 // ---------------------------------------------------------------------------------------
 
-/// Shows the "О программе" window: the name, the version, two lines of description, the
-/// «Как пользоваться» panel of task Т-23-4 and an «ОК» — and nothing else. FR-92а, task
-/// T-11-11: the window is the own-drawn dialog
-/// `IDD_ABOUT` of [`crate::settings`], shown in the resolved palette, because the
-/// `MessageBoxW` this function used to call cannot be repainted by any documented means.
+/// Shows the «О программе» window of FR-92а — the window of the shell (`ui::windows::about`),
+/// owned by the program's window `hwnd`. It is not modal: it returns at once, and the menu stays
+/// locked against a second copy and the settings dialog for as long as it is up
+/// ([`dialog_locks_command`] reads [`settings::about_is_open`]).
 ///
-/// Called in the same order the box was called: from [`dispatch_command`], reached only
-/// through [`handle_ui_message`], with **no borrow of the tray held** — the dialog is modal
-/// and pumps messages, exactly like `TrackPopupMenuEx` (the rule of the module
-/// documentation). The theme setting is *copied* out of the tray first, in a borrow that
-/// ends before the modal call begins — the same shape [`open_settings`] has.
+/// The theme setting and the hotkey are *copied* out of the tray in one borrow that ends before
+/// the window is made: the help names the key, modifiers included (task T-93-1).
 fn show_about(hwnd: HWND) {
-    // FR-92а, task Т-23-4: the help panel of решение 82.5 names the hotkey, so the key travels
-    // beside the theme setting — copied out of the tray in **one** borrow that ends before the
-    // modal call begins, exactly as the setting alone used to be. The whole `[hotkey]` since
-    // task T-93-1: the help names `Ctrl + F12`, and the modifiers are half of that name.
     let Some((setting, key)) =
         with_tray(|tray| (tray.config().general.theme, tray.config().hotkey.clone()))
     else {
         return;
     };
 
-    // SAFETY: `None` asks for the handle of the file used to create the calling process,
-    // which is the running executable — the module `app.rc` was linked into, and therefore
-    // the one holding the dialog template. The handle is borrowed and must not be freed;
-    // nothing here frees it.
-    let module = match unsafe { GetModuleHandleW(PCWSTR::null()) } {
-        Ok(module) => module,
-        Err(error) => {
-            app::report_non_critical("GetModuleHandleW", &error);
-            return;
-        }
-    };
-
-    // The version travels the same road it always did: out of the `VERSIONINFO` resource
-    // of the running executable by [`file_version`], never out of a literal.
-    match settings::show_about_dialog(hwnd, HINSTANCE(module.0), setting, file_version(), &key) {
-        // FR-103, task Т-32-4: «От автора…» ended the modal window, and the modeless one is
-        // opened **here** — after the modal call has returned, at the depth the about window
-        // was shown from, and owned by this program's own window rather than by one that has
-        // just closed.
-        Ok(true) => crate::letters::open_author(hwnd),
-        Ok(false) => {}
-        Err(error) => {
-            // NFR-13. The dialog either came up or it did not, and if it did not the user is
-            // told by the absence of a window; the reason goes to the journal.
-            app::report_non_critical("DialogBoxParamW", &error);
-        }
-    }
+    let _ = crate::ui::windows::about::open(hwnd, setting, &key);
 }
 
 /// The four-part file version of the running executable, from its `VERSIONINFO` resource.

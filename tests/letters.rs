@@ -1927,8 +1927,10 @@ fn all_sixty_six_languages_open_what_the_decisions_give_them() {
 
 /// **Задача T-103-9, сторож (3), решение 181.33 — every road to the two pages opens the page of its
 /// own language.** `perform` hands the shell what its window answers by [`letters::links`] for the
-/// language of the window; «О программе» asks the rule with the language of the interface; and no
-/// code line opens either Russian constant straight any more — the shape of the third build.
+/// language of the window; «О программе» — a window of the shell since FR-92а moved it, whose
+/// address under the panda is the road (208.172, as its name was, 139.2 п. 4) — asks the rule with
+/// the language of its window, which is the language of the interface; and no code line opens
+/// either Russian constant straight any more — the shape of the third build.
 ///
 /// ⚠ Control: the same predicate refuses the two lines of `perform` and the one of «О программе»
 /// as the third build carried them.
@@ -1940,7 +1942,11 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
             && perform.contains("Action::OpenProgram => open_link(program),")
     }
     fn opens_by_the_interface(about: &str) -> bool {
-        about.contains("open_link(crate::letters::links::program_url(ui_language()));")
+        about.contains("language: settings::ui_language(),")
+            && about.contains(
+                "Event::Pressed(Id::Site) => { \
+                 crate::letters::open_link(crate::letters::links::program_url(self.language));",
+            )
     }
     fn opens_a_constant_straight(code: &str) -> bool {
         code.contains("open_link(links::DOWNLOAD_URL)")
@@ -1949,17 +1955,19 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
     }
 
     let source = letters_source();
-    let settings_source = std::fs::read_to_string(
+    let about_source = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("settings.rs"),
+            .join("ui")
+            .join("windows")
+            .join("about.rs"),
     )
-    .expect("src\\settings.rs must be readable");
+    .expect("src\\ui\\windows\\about.rs must be readable");
     let perform = squeezed_code(
         letters_function_body(&source, "fn perform(")
             .expect("src\\letters.rs must still declare `perform`"),
     );
-    let about = squeezed_code(&settings_source);
+    let about = squeezed_code(&about_source);
 
     assert!(
         opens_by_the_window(&perform),
@@ -1968,7 +1976,8 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
     );
     assert!(
         opens_by_the_interface(&about),
-        "181.33: the name in «О программе» must open the page of the language of the interface"
+        "181.33, 208.172: the address under the panda of «О программе» must open the page of the \
+         language of the interface"
     );
     assert!(
         !opens_a_constant_straight(&squeezed_code(&source)) && !opens_a_constant_straight(&about),

@@ -127,10 +127,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     LB_SETSEL, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW,
     MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
     SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
-    SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, STM_SETICON, SW_ERASE,
-    SW_INVALIDATE, SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW,
-    SetCursor, SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, SW_ERASE, SW_INVALIDATE,
+    SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
+    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
     SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
     WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
     WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
@@ -160,14 +160,13 @@ use crate::widgets;
 // site of this file reads exactly as it read before the move.
 use crate::theme::{
     self, ButtonBorderRole, ButtonColors, ButtonFaceRole, ButtonTextRole, CHECK_FRAME_ORDER,
-    CORNER_RADIUS, CheckMark, ChipColors, ChipRowMetrics, ChipRowStyle, ComboBorderRole,
-    ComboChevronRole, ComboFillRole, CornerColors, GlyphFillRole, GlyphFrameRole, GlyphKind,
-    GlyphMarkRole, GlyphTextRole, HotBrush, ResolvedButtonColors, StaticColorRole, ThemeSetting,
-    caption_advance, check_frame_colors, chip_row, combo_chevron_points, combo_closed_color_roles,
-    combo_fill_brush, combo_item_color_roles, combo_text_ink, create_font, dc_dpi, draw_check_mark,
-    draw_combo_chevron, drawing_dpi, glyph_color_roles, label_ink, list_frame_air, list_frame_box,
-    list_item_color_roles, measure_chip_row, paint_caption_underline, paint_chip_row,
-    paint_ellipse, paint_label, paint_label_at_pitch, paint_rounded, paint_rounded_corners,
+    CORNER_RADIUS, CheckMark, ComboBorderRole, ComboChevronRole, ComboFillRole, CornerColors,
+    GlyphFillRole, GlyphFrameRole, GlyphKind, GlyphMarkRole, GlyphTextRole, HotBrush,
+    ResolvedButtonColors, StaticColorRole, ThemeSetting, caption_advance, check_frame_colors,
+    combo_chevron_points, combo_closed_color_roles, combo_fill_brush, combo_item_color_roles,
+    combo_text_ink, create_font, dc_dpi, draw_check_mark, draw_combo_chevron, drawing_dpi,
+    glyph_color_roles, label_ink, list_frame_air, list_frame_box, list_item_color_roles,
+    paint_caption_underline, paint_ellipse, paint_label, paint_rounded, paint_rounded_corners,
     paint_selection_stripe, resolve_button_colors, restore_face, scaled, scaled_tenths_offset,
     select_face, smoothed_logfont, title_bar_is_dark,
 };
@@ -5602,10 +5601,6 @@ impl Drop for CaptureSession {
 /// reported, which is the reason the number is far away from the icon identifiers.
 pub const IDD_SETTINGS: u16 = 200;
 
-/// Resource identifier of the about dialog template in `app.rc` — FR-92а, task T-11-11.
-/// Kept equal by hand, exactly as [`IDD_SETTINGS`] above.
-pub const IDD_ABOUT: u16 = 201;
-
 // =========================================================================================
 // The mirror — вопрос 97, task Т-30-2. Both windows of the program go through here.
 // =========================================================================================
@@ -6828,54 +6823,6 @@ const IDC_THEME_LABEL: i32 = 1109;
 const IDC_EXCLUSION_AUTO_LABEL: i32 = 1110;
 const IDC_EXCLUSION_MANUAL_LABEL: i32 = 1111;
 
-// The controls of the about dialog `IDD_ABOUT` — FR-92а, task T-11-11. A block of their own
-// from 1120, contiguous and clear of everything above; its «ОК» is `IDOK` and is not here.
-const IDC_ABOUT_ICON: i32 = 1120;
-const IDC_ABOUT_NAME: i32 = 1121;
-const IDC_ABOUT_VERSION: i32 = 1122;
-const IDC_ABOUT_LINE_1: i32 = 1123;
-const IDC_ABOUT_LINE_2: i32 = 1124;
-// The «Как пользоваться» panel of FR-92а — task Т-23-4, решение 82.5. The panel itself, then
-// five numerals and five rows, in one contiguous run; mirrored by hand in `app.rc`.
-const IDC_ABOUT_HELP: i32 = 1125;
-const IDC_ABOUT_HELP_N1: i32 = 1126;
-const IDC_ABOUT_HELP_N2: i32 = 1127;
-const IDC_ABOUT_HELP_N3: i32 = 1128;
-const IDC_ABOUT_HELP_N4: i32 = 1129;
-const IDC_ABOUT_HELP_N5: i32 = 1130;
-const IDC_ABOUT_HELP_1: i32 = 1131;
-const IDC_ABOUT_HELP_2: i32 = 1132;
-const IDC_ABOUT_HELP_3: i32 = 1133;
-const IDC_ABOUT_HELP_4: i32 = 1134;
-const IDC_ABOUT_HELP_5: i32 = 1135;
-
-/// The «От автора…» button of FR-103 — task Т-32-4, the one control this window gained. It
-/// stands to the left of «ОК» and the window did not grow (решение 101 п. 7).
-const IDC_ABOUT_AUTHOR: i32 = 1136;
-
-// ⭐ The sixth row of the «Как пользоваться» panel — stage E114, task T-114-2, решение 208.5 (6а):
-// a press over nothing typed and nothing selected switches the layout. The run 1125..1135 is closed
-// by «От автора…» at 1136, so the numeral and the row take the next two free numbers; mirrored by
-// hand in `app.rc`.
-const IDC_ABOUT_HELP_N6: i32 = 1137;
-const IDC_ABOUT_HELP_6: i32 = 1138;
-
-/// The rows of the «Как пользоваться» panel: the numeral, the text and the string row each
-/// text is set from — FR-92а, task Т-23-4.
-///
-/// One table and not fifteen calls, for the reason [`LOCALISED_CONTROLS`] gives for its own:
-/// this is the list a reader wants in one place and the list a test has to walk. The numerals
-/// are **not** in it — they are template literals with no string row, because a digit reads
-/// the same in both locales.
-const ABOUT_HELP_ROWS: [(i32, i32, u16); 6] = [
-    (IDC_ABOUT_HELP_N1, IDC_ABOUT_HELP_1, IDS_ABOUT_HELP_1),
-    (IDC_ABOUT_HELP_N2, IDC_ABOUT_HELP_2, IDS_ABOUT_HELP_2),
-    (IDC_ABOUT_HELP_N3, IDC_ABOUT_HELP_3, IDS_ABOUT_HELP_3),
-    (IDC_ABOUT_HELP_N4, IDC_ABOUT_HELP_4, IDS_ABOUT_HELP_4),
-    (IDC_ABOUT_HELP_N5, IDC_ABOUT_HELP_5, IDS_ABOUT_HELP_5),
-    (IDC_ABOUT_HELP_N6, IDC_ABOUT_HELP_6, IDS_ABOUT_HELP_6),
-];
-
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
 ///
 /// The appearance combo of the dialog is filled with the three strings [`IDS_THEME_SYSTEM`],
@@ -7576,39 +7523,19 @@ impl Drop for DialogSession {
     }
 }
 
-/// Whether an «О программе» window of FR-92а is on the screen of **this** thread — task
-/// T-13-17.
+/// Whether the «О программе» window of FR-92а (`ui::windows::about`) is on the screen of
+/// **this** thread.
 ///
-/// The published half of [`ABOUT_WINDOW`], and the whole of what leaves this module about
-/// that window: one `bool`, read, never written. True from the `WM_INITDIALOG` of
-/// [`about_proc`] until the guard of [`show_about_dialog`] clears the record, which is
-/// exactly the stretch of time there is a window to tell anything to.
+/// The published half of [`ABOUT_WINDOW`]: one `bool`, read, never written. True from the moment
+/// `about::open` has made the window until the window is destroyed. It answers two questions —
+/// may a second copy be made (the door at the top of `about::open`), and which commands of the
+/// menu are locked (`tray::dialog_locks_command`). The record alone is enough for both because
+/// nothing posted is dispatched between the making of the window and its recording: the menu of
+/// FR-91 and the double click on the icon both arrive posted.
 ///
-/// # One thread-local here and two next door
-///
-/// The settings dialog needs a flag *beside* its window record because [`dialog_is_open`]
-/// has to answer «да» before the window exists — it refuses a second copy of the dialog and
-/// locks tray commands, and those decisions are taken while `DialogBoxParamW` is still on its
-/// way in. This window's record is enough for the same two jobs, and task T-43-4 gives it both
-/// — the gate at the top of [`show_about_dialog`] and the doors of `tray::dialog_locks_command`
-/// (finding С21). It is enough because the only stretch in which a window is being made and
-/// the record is still empty runs from [`AboutSession::open`] to `WM_INITDIALOG`, and no posted
-/// message is dispatched in it: the menu of FR-91 and the double click on the icon both arrive
-/// posted, and the dialog manager starts pumping only after the record is written. Beyond that,
-/// the whole of what anybody wants to know about this window is «есть ли кому отдать
-/// сообщение», and the record of the live window *is* that answer. A second flag would be a
-/// second answer to one question, and [`DialogSession`] says in as many words how two answers
-/// to one question start to differ.
-///
-/// **SEC-05, R-20.** Nothing outside this process can move this: the record is a
-/// thread-local of the UI thread, written by the procedure of a window this program created
-/// and cleared by the guard of the function that opened it. There is no window message, no
-/// `wParam` and no pointer anywhere on this road.
-///
-/// ⚠ **Task T-13-20 must read this beside [`dialog_is_open`].** That task narrows the
-/// reading of the `WM_SETTINGCHANGE` string to the case «есть кому отдать»; after this task
-/// «кому отдать» is «диалог открыт **или** about жив», and a gate that asked only the first
-/// would stop the about window from following the system theme again.
+/// **SEC-05, R-20.** Nothing outside this process can move this: the record is a thread-local of
+/// the UI thread, written by the function that made the window and cleared when its content is
+/// dropped. There is no window message, no `wParam` and no pointer anywhere on this road.
 pub fn about_is_open() -> bool {
     ABOUT_WINDOW.with(Cell::get) != 0
 }
@@ -7620,49 +7547,28 @@ pub fn open_window() -> Option<HWND> {
     live_window(&DIALOG_WINDOW).or_else(|| live_window(&ABOUT_WINDOW))
 }
 
-/// The open «О программе» window of this thread, for as long as this value lives — FR-92а,
-/// task T-13-17.
+/// The open «О программе» window of this thread, for as long as this value lives — FR-92а.
 ///
-/// [`DialogSession`] in the window next door, and deliberately the same shape: created by
-/// [`show_about_dialog`] before the modal call and dropped however that function leaves — a
-/// normal return, the `-1` return of a dialog that could not be created, or a panic
-/// unwinding through the call. The window itself is closed by four different roads — «ОК»,
-/// `Esc`, the cross of the caption, and a failed `debug_assert` on the way out in Debug —
-/// and not one of them is a place to clear a record from: a [`Drop`] on the frame that owns
-/// the window is the one place that covers all four at once.
-///
-/// A record left behind would be worse than an empty one. [`on_system_theme_message`] posts
-/// [`WM_APP_SYSTEM_THEME`] to whatever the record names, and Windows is free to have given
-/// that handle to somebody else's window by then — the very reason the dialog's own record
-/// is cleared on a guard rather than in a handler.
-///
-/// ⚠ **Not re-entrant — and not because the window is modal.** Until task T-43-4 this line said
-/// the tray command that opens the window could not run while the modal loop of this very
-/// window was up, and that was false: a modal loop keeps dispatching to the other windows of
-/// the thread, the menu of FR-91 came up under it, and «О программе» opened a second time over
-/// itself and over the settings dialog (finding С21). What keeps a second copy out is the gate
-/// at the top of [`show_about_dialog`] and the doors of `tray::dialog_locks_command`, which grey
-/// and refuse the entry while this window or the settings dialog is up.
+/// `about::open` puts it into the content of the window, and the host of the shell drops the
+/// content when the window is destroyed: the record goes with the window however it closed —
+/// a button, Esc, the cross of the caption, the end of the program — and with a window Windows
+/// refused to make. A record left behind would name a handle Windows is free to give to
+/// somebody else's window.
 pub struct AboutSession;
 
 impl AboutSession {
-    /// Hands back the guard whose [`Drop`] clears the record.
-    ///
-    /// Nothing is recorded here: `DialogBoxParamW` has not been called yet and there is no
-    /// window to name — [`AboutSession::record`] does that from `WM_INITDIALOG`. The guard
-    /// is taken from *before* the modal call all the same, so that the exit paths which
-    /// never reach a window are covered by the same `Drop` as the ones that do.
+    /// Hands back the guard whose [`Drop`] clears the record. Nothing is recorded yet: there is
+    /// no window to name until the host has made it — [`AboutSession::record`] does that.
     pub fn open() -> Self {
         Self
     }
 
-    /// Records the window this session names — called from the `WM_INITDIALOG` of
-    /// [`about_proc`] and from nowhere else in the program.
+    /// Records the window this session names — called by `about::open` once the window is made,
+    /// and from nowhere else in the program.
     ///
-    /// Public for the reason [`GLYPH_CHECK_CONTROLS`] is public: `tests\settings.rs`
-    /// exercises the very guard the product uses, over the very record it writes, without a
-    /// live window. It is an in-process Rust call and not a door SEC-05 speaks of — no
-    /// window message reaches it, and nothing but this program links this library.
+    /// Public so that the tests exercise the very guard the product uses, over the very record
+    /// it writes. It is an in-process Rust call and not a door SEC-05 speaks of — no window
+    /// message reaches it, and nothing but this program links this library.
     pub fn record(hwnd: HWND) {
         ABOUT_WINDOW.with(|window| window.set(hwnd.0 as isize));
     }
@@ -7693,15 +7599,13 @@ thread_local! {
     /// belongs to the UI thread and to no other (section 6.1).
     static DIALOG_WINDOW: Cell<isize> = const { Cell::new(0) };
 
-    /// The window of the «О программе» dialog while it is up, zero otherwise — FR-92а,
-    /// task T-13-17.
+    /// The window of «О программе» while it is up, zero otherwise — FR-92а.
     ///
-    /// The neighbour of [`DIALOG_WINDOW`], on the same terms and for the same reasons:
-    /// written on `WM_INITDIALOG` by [`AboutSession::record`], cleared by the guard of
-    /// [`show_about_dialog`] however that function leaves, stored as the plain integer the
-    /// handle is, and thread-local because the window belongs to the UI thread and to no
-    /// other (section 6.1). Read through [`about_is_open`]; the half that posts to it is
-    /// [`on_system_theme_message`], the same function that posts to its neighbour.
+    /// Written by [`AboutSession::record`], cleared when that session is dropped with the
+    /// window's content; stored as the plain integer the handle is, and thread-local because the
+    /// window belongs to the UI thread and to no other (section 6.1). Read through
+    /// [`about_is_open`] and [`open_window`]. Nothing is posted to it: the window of the shell
+    /// follows the system theme on its own.
     static ABOUT_WINDOW: Cell<isize> = const { Cell::new(0) };
 }
 
@@ -7724,13 +7628,12 @@ pub const IMMERSIVE_COLOR_SET: &str = "ImmersiveColorSet";
 /// [`crate::switch::WM_APP_SWITCH`], `+ 10` and `+ 11` are [`crate::guard`]'s pair, and
 /// `+ 12` and `+ 13` are [`crate::selection`]'s.
 ///
-/// SEC-05: the message carries nothing and decides nothing. Both handlers of it — the one
-/// in [`dialog_proc`] and, since task T-13-17, the one in [`about_proc`] — re-resolve the
-/// palette out of this program's own setting and its own read of the system switch
-/// ([`refresh_palette`], [`refresh_about_palette`]), and an unchanged resolution repaints
-/// nothing — so a forged message buys the sender one reading of the personalization switch
-/// and one comparison of two pointers, and at worst one repaint of our own window with the
-/// palette it already ought to wear.
+/// SEC-05: the message carries nothing and decides nothing. Its handler in [`dialog_proc`]
+/// re-resolves the palette out of this program's own setting and its own read of the system
+/// switch ([`refresh_palette`]), and an unchanged resolution repaints nothing — so a forged
+/// message buys the sender one reading of the personalization switch and one comparison of two
+/// pointers, and at worst one repaint of our own window with the palette it already ought to
+/// wear.
 pub const WM_APP_SYSTEM_THEME: u32 = WM_APP + 14;
 
 /// «Перекрашивать?» — the pure decision of task T-11-9, closed by a table in
@@ -7756,29 +7659,27 @@ pub fn repaint_for_system_theme(
 }
 
 /// The far end of the tray's `WM_SETTINGCHANGE` and `WM_THEMECHANGED` arms — FR-92а,
-/// tasks T-11-9 and T-13-17.
+/// task T-11-9.
 ///
 /// `setting_string` is what the message named, already read within the bounds SEC-05
 /// prescribes — the reading belongs to the module that owns the receiving window.
 ///
-/// **Two windows of FR-92а can be on the screen, and this function is the one road to both
-/// of them.** The settings dialog of FR-92 (task T-11-9) and the «О программе» window
-/// (task T-13-17) are told in the same way, in this order, from this function alone: a
-/// second delivery mechanism would be a second answer to «пора ли перекраситься», and the
-/// audit that produced this task was about a window nobody told at all. Neither window
-/// listens for `WM_SETTINGCHANGE` itself — the broadcast reaches the tray's hidden window,
-/// which is the only window of this program that reads it (§6.2).
+/// **The settings dialog of FR-92 is the one window told this way.** It does not listen for
+/// `WM_SETTINGCHANGE` itself — the broadcast reaches the tray's hidden window (§6.2). The
+/// windows of the shell (`ui::host`) — «О программе» among them — follow the system theme on
+/// their own and are not on this road: their record holds no state of this module, and
+/// nothing may be read out of their windows as if it did.
 ///
-/// A window that is not up is the cheap exit and costs one thread-local read: it will
-/// resolve the fresh system switch when it opens ([`show_dialog`] and
-/// [`show_about_dialog`] both read it at that moment), so there is nothing to tell it now.
-/// Otherwise the decision is [`repaint_for_system_theme`] over that window's own state, and
-/// a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to it — posted, never sent, like
-/// everything this program tells its own windows (the implication of FR-72).
+/// A dialog that is not up is the cheap exit and costs one thread-local read: it will resolve
+/// the fresh system switch when it opens ([`show_dialog`] reads it at that moment), so there is
+/// nothing to tell it now. Otherwise the decision is [`repaint_for_system_theme`] over the
+/// dialog's own state, and a yes is one `PostMessageW` of [`WM_APP_SYSTEM_THEME`] to it —
+/// posted, never sent, like everything this program tells its own windows (the implication of
+/// FR-72).
 ///
-/// A message arriving while a state is borrowed — a re-entrant dispatch inside a handler —
-/// finds `with_state` / `with_about_state` answering `None` and does nothing; Windows sends
-/// these in a batch, and a later arrival of the batch finds the borrow free.
+/// A message arriving while the state is borrowed — a re-entrant dispatch inside a handler —
+/// finds `with_state` answering `None` and does nothing; Windows sends these in a batch, and a
+/// later arrival of the batch finds the borrow free.
 pub fn on_system_theme_message(setting_string: Option<&str>) {
     // The settings dialog of FR-92 — task T-11-9.
     if let Some(hwnd) = live_window(&DIALOG_WINDOW) {
@@ -7800,40 +7701,13 @@ pub fn on_system_theme_message(setting_string: Option<&str>) {
             post_system_theme(hwnd);
         }
     }
-
-    // The «О программе» window of FR-92а — task T-13-17. The same three steps over the state
-    // that window keeps: its own setting — the one the tray copied out of the configuration
-    // when it opened the window — its own palette, and the same fresh reading of the system
-    // switch. The dialog's own «Применить» has no counterpart here: this window changes
-    // nothing (SEC-05), so the setting it was opened under cannot move under it.
-    if let Some(hwnd) = live_window(&ABOUT_WINDOW) {
-        // SAFETY: a non-zero record names the live modal about window of this thread —
-        // written on `WM_INITDIALOG` by `AboutSession::record`, cleared however
-        // `show_about_dialog` leaves — so `hwnd` is the window of a dialog created by
-        // `show_about_dialog`, which is the contract of `with_about_state`.
-        let repaint = unsafe {
-            with_about_state(hwnd, |state| {
-                repaint_for_system_theme(
-                    setting_string,
-                    state.setting,
-                    state.palette,
-                    theme::resolve(ThemeSetting::System, theme::system_is_light()),
-                )
-            })
-        };
-
-        if repaint == Some(true) {
-            post_system_theme(hwnd);
-        }
-    }
 }
 
 /// The window a record names, or `None` when the record is empty — FR-92а, task T-13-17.
 ///
-/// The two records of [`on_system_theme_message`] are read by one body rather than by two
-/// copies of four lines. Zero is «нет окна» in both, and it is the value both are born with
-/// and are returned to by their guards, so a `None` here is «этому окну сейчас нечего
-/// сказать» and never «окно есть, но его номер потерян».
+/// Both records — [`DIALOG_WINDOW`] and [`ABOUT_WINDOW`] — are read by this one body. Zero is
+/// «нет окна» in both, and it is the value both are born with and are returned to by their
+/// guards, so a `None` here is «окна нет» and never «окно есть, но его номер потерян».
 fn live_window(record: &'static std::thread::LocalKey<Cell<isize>>) -> Option<HWND> {
     let raw = record.with(Cell::get);
 
@@ -7844,17 +7718,15 @@ fn live_window(record: &'static std::thread::LocalKey<Cell<isize>>) -> Option<HW
     Some(HWND(raw as *mut std::ffi::c_void))
 }
 
-/// Posts the empty [`WM_APP_SYSTEM_THEME`] nudge to one of this program's own windows —
-/// FR-92а, task T-13-17: the one posting site both recipients share.
+/// Posts the empty [`WM_APP_SYSTEM_THEME`] nudge to the settings dialog — FR-92а.
 ///
 /// SEC-05: the message carries two plain zeros. Nothing of the `WM_SETTINGCHANGE` that
 /// started this — no string, no pointer, no length — travels with it; the receiving handler
 /// asks the system itself what the theme now is.
 fn post_system_theme(hwnd: HWND) {
-    // SAFETY: `hwnd` came from a live record of this thread — the settings dialog or the
-    // about window, both of them windows this program created and neither of them able to
-    // outlive its record; the message carries two plain zeros and no pointer, so
-    // `PostMessageW` queues them by value and returns.
+    // SAFETY: `hwnd` came from the live record of the settings dialog of this thread, a window
+    // this program created and unable to outlive its record; the message carries two plain
+    // zeros and no pointer, so `PostMessageW` queues them by value and returns.
     if let Err(error) =
         unsafe { PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME, WPARAM(0), LPARAM(0)) }
     {
@@ -8521,54 +8393,6 @@ unsafe fn with_glyph_checks<R>(hwnd: HWND, f: impl FnOnce(&GlyphChecks) -> R) ->
     Some(f(&cell.checks))
 }
 
-/// Runs `f` against the [`AboutState`] of the about dialog — FR-92а, task T-11-11.
-///
-/// `None` on the same three occasions as [`with_state`].
-///
-/// # Safety
-///
-/// May only be called with the window of a dialog created by [`show_about_dialog`] — the
-/// `hwnd` its dialog procedure was called with, or the live window [`ABOUT_WINDOW`] records
-/// (task T-13-17) — whose `GWLP_USERDATA` therefore holds either zero or the pointer that
-/// function stored.
-unsafe fn with_about_state<R>(hwnd: HWND, f: impl FnOnce(&mut AboutState) -> R) -> Option<R> {
-    // SAFETY: by this function's own contract, `GWLP_USERDATA` of `hwnd` holds either zero
-    // or the pointer `show_about_dialog` stored, which names a `RefCell<AboutState>` alive
-    // for the whole of that modal call.
-    unsafe { with_window_state(hwnd, f) }
-}
-
-/// The window-message plumbing behind [`with_about_state`] — one body, made generic by
-/// task T-11-11 instead of copied (§6.2). [`with_state`] walked the same road until task
-/// T-11-5b-2 put the check store beside the settings dialog's `RefCell`: its pointer now
-/// names a [`DialogCell`], not a bare cell, so it reads the field itself.
-///
-/// # Safety
-///
-/// May only be called with a window whose `GWLP_USERDATA` holds either zero or a pointer to
-/// a `RefCell<S>` that outlives the modal call — which is what the wrapper above
-/// guarantees through its own contract: it names the one show function whose state type
-/// is `S`, and no other window can carry that pointer, because each show function
-/// stores its own frame's cell into the window it alone creates.
-unsafe fn with_window_state<S, R>(hwnd: HWND, f: impl FnOnce(&mut S) -> R) -> Option<R> {
-    // SAFETY: `hwnd` is the live dialog; reading a window field is a plain read.
-    let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-
-    if raw == 0 {
-        return None;
-    }
-
-    // SAFETY: by the contract above, `raw` is the pointer the show function stored, which
-    // names a `RefCell<S>` on that function's frame. The call is modal, so the frame is alive
-    // for as long as any message of this dialog can be handled. A shared reference is all that
-    // is taken, and the `RefCell` is what governs the mutable access below.
-    let cell = unsafe { &*(raw as *const RefCell<S>) };
-
-    let mut state = cell.try_borrow_mut().ok()?;
-
-    Some(f(&mut state))
-}
-
 /// The role of one control identifier — the single place the list is written down.
 ///
 /// The muted list is the explanatory notes and hints of the dialog, by their actual
@@ -8633,76 +8457,6 @@ pub const OWNER_DRAWN_LABELS: [i32; 18] = [
     IDC_STATE_LAYOUTS,
     IDC_STATE_AUTOSTART,
     IDC_STATE_PAIR,
-];
-
-/// The `SS_OWNERDRAW` labels of the about template — the same gate for the other window.
-///
-/// `IDC_ABOUT_ICON` is deliberately absent: it is an `SS_ICON` static, the type that loads the
-/// 32 px frame of the `.ico`, it draws no text at all, and owner drawing it would only lose
-/// the icon.
-///
-/// Four until task Т-23-4 (решение 82.5) added the ten statics of the «Как пользоваться»
-/// panel: five numerals and five rows.
-///
-/// ⚠ **Thirteen since task T-78-3, and the one that left is the name.** «Lang Switcher» is a
-/// `PUSHBUTTON` now — it opens the program's own page — so it belongs to [`ABOUT_BUTTONS`] and
-/// not here. The two lists move together and a guard holds them to it: a control named in both
-/// would be drawn twice, and one named in neither goes blank.
-pub const OWNER_DRAWN_ABOUT_LABELS: [i32; 15] = [
-    IDC_ABOUT_VERSION,
-    IDC_ABOUT_LINE_1,
-    IDC_ABOUT_LINE_2,
-    IDC_ABOUT_HELP_N1,
-    IDC_ABOUT_HELP_1,
-    IDC_ABOUT_HELP_N2,
-    IDC_ABOUT_HELP_2,
-    IDC_ABOUT_HELP_N3,
-    IDC_ABOUT_HELP_3,
-    IDC_ABOUT_HELP_N4,
-    IDC_ABOUT_HELP_4,
-    IDC_ABOUT_HELP_N5,
-    IDC_ABOUT_HELP_5,
-    IDC_ABOUT_HELP_N6,
-    IDC_ABOUT_HELP_6,
-];
-
-/// The twelve statics that stand **inside** the «Как пользоваться» panel — task Т-23-4; ten until
-/// stage E114 (task T-114-2) added the sixth row.
-///
-/// An `SS_OWNERDRAW` static fills the whole of its own rectangle before it writes a word, so
-/// a label on a panel has to be filled with the panel's own colour or it cuts a hole in the
-/// block. The settings dialog answers the same question with [`controls_on_panels`], which
-/// works out containment from the rectangles; this window has one panel and ten labels on it,
-/// so the list is written down instead of computed — and a test holds it against the
-/// containment the template actually declares.
-pub const ABOUT_LABELS_ON_THE_PANEL: [i32; 12] = [
-    IDC_ABOUT_HELP_N1,
-    IDC_ABOUT_HELP_1,
-    IDC_ABOUT_HELP_N2,
-    IDC_ABOUT_HELP_2,
-    IDC_ABOUT_HELP_N3,
-    IDC_ABOUT_HELP_3,
-    IDC_ABOUT_HELP_N4,
-    IDC_ABOUT_HELP_4,
-    IDC_ABOUT_HELP_N5,
-    IDC_ABOUT_HELP_5,
-    IDC_ABOUT_HELP_N6,
-    IDC_ABOUT_HELP_6,
-];
-
-/// The six **sentences** of the help panel (five until task T-114-2) — the labels that carry a key chip, task Т-26-2.
-///
-/// The numerals of [`ABOUT_LABELS_ON_THE_PANEL`] are deliberately absent: a digit has no
-/// placeholder and no chip, and it is drawn by the shared label path like every other label of
-/// this window. The split is what [`on_about_draw_item`] routes on, and it is written down here
-/// rather than tested for at the call site so that the list is one name and not a condition.
-pub const ABOUT_HELP_SENTENCES: [i32; 6] = [
-    IDC_ABOUT_HELP_1,
-    IDC_ABOUT_HELP_2,
-    IDC_ABOUT_HELP_3,
-    IDC_ABOUT_HELP_4,
-    IDC_ABOUT_HELP_5,
-    IDC_ABOUT_HELP_6,
 ];
 
 /// The colour roles of one button in one state — FR-92а, task T-11-5a, widened by the
@@ -13007,23 +12761,6 @@ pub fn about_body_line_pitch(em: i32) -> i32 {
     (em.abs() * ABOUT_BODY_LINE_PERCENT) / 100
 }
 
-/// The pitch one sentence of the help panel is drawn at — task T-43-5, finding Н69.
-///
-/// `body_pitch` is [`about_body_line_pitch`] of the window's body face, or `None` when the faces
-/// of the window could not be made (NFR-13). Until this task that `None` became a pitch of
-/// **zero**, and every line of a wrapped sentence was drawn on one and the same row: the help
-/// panel turned into an unreadable smudge on exactly the path that is already degraded, while
-/// the fallback every other label of these windows takes — [`theme::LABEL_LINE_PITCH`] through
-/// [`scaled`], in `theme::paint_label_at_pitch` — stood unused one module away. The degraded
-/// row is now drawn in the DC's own face at the pitch of a settings label: coarser, and
-/// readable.
-///
-/// Pure, and public so that a test can hand it the refusal a live window cannot be made to
-/// produce.
-pub fn about_help_row_pitch(body_pitch: Option<i32>, dpi: i32) -> i32 {
-    body_pitch.unwrap_or_else(|| scaled(theme::LABEL_LINE_PITCH, dpi))
-}
-
 /// The `LOGFONTW` of the font the dialog manager gave one of the window's own controls.
 ///
 /// The font is asked of a control (`WM_GETFONT` through `SendDlgItemMessageW`, the one way
@@ -13060,23 +12797,13 @@ pub(crate) fn dialog_logfont(hwnd: HWND, control: i32) -> Option<LOGFONTW> {
     Some(logical)
 }
 
-/// The **three** faces one window sets **its own** text in, owned: created together, freed
-/// together in `Drop` — FR-92а, task T-11-17, widened by task T-12-4.
-///
-/// # Why one type serves both windows although neither uses all three
-///
-/// The settings dialog draws with `text` and `caption` and has no name row; the about window
-/// draws with `text` and `name` and has no panel to caption. That is not new with the third
-/// face — the about window has been carrying an unused `caption` since task T-11-11 — and it
-/// is the cheaper half of the trade: one unused `CreateFontIndirectW` per window against a
-/// second owner with a second `Drop` to keep the discipline of. The set is «the faces a window
-/// of this file may set its own text in», and each window uses the ones it has text for.
+/// The **two** faces the settings dialog sets **its own** text in, owned: created together, freed
+/// together in `Drop` — FR-92а, task T-11-17.
 ///
 /// Owned rather than made per paint for the reason `theme::Brushes` gives for the brushes: a
 /// face selected into a DC has to outlive the drawing, and a paint that makes and deletes a
-/// font on every message pays for a face lookup on every message as well. The captions used to
-/// be exactly that — [`on_erase_background`] made and deleted one on every erase — and since
-/// this task both faces are made once, on `WM_INITDIALOG`, and die with the window's state.
+/// font on every message pays for a face lookup on every message as well. Both faces are made
+/// once, on `WM_INITDIALOG`, and die with the window's state.
 ///
 /// # Where it lives — section 6.1
 ///
@@ -13090,63 +12817,23 @@ struct DialogFonts {
     text: HFONT,
     /// The same face smaller and bolder, for the eight panel captions.
     caption: HFONT,
-    /// The same face **larger** and semibold, for the one row it belongs to: «Lang Switcher» in
-    /// the about window — [`about_name_logfont`], finding A-05, task T-12-4, re-sized by
-    /// решение 85.
-    name: HFONT,
-    /// The same face one step larger, ordinary weight — the body of the about window: its two
-    /// description lines and the five sentences of the help panel ([`about_body_logfont`], task
-    /// Т-26-2).
-    body: HFONT,
-    /// The body face semibold — the five numerals of the help panel
-    /// ([`about_number_logfont`]).
-    number: HFONT,
-    /// The face inside a key chip: smaller than the body and semibold
-    /// ([`about_chip_logfont`]).
-    chip: HFONT,
-    /// The `lfHeight` of [`Self::body`], kept because the line pitch of the body is a share of
-    /// it ([`about_body_line_pitch`]) and the drawing has no other way to ask.
-    body_height: i32,
-    /// The `lfHeight` of [`Self::chip`], kept because the air inside a chip is a share of it
-    /// (`theme::chip_box`).
-    chip_height: i32,
 }
 
 impl DialogFonts {
-    /// All six faces out of the font `control` was given, every handle examined.
+    /// Both faces out of the font `control` was given, every handle examined.
     ///
     /// `None` on every refusal — no font on the control, an unreadable `LOGFONTW`, any
     /// `CreateFontIndirectW` declining. The window then draws in the manager's own face, which
     /// is what it drew in before task T-11-17: degraded-but-alive, and the whole loss is the
     /// smoothing (NFR-13).
     ///
-    /// ⚠ A half-built set is unwound here and not leaked: the handles already created are
-    /// freed on the failing path, because a constructor that answers `None` leaves no value
-    /// for `Drop` to run on — the same discipline [`CaptionIcons::load`] keeps. Since task
-    /// Т-26-2 the unwinding is a loop over what has been made so far rather than one `else`
-    /// arm per face: six faces would otherwise be six copies of the same three lines.
-    ///
+    /// ⚠ A half-built set is unwound here and not leaked: the handles already created are freed
+    /// on the failing path, because a constructor that answers `None` leaves no value for `Drop`
+    /// to run on — the same discipline [`CaptionIcons::load`] keeps.
     fn new(hwnd: HWND, control: i32) -> Option<Self> {
         let base = dialog_logfont(hwnd, control)?;
 
-        let body = about_body_logfont(base);
-
-        // Решение 87 п. 1: asked once per window, and the three emphasised faces below are all
-        // built from the one answer — a window cannot come out semibold in one row and bold in
-        // the next.
-        let emphasis = resolve_emphasis(hwnd, base);
-
-        let chip = about_chip_logfont(base, emphasis);
-
-        let wanted = [
-            smoothed_logfont(base),
-            caption_logfont(base),
-            about_name_logfont(base, emphasis),
-            body,
-            about_number_logfont(base, emphasis),
-            chip,
-        ];
-
+        let wanted = [smoothed_logfont(base), caption_logfont(base)];
         let mut made: Vec<HFONT> = Vec::with_capacity(wanted.len());
 
         for logical in wanted {
@@ -13167,12 +12854,6 @@ impl DialogFonts {
         Some(Self {
             text: made[0],
             caption: made[1],
-            name: made[2],
-            body: made[3],
-            number: made[4],
-            chip: made[5],
-            body_height: body.lfHeight,
-            chip_height: chip.lfHeight,
         })
     }
 
@@ -13185,43 +12866,11 @@ impl DialogFonts {
     fn caption(&self) -> HFONT {
         self.caption
     }
-
-    /// The face of the about window's name row, borrowed — the owner frees it, nobody else.
-    fn name(&self) -> HFONT {
-        self.name
-    }
-
-    /// The face of the about window's body, borrowed — the owner frees it, nobody else.
-    fn body(&self) -> HFONT {
-        self.body
-    }
-
-    /// The face of a help numeral, borrowed — the owner frees it, nobody else.
-    fn number(&self) -> HFONT {
-        self.number
-    }
-
-    /// The face inside a key chip and that face's `lfHeight`, borrowed — the owner frees it.
-    fn chip(&self) -> (HFONT, i32) {
-        (self.chip, self.chip_height)
-    }
-
-    /// The line pitch of the about window's body, in pixels of the window it was made for.
-    fn body_pitch(&self) -> i32 {
-        about_body_line_pitch(self.body_height)
-    }
 }
 
 impl Drop for DialogFonts {
     fn drop(&mut self) {
-        for face in [
-            self.text,
-            self.caption,
-            self.name,
-            self.body,
-            self.number,
-            self.chip,
-        ] {
+        for face in [self.text, self.caption] {
             // SAFETY: each came from a successful `CreateFontIndirectW` in `new` and is freed
             // exactly once: the type is neither `Copy` nor `Clone`, its fields are private and
             // never reassigned, and `drop` runs once. Every drawing that selected a face put
@@ -14164,59 +13813,18 @@ const PUSH_BUTTONS: [i32; 12] = [
     IDC_APPLY,
 ];
 
-/// The owner-drawn push buttons of the about window — «ОК» since task T-12-8, «От автора…» since
-/// task Т-32-4.
-///
-/// ⭐ **Task T-71-1, finding Э70-Б-1: the list is the gate of the drawing too.** «От автора…» was
-/// subclassed from the day it came, but [`on_about_draw_item`] let only «ОК» through, and the
-/// button answered the cursor with nobody to paint it — blank on every machine. The gate asks
-/// [`about_button_is_painted`] now, which is this list: a button subclassed here is painted.
-///
-/// «ОК» is the accented one: [`button_color_roles`] answers the accent for it at rest and
-/// [`Palette::sel_fg`] under the cursor — **task T-15-2 gave the accented button its response**,
-/// and the day it did, the flag this subclass keeps stopped being a spare and became load
-/// bearing. ⚠ Until that task the doc here said the opposite, and said it for a good reason:
-/// the palette held no second accent and inventing a colour is forbidden. The way out was not
-/// a new colour but an existing field — which is why the wiring was kept uniform all along,
-/// and why the response appeared by one arm of the colour table and by nothing else.
-/// The repaint the flag asks for costs nothing visible — a push button has drawn itself
-/// idempotently since task T-12-6, so a repaint with nothing changed puts back the very pixels
-/// that were there.
-///
-/// ⭐ **Three since task T-78-3, and the third is the name «Lang Switcher».** It came here out of
-/// [`OWNER_DRAWN_ABOUT_LABELS`], where it had been a `SS_OWNERDRAW` label: a click on it opens
-/// the program's own page, and a button is what a thing that answers a click is. Nothing was
-/// written twice for it — the subclass, the hover flag, the gate of the drawing and the removal
-/// at `WM_DESTROY` are this one list, and adding a line to it wired all four.
-pub const ABOUT_BUTTONS: [i32; 3] = [OK_COMMAND, IDC_ABOUT_AUTHOR, IDC_ABOUT_NAME];
-
 /// Whether `control` is the **name of the program** — the one button of this program with no
 /// frame of its own, and the one that opens the page of the application.
 ///
-/// ⭐⭐ **Two windows carry it since task T-81-3** — решение 142.2 п. 6: «О программе», where
-/// задача T-78-3 first made the name a button, and «От авторе», whose head became the very same
-/// head. This predicate is what keeps them **one** rather than two alike: the colour table
-/// ([`button_color_roles`]), the hand cursor of [`button_proc`] and the drawing
-/// ([`paint_program_name`]) all ask it, and none of the three knows two numbers of its own.
+/// One window carries it: «От автора». The colour table ([`button_color_roles`]), the hand
+/// cursor of [`button_proc`] and the drawing ([`paint_program_name`]) all ask this predicate, and
+/// none of the three knows the number of its own. «О программе» carried it too until it moved
+/// to the shell (FR-92а); this goes with «От автора» when that window moves (T-120-17).
 ///
-/// ⛔ The number of «От авторе» lives in `letters.rs`, beside the other controls of that window,
-/// and is read from there rather than written down a second time here: a mirrored number is a
-/// number that can drift, and this file already learnt that from the head it is mending.
+/// ⛔ The number lives in `letters.rs`, beside the other controls of that window, and is read
+/// from there rather than written down a second time here: a mirrored number can drift.
 pub fn is_the_program_name(control: i32) -> bool {
-    control == IDC_ABOUT_NAME || control == crate::letters::IDC_AUTHOR_NAME
-}
-
-/// Whether the `WM_DRAWITEM` of the about window paints the button `control` — task T-71-1,
-/// finding Э70-Б-1.
-///
-/// Pure and exported, so that a test can hold the gate of [`on_about_draw_item`] against the
-/// template — the precedent of [`OWNER_DRAWN_ABOUT_LABELS`] for the labels of the same window. It
-/// answers [`ABOUT_BUTTONS`] and nothing else, and both buttons go the one way:
-/// [`paint_push_button`] with [`button_color_roles`], which gives the accent to «ОК» alone. Until
-/// this task the gate compared the identifier with `OK_COMMAND`, and «От автора…» stood blank from
-/// its birth.
-pub fn about_button_is_painted(control: i32) -> bool {
-    ABOUT_BUTTONS.contains(&control)
+    control == crate::letters::IDC_AUTHOR_NAME
 }
 
 /// The identifier of the button subclass — one number for all ten windows, because the key of
@@ -19065,83 +18673,13 @@ fn end_dialog(hwnd: HWND, result: isize) {
 }
 
 // =========================================================================================
-// FR-92а, task T-11-11 — the about dialog
+// What the old «О программе» window left for «От автора»
 // =========================================================================================
 //
-// The window that replaces the tray's `MessageBoxW`, which no documented means can repaint.
-// It lives here with the settings dialog because §6.2 makes this module the owner of the
-// dialogs, and because everything it paints with — the `WM_CTLCOLOR*` answers, the
-// owner-drawn button path, the DWM title bar — already lives here and is *shared*, not
-// copied: `apply_ctl_color`, `button_color_roles` + `resolve_button_colors`,
-// `paint_push_button`, `apply_title_bar_theme`, `with_window_state`.
-
-/// Everything the about dialog needs, for as long as it is up.
-///
-/// Lives on the frame of [`show_about_dialog`] and is reached the way [`DialogState`] is:
-/// through a `RefCell` behind the pointer `GWLP_USERDATA` carries. Deliberately this small.
-/// SEC-05 says of the box this window replaces: a window that changes nothing — and a state
-/// holding no configuration and no callback is how the new window stays exactly that: there
-/// is nothing here a handler could change.
-struct AboutState {
-    /// The setting `[general].theme` this window was opened under — FR-92а, task T-13-17.
-    ///
-    /// Kept because the palette has to be resolvable **again**. The handler of
-    /// [`WM_APP_SYSTEM_THEME`] re-resolves out of this setting and a fresh reading of the
-    /// system switch ([`refresh_about_palette`]), and a window that remembered only the
-    /// answer could not tell «система стала светлой» from «настройка light»: under `light`
-    /// and `dark` FR-92а fixes the palette and the system has no say, which is the very
-    /// sentence [`repaint_for_system_theme`] decides by.
-    ///
-    /// Copied out of the configuration by the caller at the moment of opening and never
-    /// moved afterwards: this window changes nothing (SEC-05), so there is no «Применить»
-    /// here to move it — and a settings dialog cannot be open at the same time, because the
-    /// tray command that would open one is a command of a menu this modal window is holding
-    /// the thread away from.
-    setting: ThemeSetting,
-    /// The palette of this window, resolved at the moment it is opened and re-resolved
-    /// whenever the system theme moves under it — FR-92а, task T-13-17.
-    ///
-    /// Until that task this field was resolved once and never again: the window was called
-    /// short-lived and nobody posted it [`WM_APP_SYSTEM_THEME`]. The audit of 2026-08-24
-    /// read that as a departure from the letter of FR-92а — the requirement names this
-    /// window among «всё видимое глазом» and asks for the change to apply to open windows
-    /// without a restart, without an exception for short-lived ones, and a person can hold
-    /// this window open for as long as they like.
-    palette: &'static theme::Palette,
-    /// The brushes of `palette`, created for this window alone and dropped however
-    /// [`show_about_dialog`] leaves. `None` — `CreateSolidBrush` refused — is survived
-    /// exactly as the settings dialog survives it: every colour answer says «not handled»
-    /// and the window lives with the system colours (NFR-13).
-    brushes: Option<theme::Brushes>,
-    /// The four-part file version out of the `VERSIONINFO` resource of the running
-    /// executable, read by the caller the same way the old box read it
-    /// (`tray::file_version`). `None` — no resource — shows as a dash, not as an error.
-    version: Option<(u16, u16, u16, u16)>,
-    /// The name of the hotkey the help panel of FR-92а names — task Т-23-4, решение 82.5.
-    ///
-    /// Copied out of the configuration by the caller at the moment of opening, on exactly the
-    /// terms `setting` above is copied on, and passed through [`effective_hotkey_name`] so
-    /// that a file naming a key this build does not know shows the default that is really in
-    /// force rather than the name that is not. This window changes nothing, so the value never
-    /// moves after it is stored.
-    hotkey: String,
-    /// The face this window sets the caption of its own «ОК» in — FR-92а, task T-11-17.
-    ///
-    /// The same owner the settings dialog keeps, for the same reason and with the same
-    /// degradation: `None` draws in the manager's own font. `None` until `WM_INITDIALOG` —
-    /// the face is made out of the font the manager gives the window, and there is no window
-    /// when this value is built.
-    fonts: Option<DialogFonts>,
-    /// The icon the caption is shown by `WM_SETICON` — task T-12-1: the settings dialog's
-    /// field, its type and its ownership, in the window that shares its paths (§6.2).
-    icon: Option<CaptionIcons>,
-    /// The logo the window shows beside its name — finding **A-08**, task T-12-4.
-    ///
-    /// `None` until `WM_INITDIALOG`, exactly as `fonts` is and for the same kind of reason:
-    /// the size is asked of the window, and there is no window when this value is built. See
-    /// [`AboutLogo`].
-    logo: Option<AboutLogo>,
-}
+// «О программе» is a window of the shell now (`ui::windows::about`, FR-92а). The logo below
+// and the faces and pitches of the name and the body (`about_*_logfont`,
+// `about_body_line_pitch`) are still drawn with by «От автора» (`letters`), whose head is the
+// head the old window had; they go when that window moves to the shell (T-120-17).
 
 /// The size of the about window's logo in **mock-up pixels** — finding A-08, task T-12-4.
 ///
@@ -19264,684 +18802,6 @@ impl Drop for AboutLogo {
     }
 }
 
-/// Shows the modal «О программе» window of FR-92а — what `tray` calls in place of the
-/// `MessageBoxW` it used to show, from the same place in the same order.
-///
-/// Same shape as [`show_dialog`]: the state lives on this frame, `DialogBoxParamW` runs
-/// the modal loop, and the palette is resolved here, at the moment of opening — from the
-/// setting the caller copied out of the configuration and one read of the system switch —
-/// so the first paint is one consistent palette; the brushes die with this frame.
-///
-/// SEC-05: the window changes nothing, exactly as the box it replaces — no configuration,
-/// no file, no registry; every command it answers ends it.
-///
-/// # One modal window at a time — task T-43-4, finding С21
-///
-/// While an «О программе» window or the settings dialog is up on this thread, the call turns
-/// round at once and answers `Ok(false)`: nothing is made, nothing is shown, and the window of
-/// FR-103 is not asked for. A modal loop keeps dispatching to the other windows of the thread,
-/// so without this the window opened over itself and over the settings dialog, and the stack
-/// that made broke three things at once — see `tray::dialog_locks_command`, which greys and
-/// refuses the menu entry for the same reason and is the rule; this is the entry half of it,
-/// the one [`show_dialog`] has always had.
-pub fn show_about_dialog(
-    owner: HWND,
-    instance: HINSTANCE,
-    setting: ThemeSetting,
-    version: Option<(u16, u16, u16, u16)>,
-    hotkey: &Hotkey,
-) -> windows::core::Result<bool> {
-    if about_is_open() || dialog_is_open() {
-        return Ok(false);
-    }
-
-    // FR-92а, task T-13-17. Taken here and released however this function leaves, the `-1`
-    // return below and a panic on the way through included — see [`AboutSession`]. The
-    // window itself is recorded from `WM_INITDIALOG`, which is the first moment there is
-    // one to record.
-    let _open = AboutSession::open();
-
-    let palette = theme::resolve(setting, theme::system_is_light());
-
-    let state = RefCell::new(AboutState {
-        // FR-92а, task T-13-17: kept for the re-resolution, not for the first one — see the
-        // field.
-        setting,
-        palette,
-        brushes: theme::Brushes::new(palette),
-        version,
-        // FR-92а, task Т-23-4: the key the help names, resolved here — once, at the moment of
-        // opening — for the reason the palette is resolved here.
-        hotkey: effective_hotkey_name(hotkey),
-        // `None` until `WM_INITDIALOG` — see the field.
-        fonts: None,
-        // FR-92а, task T-12-1: loaded before the window exists — see [`CaptionIcons`].
-        icon: CaptionIcons::load(),
-        // `None` until `WM_INITDIALOG` — see the field and [`AboutLogo::load`]: the size is
-        // asked of the window, so this one cannot be loaded before there is one.
-        logo: None,
-    });
-
-    // SAFETY: `instance` is a module handle whose resources carry `IDD_ABOUT`. `owner` is a live
-    // window of this thread. The parameter is a pointer to `state`, which lives on this frame:
-    // the call is modal and does not return until `EndDialog`, so the pointer cannot outlive the
-    // value it names. `about_proc` is the only reader of it and reads it through the `RefCell`,
-    // so no two borrows can overlap however the manager re-enters.
-    //
-    // Task Т-30-2: through the same `show_modal_dialog` the settings window uses — one body, so
-    // the two windows cannot come to disagree about which way they read.
-    let result = unsafe {
-        show_modal_dialog(
-            instance,
-            IDD_ABOUT,
-            owner,
-            Some(about_proc),
-            LPARAM(std::ptr::from_ref(&state) as isize),
-        )
-    };
-
-    // NFR-13. `DialogBoxParamW` answers -1 when the dialog could not be created at all,
-    // and that is the one outcome that is a failure — exactly as in `show_dialog`.
-    if result == -1 {
-        return Err(WinError::from_thread());
-    }
-
-    // Task Т-32-4, FR-103: which button ended the window. `true` means «От автора…», and the
-    // caller opens that window — after this modal call has returned, so the modeless window of
-    // FR-103 is owned by the program's own window and not by one that is closing.
-    Ok(result == isize::try_from(IDC_ABOUT_AUTHOR).unwrap_or(0))
-}
-
-/// The dialog procedure of the about window.
-///
-/// # Safety
-///
-/// Called by the dialog manager with the arguments of a window message. `hwnd` names the
-/// live dialog, and on `WM_INITDIALOG` `lparam` is the pointer [`show_about_dialog`]
-/// passed and nothing else — the manager forwards it unchanged and no other sender can
-/// reach this procedure (SEC-05), exactly as for [`dialog_proc`].
-unsafe extern "system" fn about_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> isize {
-    match message {
-        WM_INITDIALOG => {
-            // SAFETY: `hwnd` is the live dialog and `GWLP_USERDATA` is a field every
-            // window has, which the dialog manager does not use for itself. The value
-            // stored is the pointer the manager forwarded from `DialogBoxParamW`; it is
-            // only ever read back by `with_about_state`.
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, lparam.0) };
-
-            // FR-92а, task T-13-17: the record `on_system_theme_message` finds this window
-            // by. Cleared by the guard of `show_about_dialog` however that function leaves,
-            // so it never outlives the window it names — the dialog's own record next door
-            // is written and cleared on exactly these terms.
-            AboutSession::record(hwnd);
-
-            // Task T-12-8: the response of the cursor, wired on this window's one push button
-            // exactly as on the nine of the settings dialog. The other half of the pair is the
-            // `WM_DESTROY` branch below, walking the same `ABOUT_BUTTONS` list — see that
-            // constant for why «ОК» is subclassed although this wave paints it no differently.
-            subclass_buttons(hwnd, &ABOUT_BUTTONS);
-
-            // SAFETY: the pointer has just been stored and names the `RefCell` on the
-            // frame of `show_about_dialog`, which outlives this modal call.
-            unsafe {
-                with_about_state(hwnd, |state| {
-                    fill_about(hwnd, state.version);
-
-                    // FR-92а, task T-11-17: the face the caption of «ОК» is set in, made out
-                    // of the font the manager gave the window — the same call, and the same
-                    // ownership, as in the settings dialog. Task T-12-4 added a third face to
-                    // the set, and the name row of this very window is what it is for.
-                    state.fonts = DialogFonts::new(hwnd, OK_COMMAND);
-
-                    // FR-92а, task T-12-4: the 40 px logo, at the size this window's DPI makes
-                    // of the mock-up's — see [`AboutLogo`] for the ownership.
-                    state.logo = AboutLogo::load(hwnd);
-
-                    // The non-client title bar follows the resolved palette from the
-                    // first showing — the same call the settings dialog makes.
-                    apply_title_bar_theme(hwnd, state.palette);
-                })
-            };
-
-            // Задача T-83-1, решение 143.6: the name's button is narrowed to its backing, so the
-            // mouse is caught by the word and not by the whole line. **After** the faces — the
-            // backing is measured in the face the drawing uses — and by the one body «От автора»
-            // calls too. The face leaves the borrow before the button is moved.
-            //
-            // SAFETY: as above — the pointer was stored at the top of this arm.
-            let name_face = unsafe {
-                with_about_state(hwnd, |state| {
-                    state
-                        .fonts
-                        .as_ref()
-                        .map(|fonts| about_label_face(IDC_ABOUT_NAME, fonts).0)
-                })
-            }
-            .flatten();
-
-            // SAFETY: `hwnd` is the live dialog in its `WM_INITDIALOG`; the face belongs to the
-            // state, which outlives this modal call.
-            unsafe { fit_program_name(hwnd, IDC_ABOUT_NAME, name_face) };
-
-            // Task T-42-2, finding С44: the help panel is laid under the **measured** height of
-            // its five sentences. **After** `DialogFonts::new` — the measurement is made in the
-            // faces the drawing will use — and before the window is shown, so the growth lands
-            // ahead of the first paint.
-            //
-            // SAFETY: as above — the state pointer was stored at the top of this arm and the
-            // faces have just been built.
-            unsafe { fit_about_help(hwnd) };
-
-            // FR-92а, task T-12-1: the icon of the caption — the settings dialog's path, and
-            // its discipline: the handles leave the borrow before the messages are posted.
-            //
-            // SAFETY: as above — the pointer was stored just now and the value it names is
-            // alive for the whole of this modal call.
-            let frames = unsafe {
-                with_about_state(hwnd, |state| state.icon.as_ref().map(CaptionIcons::frames))
-            };
-
-            if let Some(Some(frames)) = frames {
-                // SAFETY: `hwnd` is the live window, and the handles belong to the value the
-                // state keeps, which is dropped only after this modal call returns.
-                unsafe { CaptionIcons::show_on(hwnd, frames) };
-            }
-
-            // FR-92а, task T-12-4: the logo of the window's own body, on the same discipline —
-            // the handle leaves the borrow before any message is sent.
-            //
-            // SAFETY: as above — the pointer was stored just now and the value it names is
-            // alive for the whole of this modal call.
-            let logo = unsafe {
-                with_about_state(hwnd, |state| state.logo.as_ref().map(AboutLogo::handle))
-            };
-
-            if let Some(Some(logo)) = logo {
-                // `STM_SETICON`, the documented way to give an `SS_ICON` static a picture: the
-                // control resizes itself around the handle, which is how a 40 px logo reaches a
-                // window whose template can only ask for one and be ignored (see [`AboutLogo`]).
-                //
-                // ⚠ **Sent and not posted, and that is not the `SendMessage` FR-72 forbids**:
-                // this is `SendDlgItemMessageW` through `send_to`, the one road this file
-                // already sends its own controls anything by (`WM_GETFONT` in
-                // `dialog_logfont`). The answer — the shared 32 px frame the dialog manager
-                // loaded for itself — is deliberately dropped: it was never ours to free.
-                let _ = send_to(hwnd, IDC_ABOUT_ICON, STM_SETICON, logo.0 as usize, 0);
-            }
-
-            // Решение 97.1, task Т-30-3: the logo is a picture and pictures carry no direction,
-            // so it is drawn the same way round in a mirrored window as in any other. See
-            // [`unmirror_control`] — and note that this program's icon is symmetrical, so what
-            // this call buys today is not a visible difference but the removal of a dependence
-            // on the icon staying symmetrical.
-            unmirror_control(hwnd, IDC_ABOUT_ICON);
-
-            // «ОК» is BS_OWNERDRAW, so the default identifier is handed to the dialog
-            // manager by the documented replacement, `DM_SETDEFID` — *posted*, not sent,
-            // for the reasons written down at the same message of `dialog_proc` (FR-72).
-            // It is what keeps Enter landing on «ОК».
-            //
-            // SAFETY: `hwnd` is the live dialog; the message carries two plain integers
-            // and no pointer — `PostMessageW` queues them by value and returns.
-            if let Err(error) = unsafe {
-                PostMessageW(
-                    Some(hwnd),
-                    DM_SETDEFID,
-                    WPARAM(usize::try_from(OK_COMMAND).unwrap_or(0)),
-                    LPARAM(0),
-                )
-            } {
-                // NFR-13. Not fatal: Enter would be answered by the dialog manager's
-                // fallback instead of the named default, and the journal is told.
-                crate::app::report_non_critical("PostMessageW", &error);
-            }
-
-            // TRUE: let the dialog manager choose the focus — «ОК» is the one tab stop.
-            1
-        }
-
-        // FR-92а, task T-12-1, п. 4: the ground of this window and the one-pixel line under
-        // its title bar. Until this task the window had no erase handler at all — the dialog
-        // manager erased it with the brush `WM_CTLCOLORDLG` answers, which is the very same
-        // `window_bg` — so the ground is unchanged and the line is the whole difference.
-        WM_ERASEBKGND => {
-            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
-            // alive for the whole of this modal call.
-            unsafe { on_about_erase_background(hwnd, wparam) }
-        }
-
-        // The colour questions of this window, answered from its own palette; the applying
-        // half is the shared `apply_ctl_color` — task T-11-11 reuses the paths of the
-        // settings dialog rather than copying them (§6.2). `WM_CTLCOLOREDIT` and
-        // `WM_CTLCOLORLISTBOX` are deliberately not routed: this window has no field and
-        // no list.
-        WM_CTLCOLORDLG | WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
-            // SAFETY: as above — the pointer was stored on `WM_INITDIALOG` and the value
-            // it names is alive for the whole of this modal call.
-            unsafe { on_about_ctl_color(hwnd, message, wparam, lparam) }
-        }
-
-        // The one owner-drawn button of this window. The gate the last sentence of SEC-05
-        // names is the same as everywhere: the message is handled only while the program
-        // itself holds this dialog on the screen, and nothing of it is dereferenced
-        // beyond the checked fields and the drawing rectangle.
-        WM_DRAWITEM => {
-            // SAFETY: the sender owns the struct `lparam` names for the length of the
-            // send, and this procedure is inside that send.
-            unsafe { on_about_draw_item(hwnd, lparam) }
-        }
-
-        WM_COMMAND => {
-            let control = i32::from(low_word(wparam.0));
-
-            // «ОК» and Esc — `IDCANCEL`, which the dialog manager sends whether or not
-            // the window has the button — both simply end the window: it changes nothing,
-            // so there is nothing to apply and nothing to undo (SEC-05).
-            //
-            // ⚠ **«От автора…» is the third**, task Т-32-4: it ends the window too, and with
-            // its own identifier, so that the caller can tell the three apart. The window of
-            // FR-103 is **not** opened from here — this dialog is modal and about to be gone,
-            // and a modeless window owned by a window that is closing would be an orphan. The
-            // caller opens it after the modal call returns, which is where `tray::show_about`
-            // already stands.
-            if control == OK_COMMAND || control == CANCEL_COMMAND || control == IDC_ABOUT_AUTHOR {
-                end_dialog(hwnd, isize::try_from(control).unwrap_or(0));
-            }
-
-            // ⭐ **The fourth, and the one that does not end the window** — task T-78-3. The
-            // name opens the program's own page in the browser and the window stays where it
-            // is: nothing about it has changed, and closing «О программе» to show a web page
-            // would take away the very window the person was reading.
-            //
-            // It goes by `letters::open_link` and not by the shared door beneath it, because
-            // that function **is** the gate of С52 — https only, and only at a host this build
-            // declares. A window that reached the door past it would be exactly the caller that
-            // gate was written to stop.
-            //
-            // Решение 181.33: the page in the language of the interface at the click — Russian
-            // for the Russian side, under `/en/` for the twelve of the English one.
-            if control == IDC_ABOUT_NAME {
-                crate::letters::open_link(crate::letters::links::program_url(ui_language()));
-            }
-
-            0
-        }
-
-        // Task T-12-8: the far half of the subclass pair, on the terms `dialog_proc` states at
-        // its own `WM_DESTROY` — this message reaches the window while its children are still
-        // live, so «ОК» is still there to be handed back its own procedure. The message carries
-        // nothing and is not dereferenced (SEC-05).
-        WM_DESTROY => {
-            unsubclass_buttons(hwnd, &ABOUT_BUTTONS);
-
-            // «Not handled»: the dialog manager still needs its own `WM_DESTROY`.
-            0
-        }
-
-        // FR-92а, task T-13-17: the system theme moved while this window is up — the far end
-        // of the nudge `on_system_theme_message` posted, the same message and the same road
-        // the settings dialog is told by. The message carries nothing and decides nothing
-        // (SEC-05): `refresh_about_palette` resolves the palette afresh out of this
-        // program's own setting and its own reading of the system switch, and leaves
-        // everything alone when the resolution did not move — the check that settles the
-        // batch Windows sends of these into one repaint. A forged message therefore buys the
-        // sender one reading of the personalization switch and one pointer comparison, at
-        // worst one repaint of our own window in the palette the system already asks for.
-        WM_APP_SYSTEM_THEME => {
-            // SAFETY: the pointer was stored on `WM_INITDIALOG` and the value it names is
-            // alive for the whole of this modal call.
-            unsafe { with_about_state(hwnd, |state| refresh_about_palette(hwnd, state)) };
-
-            0
-        }
-
-        _ => 0,
-    }
-}
-
-/// Re-resolves the palette of the «О программе» window and repaints it if the resolution
-/// moved — FR-92а, task T-13-17.
-///
-/// [`refresh_palette`] over the state this window keeps, and deliberately the same steps in
-/// the same order: a fresh [`theme::resolve`] out of the window's own setting and one
-/// reading of the system switch; the identity test that is both the correctness check and
-/// the debounce of the batch — `resolve` answers `&'static` identity, so pointer equality is
-/// the whole of it; and, only when the resolution moved *and* a whole new brush set was
-/// made, the new palette, the caption through [`apply_title_bar_theme`], and one
-/// invalidation of the window together with its children.
-///
-/// Two lines of the dialog's version are absent because this window has neither of the
-/// things they are for: the layout list's three `LVM_SET*COLOR` colours, and the cached
-/// background picture. Everything this window does paint with is read from `state.palette`
-/// on the next paint — the shared `WM_CTLCOLOR*` answer, the shared owner-drawn button and
-/// the two `FillRect`s of [`on_about_erase_background`] — so the invalidation is the whole
-/// of what the client area needs (§6.2).
-///
-/// A refused [`theme::Brushes::new`] (NFR-13) leaves palette and brushes exactly as they
-/// were: the previous consistent palette on the screen is better than half a new one. It is
-/// not journaled, for the reason `Brushes::new` gives for its own refusal.
-fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {
-    let fresh = theme::resolve(state.setting, theme::system_is_light());
-
-    if !std::ptr::eq(fresh, state.palette)
-        && let Some(brushes) = theme::Brushes::new(fresh)
-    {
-        state.palette = fresh;
-        state.brushes = Some(brushes);
-
-        apply_title_bar_theme(hwnd, fresh);
-
-        widgets::repaint::whole(hwnd);
-    }
-}
-
-/// Puts the strings of the locale in force into the about window — FR-94 — and composes
-/// the version line out of the `VERSIONINFO` the caller read.
-///
-/// The name row is deliberately not set: «Lang Switcher» is not translated — decision on
-/// question 7 — and the template literal already is the name. The five numerals of the help
-/// panel are not set either, for the same kind of reason: a digit is a digit in both locales.
-///
-/// ⚠ **The key name is no longer substituted here** — task Т-26-2. The name of the hotkey as it
-/// acts ([`effective_hotkey_name`] of the running configuration) used to be filled into the
-/// `{0}` of the first three help rows on this road; решение 85 п. 1 draws a chip around it, so
-/// the substitution moved to the pen and the placeholder is left standing on the control. The
-/// key itself is where it was — in the window's state, resolved once when the window opened —
-/// and `draw_about_help_row` is what reads it.
-fn fill_about(hwnd: HWND, version: Option<(u16, u16, u16, u16)>) {
-    let caption = wide(&text(IDS_ABOUT_CAPTION));
-
-    // SAFETY: `hwnd` is the live dialog and `caption` is a NUL-terminated UTF-16 buffer
-    // owned by this frame, neither moved nor dropped until the call returns; the call
-    // copies it.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    for (control, caption) in about_texts(version) {
-        set_text(hwnd, control, &caption);
-    }
-}
-
-/// Every text [`fill_about`] puts on a control of the about window, in the locale in force —
-/// task T-106-2, решение 198.11.
-///
-/// One table for the window and for its sweep: the window takes its texts from nothing else,
-/// so `tests\settings.rs` reads what the window shows in each of the fourteen languages without
-/// raising it. The button «От автора…» came with task Т-32-4 and stood out of this list for
-/// thirty-five deliveries — its template literal, Russian, showed in every other language (the
-/// English window of 1.0.0 on the stand, 2026-10-27).
-pub fn about_texts(version: Option<(u16, u16, u16, u16)>) -> Vec<(i32, String)> {
-    let mut texts = vec![
-        (IDC_ABOUT_VERSION, about_version_line(version)),
-        (IDC_ABOUT_LINE_1, text(IDS_ABOUT_LINE_1)),
-        (IDC_ABOUT_LINE_2, text(IDS_ABOUT_LINE_2)),
-        // FR-92а, task Т-23-4, решение 82.5 — the «Как пользоваться» panel.
-        //
-        // The caption goes on the hidden control the block is drawn from: the window's own
-        // background reads it back off that control with `GetDlgItemTextW`, exactly as the
-        // settings dialog reads the captions of its six panels, so FR-94 reaches a panel
-        // heading by the same one road it reaches every other piece of text.
-        (IDC_ABOUT_HELP, text(IDS_ABOUT_HELP)),
-    ];
-
-    // The numerals are already on their controls — template literals, the same in both
-    // locales — so only the five sentences are set here.
-    //
-    // ⚠ **The placeholder is left standing**, and that is task Т-26-2: решение 85 п. 1 draws a
-    // chip around the key name, and a chip has to be drawn *where the name is*. A substituted
-    // sentence no longer says where that was, so the substitution moved to the pen —
-    // `draw_about_help_row` splits the caption at `theme::KEY_PLACEHOLDER` and writes the key
-    // itself inside the figure.
-    for (_, row, string) in ABOUT_HELP_ROWS {
-        texts.push((row, text(string)));
-    }
-
-    // Task T-106-2, решение 198.11: the button of FR-103 says it in the language of the window.
-    texts.push((IDC_ABOUT_AUTHOR, text(IDS_ABOUT_AUTHOR)));
-    texts.push((OK_COMMAND, text(IDS_ABOUT_OK)));
-
-    texts
-}
-
-/// Lays the «Как пользоваться» panel under the **measured** height of its five sentences —
-/// task T-42-2, finding С44, решение 124.4 (вариант 1 «мерить, а не угадывать»).
-///
-/// # What was wrong
-///
-/// The five heights in `app.rc` — 29 / 19 / 19 / 19 / 19 units — were fitted by hand against
-/// one locale at one scale. A sentence that wraps into one more line than those numbers allow
-/// is **cut off**: an owner-drawn static answers for its own rectangle and `paint_chip_row`
-/// narrows the clip to it, so the last line simply is not there. Measured by the fitting stand
-/// of the контур on the dialog's own arithmetic: 28 clips over fourteen locales and five
-/// scales, all of them in rows 1 and 3, four of them at **100 %** — `ru`, `uk` and `es` lose
-/// the fourth line of «Набрали слово не в той раскладке…».
-///
-/// # What is done instead
-///
-/// Every row is measured here by [`theme::measure_chip_row`] — the measuring twin of the very
-/// function that draws it, sharing its atoms and its wrap — and the rows are then laid out top
-/// to bottom with the air the template itself declares. The panel grows under the sum, and the
-/// two buttons of the bottom row and the window's own edge come down with it.
-///
-/// ⚠ **Only downwards.** A row shorter than its template height keeps the template height, so
-/// a locale that fits today looks exactly as it did: the внешний вид is frozen (решение 124.1)
-/// and what is allowed is the growth влезание asks for, nothing else. A window that needs
-/// nothing does not move a pixel — the function then ends at the `grow <= 0` gate.
-///
-/// NFR-13: every refusal on the way — no faces, no DC, an unreadable rectangle — leaves the
-/// template's own layout standing, which is the layout this window had before this task.
-///
-/// # Safety
-///
-/// Called from the `WM_INITDIALOG` arm of [`about_proc`] only, after the state pointer has been
-/// stored and the faces built.
-unsafe fn fit_about_help(hwnd: HWND) {
-    // The faces and the key name leave the borrow before a single message is sent — the
-    // discipline of this file's every `WM_INITDIALOG` step.
-    //
-    // SAFETY: see the contract — the state pointer was stored at the top of the arm.
-    let Some(Some((faces, key))) = (unsafe {
-        with_about_state(hwnd, |state| {
-            let fonts = state.fonts.as_ref()?;
-
-            Some((
-                (fonts.body(), fonts.chip(), fonts.body_pitch()),
-                state.hotkey.clone(),
-            ))
-        })
-    }) else {
-        return;
-    };
-
-    let (body, chip, pitch) = faces;
-
-    // SAFETY: `hwnd` is the live dialog; the DC is released on every path below.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let metrics = ChipRowMetrics {
-        body: Some(body),
-        chip_face: Some(chip),
-        pitch,
-        dpi: drawing_dpi(dc),
-    };
-
-    // The rectangles the template gave the five rows and their numerals, in the client
-    // coordinates of the dialog — through the one conversion of this file that survives a
-    // mirrored window ([`screen_rect_in_client`]).
-    let mut rows = Vec::with_capacity(ABOUT_HELP_ROWS.len());
-
-    for (numeral, row, string) in ABOUT_HELP_ROWS {
-        let (Some(text_rect), Some(numeral_rect)) = (
-            child_rect_in_client(hwnd, row),
-            child_rect_in_client(hwnd, numeral),
-        ) else {
-            // SAFETY: the DC was taken from this window a few lines above.
-            unsafe { ReleaseDC(Some(hwnd), dc) };
-            return;
-        };
-
-        let sentence = text(string);
-        let width = text_rect.right - text_rect.left;
-        let height = text_rect.bottom - text_rect.top;
-
-        // SAFETY: `dc` is live and both faces belong to the window's state, which outlives this
-        // call; nothing is drawn and no DC state is left behind.
-        let measured =
-            unsafe { measure_chip_row(dc, width, theme::chip_row(&sentence, &key), metrics) };
-
-        let Some((_, needed)) = measured else {
-            // SAFETY: as above.
-            unsafe { ReleaseDC(Some(hwnd), dc) };
-            return;
-        };
-
-        // ⭐⭐ **`needed`, а не `needed.max(height)` — задача T-81-6, находка 142б.2.**
-        //
-        // Строка берёт ту высоту, которая ей нужна **сейчас**, а не ту, что шаблон отвёл ей на
-        // худший случай. Шаблон размечен по самому широкому имени клавиши, какое программа может
-        // показать («PrintScreen»), — и это правильно: он обязан вмещать любое. Но клавиша у
-        // человека своя, и на «Pause» русские строки просят 18 / 9 / 18 / 9 / 9 единиц там, где
-        // шаблон отвёл 29 / 19 / 29 / 19 / 10: **43 единицы воздуха** внутри блока
-        // (`scratchpad-E81\probe-widths.log`). Пока колонка была 142 единицы, разница была мала
-        // и её не было видно; задача T-81-1 расширила колонку до 207, каждой строке стало хватать
-        // меньшего числа строк — и разметка по худшему случаю проступила на экране. Владелец
-        // увидел это на живой 0.81.0 дословно: «текст в окне о программе получился сильно
-        // разряженным по высоте».
-        //
-        // ⚠ Окно при этом **не укорачивается**: типовая высота трёх окон — решение 142.2 п. 8, и
-        // свободную высоту забирает блок справки, как макет и показывает. Сжимаются только
-        // строки внутри блока; ниже растёт по-прежнему только вверх.
-        let _ = height;
-
-        rows.push((row, numeral, text_rect, numeral_rect, needed));
-    }
-
-    // SAFETY: the DC was taken from this window above and is not needed past this point.
-    unsafe { ReleaseDC(Some(hwnd), dc) };
-
-    // The air between two rows, read off the template rather than written down again: the four
-    // units live in `app.rc`, and a literal here would be a second copy of them.
-    let air = rows
-        .windows(2)
-        .map(|pair| pair[1].2.top - pair[0].2.bottom)
-        .min()
-        .unwrap_or(0);
-
-    // Where each row goes now — the arithmetic of the stack, apart from the moving of windows.
-    let heights: Vec<i32> = rows.iter().map(|(.., needed)| *needed).collect();
-    let tops = stacked_tops(rows.first().map_or(0, |first| first.2.top), &heights, air);
-
-    let grow = rows.last().map_or(0, |(.., rect, _, needed)| {
-        tops[rows.len() - 1] + needed - rect.bottom
-    });
-
-    // The rows and their numerals, each to its new top; the sentence also takes its measured
-    // height, so the clip of `paint_chip_row` is the height the text actually needs.
-    //
-    // ⚠ **Ставятся ВСЕГДА, и это с задачи T-81-6.** Прежде при `grow <= 0` функция уходила
-    // ничего не сделав, и строки оставались в слотах худшего случая — а теперь именно этот путь
-    // и есть обычный: блок, размеченный под «PrintScreen», на «Pause» сжимается.
-    for (index, (row, numeral, rect, numeral_rect, needed)) in rows.iter().enumerate() {
-        move_child(hwnd, *row, tops[index], Some(*needed), rect);
-        move_child(
-            hwnd,
-            *numeral,
-            tops[index] + (numeral_rect.top - rect.top),
-            None,
-            numeral_rect,
-        );
-    }
-
-    // ⛔ **Ниже — только РОСТ, и только он.** Блок, ряд кнопок и само окно двигаются, когда
-    // строкам не хватило слотов шаблона: тогда окно растёт вниз, как оно росло с задачи T-42-2.
-    // Когда строкам хватило с запасом, здесь не делается **ничего**: окно держит типовую высоту
-    // решения 142.2 п. 8, а свободная высота остаётся блоку справки — ровно то, что показывает
-    // принятый макет. Укорачивать окно тут нельзя: три окна семьи одной высоты.
-    if grow <= 0 {
-        return;
-    }
-
-    // The panel under them, then the two buttons of the bottom row, then the window itself —
-    // FR-103 put «От автора…» beside «ОК», and **both** come down (task Т-32-4).
-    if let Some(panel) = child_rect_in_client(hwnd, IDC_ABOUT_HELP) {
-        move_child(
-            hwnd,
-            IDC_ABOUT_HELP,
-            panel.top,
-            Some(panel.bottom - panel.top + grow),
-            &panel,
-        );
-    }
-
-    for button in [IDC_ABOUT_AUTHOR, OK_COMMAND] {
-        if let Some(rect) = child_rect_in_client(hwnd, button) {
-            move_child(hwnd, button, rect.top + grow, None, &rect);
-        }
-    }
-
-    let mut frame = RECT::default();
-
-    // SAFETY: `hwnd` is the live dialog and the buffer is a live local of this frame.
-    if unsafe { GetWindowRect(hwnd, &raw mut frame) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live dialog being initialised; the call is given plain numbers and
-    // keeps no pointer. The window is not on the screen yet — it is shown when this procedure
-    // returns — so the growth lands before the first paint, exactly as the move of решение
-    // 99.1(б) does in the settings dialog.
-    if let Err(error) = unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            frame.right - frame.left,
-            frame.bottom - frame.top + grow,
-            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE,
-        )
-    } {
-        // NFR-13: the panel is taller and the window is not, so the last row is cut by the
-        // window's edge instead of by the panel's. Worse than the growth, better than a clipped
-        // sentence, and the journal is told.
-        crate::app::report_non_critical("SetWindowPos", &error);
-    }
-}
-
-/// Where a stack of rows starts, each under the last with `air` between them — task T-42-2.
-///
-/// The whole arithmetic of [`fit_about_help`], and the reason it is a function of its own: a
-/// row that overlapped its neighbour would not merely look wrong — two owner-drawn statics
-/// **erase** each other (defect Г-1), and the numeral of the row below would go under the tail
-/// of the row above. That cannot be checked by eye on one locale at one scale; it is checked by
-/// a test walking all fourteen locales and all five scales
-/// (`the_help_rows_never_overlap_at_any_scale_or_locale`), and a test needs the arithmetic
-/// without a window.
-///
-/// Pure. `first` is where the first row stands — the panel's own top padding, which does not
-/// move (решение 87 accepted it by eye).
-pub fn stacked_tops(first: i32, heights: &[i32], air: i32) -> Vec<i32> {
-    let mut tops = Vec::with_capacity(heights.len());
-    let mut top = first;
-
-    for height in heights {
-        tops.push(top);
-        top += height + air;
-    }
-
-    tops
-}
-
 /// One child's rectangle in the client coordinates of its dialog, or `None` on any refusal.
 ///
 /// The pair of [`screen_rect_in_client`] for a **named** control: [`child_rects_in_client`]
@@ -19987,417 +18847,6 @@ fn move_child(hwnd: HWND, control: i32, top: i32, height: Option<i32>, rect: &RE
         // already moved, so the panel reads worse and still reads.
         crate::app::report_non_critical("SetWindowPos", &error);
     }
-}
-
-/// The version line of the about window: [`IDS_ABOUT_VERSION`] with the version number
-/// substituted — FR-94. The number comes out of the `VERSIONINFO` resource of the running
-/// executable, read by the caller of [`show_about_dialog`] the same way the old box read
-/// it, and is never spelled in the source.
-///
-/// # Three parts and not four — решение В-2, finding A-12
-///
-/// The mock-up's line is «версия 0.1.0» (`chrome.ps1:195`), and the fourth part is what made
-/// the live line longer than the model's at the same point size. The revision is *read* all the
-/// same — the caller hands over whatever the resource holds — and only the last part is left
-/// out of the sentence a person reads. Nothing else in the program loses it.
-///
-/// `None` — a binary without the resource — shows a dash: not a failure, and next to
-/// impossible for this window, because the template it was created from lives in the same
-/// `app.rc` as the version block.
-///
-/// Public so the test can call the very function the dialog calls.
-pub fn about_version_line(version: Option<(u16, u16, u16, u16)>) -> String {
-    let number = version.map_or_else(
-        || "—".to_owned(),
-        // The revision is deliberately dropped here and nowhere else — see the doc comment.
-        |(major, minor, build, _revision)| format!("{major}.{minor}.{build}"),
-    );
-
-    format_text(IDS_ABOUT_VERSION, &[&number])
-}
-
-/// The whole background of the about window — FR-92а, task T-12-1, п. 4.
-///
-/// Two `FillRect`s and no picture: this window has no panels, no field frames and no
-/// letter-spaced captions, so there is nothing here worth the [`BackgroundCache`] the
-/// settings dialog needs — the ground and the line are the whole of it.
-///
-/// Answers 1 — «erased» — when the ground was laid, and 0 when the state is unreachable (a
-/// re-entrant message) or [`theme::Brushes::new`] was refused at initialisation: the dialog
-/// manager then erases with the answer of `WM_CTLCOLORDLG`, exactly as it did before this
-/// task, and the window is short of its line and of nothing else (NFR-13).
-///
-/// # Safety
-///
-/// Called from [`about_proc`] only, with the `wparam` of the message — the DC the manager
-/// owns for the length of the send.
-unsafe fn on_about_erase_background(hwnd: HWND, wparam: WPARAM) -> isize {
-    // The one thing taken out of the message (SEC-05): the DC to paint into. It is written
-    // to and never read from, and no pointer of the message is followed.
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-
-    let mut client = RECT::default();
-
-    // NFR-13: examined — no rectangle, no paint, and the manager's own erase is the
-    // degraded-but-alive answer.
-    //
-    // SAFETY: `hwnd` is the live window and `client` is a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return 0;
-    }
-
-    // The colour choice, split from the painting exactly as everywhere in this file: the
-    // borrow of the state ends before the DC is touched.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-
-            Some((
-                brushes.window_bg(),
-                state.palette.field_border,
-                // Task Т-23-4 — the panel of the «Как пользоваться» block, in the colours the
-                // six panels of the settings dialog are drawn in.
-                brushes.panel_bg(),
-                state.palette.panel_border,
-                state.palette.cap,
-                state.fonts.as_ref().map(DialogFonts::caption),
-            ))
-        })
-    };
-
-    let Some(Some((ground, line, panel, panel_border, caption, caption_face))) = choice else {
-        return 0;
-    };
-
-    // SAFETY: `dc` is the DC of the message, painted into for the length of this send;
-    // `ground` is a live brush this window's state owns for longer than the call.
-    unsafe { FillRect(dc, &client, ground) };
-
-    paint_caption_underline(dc, &client, line);
-
-    // Task Т-23-4, решение 82.5 — the one panel of this window, drawn here for the reason the
-    // six panels of the settings dialog are drawn in *its* erase: a block is the background of
-    // what stands on it, so it is laid before the children paint and never over them. The
-    // rectangle is the hidden control's own, exactly as there.
-    //
-    // NFR-13: no rectangle for the control — a template that lost it — leaves the window
-    // without its block and with everything else intact, which is what a missing panel has
-    // always cost here.
-    if let Some(rect) = child_rects_in_client(hwnd)
-        .into_iter()
-        .find(|(control, _)| *control == IDC_ABOUT_HELP)
-        .map(|(_, rect)| rect)
-    {
-        // NFR-13 one level down: `dc_dpi` answers 96 for a DC that will not say, which is the
-        // 100 % size and a legal one.
-        let dpi = drawing_dpi(dc);
-
-        paint_rounded(
-            dc,
-            &rect,
-            scaled(CORNER_RADIUS, dpi),
-            panel_border,
-            panel,
-            dpi,
-        );
-
-        if let Some(face) = caption_face {
-            // SAFETY: `dc` is the caller's; `face` is a live font this window's state owns for
-            // longer than the call, and `draw_panel_caption` puts the previous one back.
-            unsafe { draw_panel_caption(hwnd, IDC_ABOUT_HELP, dc, rect, caption, dpi, face) };
-        }
-    }
-
-    // TRUE — the background is drawn; the manager must not erase over it.
-    1
-}
-
-/// The colour role of one static of the about window — the closed vocabulary
-/// [`static_color_role`] already answers with, reused rather than widened (§6.2): the version
-/// line **and the two description lines** are the quiet ones, the icon and the name are
-/// ordinary captions. Nothing in this window is a field, so [`StaticColorRole::Field`] never
-/// comes out of it.
-///
-/// # The description went quiet in task T-12-4 — finding A-06
-///
-/// The mock-up paints the paragraph under the name with `$brMu` — the muted brush — and the
-/// name itself with `$brFg` (`chrome.ps1:194,196`), so only two things in that window are
-/// drawn in the full-strength ink: the name and the icon. Решение В-2 keeps the live two
-/// sentences where the model has one, and says in as many words that they stay «в колонке
-/// имени и приглушённым цветом». Until this task both lines answered [`StaticColorRole::Label`]
-/// and came out `text`.
-///
-/// Public for the same reason as [`static_color_role`]: the table test calls the function
-/// the dialog calls.
-pub fn about_static_color_role(control: i32) -> StaticColorRole {
-    match control {
-        IDC_ABOUT_VERSION | IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => StaticColorRole::Muted,
-        // Task Т-23-4: the numeral of a help row is the mock-up's `.key` — muted, so the
-        // column of digits does not compete with the sentences beside it. The sentences
-        // themselves are the full-strength ink of the mock-up's row text and fall to the
-        // catch-all below with the name.
-        IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
-        | IDC_ABOUT_HELP_N5 | IDC_ABOUT_HELP_N6 => StaticColorRole::Muted,
-        // Spelled out rather than swallowed by the catch-all, so the mirrored identifiers
-        // of the template stay load-bearing in exactly one function.
-        IDC_ABOUT_ICON | IDC_ABOUT_NAME => StaticColorRole::Label,
-        _ => StaticColorRole::Label,
-    }
-}
-
-/// The `WM_CTLCOLOR*` answers of the about window — the choosing half; the applying half
-/// is the shared [`apply_ctl_color`] (§6.2, task T-11-11: one body, not a copy).
-///
-/// SEC-05 is held exactly as in [`on_ctl_color`]: the whole of what is taken out of the
-/// message is two handles, the control is only asked for its identifier, the DC is only
-/// written to. Zero — «not handled», the system colours — whenever the state is not
-/// reachable or [`theme::Brushes::new`] was refused at initialisation (NFR-13).
-///
-/// # Safety
-///
-/// Called from [`about_proc`] only, with the arguments of the message.
-unsafe fn on_about_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> isize {
-    // The two handles of the message — see above; this is all that is ever read out of it.
-    let dc = HDC(wparam.0 as *mut std::ffi::c_void);
-    let control = HWND(lparam.0 as *mut std::ffi::c_void);
-
-    // SAFETY: `control` is a window handle out of the message; asking for its identifier
-    // reads a field of that window and no memory of ours. For `WM_CTLCOLORDLG` the handle
-    // is the dialog itself and the identifier goes unused.
-    let control_id = unsafe { GetDlgCtrlID(control) };
-
-    // The colour choice, split from the painting exactly as `on_ctl_color` splits it: the
-    // borrow of the state ends before the DC is touched.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-            let palette = state.palette;
-
-            Some(match message {
-                // The window itself and the erase under the owner-drawn «ОК»: the window
-                // brush is the whole answer — this dialog has no panels.
-                WM_CTLCOLORDLG | WM_CTLCOLORBTN => (None, None, brushes.window_bg()),
-
-                // The statics: the role decides the ink, the ground is always the window
-                // brush. The `Field` arm keeps the match closed over the shared
-                // vocabulary; `about_static_color_role` never answers it.
-                WM_CTLCOLORSTATIC => match about_static_color_role(control_id) {
-                    StaticColorRole::Label => (Some(palette.text), None, brushes.window_bg()),
-                    StaticColorRole::Muted => (Some(palette.text_muted), None, brushes.window_bg()),
-                    StaticColorRole::Field => (
-                        Some(palette.text),
-                        Some(palette.field_bg),
-                        brushes.field_bg(),
-                    ),
-                },
-
-                // Unreachable: the caller only routes the three messages above here.
-                _ => return None,
-            })
-        })
-    };
-
-    apply_ctl_color(dc, choice.flatten())
-}
-
-/// The face and the line pitch one label of the about window is set in — task Т-26-2,
-/// решение 85, and the whole of the role table of that decision on the drawing side.
-///
-/// Roles rather than identifiers scattered through a `match` in the drawing: the name row is
-/// the largest and semibold, the body is one step above the dialog font and ordinary, a numeral
-/// is the body semibold, and everything else — the version line and «ОК» — keeps the dialog
-/// font, exactly as the accepted mock-up sets them (`.appver { font-size: 12.5px }` against the
-/// dialog's own 12,5 px at 96 DPI).
-///
-/// The pitch is `Some` only where a label may wrap and решение 85 asks for air between the
-/// lines: the two description lines. A one-line label is unaffected by any pitch
-/// ([`theme::label_model_pitch`] refuses it), and passing one would be noise.
-fn about_label_face(control: i32, fonts: &DialogFonts) -> (HFONT, Option<i32>) {
-    match control {
-        IDC_ABOUT_NAME => (fonts.name(), None),
-        IDC_ABOUT_LINE_1 | IDC_ABOUT_LINE_2 => (fonts.body(), Some(fonts.body_pitch())),
-        IDC_ABOUT_HELP_N1 | IDC_ABOUT_HELP_N2 | IDC_ABOUT_HELP_N3 | IDC_ABOUT_HELP_N4
-        | IDC_ABOUT_HELP_N5 | IDC_ABOUT_HELP_N6 => (fonts.number(), None),
-        _ => (fonts.text(), None),
-    }
-}
-
-/// Draws one owner-drawn label of the about window — FR-92а, task T-11-18.
-///
-/// The choosing half; the painting half is the shared [`paint_label_at_pitch`] (§6.2: the
-/// settings dialog's path, not a copy of it). Three differences from [`draw_label`] and no
-/// more: the state is this window's, the ground is the panel brush for the ten labels standing
-/// on the help block and the window brush everywhere else, and the identifier's role comes from
-/// [`about_static_color_role`] — the mapping task T-11-11 wrote and task Т-23-4 widened.
-///
-/// ⚠ The five **sentences** of the help panel do not come here at all since task Т-26-2: a row
-/// with a chip in it is laid word by word, which `DrawTextW` cannot do — see
-/// [`draw_about_help_row`].
-///
-/// FR-94 holds here as it does there: the caption is read back off the control `fill_about`
-/// wrote it into, and the version line composed from the `VERSIONINFO` resource arrives by the
-/// same road.
-///
-/// # Safety
-///
-/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM`
-/// message it is inside of.
-unsafe fn draw_about_label(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
-    // The colour choice, split from the painting — the borrow ends before the DC is touched,
-    // exactly as everywhere in this file.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-
-            Some((
-                // Task Т-23-4: a label standing on the «Как пользоваться» panel is filled
-                // with the panel's own colour. It fills its whole rectangle before it writes
-                // a word, so a window-coloured fill there would cut ten holes in the block.
-                if ABOUT_LABELS_ON_THE_PANEL.contains(&control) {
-                    brushes.panel_bg()
-                } else {
-                    brushes.window_bg()
-                },
-                label_ink(about_static_color_role(control), state.palette),
-                // Решение 85: the role table of this window, in one pure place.
-                state
-                    .fonts
-                    .as_ref()
-                    .map(|fonts| about_label_face(control, fonts)),
-            ))
-        })
-    };
-
-    let Some(Some((ground, ink, face))) = choice else {
-        return 0;
-    };
-
-    let (face, pitch) = match face {
-        Some((face, pitch)) => (Some(face), pitch),
-        None => (None, None),
-    };
-
-    // Read after the borrow ends, for the reason `draw_label` gives. Without the trailing NUL:
-    // `DrawTextW` takes the length of the slice it is given.
-    let mut caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `ground` and
-    // `face` are objects this window's state owns for longer than this call.
-    // The about window has no island of its own: every label of it is a sentence of the
-    // interface language, and the one Latin run in it — the key name — is inside a chip that
-    // `paint_chip_row` lays out atom by atom (task Т-30-2 п. 4).
-    unsafe {
-        paint_label_at_pitch(
-            dc,
-            rect,
-            &mut caption,
-            theme::LabelStyle {
-                ground,
-                ink,
-                face,
-                pitch,
-                reading: theme::Reading::Native,
-            },
-        )
-    }
-}
-
-/// Draws the name «Lang Switcher» — task T-78-3, the one button of this program that is painted
-/// as a label.
-///
-/// # ⚠⚠ Why this is not [`paint_push_button`], and why that is the whole point
-///
-/// The name was an `SS_OWNERDRAW` label until this task and it has to go on **looking exactly
-/// like one** — the user approved a name that is quiet until the pointer reaches it, and the
-/// rectangle it stands in did not move a unit. The two painting roads do not lay text out the
-/// same way, and the difference is not a matter of degree:
-///
-/// | | horizontal | vertical |
-/// |---|---|---|
-/// | the label road ([`theme::LABEL_TEXT_FORMAT`]) | `DT_LEFT` | `DT_TOP` |
-/// | the button road ([`paint_push_button`]) | `DT_CENTER` | `DT_VCENTER` |
-///
-/// The control is 141 units wide and the name is nowhere near that, so `DT_CENTER` alone would
-/// have carried it tens of pixels to the right, and `DT_VCENTER` would have moved it down inside
-/// an 11-unit box. **Both are measured from the flags, not looked at** — развилка C5 of the
-/// mandate, and the lesson of Э51.
-///
-/// So the button borrows its **ground** from the button table and its **drawing** from the label
-/// body: [`button_color_roles`] chooses the face exactly as it does for «ОК», and the face's
-/// brush is then handed to [`theme::paint_label_at_pitch`] as the ground of a label. The face,
-/// the ink, the rectangle and the format are then the very values the label road passed — not
-/// equal ones, **the same ones**, read out of [`about_label_face`] and
-/// [`about_static_color_role`] — so the typography cannot move by a pixel without one of those
-/// two functions changing.
-///
-/// # Safety
-///
-/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM` message
-/// it is inside of.
-unsafe fn draw_about_name(hwnd: HWND, dc: HDC, rect: RECT, hot: bool) -> isize {
-    // The colour choice, split from the painting — the borrow ends before the DC is touched,
-    // exactly as everywhere in this file.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-
-            let (colors, hot_brush) = theme::resolve_button_colors(
-                // Pressed and disabled are not asked about: this button has two states and
-                // `button_color_roles` answers them above both gates — see it for why.
-                button_color_roles(IDC_ABOUT_NAME, hot, false, false),
-                // The ground of this window, the same one `on_about_ctl_color` answers with.
-                brushes.window_bg(),
-                brushes,
-                state.palette,
-            );
-
-            Some((
-                colors,
-                hot_brush,
-                // ⚠ The ink of the label it was, out of the one table that answers it.
-                label_ink(about_static_color_role(IDC_ABOUT_NAME), state.palette),
-                // ⚠ And the face of the label it was, out of the one table that answers that.
-                state
-                    .fonts
-                    .as_ref()
-                    .map(|fonts| about_label_face(IDC_ABOUT_NAME, fonts)),
-                // The ground of the window itself — what the rectangle outside the backing is
-                // erased with, in both states.
-                brushes.window_bg(),
-            ))
-        })
-    };
-
-    // `_hot_brush` is named and not discarded for the reason `on_about_draw_item` gives at its
-    // own: the brush of the lit face is made for the length of one paint and must outlive it.
-    let Some(Some((colors, _hot_brush, ink, face, window))) = choice else {
-        return 0;
-    };
-
-    let (face, pitch) = match face {
-        Some((face, pitch)) => (Some(face), pitch),
-        None => (None, None),
-    };
-
-    // Read after the borrow ends, for the reason `draw_label` gives. Without the trailing NUL:
-    // `DrawTextW` takes the length of the slice it is given.
-    let mut caption: Vec<u16> = get_text(hwnd, IDC_ABOUT_NAME).encode_utf16().collect();
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message; `face` and
-    // `window` are handles this window's state owns for longer than this call.
-    unsafe { paint_program_name(dc, rect, &mut caption, face, pitch, ink, colors, window) }
 }
 
 /// **Paints the name of the program** — the half of the drawing that is the same in both windows
@@ -20666,210 +19115,6 @@ pub(crate) unsafe fn fit_program_name(hwnd: HWND, control: i32, face: Option<HFO
     if narrowed != rect {
         move_child(hwnd, control, narrowed.top, None, &narrowed);
     }
-}
-
-/// Draws one **sentence** of the help panel — task Т-26-2, решение 85 п. 1.
-///
-/// The choosing half of a chip row; the laying and the painting are `theme::paint_chip_row`.
-/// What is chosen here is the same four things every drawing of this file chooses — the ground,
-/// the ink, the faces and the colours — plus the two halves of the sentence, which come from
-/// the control's own caption split at `theme::KEY_PLACEHOLDER`.
-///
-/// # Why the caption on the control still carries `{0}`
-///
-/// FR-94 puts the text of the locale in force on the control and the drawing reads it back;
-/// that road is unchanged. What changed is *where the key name is substituted*: it used to
-/// happen in [`fill_about`] with [`format_text`], and now it happens at the pen, because the
-/// chip has to be drawn **at** the placeholder and a substituted string no longer says where
-/// that was. The key name itself is the same one, resolved once when the window opens
-/// ([`effective_hotkey_name`]) and kept in the state — решение 82.5 untouched.
-///
-/// # Safety
-///
-/// Called from [`on_about_draw_item`] only, with values copied out of the `WM_DRAWITEM`
-/// message it is inside of.
-unsafe fn draw_about_help_row(hwnd: HWND, control: i32, dc: HDC, rect: RECT) -> isize {
-    // The colour choice, split from the painting — the borrow ends before the DC is touched.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-
-            let fonts = state.fonts.as_ref();
-
-            Some((
-                ChipRowStyle {
-                    ground: brushes.panel_bg(),
-                    ink: label_ink(about_static_color_role(control), state.palette),
-                    body: fonts.map(DialogFonts::body),
-                    chip_face: fonts.map(DialogFonts::chip),
-                    chip: ChipColors {
-                        // ⛔ No new palette field — правило Э12. The chip is the box a field of
-                        // the settings dialog is drawn in, in that box's own two colours.
-                        outline: state.palette.field_border,
-                        // ⚠ **`window_bg` and not `field_bg`** — решение 87 п. 2, which corrects
-                        // the wording of the mandate. The mock-up fills the chip with the colour
-                        // of the **window** (`kbd { background: var(--window-bg) }`), and the
-                        // difference is decisive in «Туман»: there `field_bg` and `panel_bg` are
-                        // both pure white, so a chip filled with the first would be a bare frame
-                        // on the second. Both are fields of the existing palette either way —
-                        // правило Э12 is untouched; what changed is which of the two.
-                        fill: brushes.window_bg(),
-                        ink: state.palette.text,
-                    },
-                    // Task T-43-5, finding Н69: a window whose faces were refused draws its
-                    // sentences at the pitch of a settings label, not on top of each other.
-                    pitch: about_help_row_pitch(
-                        fonts.map(DialogFonts::body_pitch),
-                        drawing_dpi(dc),
-                    ),
-                    dpi: drawing_dpi(dc),
-                },
-                state.hotkey.clone(),
-            ))
-        })
-    };
-
-    let Some(Some((style, key))) = choice else {
-        return 0;
-    };
-
-    // Read after the borrow ends, for the reason `draw_label` gives.
-    let template = get_text(hwnd, control);
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message, and every handle
-    // of `style` is an object this window's state owns for longer than this call.
-    unsafe { paint_chip_row(dc, rect, chip_row(&template, &key), style) }
-}
-
-/// The `WM_DRAWITEM` of the about window — the four labels of task T-11-18 and one
-/// owner-drawn button, «ОК», painted by the shared [`paint_push_button`] with the colours the
-/// shared [`button_color_roles`] table chose, on which `IDOK` is the accent (§6.2, task
-/// T-11-11: the paths of the settings dialog, not copies of them).
-///
-/// SEC-05, held as in [`on_draw_item`]: the control type and the identifier are checked
-/// before any work, the same copied fields and nothing else are taken out of the message,
-/// `itemData` — never.
-///
-/// # Safety
-///
-/// Called from [`about_proc`] only, with the `lparam` of the message: the sender owns the
-/// struct it names for the length of the send, and this procedure is inside that send.
-unsafe fn on_about_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
-    if lparam.0 == 0 {
-        return 0;
-    }
-
-    // The one dereference of the message — the same copied fields as `on_draw_item`,
-    // taken out as plain values before anything else runs.
-    //
-    // SAFETY: see above — the dialog manager owns the struct for the length of the send,
-    // and this procedure is inside that send.
-    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    let (ctl_type, ctl_id, item_state, dc, rect, item_window) = (
-        item.CtlType,
-        item.CtlID,
-        item.itemState,
-        item.hDC,
-        item.rcItem,
-        item.hwndItem,
-    );
-
-    let control = i32::try_from(ctl_id).unwrap_or(-1);
-
-    // FR-92а, task T-11-18: the four labels of this window, by control type and then by
-    // identifier — the same gate and the same order the settings dialog uses. `itemState` is
-    // deliberately not consulted: a label takes no focus and none of these is ever disabled.
-    if ctl_type == ODT_STATIC {
-        if !OWNER_DRAWN_ABOUT_LABELS.contains(&control) {
-            return 0;
-        }
-
-        // Task Т-26-2, решение 85 п. 1: the five sentences of the help panel carry a chip and
-        // are laid word by word; every other label of this window is one call of the shared
-        // label drawing.
-        if ABOUT_HELP_SENTENCES.contains(&control) {
-            // SAFETY: see the caller — `dc` and `rect` are the values of the message, used
-            // only to paint into for the length of this send.
-            return unsafe { draw_about_help_row(hwnd, control, dc, rect) };
-        }
-
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
-        // to paint into for the length of this send.
-        return unsafe { draw_about_label(hwnd, control, dc, rect) };
-    }
-
-    // Both owner-drawn *buttons* of this window go this one way — «ОК», and since task T-71-1
-    // (finding Э70-Б-1) «От автора…»: the gate used to compare the identifier with «ОК» alone,
-    // and the second button of the list had nobody to paint it.
-    if ctl_type != ODT_BUTTON || !about_button_is_painted(control) {
-        return 0;
-    }
-
-    // ⭐ Task T-78-3: the name goes its own way, and the way is the **label** body it went by
-    // while it was a label. See [`draw_about_name`] — in one line, the two roads lay text out
-    // differently (`DT_LEFT | DT_TOP` against `DT_CENTER | DT_VCENTER`), and the name has to
-    // stand where it stood. No focus frame either: the template gives it `NOT WS_TABSTOP`, so
-    // there is no focus to draw, and a dotted rectangle round the name of the program was never
-    // part of what the user approved.
-    if control == IDC_ABOUT_NAME {
-        // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only to
-        // paint into for the length of this send.
-        return unsafe { draw_about_name(hwnd, dc, rect, is_hot(item_window)) };
-    }
-
-    let pressed = item_state.0 & ODS_SELECTED.0 != 0;
-    let disabled = item_state.0 & ODS_DISABLED.0 != 0;
-    let focused = item_state.0 & ODS_FOCUS.0 != 0 && item_state.0 & ODS_NOFOCUSRECT.0 == 0;
-
-    // Task T-12-8: the same fourth state as in the settings dialog, read the same way — this
-    // program's own record, compared against the window of the message and never followed. The
-    // colour table answers the accent for «ОК» at rest and `sel_fg` under the cursor since task
-    // T-15-2, so this flag is **load bearing**: the button paints itself differently hot and
-    // cold, and dropping the read would take the response away. ⚠ Until that task the comment
-    // here said the button painted itself the same either way — true then, false now.
-    let hot = is_hot(item_window);
-
-    // The colour choice, split from the painting — the borrow ends before the DC is
-    // touched, exactly as everywhere in this file.
-    //
-    // SAFETY: see the caller.
-    let choice = unsafe {
-        with_about_state(hwnd, |state| {
-            // `None` — the brushes were refused at initialisation (NFR-13).
-            let brushes = state.brushes.as_ref()?;
-
-            let (colors, hot_brush) = resolve_button_colors(
-                // Task T-12-4, finding A-13: the same face and the same ink as everywhere —
-                // and no frame, which is the one thing this window's button does differently
-                // from the nine of the settings dialog.
-                button_color_roles(control, hot, pressed, disabled),
-                // The ground of this window has no panels in it: `on_about_ctl_color`
-                // answers `WM_CTLCOLORBTN` with the window brush and nothing else
-                // (task T-12-6).
-                brushes.window_bg(),
-                brushes,
-                state.palette,
-            );
-
-            Some((
-                colors,
-                hot_brush,
-                state.fonts.as_ref().map(DialogFonts::text),
-            ))
-        })
-    };
-
-    // `_hot_brush` is named and not discarded for the reason `on_draw_item` gives at its own.
-    let Some(Some((colors, _hot_brush, face))) = choice else {
-        return 0;
-    };
-
-    // SAFETY: see the caller — `dc` and `rect` are the values of the message, used only
-    // to paint into for the length of this send; `face` is a face the state owns for longer.
-    unsafe { paint_push_button(hwnd, control, dc, rect, colors, focused, face) }
 }
 
 // =========================================================================================

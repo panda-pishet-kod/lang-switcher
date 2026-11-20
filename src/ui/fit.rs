@@ -258,7 +258,7 @@ pub const TABLE: &[(&str, K)] = &[
         "ta",
         K {
             narrow: 1.0,
-            ordinary: 1.0,
+            ordinary: 0.997,
             large: 1.0,
         },
     ),
@@ -306,7 +306,7 @@ pub const TABLE: &[(&str, K)] = &[
         "ml",
         K {
             narrow: 1.0,
-            ordinary: 1.0,
+            ordinary: 0.997,
             large: 1.0,
         },
     ),
@@ -434,7 +434,7 @@ pub const TABLE: &[(&str, K)] = &[
         "ka",
         K {
             narrow: 1.0,
-            ordinary: 1.0,
+            ordinary: 0.997,
             large: 1.0,
         },
     ),
@@ -474,7 +474,7 @@ pub const TABLE: &[(&str, K)] = &[
         "hu",
         K {
             narrow: 1.0,
-            ordinary: 1.0,
+            ordinary: 0.997,
             large: 1.0,
         },
     ),

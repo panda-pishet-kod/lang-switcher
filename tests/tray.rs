@@ -53,7 +53,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyIcon, DestroyWindow, GetIconInfo, GetMenuItemCount, GetMenuItemID,
     GetMenuItemInfoW, GetMenuState, GetSystemMetrics, HICON, HMENU, ICONINFO, IMAGE_ICON,
     LR_DEFAULTCOLOR, LoadImageW, MENU_ITEM_FLAGS, MENUITEMINFOW, MF_BYPOSITION, MF_CHECKED,
-    MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW, RT_DIALOG,
+    MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_SEPARATOR, MIIM_DATA, NONCLIENTMETRICSW,
     RT_GROUP_ICON, RT_VERSION, SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON,
     SPI_GETNONCLIENTMETRICS, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP,
     WM_CONTEXTMENU, WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION,
@@ -6426,29 +6426,128 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     assert_eq!(tray::file_version(), None);
 }
 
+/// The windows of the shell (`ui::host`, class `LangSwitcher.Shell`) this thread has, top-level.
+#[cfg(feature = "testing")]
+fn shell_windows_of_this_thread() -> Vec<HWND> {
+    use windows::Win32::Foundation::TRUE;
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::WindowsAndMessaging::{EnumThreadWindows, GetClassNameW};
+    use windows::core::BOOL;
+
+    unsafe extern "system" fn one(hwnd: HWND, found: LPARAM) -> BOOL {
+        let mut name = [0_u16; 64];
+        // SAFETY: a window Windows enumerates and a buffer of this frame.
+        let length = unsafe { GetClassNameW(hwnd, &mut name) };
+        let class = String::from_utf16_lossy(&name[..usize::try_from(length).unwrap_or(0)]);
+        if class == "LangSwitcher.Shell" {
+            // SAFETY: the pointer `shell_windows_of_this_thread` passed, alive across the call.
+            unsafe { &mut *(found.0 as *mut Vec<HWND>) }.push(hwnd);
+        }
+        TRUE
+    }
+
+    let mut found: Vec<HWND> = Vec::new();
+    // SAFETY: the callback reads the vector of this frame only during the call.
+    let _ = unsafe {
+        EnumThreadWindows(
+            GetCurrentThreadId(),
+            Some(one),
+            LPARAM(std::ptr::from_mut(&mut found) as isize),
+        )
+    };
+    found
+}
+
+/// **FR-92а, task T-120-13 — the red before.** The command of the menu «О программе» opens the
+/// window of the shell, and the template of the old window (`IDD_ABOUT`, `RT_DIALOG` 201) is not
+/// in the file that ships. A second command while it is up makes no second window, and the record
+/// the menu is locked by goes with the window.
+///
+/// The window is made as the product makes it and left hidden (`about::testing`): nothing shows
+/// on the screen of the machine the tests run on.
+#[cfg(feature = "testing")]
 #[test]
-fn the_window_the_about_item_opens_ships_in_the_product_resources() {
-    // FR-92а, task T-11-11: «О программе» is no longer a `MessageBoxW` — `show_about`
-    // asks `DialogBoxParamW` for template 201 (`IDD_ABOUT`) of the running executable. A
-    // missing template would cost nothing at build time — `embed-resource` links whatever
-    // `app.rc` produced — and would fail at the moment the menu item is chosen, so the
-    // presence of the template is pinned here, in the file that ships. What is *in* the
-    // template — the elements, the styles, the strings of both locales — is the business
-    // of `tests\settings.rs`.
+fn the_about_command_opens_the_window_of_the_shell_and_no_template_ships() {
+    use lang_switcher::ui::windows::about;
+    use windows::Win32::UI::WindowsAndMessaging::RT_DIALOG;
+
+    let window = TestWindow::new();
+    let home = TestDir::new("about-shell");
+    let _ui = attach_ui(&window, &home);
+
+    assert!(
+        !settings::about_is_open(),
+        "no «О программе» on this thread yet"
+    );
+
+    about::testing::hidden_while(|| tray::dispatch_command(window.handle, tray::CMD_ABOUT));
+    let first = shell_windows_of_this_thread();
+    let recorded = settings::open_window();
+    // The owner and the button on the task bar: the program's window owns it, as it owned the
+    // old one, and the window asks for a button of its own — its owner is a tool window and has
+    // none to lend.
+    let (owner, extended) = first.first().map_or((None, 0), |&hwnd| {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongPtrW,
+        };
+        // SAFETY: a live window of this thread; plain reads.
+        unsafe {
+            (
+                GetWindow(hwnd, GW_OWNER).ok(),
+                GetWindowLongPtrW(hwnd, GWL_EXSTYLE),
+            )
+        }
+    });
+
+    about::testing::hidden_while(|| tray::dispatch_command(window.handle, tray::CMD_ABOUT));
+    let second = shell_windows_of_this_thread();
+
     let product = ProductImage::open();
-    let template = product.resource(RT_DIALOG, 201);
+    let template = product.has(RT_DIALOG, 201);
 
-    println!("RT_DIALOG 201 is {} bytes", template.len());
+    println!(
+        "after the command: {} window(s) of the shell, recorded {recorded:?}; after a second \
+         one: {}; RT_DIALOG 201 in the product: {template}",
+        first.len(),
+        second.len()
+    );
 
-    // A DIALOGEX template opens with version 1, signature 0xFFFF — the same first four
-    // bytes the parser of tests\settings.rs demands.
+    for &hwnd in &second {
+        // SAFETY: windows of this thread, each destroyed once.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
+
     assert_eq!(
-        (
-            u16::from_le_bytes([template[0], template[1]]),
-            u16::from_le_bytes([template[2], template[3]]),
-        ),
-        (1, 0xFFFF),
-        "RT_DIALOG 201 must be a DIALOGEX template"
+        first.len(),
+        1,
+        "the command «О программе» must open one window of the shell"
+    );
+    assert_eq!(
+        recorded,
+        first.first().copied(),
+        "and the record the menu is locked by names it"
+    );
+    assert_eq!(
+        owner,
+        Some(window.handle),
+        "the program's window owns «О программе»"
+    );
+    assert!(
+        extended & 0x0004_0000 != 0 && extended & 0x0000_0080 == 0,
+        "and the window asks the task bar for a button of its own (WS_EX_APPWINDOW, not \
+         WS_EX_TOOLWINDOW): extended style {extended:#010x}"
+    );
+    assert_eq!(
+        second, first,
+        "a second command while it is up makes nothing"
+    );
+    assert!(
+        !settings::about_is_open(),
+        "the record goes with the window"
+    );
+    assert!(
+        !template,
+        "the template of the old window, RT_DIALOG 201, must be gone from the product"
     );
 }
 
@@ -6561,6 +6660,17 @@ impl ProductImage {
     /// The module handle as an `HINSTANCE`, for `LoadImageW`.
     fn instance(&self) -> HINSTANCE {
         HINSTANCE(self.module.0)
+    }
+
+    /// Whether the product binary carries a resource of this type and numeric identifier.
+    #[cfg(feature = "testing")]
+    fn has(&self, kind: PCWSTR, id: u16) -> bool {
+        let name = PCWSTR(std::ptr::without_provenance(usize::from(id)));
+
+        // SAFETY: as in `resource`: integer identifiers, a module loaded for this value's life.
+        !unsafe { FindResourceW(Some(self.module), name, kind) }
+            .0
+            .is_null()
     }
 
     /// A copy of one resource of the product binary, by type and numeric identifier.
