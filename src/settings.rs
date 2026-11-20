@@ -3165,6 +3165,7 @@ pub enum Quarantined {
 /// written over them (NFR-13 — the result is acted on, and the direction it is acted on in is
 /// the one that keeps the file).
 pub fn quarantine(path: &Path) -> Result<Quarantined, ConfigError> {
+    crate::sandbox::guard_path(path);
     match fs::rename(path, quarantine_path_for(path)) {
         Ok(()) => Ok(Quarantined::Moved),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Quarantined::NothingThere),
@@ -3195,6 +3196,7 @@ pub fn write_to(path: &Path, config: &Config) -> Result<WriteOutcome, ConfigErro
 /// configuration ([`kept_feed_path_in`]) the same way, temporary file, flush, one rename, so that a
 /// killed process leaves the old copy or the new one and never half of either.
 pub fn write_bytes_to(path: &Path, bytes: &[u8]) -> Result<WriteOutcome, ConfigError> {
+    crate::sandbox::guard_path(path);
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -3410,6 +3412,24 @@ const AUTOSTART_VALUE_NAME: PCWSTR = w!("Lang Switcher");
 /// The `Run` key of the current user, closed when this value is dropped.
 struct RunKey(HKEY);
 
+thread_local! {
+    /// A key of a test's own in place of [`RUN_KEY_PATH`] on this thread
+    /// ([`use_run_key_on_this_thread`]): its name and the same as UTF-16 with the terminator.
+    static RUN_KEY_OF_TEST: std::cell::RefCell<Option<(String, Vec<u16>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// **For tests**: the key under `HKEY_CURRENT_USER` this thread writes and reads in place of the real
+/// `Run` — a key of the test's own, made and taken away by the test; `None` gives the real one back.
+/// The program never calls it: a test that writes autostart without it is stopped before the write
+/// (`sandbox::guard_run_key`, the night of 2026-11-20).
+#[doc(hidden)]
+pub fn use_run_key_on_this_thread(subkey: Option<&str>) {
+    RUN_KEY_OF_TEST.with(|cell| {
+        *cell.borrow_mut() = subkey.map(|subkey| (subkey.to_owned(), wide(subkey)));
+    });
+}
+
 impl RunKey {
     /// Opens [`RUN_KEY_PATH`] under `HKEY_CURRENT_USER` with the access asked for.
     ///
@@ -3418,14 +3438,27 @@ impl RunKey {
     /// merely absent — and creating registry keys is not what FR-93 asks for.
     fn open(access: REG_SAM_FLAGS) -> windows::core::Result<Self> {
         let mut key = HKEY::default();
+        let own = RUN_KEY_OF_TEST.with(|cell| cell.borrow().clone());
+
+        // The guard: a test does not write the real key — stopped here, before the key is even
+        // opened for writing. A key of the test's own passes, unless the test of the guard treats it
+        // as the real one.
+        let real = own
+            .as_ref()
+            .is_none_or(|(name, _)| crate::sandbox::pretended_real_run_key(name));
+        if real && access.0 & KEY_SET_VALUE.0 != 0 {
+            crate::sandbox::guard_run_key();
+        }
+        let path = own
+            .as_ref()
+            .map_or(RUN_KEY_PATH, |(_, units)| PCWSTR(units.as_ptr()));
 
         // SAFETY: `RUN_KEY_PATH` is a NUL-terminated `'static` UTF-16 literal, so the pointer
         // the call reads through outlives the call. `key` is a live local the call writes
         // exactly one handle into, and it is written only on success — which is checked on the
         // next line, so a failed open cannot leave a bogus handle to be closed. The handle
         // becomes the property of the returned value and is closed exactly once, in `Drop`.
-        let status =
-            unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY_PATH, None, access, &mut key) };
+        let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, path, None, access, &mut key) };
 
         status.ok()?;
 

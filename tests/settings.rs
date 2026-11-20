@@ -5,6 +5,9 @@
 //! `%APPDATA%\Lang_Switcher`: that is the working environment of whoever runs the tests,
 //! and the one test that is about the standard path builds the string and stops there.
 
+#[path = "support/run_key.rs"]
+mod run_key;
+use run_key::OwnRunKey;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10948,26 +10951,15 @@ fn a_value_below_the_ceiling_is_published_as_it_stands_and_raises_nothing() {
 
 #[test]
 fn the_autostart_value_appears_and_disappears_under_hkcu() {
-    // ⚠ This test writes into the registry of whoever is running it — the one value FR-93
-    // names, under the current user and nowhere else. If that value is already there it
-    // belongs to a real installation of this program, and the test refuses to touch it rather
-    // than restore an approximation of it afterwards.
-    if let Some(existing) = settings::autostart_value() {
-        println!("autostart already registered ({existing}); this test does not touch it");
-        return;
-    }
+    // The night of 2026-11-20: no test writes the person's `HKCU\...\Run` — a write there from a
+    // test process is stopped (`sandbox::guard_run_key`). The same writing and removal of FR-93 is
+    // made in a key of the test's own under `HKCU\Software\Lang_Switcher-tests`, taken away after.
+    let _own = OwnRunKey::new("criterion-15");
 
-    /// Puts the absence back even if an assertion below fails.
-    struct Restore;
-
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            let _ = settings::set_autostart(false);
-        }
-    }
-
-    let _restore = Restore;
-
+    // Removing what is not there is not a failure, which is what makes the operation safe to
+    // repeat. First of all, so that a test that lost its own key meets the guard before it reads
+    // or writes anything of the person's.
+    settings::set_autostart(false).expect("removing an absent value must succeed");
     assert!(!settings::autostart_registered(), "nothing there to start");
 
     settings::set_autostart(true).expect("FR-93: the value must be writable under HKCU");
@@ -10991,10 +10983,6 @@ fn the_autostart_value_appears_and_disappears_under_hkcu() {
         !settings::autostart_registered(),
         "FR-93: unticking the box removes the value"
     );
-
-    // And removing what is not there is not a failure, which is what makes the operation safe
-    // to repeat.
-    settings::set_autostart(false).expect("removing an absent value must succeed");
 }
 
 /// **Решение 120.4 (е), task T-55-1 — the guard against litter.** Only the installed product may

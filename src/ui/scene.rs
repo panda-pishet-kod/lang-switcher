@@ -239,6 +239,9 @@ pub enum Node<I> {
     },
     /// The line between the groups of the menu.
     MenuRule,
+    /// A line of status (passport §6): its dot — `accent` while the program works, `ink3` paused,
+    /// `warn` waiting for a restart, as in the head of the menu — and its words in `body`.
+    Status { state: MenuState, words: String },
     /// The example with a key (passport §6 «Клавиша»): the word typed, the key, the word fixed.
     Example {
         typed: String,
@@ -459,6 +462,7 @@ impl<I> Node<I> {
                 emphasis,
             },
             Node::MenuRule => Node::MenuRule,
+            Node::Status { state, words } => Node::Status { state, words },
             Node::Example { typed, key, fixed } => Node::Example { typed, key, fixed },
             Node::OverPicture { over, otherwise } => Node::OverPicture {
                 over,
@@ -581,6 +585,7 @@ impl<I> Node<I> {
                 }
             }
             Node::MenuRule => {}
+            Node::Status { words, .. } => f(Role::Body, words),
             Node::Example { typed, fixed, .. } => {
                 f(Role::Code, typed);
                 f(Role::Code, fixed);

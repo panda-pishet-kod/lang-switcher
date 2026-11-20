@@ -254,3 +254,36 @@ fn print_the_element_bench() {
         .expect("the sheets are printed");
     assert_eq!(written.len(), 40);
 }
+
+/// **The label of a button goes on to a second line only where the layout made room for it**
+/// (§3а, step 5) — the stand of 2026-11-20: «Close», exactly as wide as its main button, came out
+/// «Clos / e». A label that fits to the rounding of a measure stays whole on its line; a wider one in
+/// a button one line high stays on its line too (cut and counted by the layout, not broken here).
+#[test]
+fn a_button_label_wraps_only_where_the_layout_made_the_button_taller() {
+    use lang_switcher::ui::elements::button_label_wraps;
+
+    let line = 18.0;
+    let one_line = 18.0;
+    let two_lines = 36.0;
+    assert!(
+        !button_label_wraps(40.0, 40.0, one_line, line),
+        "exactly as wide"
+    );
+    assert!(
+        !button_label_wraps(40.004, 40.0, one_line, line),
+        "wider by a rounding"
+    );
+    assert!(
+        !button_label_wraps(40.004, 40.0, two_lines, line),
+        "wider by a rounding, even in a taller button"
+    );
+    assert!(
+        !button_label_wraps(60.0, 40.0, one_line, line),
+        "a button one line high"
+    );
+    assert!(
+        button_label_wraps(60.0, 40.0, two_lines, line),
+        "made taller for it"
+    );
+}

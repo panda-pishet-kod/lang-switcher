@@ -401,6 +401,7 @@ impl State {
     /// Writes the state: a temporary file beside it, then one move over the old name, so that
     /// a power cut leaves the old state or the new one and never half of either.
     pub fn save(&self, path: &Path) -> bool {
+        crate::sandbox::guard_path(path);
         let Ok(text) = toml::to_string(self) else {
             return false;
         };

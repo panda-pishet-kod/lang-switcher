@@ -1375,6 +1375,7 @@ pub fn write_as(path: &Path, session: Session) -> io::Result<()> {
 
 /// The three steps of [`write_as`]: the folder, the temporary file, the rename.
 fn write_replacing(path: &Path, session: Session) -> io::Result<()> {
+    crate::sandbox::guard_path(path);
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
