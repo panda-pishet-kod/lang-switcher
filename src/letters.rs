@@ -4562,7 +4562,7 @@ pub fn author_view_in(
             Some(day) => format_text(
                 IDS_NEWS_READ_ON,
                 &[
-                    &format_date(day),
+                    &format_date_in(language, day),
                     &days_until_feed_read(state, today).to_string(),
                 ],
             ),
@@ -4622,7 +4622,14 @@ pub fn author_view_in(
 /// NFR-13: a refusal falls back to the ISO form the configuration file is written in, which is
 /// readable everywhere and wrong nowhere.
 pub fn format_date(date: Date) -> String {
-    let locale = settings::wide(settings::ui_language().tag());
+    format_date_in(settings::ui_language(), date)
+}
+
+/// [`format_date`] in `language` — the language of the window that shows the date, which is the
+/// program's in the running program and any language in a description built for it (T-120-17:
+/// «От автора» in Hebrew printed the day with the Russian month of the program).
+pub fn format_date_in(language: Language, date: Date) -> String {
+    let locale = settings::wide(language.tag());
 
     match gregorian_month_name(&locale, date.month()) {
         Some(month) => format!("{} {month}", date.day()),

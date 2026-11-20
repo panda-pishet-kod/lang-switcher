@@ -4576,9 +4576,9 @@ fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
     );
 }
 
-/// **The pictures of C3 of T-120-16** — the four letters and «Последние письма» drawn in memory by
-/// the drawing of the shell itself (the layout and `elements::draw`, as a live window draws them):
-/// Russian straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
+/// **The pictures of C3 of T-120-16 and T-120-17** — the four letters, «Последние письма» and «От
+/// автора» drawn in memory by the drawing of the shell itself (the layout and `elements::draw`, as a
+/// live window draws them): Russian and German straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
 /// screen (1280 × 720) and the narrowest one (620 × 500), at the factor of the table. Printed only
 /// when `LANGSW_LETTERS_DIR` names a folder.
 #[cfg(feature = "testing")]
@@ -4603,7 +4603,7 @@ fn print_the_letters() {
     let folder = Path::new(&folder);
     std::fs::create_dir_all(folder).expect("the folder of the pictures");
 
-    for language in [Language::Ru, Language::He] {
+    for language in [Language::Ru, Language::De, Language::He] {
         let rtl = language.is_rtl();
         let direction = if rtl {
             Direction::RightToLeft
@@ -4763,6 +4763,48 @@ fn hello_shows_the_frame_of_its_tick() {
     for letter in [Letter::Thanks, Letter::Update, Letter::News(7)] {
         assert_eq!(view(letter).tick(), None, "{letter:?} stands still");
     }
+}
+
+/// **T-120-17: «От автора» dates the reading of the feed in the language of its window**, not in
+/// the program's. The two are one in the running program; a description built for another language
+/// — the pictures of C3, the instrument of fitting, the window built again after a change — printed
+/// the day with the Russian month of the program («16 ноября» in Hebrew).
+#[test]
+fn the_author_window_dates_the_feed_in_the_language_of_its_window() {
+    use lang_switcher::letters::{FeedView, author_view_in, format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let today = item.date.expect("the sample entry carries its day");
+    let state = Letters {
+        feed_last_read: Some(today),
+        ..Letters::default()
+    };
+    let view = author_view_in(
+        Language::De,
+        &state,
+        today,
+        "1.7.0",
+        FeedView {
+            update: None,
+            news: &[],
+        },
+    );
+    let german = format_date_in(Language::De, today);
+    let russian = format_date_in(Language::Ru, today);
+
+    println!("De: {} (the program speaks Russian)", view.feed_state);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        view.feed_state.contains(&german) && !view.feed_state.contains(&russian),
+        "the line of the feed must carry «{german}», the day in the language of the window: {}",
+        view.feed_state
+    );
 }
 
 /// **T-120-17: the two lines of the state of «От автора» are the element `Status` of the shell, and
