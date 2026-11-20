@@ -56,17 +56,10 @@
 // rather than as the wrong one.
 #define IDD_SETTINGS 200
 
-// The three windows of the letters from the author — FR-101 and FR-103, task Т-32-2. Next in
-// the dialog row, contiguous with the two above: a dialog identifier is only unique within its
-// type, and keeping the numbering distinct makes a mismatched constant in the Rust source show
-// up as a missing resource rather than as the wrong window.
-//
-// One template serves **five letters** (IDD_LETTER): «Привет», «Спасибо», «Что нового»,
-// «Обновление» and «Новость» differ in which of its slots are filled, not in their shape. The
-// list of recent letters (IDD_LETTERS_LIST) is the same outline with four entry slots in the
-// panel, and «От автора» (IDD_AUTHOR) is the wider window of FR-103.
-#define IDD_LETTER 202
-#define IDD_LETTERS_LIST 203
+// «От автора» — FR-103, task Т-32-2. Next in the dialog row: a dialog identifier is only unique
+// within its type, and keeping the numbering distinct makes a mismatched constant in the Rust
+// source show up as a missing resource rather than as the wrong window. 202 and 203 were the
+// letters and «Последние письма», windows of the shell since task T-120-16.
 #define IDD_AUTHOR 204
 // The wizard of FR-104 — task Т-32-8. Six steps in one window, five of them on the road of a
 // trouble and three on the road of an idea.
@@ -174,74 +167,6 @@
 #define IDC_EXCLUSION_AUTO_LABEL 1110
 #define IDC_EXCLUSION_MANUAL_LABEL 1111
 
-// Controls of the letter template IDD_LETTER — FR-101, task Т-32-2. A block of their own from
-// 1200, contiguous and clear of everything above.
-//
-// ⚠ **These rectangles are a pool of slots and not a layout.** One template serves five
-// letters, each filling a different set of slots, so the position and the height of every
-// control below are computed at `WM_INITDIALOG` by `letters::layout` out of the text actually
-// put into it, measured with the very `DrawTextW` that will draw it. What the template fixes is
-// the *window* — its width, its height and its font — and which slots exist. A slot no letter
-// fills is hidden, and a hidden control paints nothing; that is what keeps the rule of the two
-// windows above true here as well: **no two owner-drawn statics ever overlap**, because the
-// layout assigns disjoint rectangles and hides the rest.
-#define IDC_LETTER_ICON        1200
-#define IDC_LETTER_TITLE       1201
-#define IDC_LETTER_SUBTITLE    1202
-#define IDC_LETTER_LEAD        1203
-#define IDC_LETTER_PARA        1204
-// The demonstration of «Привет» — an owner-drawn static this program animates while the window
-// is open (FR-101, NFR-10: the timer runs only then).
-#define IDC_LETTER_DEMO        1205
-#define IDC_LETTER_DEMO_CAP    1206
-// The panel: a hidden CONTROL on the terms the six panels of the settings dialog and the one
-// panel of the about window are on — it carries the caption and the rectangle, and the window's
-// own WM_ERASEBKGND draws the block.
-#define IDC_LETTER_PANEL       1207
-#define IDC_LETTER_PANEL_TITLE 1208
-#define IDC_LETTER_PANEL_TEXT  1209
-#define IDC_LETTER_N1          1210
-#define IDC_LETTER_N2          1211
-#define IDC_LETTER_N3          1212
-#define IDC_LETTER_N4          1213
-#define IDC_LETTER_ROW_1       1214
-#define IDC_LETTER_ROW_2       1215
-#define IDC_LETTER_ROW_3       1216
-#define IDC_LETTER_ROW_4       1217
-#define IDC_LETTER_PANEL_BTN_1 1218
-#define IDC_LETTER_PANEL_BTN_2 1219
-#define IDC_LETTER_LEFT        1220
-#define IDC_LETTER_RIGHT       1221
-#define IDC_LETTER_ACCENT      1222
-#define IDC_LETTER_FOOT        1223
-
-// Controls of the «Последние письма» window IDD_LETTERS_LIST — FR-101, task Т-32-2. Four
-// entries of five controls each, in four contiguous runs, so that the identifier of entry `i`
-// is the first of its run plus `i`.
-#define IDC_LETTERS_PANEL      1230
-#define IDC_LETTERS_T1         1231
-#define IDC_LETTERS_T2         1232
-#define IDC_LETTERS_T3         1233
-#define IDC_LETTERS_T4         1234
-#define IDC_LETTERS_D1         1235
-#define IDC_LETTERS_D2         1236
-#define IDC_LETTERS_D3         1237
-#define IDC_LETTERS_D4         1238
-#define IDC_LETTERS_X1         1239
-#define IDC_LETTERS_X2         1240
-#define IDC_LETTERS_X3         1241
-#define IDC_LETTERS_X4         1242
-#define IDC_LETTERS_B1         1243
-#define IDC_LETTERS_B2         1244
-#define IDC_LETTERS_B3         1245
-#define IDC_LETTERS_B4         1246
-#define IDC_LETTERS_R1         1247
-#define IDC_LETTERS_R2         1248
-#define IDC_LETTERS_R3         1249
-#define IDC_LETTERS_R4         1250
-#define IDC_LETTERS_CLOSE      1251
-#define IDC_LETTERS_FOOT       1252
-
 // Controls of the «От автора» window IDD_AUTHOR — FR-103, task Т-32-3. Three panels: the
 // author, the news and the feed, and the way to write to the author.
 #define IDC_AUTHOR_ICON        1260
@@ -276,7 +201,7 @@
 // with the gap after 1279 left deliberately: the three windows above may still grow a slot,
 // and a number that once meant one control must never come to mean another.
 //
-// ⚠ **A pool of slots, exactly as IDD_LETTER is.** Six steps share one window; each step shows
+// ⚠ **A pool of slots.** Six steps share one window; each step shows
 // its own set and hides the rest, and every rectangle is computed at run time by
 // `letters::layout_wizard` from the text actually put into it. What the template fixes is the
 // window — its width, its height and its font — and which slots exist.
@@ -341,7 +266,7 @@
 #define IDC_WZ_BACK            1351
 #define IDC_WZ_NEXT            1352
 // Step «Готово» — the thanks, task Т-33-3, решение 103.3. It used to be a window of its own on
-// IDD_LETTER; the user asked for it to be the wizard's last step, in the same window and at the
+// the template of the letters; the user asked for it to be the wizard's last step, in the same window and at the
 // same size. Two slots and not one string more: the caption of the step is IDS_WIZARD_DONE
 // (the same word the button carried), the heading and the paragraph are the two pairs the
 // abolished window already had, and the button is IDS_CHANNEL_OPEN.
@@ -912,116 +837,12 @@ END
 // FR-101 and FR-103 -- the windows of the letters from the author. Task Т-32-2.
 // =======================================================================================
 //
-// ⚠ **Three templates, and every rectangle in them is a slot rather than a layout.**
-//
-// The two windows above are laid out to the unit in this file, and each was cut against a
-// mock-up measured on the raised window (tasks Т-23-4, Т-26-2). These three cannot be: one
-// template serves five letters, a letter's panel holds between nothing and four rows, and the
-// text of a news item comes out of the author's feed at run time. So `letters::layout` places
-// every control top to bottom out of the height its own text actually needs, measured with the
-// same `DrawTextW` that will draw it, and hides the slots this letter does not use.
-//
-// What the templates below therefore fix is exactly three things, and they are the three that
-// cannot be decided at run time: **the size of the window**, **the font its units are in**, and
-// **which slots exist at all**. The `x`, `y` and `cy` of every child are starting values that
-// the layout overwrites before the window is shown.
-//
-// The width is 191 units, which is the about window's, and the font is its font — 9 pt — so the
-// two windows are the same 334 px wide at 96 DPI and one set of paddings serves both. The
-// height is 296 units: the accepted mock-up draws the tallest letter at about 555 px, and
-// 555 × 8 / 15 is 296. Решение 101 п. 7 fixes it there for every letter, so that a person does
-// not meet a window that changes size depending on what the author had to say.
-
-IDD_LETTER DIALOGEX 0, 0, 256, 276
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-// 0x00040000 = WS_EX_APPWINDOW, for the reason the two windows above carry it: the owner is
-// this program's hidden WS_EX_TOOLWINDOW window, and an owned window inherits its owner's
-// absence from the task bar. A letter that cannot be found on the task bar is a letter that
-// cannot be found at all — and unlike those two, this one is **modeless** and may sit open.
-EXSTYLE 0x00040000
-CAPTION "Письмо от автора"
-FONT 10, "Segoe UI", 400, 0, 0x1
-BEGIN
-    // ⚠⚠ **Ширины пере-разложены задачей T-81-1, решение 142.2 п. 2 и п. 3.** Окно 256 единиц:
-    // внешнее поле 12 с обеих сторон, колонка текста рядом со значком 42…244 = **202**, блок во
-    // всю ширину 12…244 = **232**, содержимое панели 19…237 = **218**, строка с маркером
-    // 30…237 = **207**. Числа шаблона здесь — **стартовая форма**: окно раскладывается кодом
-    // (`letters::layout_letter`) от своей клиентской ширины, и шаблон обязан быть ей согласен, а
-    // не подменять её.
-    ICON            IDI_APP_ACTIVE, IDC_LETTER_ICON, 12, 13, 23, 22
-    LTEXT           "", IDC_LETTER_TITLE, 42, 12, 202, 22, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_SUBTITLE, 42, 35, 202, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_LEAD, 42, 46, 202, 40, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_PARA, 12, 88, 232, 30, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_DEMO, 12, 120, 232, 34, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_DEMO_CAP, 12, 156, 232, 20, SS_OWNERDRAW
-    // ⚠ Нижний блок поджат задачей T-81-4: окно стало типовых **276** единиц вместо 308, потому
-    // что в колонке 256 самое высокое письмо — греческое «Здравствуйте» — просит 276, а не 308
-    // (замер `scratchpad-E81\probe-letter-height.log`). Числа здесь — стартовая форма;
-    // `letters::layout_letter` кладёт всё заново, а панель берёт то, что осталось между шапкой
-    // и рядом кнопок.
-    CONTROL         "", IDC_LETTER_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 180, 232, 48
-    LTEXT           "", IDC_LETTER_PANEL_TITLE, 19, 190, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_PANEL_TEXT, 19, 202, 218, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N1, 19, 190, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N2, 19, 200, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N3, 19, 210, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_N4, 19, 220, 7, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_1, 30, 190, 207, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_2, 30, 200, 207, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_3, 30, 210, 207, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTER_ROW_4, 30, 220, 207, 9, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_1, 19, 212, 86, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_PANEL_BTN_2, 109, 212, 63, 14, BS_OWNERDRAW
-    // ⚠⚠ **Тихая строка переехала НАД ряд кнопок — задача T-81-2, решение 142.2 п. 7.** Правило
-    // «ряд прижат к низу с отступом 12» и строка под кнопками — вещи несовместные, и макет,
-    // принятый владельцем, кладёт эту строку именно над рядом. Числа шаблона — стартовая форма;
-    // порядок снизу вверх задаёт `letters::layout_letter`.
-    LTEXT           "", IDC_LETTER_FOOT, 12, 237, 232, 10, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_LEFT, 12, 250, 74, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_RIGHT, 155, 250, 44, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTER_ACCENT, 203, 250, 41, 14, BS_OWNERDRAW
-END
-
-// «Последние письма» — FR-101. The letter's outline with four entry slots in place of the
-// rows: each entry is a heading, a line of «when and whether it was read», one line of the
-// text, and up to two buttons. Built in stage А and filled in stage Б, when there is a feed to
-// fill it from.
-IDD_LETTERS_LIST DIALOGEX 0, 0, 256, 296
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-EXSTYLE 0x00040000
-CAPTION "Последние письма"
-FONT 10, "Segoe UI", 400, 0, 0x1
-BEGIN
-    // ⚠⚠ **Пере-разложено задачей T-81-1 под ширину 256** — те же колонки, что у письма: панель
-    // 12…244 = 232, её содержимое 19…237 = 218. Числа шаблона — стартовая форма;
-    // `letters::layout_list` кладёт записи от клиентской ширины окна.
-    CONTROL         "", IDC_LETTERS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 12, 232, 240
-    LTEXT           "", IDC_LETTERS_T1, 19, 20, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D1, 19, 32, 218, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X1, 19, 42, 218, 20, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_B1, 19, 63, 60, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_R1, 83, 63, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T2, 19, 82, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D2, 19, 94, 218, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X2, 19, 104, 218, 20, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_B2, 19, 125, 60, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_R2, 83, 125, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T3, 19, 144, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D3, 19, 156, 218, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X3, 19, 166, 218, 20, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_B3, 19, 187, 60, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_R3, 83, 187, 48, 13, BS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_T4, 19, 206, 218, 11, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_D4, 19, 218, 218, 9, SS_OWNERDRAW
-    LTEXT           "", IDC_LETTERS_X4, 19, 228, 218, 20, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_B4, 19, 249, 60, 13, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_R4, 83, 249, 48, 13, BS_OWNERDRAW
-    // ⚠⚠ Тихая строка над рядом кнопок — задача T-81-2, как у письма. Ширина «Закрыть» — по
-    // правилу «подпись плюс воздух»: `De` «Schließen» 54 px = 31 единица плюс 20 ⇒ **51**.
-    LTEXT           "", IDC_LETTERS_FOOT, 12, 257, 232, 10, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_LETTERS_CLOSE, 193, 270, 51, 14, BS_OWNERDRAW
-END
+// ⚠ **Two templates, «От автора» and the wizard, and every rectangle in them is a slot rather
+// than a layout**: `letters` places every control top to bottom out of the height its own text
+// needs, measured with the same `DrawTextW` that will draw it, and hides the slots a state does
+// not use. What a template fixes is the size of the window, the font its units are in and which
+// slots exist. The letters and «Последние письма» are windows of the shell (task T-120-16:
+// `src\ui\windows\letter.rs`, `letters_list.rs`) and have no template here.
 
 // «От автора» — FR-103. Wider than a letter and the one window of the three whose height the
 // content decides: the accepted mock-up draws it 430 px across, and 430 × 4 / 7 is 246 units at

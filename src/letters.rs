@@ -1447,48 +1447,15 @@ pub type NewsMap<T> = BTreeMap<String, T>;
 // 9. What goes into a letter window — FR-101, task Т-32-3
 // =========================================================================================
 
-/// Resource identifiers of the three templates, mirrored from `app.rc` by hand — the same rule
+/// Resource identifiers of the two templates, mirrored from `app.rc` by hand — the same rule
 /// every identifier of `settings` is kept by, and for the same reason: a `.rc` file and a Rust
 /// file share no header, and a mismatch shows up as a missing resource rather than the wrong
-/// one.
-pub const IDD_LETTER: u16 = 202;
-/// The «Последние письма» window — FR-101.
-pub const IDD_LETTERS_LIST: u16 = 203;
+/// one. The letters and «Последние письма» are windows of the shell (T-120-16) and have none.
+///
 /// The «От автора» window — FR-103.
 pub const IDD_AUTHOR: u16 = 204;
 /// The wizard «Написать автору» — FR-104.
 pub const IDD_WIZARD: u16 = 205;
-
-// Controls of `IDD_LETTER`, mirrored from `app.rc`.
-const IDC_LETTER_ICON: i32 = 1200;
-const IDC_LETTER_TITLE: i32 = 1201;
-const IDC_LETTER_SUBTITLE: i32 = 1202;
-const IDC_LETTER_LEAD: i32 = 1203;
-const IDC_LETTER_PARA: i32 = 1204;
-const IDC_LETTER_DEMO: i32 = 1205;
-const IDC_LETTER_DEMO_CAP: i32 = 1206;
-const IDC_LETTER_PANEL: i32 = 1207;
-const IDC_LETTER_PANEL_TITLE: i32 = 1208;
-const IDC_LETTER_PANEL_TEXT: i32 = 1209;
-const IDC_LETTER_N1: i32 = 1210;
-const IDC_LETTER_ROW_1: i32 = 1214;
-const IDC_LETTER_PANEL_BTN_1: i32 = 1218;
-const IDC_LETTER_PANEL_BTN_2: i32 = 1219;
-const IDC_LETTER_LEFT: i32 = 1220;
-const IDC_LETTER_RIGHT: i32 = 1221;
-const IDC_LETTER_ACCENT: i32 = 1222;
-const IDC_LETTER_FOOT: i32 = 1223;
-
-// Controls of `IDD_LETTERS_LIST`, mirrored from `app.rc`. Four entries of five controls, in
-// four contiguous runs, so that entry `i` is the first of its run plus `i`.
-const IDC_LETTERS_PANEL: i32 = 1230;
-const IDC_LETTERS_T1: i32 = 1231;
-const IDC_LETTERS_D1: i32 = 1235;
-const IDC_LETTERS_X1: i32 = 1239;
-const IDC_LETTERS_B1: i32 = 1243;
-const IDC_LETTERS_R1: i32 = 1247;
-const IDC_LETTERS_CLOSE: i32 = 1251;
-const IDC_LETTERS_FOOT: i32 = 1252;
 
 // Controls of `IDD_AUTHOR`, mirrored from `app.rc`.
 const IDC_AUTHOR_ICON: i32 = 1260;
@@ -1569,7 +1536,7 @@ const IDC_WZ_CONTACT_LABEL: i32 = 1357;
 const IDC_WZ_CONTACT: i32 = 1358;
 
 /// Every owner-drawn **static** of the wizard — the gate of `WM_DRAWITEM`, and it is written
-/// out in full for the reason [`LETTER_LABELS`] carries in its own comment: a run written short
+/// out in full for the reason a list of runs needs: a run written short
 /// is a row that never gets painted, and the screenshot is what finds it.
 const WIZARD_LABELS: [i32; 25] = [
     IDC_WZ_STEP,
@@ -1635,50 +1602,15 @@ const WIZARD_BUTTONS: [i32; 21] = [
     IDC_WZ_NEXT,
 ];
 
-/// The four row markers and the four row texts, paired — the panel of a letter holds up to
-/// four rows and the identifiers of each run are contiguous (`app.rc`).
-const LETTER_ROWS: [(i32, i32); 4] = [
-    (IDC_LETTER_N1, IDC_LETTER_ROW_1),
-    (IDC_LETTER_N1 + 1, IDC_LETTER_ROW_1 + 1),
-    (IDC_LETTER_N1 + 2, IDC_LETTER_ROW_1 + 2),
-    (IDC_LETTER_N1 + 3, IDC_LETTER_ROW_1 + 3),
-];
-
-/// Every owner-drawn **static** of the letter window, in no particular order — the gate of
-/// `WM_DRAWITEM`, exactly as `settings::OWNER_DRAWN_ABOUT_LABELS` is for its window.
-const LETTER_LABELS: [i32; 17] = [
-    IDC_LETTER_TITLE,
-    IDC_LETTER_SUBTITLE,
-    IDC_LETTER_LEAD,
-    IDC_LETTER_PARA,
-    IDC_LETTER_DEMO,
-    IDC_LETTER_DEMO_CAP,
-    IDC_LETTER_PANEL_TITLE,
-    IDC_LETTER_PANEL_TEXT,
-    IDC_LETTER_N1,
-    IDC_LETTER_N1 + 1,
-    IDC_LETTER_N1 + 2,
-    IDC_LETTER_N1 + 3,
-    // ⚠ **All four rows, and the three after the first arrived only when the stand showed the
-    // window**: with `IDC_LETTER_ROW_1` alone on this list the gate of `on_draw_item` refused
-    // rows two, three and four, and «Привет» came up with its markers and no sentences beside
-    // them. The instrument found it in the first screenshot it took (`scratchpad-Э32\снимки`).
-    IDC_LETTER_ROW_1,
-    IDC_LETTER_ROW_1 + 1,
-    IDC_LETTER_ROW_1 + 2,
-    IDC_LETTER_ROW_1 + 3,
-    IDC_LETTER_FOOT,
-];
-
 /// Whether this label stands **on** a panel, and is therefore filled with the panel's own
 /// colour — an owner-drawn static answers for the whole of its rectangle, so a
 /// window-coloured fill on a block would cut a hole in it.
 ///
-/// A function over ranges and not a list: the rows of a letter and the entries of the list
-/// window are numbered in runs, and a list is a place where a run can be written short — which
-/// is exactly the defect the first screenshot of «Привет» showed, in the twin of this rule.
+/// A function over ranges and not a list: the cards of the wizard are numbered in runs, and a
+/// list is a place where a run can be written short — which is exactly the defect the first
+/// screenshot of «Привет» showed, in the twin of this rule.
 ///
-/// The three windows are answered by one body because their identifiers are disjoint: every
+/// The two windows are answered by one body because their identifiers are disjoint: every
 /// control of every template has a number of its own, so «is this label on a block» is a
 /// question about the number and not about the window.
 ///
@@ -1689,8 +1621,6 @@ const LETTER_LABELS: [i32; 17] = [
 /// exactly that on `e79` and named the cure himself — one mechanism for all of them, not a second
 /// one beside it. Hence this function is no longer about labels, and its name says so.
 ///
-/// ⚠ The demonstration of «Привет» is **not** on a panel — it is a field of its own on the
-/// window's ground, and it fills its whole rectangle itself.
 pub fn stands_on_a_panel(control: i32) -> bool {
     matches!(
         control,
@@ -1702,49 +1632,23 @@ pub fn stands_on_a_panel(control: i32) -> bool {
             | IDC_NEWS_VERSION
             | IDC_NEWS_FILE_ONLY
             | IDC_FEEDBACK_TEXT
-            | IDC_LETTER_PANEL_TITLE
-            | IDC_LETTER_PANEL_TEXT
             // ⭐ **The buttons, since task T-80-1.** Every one of these is laid into a block by
             // `place_panel_buttons`, which is handed the block's own inner corner — so «on a
-            // panel» is a fact of the layout and not a guess about pixels. The three that are
-            // absent are absent on purpose: «Закрыть» of «От автора» and of «Последние письма»,
-            // and the row of buttons under a letter, all stand below every block on the ground
-            // of the window.
+            // panel» is a fact of the layout and not a guess about pixels. «Закрыть» of «От
+            // автора» is absent on purpose: it stands below every block on the ground of the
+            // window.
             | IDC_AUTHOR_SUPPORT
             | IDC_AUTHOR_CHANNEL
             | IDC_NEWS_DOWNLOAD
             | IDC_NEWS_LETTERS
             | IDC_FEEDBACK_WRITE
-            | IDC_LETTER_PANEL_BTN_1
-            | IDC_LETTER_PANEL_BTN_2
-    ) || (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control)
-        || (IDC_LETTER_ROW_1..IDC_LETTER_ROW_1 + 4).contains(&control)
-        || (IDC_LETTERS_T1..IDC_LETTERS_T1 + 4).contains(&control)
-        || (IDC_LETTERS_D1..IDC_LETTERS_D1 + 4).contains(&control)
-        || (IDC_LETTERS_X1..IDC_LETTERS_X1 + 4).contains(&control)
-        // ⭐ The two buttons of every entry of «Последние письма», task T-80-1 — laid by
-        // `place_panel_buttons` at the same inner corner as the three labels of the run above
-        // them, and therefore on the same block. Runs and not a list, for the reason this
-        // function's doc gives: a list is where a run gets written short.
-        || (IDC_LETTERS_B1..IDC_LETTERS_B1 + 4).contains(&control)
-        || (IDC_LETTERS_R1..IDC_LETTERS_R1 + 4).contains(&control)
+    )
         // The two lines of every card of the wizard stand **on** that card, and the card is
         // drawn with the panel brush — see `draw_card`, which never changes its fill for
         // exactly this reason.
         || (IDC_WZ_CARD_T1..IDC_WZ_CARD_T1 + 3).contains(&control)
         || (IDC_WZ_CARD_S1..IDC_WZ_CARD_S1 + 3).contains(&control)
 }
-
-/// Every owner-drawn **button** of the letter window — the list `subclass_buttons` walks so
-/// that the cursor gets its answer (task T-12-8), and the gate of the button branch of
-/// `WM_DRAWITEM`.
-const LETTER_BUTTONS: [i32; 5] = [
-    IDC_LETTER_PANEL_BTN_1,
-    IDC_LETTER_PANEL_BTN_2,
-    IDC_LETTER_LEFT,
-    IDC_LETTER_RIGHT,
-    IDC_LETTER_ACCENT,
-];
 
 /// What a button of a letter does when it is pressed — FR-101 and FR-103.
 ///
@@ -1780,6 +1684,28 @@ pub enum Action {
     OpenLetters,
     /// The wizard of FR-104. Stage В; until then the button that would ask for it is absent.
     OpenWizard,
+}
+
+impl Action {
+    /// Whether the action hands an address to the browser — its button carries the sign ↗
+    /// (passport §6); a button that opens a window of the program or acts on the letter does not.
+    pub const fn opens_browser(self) -> bool {
+        match self {
+            Action::OpenChannel
+            | Action::OpenFeedback
+            | Action::OpenSupport
+            | Action::OpenDownload
+            | Action::OpenProgram
+            | Action::OpenLink => true,
+            Action::Close
+            | Action::Snooze
+            | Action::MarkRead
+            | Action::OpenSettings
+            | Action::OpenAuthor
+            | Action::OpenLetters
+            | Action::OpenWizard => false,
+        }
+    }
 }
 
 /// One button of a letter: what it says, what it does, and whether it can be pressed.
@@ -1826,24 +1752,40 @@ impl Button {
     }
 }
 
-/// One row of a letter's panel: the marker in the narrow column and the sentence beside it.
+/// One row of a numbered list of a letter: its number and the sentence beside it.
 ///
-/// The marker is «1», «2», «3» for a numbered list and «·» for a bulleted one — a template
-/// literal in both cases, the same in every locale, exactly as the five numerals of the about
-/// window are.
+/// The marker is «1», «2», «3» — a literal, the same in every locale; an empty marker is a line
+/// that follows the list without a number (the last line of «Как обновиться»).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     /// The marker.
     pub marker: String,
-    /// The sentence. May carry [`theme::KEY_PLACEHOLDER`], and then it is drawn as a chip row.
+    /// The sentence. May carry [`theme::KEY_PLACEHOLDER`] — the name of the key goes there.
     pub text: String,
 }
 
-/// **What a letter looks like** — the pure description one window is filled from.
-///
-/// Every field is a slot of `IDD_LETTER`; an empty one is a slot this letter does not use, and
-/// the layout hides it. This is the whole of «which letter is this»: the window procedure
-/// itself knows about panels and buttons and nothing about «Привет» or «Спасибо».
+impl Row {
+    /// The sentence — for the description of the shell, which names no `text` (the guard of the
+    /// window descriptions, rule 2).
+    pub fn words(&self) -> &str {
+        &self.text
+    }
+}
+
+/// One of the pair of action cards of «Спасибо»: a heading, a sentence and the button under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Card {
+    pub title: String,
+    /// The sentence under the heading.
+    pub words: String,
+    pub button: Button,
+}
+
+/// **What a letter says** — the pure description the window of the shell is built from
+/// (`ui::windows::letter`), part by part in the order of the window: the head, the notice, the
+/// lead, the example with the key, the paragraph, the entry of the feed, the numbered list, the
+/// pair of cards, the link, the line under them and the row of buttons. An empty part is a part
+/// this letter does not have.
 ///
 /// Pure, and that is the point — [`plan_for`] reads the string tables and the state and answers
 /// this, so every rule about what a letter says is checked in a test with no window at all.
@@ -1851,38 +1793,64 @@ pub struct Row {
 pub struct LetterPlan {
     /// The window's own caption.
     pub caption: String,
-    /// The heading, in the large semibold face.
+    /// The line over the heading — whose letter this is; never a version (T-120-16 п. 4).
+    pub eyebrow: String,
+    /// The heading.
     pub title: String,
-    /// The quiet line under the heading — a version, a date.
+    /// The quiet line under the heading — the versions, a date.
     pub subtitle: String,
-    /// The paragraph in the text column beside the icon.
+    /// The notice in its own block — what happened, before anything else is said.
+    pub note: String,
+    /// The opening paragraph.
     pub lead: String,
-    /// A paragraph the full width of the window, under the head block.
-    pub para: String,
-    /// Whether the demonstration of «Привет» is shown.
+    /// Whether the example of «Привет» is shown: the word typed, the key, the word fixed.
     pub demo: bool,
-    /// The pair the demonstration shows — [`demo_pair`] of the language the plan is built in.
+    /// The pair the example shows — [`demo_pair`] of the language the plan is built in.
     pub demo_pair: DemoPair,
-    /// The caption under the demonstration.
+    /// The sentence under the example. May carry [`theme::KEY_PLACEHOLDER`].
     pub demo_caption: String,
-    /// The caption of the panel; empty means the letter has no panel.
-    pub panel: String,
-    /// A heading inside the panel — the title of a news item.
+    /// A paragraph of the body.
+    pub para: String,
+    /// The heading of the entry of the feed a «Новость» is about — the author's words.
     pub panel_title: String,
-    /// A paragraph inside the panel.
+    /// The label over the author's words about a release — «Что нового в X».
+    pub whats_new: String,
+    /// The author's text: of the news entry, or of the release.
     pub panel_text: String,
-    /// Up to four rows inside the panel.
+    /// The label over the numbered list; empty means the letter has no list.
+    pub panel: String,
+    /// The numbered list.
     pub rows: Vec<Row>,
-    /// Up to two buttons inside the panel.
-    pub panel_buttons: Vec<Button>,
-    /// The button at the bottom left.
-    pub left: Option<Button>,
-    /// The plain button at the bottom right.
-    pub right: Option<Button>,
-    /// The accented button at the bottom right — the one Enter presses.
-    pub accent: Option<Button>,
-    /// The quiet line under the buttons.
+    /// The pair of action cards.
+    pub cards: Vec<Card>,
+    /// A link to the site under the body.
+    pub link: Option<Button>,
+    /// The line under the body — what the buttons do to the letter.
     pub foot: String,
+    /// The first button of the row.
+    pub left: Option<Button>,
+    /// The second plain button of the row.
+    pub right: Option<Button>,
+    /// The main button — the rightmost, the one Enter presses.
+    pub accent: Option<Button>,
+}
+
+impl LetterPlan {
+    /// The buttons of the row at the bottom, in their order: the main one last.
+    pub fn buttons(&self) -> impl Iterator<Item = &Button> {
+        [&self.left, &self.right, &self.accent]
+            .into_iter()
+            .filter_map(Option::as_ref)
+    }
+
+    /// Every button of the letter: the cards', the link and the row at the bottom.
+    pub fn all_buttons(&self) -> impl Iterator<Item = &Button> {
+        self.cards
+            .iter()
+            .map(|card| &card.button)
+            .chain(self.link.as_ref())
+            .chain(self.buttons())
+    }
 }
 
 /// Everything [`plan_for`] needs that is not in the string tables.
@@ -1890,7 +1858,8 @@ pub struct LetterPlan {
 pub struct PlanContext<'a> {
     /// This build's version, as `VERSIONINFO` spells it.
     pub version: String,
-    /// The hotkey as it acts, for the chip of «Привет».
+    /// The hotkey as it acts. Unused by the plan: the name of the key goes into the window when it
+    /// is built (`ui::windows::letter`), in place of [`theme::KEY_PLACEHOLDER`].
     pub hotkey: String,
     /// Whether «Спасибо» may still offer its one snooze.
     pub snooze_offered: bool,
@@ -1898,46 +1867,62 @@ pub struct PlanContext<'a> {
     pub item: Option<&'a FeedItem>,
 }
 
-/// What one letter says — **the whole of FR-101's text side**, and a pure function of the
-/// string tables, the state and the feed.
+/// What one letter says in the language of the program — [`plan_in`] of
+/// `settings::ui_language()`.
 pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
+    plan_in(settings::ui_language(), letter, context)
+}
+
+/// What one letter says in `language` — **the whole of FR-101's text side**, and a pure function
+/// of the string tables, the state and the feed. In any language, for the instrument of fitting,
+/// which goes over all of them.
+pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
         IDS_CLOSE, IDS_FALLBACK_NOTICE, IDS_FALLBACK_REPEATS, IDS_FALLBACK_SUB, IDS_FALLBACK_TITLE,
-        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD,
-        IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3,
-        IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT,
-        IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON,
-        IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD,
-        IDS_THANKS_PARA, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW,
-        IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR, format_text,
-        text,
+        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT,
+        IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1,
+        IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION,
+        IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
+        IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL,
+        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE,
+        IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2,
+        IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR,
+    };
+
+    let text = |id| settings::text_in(language, id);
+    let format_text = |id, arguments: &[&str]| {
+        let mut filled = text(id);
+        for (index, argument) in arguments.iter().enumerate() {
+            filled = filled.replace(&format!("{{{index}}}"), argument);
+        }
+        filled
+    };
+    let numbered = |ids: [u16; 3]| -> Vec<Row> {
+        ids.iter()
+            .zip(1..)
+            .map(|(id, number)| Row {
+                marker: number.to_string(),
+                text: text(*id),
+            })
+            .collect()
     };
 
     let caption = text(IDS_LETTER_CAPTION);
+    // Whose letter it is, over the heading of each of the four: the caption's own words. No version
+    // stands there (T-120-16 п. 4) — the only window with a number over its title is «О программе».
+    let eyebrow = caption.clone();
 
     match letter {
         Letter::Welcome => LetterPlan {
             caption,
+            eyebrow,
             title: text(IDS_HELLO_TITLE),
             lead: text(IDS_HELLO_LEAD),
             demo: true,
-            demo_pair: demo_pair(settings::ui_language()),
+            demo_pair: demo_pair(language),
             demo_caption: text(IDS_HELLO_DEMO_CAP),
             panel: text(IDS_HELLO_PANEL),
-            rows: vec![
-                Row {
-                    marker: "1".to_owned(),
-                    text: text(IDS_HELLO_ROW_1),
-                },
-                Row {
-                    marker: "2".to_owned(),
-                    text: text(IDS_HELLO_ROW_2),
-                },
-                Row {
-                    marker: "3".to_owned(),
-                    text: text(IDS_HELLO_ROW_3),
-                },
-            ],
+            rows: numbered([IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3]),
             left: Some(Button::live(text(IDS_HELLO_SETTINGS), Action::OpenSettings)),
             accent: Some(Button::live(text(IDS_HELLO_OK), Action::Close)),
             ..LetterPlan::default()
@@ -1945,29 +1930,41 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
 
         Letter::Thanks => LetterPlan {
             caption,
+            eyebrow,
             title: text(IDS_THANKS_TITLE),
             lead: text(IDS_THANKS_LEAD),
-            para: text(IDS_THANKS_PARA),
-            panel: text(IDS_SUPPORT_PANEL),
-            panel_text: text(IDS_SUPPORT_TEXT),
-            panel_buttons: vec![
-                Button::link(
-                    text(IDS_SUPPORT_OPEN),
-                    Action::OpenSupport,
-                    links::SUPPORT_URL,
-                ),
-                // Решение 181.1: «Если понравилось, расскажите об этом» — and the channel has
-                // nowhere to say it, so the button goes where a person can write, by language.
-                Button::link(
-                    text(IDS_FEEDBACK_OPEN),
-                    Action::OpenFeedback,
-                    links::feedback_url(settings::ui_language()),
-                ),
+            // No paragraph after the lead (C6 of T-120-16, ◆ word of the controller): it said again what
+            // the pair of cards and the link under them say, and the window did not fit 620 × 500.
+            // The pair of action cards (T-120-16 п. 1): to support the author — the page of
+            // support, in the browser; to write to him — the wizard of the program, which says
+            // more than a page could.
+            cards: vec![
+                Card {
+                    title: text(IDS_SUPPORT_PANEL),
+                    words: text(IDS_SUPPORT_TEXT),
+                    button: Button::link(
+                        text(IDS_SUPPORT_OPEN),
+                        Action::OpenSupport,
+                        links::SUPPORT_URL,
+                    ),
+                },
+                Card {
+                    title: text(IDS_FEEDBACK_PANEL),
+                    words: text(IDS_FEEDBACK_TEXT),
+                    button: Button::live(text(IDS_WRITE_TO_AUTHOR), Action::OpenWizard),
+                },
             ],
+            // Решение 181.1: «Если понравилось, расскажите об этом» — where a person can write,
+            // by language: the group, or GitHub Issues. A link, because it only goes to the site.
+            link: Some(Button::link(
+                text(IDS_FEEDBACK_OPEN),
+                Action::OpenFeedback,
+                links::feedback_url(language),
+            )),
             // FR-101: the snooze is offered once, and the second showing has no button where
-            // it stood — not a disabled one. A disabled «Напомнить через неделю» would say the
-            // program is refusing; an absent one says the letter is on its last showing, which
-            // is what the line under it says too.
+            // it stood — not a disabled one. A disabled «Напомнить позже» would say the program
+            // is refusing; an absent one says the letter is on its last showing, which is what
+            // the line under it says too.
             left: context
                 .snooze_offered
                 .then(|| Button::live(text(IDS_THANKS_SNOOZE), Action::Snooze)),
@@ -1976,65 +1973,46 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
             ..LetterPlan::default()
         },
 
-        // The two letters out of the feed — стадия Б fills them from `context.item`. Until
-        // there is a feed there is nothing to say, and a letter with no entry behind it is a
-        // window that must not open: the plan comes back empty and the caller refuses.
+        // The two letters out of the feed. A letter with no entry behind it is a window that must
+        // not open: the plan comes back empty and the caller refuses.
         Letter::Update | Letter::News(_) => {
             let Some(item) = context.item else {
                 return LetterPlan::default();
             };
 
-            let is_update = matches!(letter, Letter::Update);
-
             let released = item.date.map(format_date).unwrap_or_default();
 
-            if is_update {
-                // ⭐ «Обновление» — **the honest letter of task T-119-9** (решения 208.95–208.99,
-                // макет «Запасное письмо „Обновление“», третья версия). It opens only when the
-                // person asks — the menu entry or the row of «Последние письма», from the seventh
-                // day — so it says what happened: the program could not put the version in by
-                // itself. The heading is the program's; the release date stands as a date and not
-                // as a count of days; the author's own words about the release come under «Что
-                // нового в X»; the panel keeps its three steps, and its last row offers the wizard
-                // (208.97 п. 2). **The look of the letter is the old one** (ТЗ: the new one is the
-                // next stage's): the notice and the label go into the one paragraph, the line
-                // about the author into a fourth row of the panel, the button under it.
+            if matches!(letter, Letter::Update) {
+                // ⭐ «Обновление» — the honest letter of task T-119-9 (решения 208.95–208.99). It
+                // opens only when the person asks — the menu entry or the row of «Последние
+                // письма», from the seventh day — so it says what happened, in the notice: the
+                // program could not put the version in by itself. The release date stands as a
+                // date and not as a count of days; the author's own words about the release come
+                // under «Что нового в X»; the three steps, and the line that sends to the author
+                // when it repeats, with the wizard among the buttons (208.97 п. 2).
                 let announced = item.version.clone().unwrap_or_default();
-                let notice = format_text(IDS_FALLBACK_NOTICE, &[&announced, &released]);
-                let whats_new = format_text(IDS_FALLBACK_WHATS_NEW, &[&announced]);
 
                 return LetterPlan {
                     caption,
+                    eyebrow,
                     title: text(IDS_FALLBACK_TITLE),
                     subtitle: format_text(
                         IDS_FALLBACK_SUB,
                         &[&announced, &context.version, &released],
                     ),
-                    para: format!("{notice}\n\n{whats_new}\n{}", item.text),
+                    note: format_text(IDS_FALLBACK_NOTICE, &[&announced, &released]),
+                    whats_new: format_text(IDS_FALLBACK_WHATS_NEW, &[&announced]),
+                    panel_text: item.text.clone(),
                     panel: text(IDS_UPDATE_HOW),
-                    panel_buttons: vec![Button::live(
-                        text(IDS_WRITE_TO_AUTHOR),
-                        Action::OpenWizard,
-                    )],
-                    rows: vec![
-                        Row {
-                            marker: "1".to_owned(),
-                            text: text(IDS_UPDATE_STEP_1),
-                        },
-                        Row {
-                            marker: "2".to_owned(),
-                            text: text(IDS_UPDATE_STEP_2),
-                        },
-                        Row {
-                            marker: "3".to_owned(),
-                            text: text(IDS_UPDATE_STEP_3),
-                        },
-                        Row {
+                    rows: numbered([IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3])
+                        .into_iter()
+                        .chain([Row {
                             marker: String::new(),
                             text: text(IDS_FALLBACK_REPEATS),
-                        },
-                    ],
-                    left: Some(Button::live(text(IDS_CLOSE), Action::Close)),
+                        }])
+                        .collect(),
+                    left: Some(Button::live(text(IDS_WRITE_TO_AUTHOR), Action::OpenWizard)),
+                    right: Some(Button::live(text(IDS_CLOSE), Action::Close)),
                     accent: Some(Button::link(
                         text(IDS_NEWS_DOWNLOAD),
                         Action::OpenDownload,
@@ -2045,32 +2023,24 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                 };
             }
 
-            // «Новость» — the window says whose news it is, the panel says which news. The
-            // entry's own heading goes **inside** the panel and not into the window's title:
-            // the title belongs to the program, and a heading out of the feed in that place
-            // would let the author write anything at all where the program speaks.
+            // «Новость» — the window says whose news it is, the body says which news. The entry's
+            // own heading goes **into the body** and not into the window's title: the title
+            // belongs to the program, and a heading out of the feed in that place would let the
+            // author write anything at all where the program speaks.
             LetterPlan {
                 caption,
+                eyebrow,
                 title: text(IDS_NEWS_LETTER_TITLE),
                 subtitle: released,
                 panel_title: item.title.clone(),
                 panel_text: item.text.clone(),
-                // Task T-41-1, finding С52: the road an empty address already took is the road
-                // an address the gate refuses takes now. Since `e88` a placeholder takes it too:
-                // its host left `links` with the feed's placeholder (task T-88-1, решение
-                // 148.7), so [`links::is_allowed`] refuses it and it gets no button at all.
-                panel_buttons: if links::is_allowed(&item.link) {
-                    vec![Button::link(
-                        text(IDS_NEWS_OPEN_LINK),
-                        Action::OpenLink,
-                        &item.link,
-                    )]
-                } else {
-                    Vec::new()
-                },
                 // FR-101: closing is postponing, and the button says so. «Закрыть» here would
                 // promise an end the letter does not give — it comes back in a week.
                 left: Some(Button::live(text(IDS_NEWS_LATER), Action::Close)),
+                // Task T-41-1, finding С52: an address the gate refuses gets no button at all —
+                // and since `e88` a placeholder takes that road too (task T-88-1, решение 148.7).
+                right: links::is_allowed(&item.link)
+                    .then(|| Button::link(text(IDS_NEWS_OPEN_LINK), Action::OpenLink, &item.link)),
                 accent: Some(Button::live(text(IDS_NEWS_READ_BUTTON), Action::MarkRead)),
                 foot: text(IDS_NEWS_FOOT),
                 ..LetterPlan::default()
@@ -2083,8 +2053,9 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
 // 10. The demonstration of «Привет» — FR-101, and it is a pure function of one number
 // =========================================================================================
 
-/// How long one frame of the demonstration lasts, in milliseconds.
-const DEMO_TICK_MS: u32 = 130;
+/// How long one frame of the demonstration lasts, in milliseconds — the tick the window of
+/// «Привет» is given (T-120-25).
+pub const DEMO_TICK_MS: u32 = 130;
 
 /// How many frames one turn of the demonstration takes.
 pub const DEMO_FRAMES: u32 = 48;
@@ -2633,13 +2604,6 @@ use crate::theme::{self, StaticColorRole, ThemeSetting};
 // здесь: в этом и состоит принцип пользователя «один механизм на все окна».
 use crate::widgets;
 
-/// The identifier of the timer that drives the demonstration of «Привет».
-///
-/// NFR-10: it is set on `WM_INITDIALOG` of a letter that has a demonstration and killed on
-/// `WM_DESTROY`, so **nothing ticks while no such window is open** — which is the whole of the
-/// requirement's «в покое ничего не делает».
-const DEMO_TIMER: usize = 1;
-
 /// The identifier of the timer that counts the five seconds of «Взять из активного окна».
 ///
 /// NFR-10 again: it exists only between the press of that button and the capture, and is
@@ -2974,33 +2938,22 @@ impl Drop for Faces {
 /// first `WM_PAINT`. The pointer goes into `GWLP_USERDATA` and the box is freed on
 /// `WM_NCDESTROY` — the last message a window ever gets.
 struct WindowState {
+    /// [`Kind::Author`] or [`Kind::Wizard`]: the letters and «Последние письма» are windows of
+    /// the shell (`ui::windows::letter`, `ui::windows::letters_list`) and have no state here.
     kind: Kind,
-    /// Which letter this is, for a window of [`Kind::Letter`].
-    letter: Option<Letter>,
-    /// The identifier of the feed entry a «Новость» is about — what «Прочитано» marks.
-    news: Option<u64>,
-    /// The link the entry carried, for the two buttons that open one.
-    link: String,
     setting: ThemeSetting,
     palette: &'static theme::Palette,
     brushes: Option<theme::Brushes>,
     fonts: Option<Faces>,
-    /// What this window says — the pure description it is filled and laid out from.
-    plan: LetterPlan,
-    /// What «От автора» says. Empty for the other two kinds.
+    /// What «От автора» says. Empty for the wizard.
     author: AuthorView,
-    /// What «Последние письма» shows. Empty for the other two kinds, and empty for the whole of
-    /// stage А — the feed arrives in stage Б.
-    entries: Vec<Entry>,
-    /// What the wizard is holding — `None` for every other kind. Boxed because it is the one
-    /// large member and four kinds out of five never fill it.
+    /// What the wizard is holding — `None` for «От автора». Boxed because it is the one large
+    /// member.
     wizard: Option<Box<Wizard>>,
-    /// The hotkey as it acts, for the chips of «Привет».
+    /// The hotkey as it acts, for the chip of the wizard.
     hotkey: String,
     icons: Option<settings::CaptionIcons>,
     logo: Option<settings::AboutLogo>,
-    /// The frame of the demonstration, counted by the timer.
-    tick: u32,
     /// The locale the window was built in — what `language_switch` is asked about.
     language: Language,
     /// The window that owns this one — this program's hidden UI window, the same owner the two
@@ -3016,14 +2969,10 @@ impl WindowState {
     /// tells the dialog manager about it with `DM_SETDEFID`.
     fn accent_control(&self) -> i32 {
         match self.kind {
-            // The window of thanks is a letter in everything but its name — the same template
-            // and the same accented button.
-            Kind::Letter => IDC_LETTER_ACCENT,
-            Kind::List => IDC_LETTERS_CLOSE,
-            Kind::Author => IDC_AUTHOR_CLOSE,
             // «Далее» — and on the last step it says «Готово». Enter presses it on every step,
             // which is what a wizard is for.
             Kind::Wizard => IDC_WZ_NEXT,
+            Kind::Author | Kind::Letter | Kind::List => IDC_AUTHOR_CLOSE,
         }
     }
 
@@ -3031,10 +2980,7 @@ impl WindowState {
     /// language the window is built in (решение 181.1).
     ///
     /// The language of the **window** and not the one asked of `settings` at the click: it is the
-    /// language its words are in, and [`language_changed`] moves it together with them, so a
-    /// button that says «группу» opens the group and one that says «GitHub Issues» opens those.
-    /// Asked by «Открыть группу» of «Спасибо»; the wizard asked too until 1.2.0, when решение 199.3
-    /// took the group and the issues out of it (задача T-107-3).
+    /// language its words are in, and [`language_changed`] moves it together with them.
     fn feedback_url(&self) -> &'static str {
         links::feedback_url(self.language)
     }
@@ -3051,21 +2997,16 @@ impl WindowState {
         links::program_url(self.language)
     }
 
-    /// The `SS_ICON` static this window's logo goes into.
-    fn icon_control(&self) -> i32 {
-        match self.kind {
-            Kind::Author => IDC_AUTHOR_ICON,
-            _ => IDC_LETTER_ICON,
-        }
+    /// The `SS_ICON` static this window's logo goes into: «От автора» has one, the wizard none.
+    fn icon_control(&self) -> Option<i32> {
+        (self.kind == Kind::Author).then_some(IDC_AUTHOR_ICON)
     }
 
-    /// What pressing this control does, out of the plan — `None` for a control that is not a
-    /// button of this window.
+    /// What pressing this control does — `None` for a control that is not a button of this
+    /// window.
     fn action_of(&self, control: i32) -> Option<Action> {
-        let plan = &self.plan;
-
-        // The «От автора» window's buttons are fixed — its shape does not change with a
-        // letter — so they answer by identifier and not out of a plan.
+        // The «От автора» window's buttons are fixed — its shape does not change — so they
+        // answer by identifier.
         if self.kind == Kind::Author {
             return match control {
                 // Задача T-81-3, решение 142.2 п. 6: имя открывает страницу приложения — то же,
@@ -3081,20 +3022,8 @@ impl WindowState {
             };
         }
 
-        if self.kind == Kind::List {
-            return (control == IDC_LETTERS_CLOSE).then_some(Action::Close);
-        }
-
-        let button = match control {
-            IDC_LETTER_LEFT => plan.left.as_ref(),
-            IDC_LETTER_RIGHT => plan.right.as_ref(),
-            IDC_LETTER_ACCENT => plan.accent.as_ref(),
-            IDC_LETTER_PANEL_BTN_1 => plan.panel_buttons.first(),
-            IDC_LETTER_PANEL_BTN_2 => plan.panel_buttons.get(1),
-            _ => None,
-        }?;
-
-        button.enabled.then_some(button.action)
+        // The wizard answers its own buttons (`wizard_command`).
+        None
     }
 }
 
@@ -3111,7 +3040,7 @@ thread_local! {
 
 /// Whether a window of this kind is open on this thread.
 pub fn is_open(kind: Kind) -> bool {
-    OPEN.with_borrow(|open| open.iter().any(|(other, _)| *other == kind))
+    window_of(kind).is_some()
 }
 
 /// The handle of the open window of this kind, if there is one.
@@ -3120,6 +3049,13 @@ fn window_of(kind: Kind) -> Option<HWND> {
         open.iter()
             .find(|(other, _)| *other == kind)
             .map(|(_, hwnd)| *hwnd)
+    })
+    .or_else(|| {
+        SHELL.with_borrow(|open| {
+            open.iter()
+                .find(|window| window.kind == kind)
+                .map(|window| window.hwnd)
+        })
     })
 }
 
@@ -3323,8 +3259,6 @@ mod air {
     pub(super) const PAD: i32 = 12;
     /// The top of the head block.
     pub(super) const TOP: i32 = 12;
-    /// Where the text column beside the icon starts.
-    pub(super) const TEXT_X: i32 = 42;
     /// The air between two things that belong together.
     pub(super) const TIGHT: i32 = 3;
     /// **Зазор между текстом подписи и кромкой рамки поля** — решение 107.4, задача Т-45-3.
@@ -3374,12 +3308,8 @@ mod air {
     /// окно как на образец (решение 141а), и «единая нижняя строка во всех окнах» означает
     /// прийти к его зазору, а не завести седьмой.
     pub(super) const BUTTON_GAP: i32 = 4;
-    /// The width of the marker column of a panel row.
-    pub(super) const MARKER: i32 = 7;
     /// Where the text of a panel row starts, from the panel's own inset.
     pub(super) const ROW_TEXT: i32 = 11;
-    /// The height of the demonstration of «Привет».
-    pub(super) const DEMO: i32 = 34;
 }
 
 /// Measures the height one caption needs at one width, in the face it will be drawn in.
@@ -3407,84 +3337,6 @@ unsafe fn measure(dc: HDC, face: HFONT, width: i32, caption: &str, pitch: Option
     let _ = unsafe { SelectObject(dc, previous) };
 
     height
-}
-
-/// How tall a **row that may carry a key chip** has to be — [`measure`] with the width narrowed
-/// by what the chip adds.
-///
-/// ⚠ **A row with a chip in it is wider than its words, and measuring it without the chip is a
-/// measurement of a different row.** The German «Привет» came up one line short because of
-/// exactly this: the last two words of its caption were drawn past the bottom of the label
-/// (`scratchpad-Э32\снимки\de-dark-hello.png`, before this function existed). The figure round
-/// the key name takes `chip_box().width` where the words take the width of the name itself, so
-/// the honest measurement is of the same sentence in a **narrower** column — the shape the
-/// fitting stand of Э30 already found for the help rows of «О программе».
-///
-/// A caption with no placeholder, or a window with no key name, is measured exactly as
-/// [`measure`] measures it: the overhang is zero and the call is the same call.
-///
-/// # Safety
-///
-/// As [`measure`], with `chip` a live font of this window as well.
-unsafe fn measure_row(
-    dc: HDC,
-    face: HFONT,
-    chip: Chip<'_>,
-    width: i32,
-    caption: &str,
-    pitch: Option<i32>,
-) -> i32 {
-    // SAFETY: see the contract.
-    let overhang = unsafe { chip_overhang(dc, face, chip, caption) };
-
-    // SAFETY: as above.
-    unsafe { measure(dc, face, width - overhang, caption, pitch) }
-}
-
-/// The chip of a row: the face its key name is set in, that face's `lfHeight`, and the name.
-///
-/// A record rather than three more parameters — the shape `theme::ChipRowStyle` already has,
-/// and for the same reason: this project's `clippy` denies a seventh argument.
-#[derive(Clone, Copy)]
-struct Chip<'a> {
-    face: HFONT,
-    height: i32,
-    key: &'a str,
-}
-
-/// How much wider than its own words a chip row is — the figure minus the placeholder it
-/// replaces. Zero when there is no chip in this caption.
-///
-/// # Safety
-///
-/// As [`measure`].
-unsafe fn chip_overhang(dc: HDC, face: HFONT, chip: Chip<'_>, caption: &str) -> i32 {
-    if chip.key.is_empty() || !caption.contains(theme::KEY_PLACEHOLDER) {
-        return 0;
-    }
-
-    // SAFETY: see the contract — the two faces are live fonts of this window.
-    let key_width = unsafe { text_width(dc, chip.face, chip.key) };
-    // SAFETY: as above.
-    let placeholder = unsafe { text_width(dc, face, theme::KEY_PLACEHOLDER) };
-
-    let mut metrics = windows::Win32::Graphics::Gdi::TEXTMETRICW::default();
-
-    // SAFETY: the chip face is selected into the DC for the measurement and put back.
-    let previous = unsafe { SelectObject(dc, chip.face.into()) };
-    // SAFETY: `metrics` is a live local the call fills.
-    let _ = unsafe { windows::Win32::Graphics::Gdi::GetTextMetricsW(dc, &mut metrics) };
-    // SAFETY: puts back exactly the handle the call above answered with.
-    let _ = unsafe { SelectObject(dc, previous) };
-
-    let box_of_chip = theme::chip_box(
-        key_width,
-        chip.height,
-        metrics.tmHeight,
-        theme::scaled(theme::BORDER_THICKNESS, theme::drawing_dpi(dc)),
-    );
-
-    (box_of_chip.width - placeholder).max(0)
 }
 
 /// The width of one run of text in one face, on one line.
@@ -3654,15 +3506,9 @@ fn quiet_flag() -> SET_WINDOW_POS_FLAGS {
     }
 }
 
-/// Every panel of every one of the three windows — the controls that carry a caption and a
+/// Every panel of «От автора» — the controls that carry a caption and a
 /// rectangle and are never shown.
-const PANELS: [i32; 5] = [
-    IDC_LETTER_PANEL,
-    IDC_LETTERS_PANEL,
-    IDC_AUTHOR_PANEL,
-    IDC_NEWS_PANEL,
-    IDC_FEEDBACK_PANEL,
-];
+const PANELS: [i32; 3] = [IDC_AUTHOR_PANEL, IDC_NEWS_PANEL, IDC_FEEDBACK_PANEL];
 
 /// Hides one child — a slot this letter does not use.
 ///
@@ -3741,472 +3587,6 @@ fn enable(hwnd: HWND, control: i32, enabled: bool) {
     let _ = unsafe { EnableWindow(child, enabled) };
 }
 
-/// Lays a row of buttons against the bottom of the window: the left one at the left margin, the
-/// accented one at the right margin, the plain one beside it.
-///
-/// ⚠ **«Left» and «right» are the window's own**, and in a mirrored window the window manager
-/// makes them the other way round for us: a child's coordinates in a `WS_EX_LAYOUTRTL` parent
-/// are counted from the **right** edge. That is the whole of what ИТОГ-Э30 §9.2 asks of a new
-/// window — be born mirrored and then lay out as usual.
-///
-/// # Safety
-///
-/// As [`measure`].
-unsafe fn place_button_row(
-    hwnd: HWND,
-    dc: HDC,
-    face: HFONT,
-    metrics: Metrics,
-    width: i32,
-    y: i32,
-    row: [(i32, Option<&Button>); 3],
-) {
-    let pad = metrics.x(air::PAD);
-    let height = metrics.y(air::BUTTON);
-    let mut right = width - pad;
-
-    // The two right-hand buttons, from the right edge inwards: the accent first, then the
-    // plain one beside it.
-    for (control, button) in row.iter().skip(1) {
-        let Some(button) = button else {
-            hide(hwnd, *control);
-            continue;
-        };
-
-        // SAFETY: see the contract.
-        let wanted = unsafe { button_width(dc, face, metrics, &button.label) };
-
-        place(hwnd, *control, right - wanted, y, wanted, height);
-        enable(hwnd, *control, button.enabled);
-
-        right -= wanted + metrics.x(air::BUTTON_GAP);
-    }
-
-    let (control, button) = row[0];
-
-    match button {
-        Some(button) => {
-            // SAFETY: see the contract.
-            let wanted = unsafe { button_width(dc, face, metrics, &button.label) };
-
-            place(hwnd, control, pad, y, wanted.min(right - pad), height);
-            enable(hwnd, control, button.enabled);
-        }
-        None => hide(hwnd, control),
-    }
-}
-
-/// **Lays out one letter** — the whole of «where everything goes», measured on this window with
-/// this window's faces at this window's DPI.
-///
-/// Top to bottom for the head, the paragraph and the demonstration; bottom to top for the line
-/// under the buttons and the buttons themselves; and the panel takes everything left between
-/// the two, which is the mock-up's «панель тянется на свободную высоту» exactly.
-///
-/// Every slot the plan leaves empty is hidden, and a hidden owner-drawn static paints nothing —
-/// which is what keeps the rule of `app.rc` true here: **no two of these rectangles ever
-/// overlap**, because the ones in use are handed disjoint bands and the rest are not on the
-/// screen at all.
-///
-/// # Safety
-///
-/// `hwnd` is the live letter window and `state` is its own state, borrowed for this call only.
-unsafe fn layout_letter(hwnd: HWND, state: &WindowState) {
-    let Some(faces) = state.fonts.as_ref() else {
-        return;
-    };
-
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `client` a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; the DC is released on every path below.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let metrics = Metrics::of(hwnd);
-    let plan = &state.plan;
-    let pad = metrics.x(air::PAD);
-    let full_width = client.right - pad * 2;
-    let text_x = metrics.x(air::TEXT_X);
-    let text_width = client.right - text_x - pad;
-    let pitch = Some(faces.body_pitch());
-    let tight = metrics.y(air::TIGHT);
-    let gap = metrics.y(air::GAP);
-
-    let mut top = metrics.y(air::TOP);
-
-    // --- the head: the icon, the heading, the quiet line, the paragraph beside them --------
-    for (control, caption, face, width, own_pitch) in [
-        (
-            IDC_LETTER_TITLE,
-            &plan.title,
-            faces.name,
-            text_width,
-            None::<i32>,
-        ),
-        (
-            IDC_LETTER_SUBTITLE,
-            &plan.subtitle,
-            faces.text,
-            text_width,
-            None,
-        ),
-        (IDC_LETTER_LEAD, &plan.lead, faces.body, text_width, pitch),
-    ] {
-        if caption.is_empty() {
-            hide(hwnd, control);
-            continue;
-        }
-
-        // SAFETY: `dc` is this window's DC and the face is one it owns.
-        let height = unsafe { measure(dc, face, width, caption, own_pitch) };
-
-        place(hwnd, control, text_x, top, width, height);
-        top += height + tight;
-    }
-
-    // The head block never ends above the icon: the icon is 22 units tall from 13, and a
-    // one-line heading with no paragraph would otherwise let the panel run up beside it.
-    top = top.max(metrics.y(13 + 22) + gap);
-
-    // --- the paragraph the full width of the window ---------------------------------------
-    if plan.para.is_empty() {
-        hide(hwnd, IDC_LETTER_PARA);
-    } else {
-        // SAFETY: as above.
-        let height = unsafe { measure(dc, faces.body, full_width, &plan.para, pitch) };
-
-        place(hwnd, IDC_LETTER_PARA, pad, top, full_width, height);
-        top += height + gap;
-    }
-
-    // --- the demonstration of «Привет» ------------------------------------------------------
-    if plan.demo {
-        let height = metrics.y(air::DEMO);
-
-        place(hwnd, IDC_LETTER_DEMO, pad, top, full_width, height);
-        top += height + tight;
-
-        if plan.demo_caption.is_empty() {
-            hide(hwnd, IDC_LETTER_DEMO_CAP);
-        } else {
-            // SAFETY: as above.
-            // The caption of the demonstration names the key, so it is measured as a chip row.
-            let height = unsafe {
-                measure_row(
-                    dc,
-                    faces.body,
-                    Chip {
-                        face: faces.chip,
-                        height: faces.chip_height,
-                        key: &state.hotkey,
-                    },
-                    full_width,
-                    &plan.demo_caption,
-                    pitch,
-                )
-            };
-
-            place(hwnd, IDC_LETTER_DEMO_CAP, pad, top, full_width, height);
-            top += height;
-        }
-
-        top += gap;
-    } else {
-        hide(hwnd, IDC_LETTER_DEMO);
-        hide(hwnd, IDC_LETTER_DEMO_CAP);
-    }
-
-    // --- from the bottom: the row of buttons, and the quiet line above it -------------------
-    //
-    // ⚠⚠ **Порядок перевёрнут задачей T-81-2, решение 142.2 п. 7.** Тихая строка стояла **под**
-    // кнопками, и ряд из-за неё висел в 26 единицах от нижнего края вместо 12. Правило «ряд
-    // прижат к низу с отступом 12» и строка под ним несовместны; макет, принятый владельцем
-    // глазом, кладёт эту строку над рядом. Ряд берётся от края первым, строка — тем, что над
-    // ним, и панель получает остаток, как и получала.
-    let mut bottom = client.bottom - metrics.y(air::PAD);
-
-    if plan.left.is_some() || plan.right.is_some() || plan.accent.is_some() {
-        bottom -= metrics.y(air::BUTTON);
-
-        // SAFETY: as above.
-        unsafe {
-            place_button_row(
-                hwnd,
-                dc,
-                faces.text,
-                metrics,
-                client.right,
-                bottom,
-                [
-                    (IDC_LETTER_LEFT, plan.left.as_ref()),
-                    (IDC_LETTER_ACCENT, plan.accent.as_ref()),
-                    (IDC_LETTER_RIGHT, plan.right.as_ref()),
-                ],
-            );
-        }
-    } else {
-        for control in [IDC_LETTER_LEFT, IDC_LETTER_RIGHT, IDC_LETTER_ACCENT] {
-            hide(hwnd, control);
-        }
-    }
-
-    if plan.foot.is_empty() {
-        hide(hwnd, IDC_LETTER_FOOT);
-    } else {
-        // SAFETY: as above.
-        let height = unsafe { measure(dc, faces.text, full_width, &plan.foot, None) };
-
-        bottom -= tight + height;
-        place(hwnd, IDC_LETTER_FOOT, pad, bottom, full_width, height);
-    }
-
-    bottom -= gap;
-
-    // --- and the panel takes what is left --------------------------------------------------
-    // SAFETY: `dc` is this window's DC; the borrow of the state ends with this call.
-    unsafe { layout_panel(hwnd, dc, state, metrics, pad, full_width, top, bottom) };
-
-    // SAFETY: releases exactly the DC taken at the top of this function, once.
-    unsafe { ReleaseDC(Some(hwnd), dc) };
-
-    // ⛔ **The one letter whose height its content decided is gone — задача Т-33-3.** It was
-    // the window of thanks, and Т-32-10 had to give it a height of its own because four lines
-    // of text in a window built for a letter left three hundred pixels of empty ground under
-    // them. Решение 103.3 made the thanks the wizard's last step instead, in the wizard's own
-    // window and at the wizard's own size, and every letter that is left keeps the height of
-    // the template — they fill it.
-    let _ = bottom;
-}
-
-/// Lays out the panel of a letter and everything standing on it — the second half of
-/// [`layout_letter`], split out because a panel is a window of its own inside the window.
-///
-/// # Safety
-///
-/// As [`layout_letter`].
-#[allow(clippy::too_many_arguments)]
-unsafe fn layout_panel(
-    hwnd: HWND,
-    dc: HDC,
-    state: &WindowState,
-    metrics: Metrics,
-    pad: i32,
-    full_width: i32,
-    top: i32,
-    bottom: i32,
-) {
-    let Some(faces) = state.fonts.as_ref() else {
-        return;
-    };
-
-    let plan = &state.plan;
-
-    let wanted = !plan.panel.is_empty()
-        || !plan.panel_title.is_empty()
-        || !plan.panel_text.is_empty()
-        || !plan.rows.is_empty()
-        || !plan.panel_buttons.is_empty();
-
-    if !wanted || bottom <= top {
-        for control in [
-            IDC_LETTER_PANEL,
-            IDC_LETTER_PANEL_TITLE,
-            IDC_LETTER_PANEL_TEXT,
-            IDC_LETTER_PANEL_BTN_1,
-            IDC_LETTER_PANEL_BTN_2,
-        ] {
-            hide(hwnd, control);
-        }
-
-        for (marker, row) in LETTER_ROWS {
-            hide(hwnd, marker);
-            hide(hwnd, row);
-        }
-
-        return;
-    }
-
-    place(hwnd, IDC_LETTER_PANEL, pad, top, full_width, bottom - top);
-
-    let inset = metrics.x(air::PANEL_PAD);
-    let inner_x = pad + inset;
-    let inner_width = full_width - inset * 2;
-    let pitch = Some(faces.body_pitch());
-    let tight = metrics.y(air::TIGHT);
-
-    // Under the caption the window's background draws into the top of the block. A panel with
-    // no caption of its own still keeps the same inset: what stands on a block never touches
-    // its edge.
-    let mut y = top + metrics.y(air::PANEL_HEAD);
-
-    for (control, caption, face, own_pitch) in [
-        (
-            IDC_LETTER_PANEL_TITLE,
-            &plan.panel_title,
-            faces.number,
-            None::<Option<i32>>.flatten(),
-        ),
-        (IDC_LETTER_PANEL_TEXT, &plan.panel_text, faces.body, pitch),
-    ] {
-        if caption.is_empty() {
-            hide(hwnd, control);
-            continue;
-        }
-
-        // SAFETY: see the contract.
-        let height = unsafe { measure(dc, face, inner_width, caption, own_pitch) };
-
-        place(hwnd, control, inner_x, y, inner_width, height);
-        y += height + tight;
-    }
-
-    // --- the rows -------------------------------------------------------------------------
-    let marker_width = metrics.x(air::MARKER);
-    let row_x = inner_x + metrics.x(air::ROW_TEXT);
-    let row_width = inner_width - metrics.x(air::ROW_TEXT);
-
-    for (index, (marker_control, text_control)) in LETTER_ROWS.into_iter().enumerate() {
-        let Some(row) = plan.rows.get(index) else {
-            hide(hwnd, marker_control);
-            hide(hwnd, text_control);
-            continue;
-        };
-
-        // SAFETY: see the contract. A row that names the key is measured **as a chip row**:
-        // the figure is wider than the words it replaces, and measuring without it is what put
-        // the German «Привет» one line short.
-        let height = unsafe {
-            measure_row(
-                dc,
-                faces.body,
-                Chip {
-                    face: faces.chip,
-                    height: faces.chip_height,
-                    key: &state.hotkey,
-                },
-                row_width,
-                &row.text,
-                pitch,
-            )
-        };
-        // SAFETY: as above — one line of the marker's own face.
-        let marker_height = unsafe { measure(dc, faces.number, marker_width, &row.marker, None) };
-
-        place(
-            hwnd,
-            marker_control,
-            inner_x,
-            y,
-            marker_width,
-            marker_height,
-        );
-        place(hwnd, text_control, row_x, y, row_width, height);
-
-        y += height.max(marker_height) + metrics.y(air::TIGHT + 1);
-    }
-
-    // --- the buttons inside the panel -------------------------------------------------------
-    let controls = [IDC_LETTER_PANEL_BTN_1, IDC_LETTER_PANEL_BTN_2];
-
-    // SAFETY: see the contract. The wrap is what keeps the second button on the block in a
-    // locale that writes the first one long.
-    unsafe {
-        place_panel_buttons(
-            hwnd,
-            dc,
-            faces.text,
-            metrics,
-            inner_x,
-            y,
-            inner_width,
-            &[
-                (controls[0], !plan.panel_buttons.is_empty()),
-                (controls[1], plan.panel_buttons.len() > 1),
-            ],
-        );
-    }
-
-    for (control, button) in controls.into_iter().zip(plan.panel_buttons.iter()) {
-        enable(hwnd, control, button.enabled);
-    }
-}
-
-/// Puts the words of the plan into the controls — FR-94, and the one body that fills a letter
-/// window whether it has just been created or has just been handed a new locale.
-fn fill_letter(hwnd: HWND, state: &WindowState) {
-    let plan = &state.plan;
-    let caption = settings::wide(&plan.caption);
-
-    // SAFETY: `hwnd` is the live window and `caption` a NUL-terminated UTF-16 buffer owned by
-    // this frame, neither moved nor dropped until the call returns; the call copies it.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    for (control, caption) in [
-        (IDC_LETTER_TITLE, &plan.title),
-        (IDC_LETTER_SUBTITLE, &plan.subtitle),
-        (IDC_LETTER_LEAD, &plan.lead),
-        (IDC_LETTER_PARA, &plan.para),
-        (IDC_LETTER_DEMO_CAP, &plan.demo_caption),
-        (IDC_LETTER_PANEL, &plan.panel),
-        (IDC_LETTER_PANEL_TITLE, &plan.panel_title),
-        (IDC_LETTER_PANEL_TEXT, &plan.panel_text),
-        (IDC_LETTER_FOOT, &plan.foot),
-    ] {
-        settings::set_text(hwnd, control, caption);
-    }
-
-    for (index, (marker_control, text_control)) in LETTER_ROWS.into_iter().enumerate() {
-        let (marker, text) = plan
-            .rows
-            .get(index)
-            .map_or((String::new(), String::new()), |row| {
-                (row.marker.clone(), row.text.clone())
-            });
-
-        settings::set_text(hwnd, marker_control, &marker);
-        settings::set_text(hwnd, text_control, &text);
-    }
-
-    for (control, button) in [
-        (IDC_LETTER_LEFT, plan.left.as_ref()),
-        (IDC_LETTER_RIGHT, plan.right.as_ref()),
-        (IDC_LETTER_ACCENT, plan.accent.as_ref()),
-    ] {
-        settings::set_text(hwnd, control, button.map_or("", |button| &button.label));
-    }
-
-    for (control, button) in [IDC_LETTER_PANEL_BTN_1, IDC_LETTER_PANEL_BTN_2]
-        .into_iter()
-        .zip(
-            plan.panel_buttons
-                .iter()
-                .map(Some)
-                .chain(std::iter::repeat(None)),
-        )
-    {
-        settings::set_text(hwnd, control, button.map_or("", |button| &button.label));
-    }
-
-    // Решение 97.2, ИТОГ-Э30 §9.4: the demonstration is an **island** — a typed word, the word it
-    // becomes and two Latin layout names — and an island in a mirrored window keeps its own
-    // reading order. Решение 178.6 keeps it so in Hebrew and Arabic: the Latin letters typed, then
-    // the word of the reader's script, whole, after the press.
-    // The control is owner-drawn, so what the island needs is not this call but the reading
-    // order its painting asks for; the call is here for the same reason the about window makes
-    // it for its logo — the *place* stays mirrored and only the inside is straightened.
-    settings::unmirror_control(hwnd, IDC_LETTER_DEMO);
-}
-
 // -----------------------------------------------------------------------------------------
 // The window procedure
 // -----------------------------------------------------------------------------------------
@@ -4249,17 +3629,12 @@ unsafe fn with_state<R>(hwnd: HWND, body: impl FnOnce(&mut WindowState) -> R) ->
 /// Public so that a test can call the very function the window calls.
 pub fn label_color_role(control: i32) -> StaticColorRole {
     match control {
-        IDC_LETTER_SUBTITLE | IDC_LETTER_FOOT | IDC_LETTER_DEMO_CAP => StaticColorRole::Muted,
         // ⭐ **Шапка «От автора» = шапка «О программе», задача T-81-3, решение 142.2 п. 4.**
         // Там строка версии и обе строки описания приглушены (`about_static_color_role`), и
         // здесь они приглушены по той же причине: это одна шапка, а не две похожие. ⚠ Строка
         // версии до этой задачи падала сюда в `Label` и оттого была в двух окнах разного цвета —
         // расхождение того же рода, что и ссылка у одной копии шапки из двух.
         IDC_AUTHOR_VERSION | IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => StaticColorRole::Muted,
-        control if (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control) => StaticColorRole::Muted,
-        // The demonstration is a field of its own — it is drawn as one, and its ground is the
-        // field colour rather than the window's.
-        IDC_LETTER_DEMO => StaticColorRole::Field,
         // The wizard's quiet lines: the step counter, every explanation and the status line.
         // Everything that asks a question or names a thing stays a plain label.
         IDC_WZ_STEP | IDC_WZ_NOTE | IDC_WZ_CAPTURE_NOTE | IDC_WZ_FIELD_2_SUB
@@ -4282,21 +3657,10 @@ pub fn label_color_role(control: i32) -> StaticColorRole {
 /// one pure place, exactly as `settings::about_label_face` is for the about window.
 fn label_face(control: i32, faces: &Faces) -> (HFONT, Option<i32>) {
     match control {
-        IDC_LETTER_TITLE => (faces.name, None),
         // Задача T-81-3: описание в шапке набрано читающим лицом и его шагом — ровно то, что
         // `settings::about_label_face` отвечает про `IDC_ABOUT_LINE_1` и `_2`.
         IDC_AUTHOR_LINE_1 | IDC_AUTHOR_LINE_2 => (faces.body, Some(faces.body_pitch())),
-        IDC_LETTER_PANEL_TITLE => (faces.number, None),
-        control if (IDC_LETTER_N1..IDC_LETTER_N1 + 4).contains(&control) => (faces.number, None),
-        IDC_LETTER_LEAD
-        | IDC_LETTER_PARA
-        | IDC_LETTER_PANEL_TEXT
-        | IDC_LETTER_DEMO_CAP
-        | IDC_LETTER_DEMO => (faces.body, Some(faces.body_pitch())),
-        control if (IDC_LETTER_ROW_1..IDC_LETTER_ROW_1 + 4).contains(&control) => {
-            (faces.body, Some(faces.body_pitch()))
-        }
-        // The wizard: the heading of a step is set like the heading of a letter, and every
+        // The wizard: the heading of a step is set in the face of a name, and every
         // sentence that wraps is set in the reading face at the reading pitch.
         IDC_WZ_TITLE => (faces.name, None),
         IDC_WZ_NOTE | IDC_WZ_CAPTURE_NOTE | IDC_WZ_FIELD_2_SUB | IDC_WZ_ATTACH_FOOT
@@ -4361,13 +3725,11 @@ unsafe fn on_erase(hwnd: HWND, wparam: WPARAM) -> isize {
 
     let dpi = theme::drawing_dpi(dc);
     let panels: &[i32] = match kind {
-        Kind::Letter => &[IDC_LETTER_PANEL],
-        Kind::List => &[IDC_LETTERS_PANEL],
         Kind::Author => &[IDC_AUTHOR_PANEL, IDC_NEWS_PANEL, IDC_FEEDBACK_PANEL],
         // ⚠ The wizard has **no panel**: its steps stand on the window's own ground, and the
         // three cards of the first step are drawn as blocks by the button branch rather than
         // by the background. A panel here would be a block behind the fields.
-        Kind::Wizard => &[],
+        Kind::Wizard | Kind::Letter | Kind::List => &[],
     };
 
     let rects = settings::child_rects_in_client(hwnd);
@@ -4607,142 +3969,6 @@ unsafe fn on_ctl_color(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM)
     settings::apply_ctl_color(dc, choice.flatten())
 }
 
-/// Draws the demonstration of «Привет» — FR-101, the one picture in this program that moves.
-///
-/// A field with the word being typed, the key chip that lights up when it is pressed, and the
-/// layout indicator that flips when the word is fixed. Everything in it is an **island**
-/// (решение 97.2): the typed word, the word it becomes, a key name and two Latin layout names, so
-/// the whole rectangle is laid left to right even in a mirrored window. The pair is the plan's —
-/// [`demo_pair`] of the language the plan was built in (решение 178.6) — and each word of the row
-/// is one run of `TextOutW`, so Windows orders and joins the letters of a Hebrew or an Arabic word
-/// itself (вопрос 178, П4).
-///
-/// # Safety
-///
-/// Called from [`on_draw_item`] with values copied out of the `WM_DRAWITEM` message.
-unsafe fn draw_demo(dc: HDC, rect: RECT, state: &WindowState) -> isize {
-    let (Some(brushes), Some(faces)) = (state.brushes.as_ref(), state.fonts.as_ref()) else {
-        return 0;
-    };
-
-    let dpi = theme::drawing_dpi(dc);
-    let palette = state.palette;
-    let pair = state.plan.demo_pair;
-    let frame = demo_frame(state.tick, pair);
-
-    // ⭐ **Один кадр вместо череды — задача T-92-1, решение 156.10 (находка владельца Д2: «в
-    // приветственном окне после установки мигает текст»).** Тело ниже кладёт заливку цветом окна,
-    // потом поле, потом строку с чипом, и, пока оно писало прямо в DC сообщения, композитор
-    // успевал снять окно посреди — 2,3…8,2 мс на кадр, 7,7 кадра в секунду. Замерено прибором
-    // этапа Э92, а не выведено: на настоящем экране 63 переходных кадра из 780 за два оборота
-    // демонстрации, из них 19 — «поле без единой буквы» (`scratchpad-E92\probe-e92-screen-*.log`);
-    // на поверхности окна — 186 промежуточных картинок, среди них и «ни поля, ни слова». Стирание
-    // перед перерисовкой здесь ни при чём — статик `SS_OWNERDRAW` на `WM_ERASEBKGND` не рисует ни
-    // пикселя (46 из 46, `probe-e92-demo-base.log`), и дверь без стирания одна не лечила ничего (186
-    // → 193). Лечит то, чем задача Т-33-5 вылечила карточки мастера, а T-71-5 — выключатель: три
-    // строки [`theme::PaintBuffer`], общий механизм окон. С ним — 0 переходных кадров и 1,0 мс на кадр.
-    //
-    // ⚠ **Цена, принятая владельцем (156.10): кадр покоя не байт в байт прежний.** В буфере плитка
-    // клавиши выходит ровно цветом своей кисти (`202329` в «Графите»), а прямо в окне выходила на
-    // единицу иной (`202428`), края букв — ±1 в синем канале: 551 пиксель из 29 232, на 1 единицу
-    // одного канала, глазом неразличимо (экран и отдельный рабочий стол дали одно и то же).
-    //
-    // `None` — GDI отказал (NFR-13): `map_or` тогда отдаёт телу DC сообщения, и демонстрация
-    // рисуется ровно как до этой задачи — с морганием, то есть ухудшенно, но живо. DPI выше взят у
-    // DC сообщения, а не у буфера: `GetDeviceCaps` буфера отвечает про память.
-    //
-    // SAFETY: `dc` — DC сообщения, живой на время посылки; буфер читает его глубину цвета и
-    // начертание и освобождает свои DC и растр, когда кончится этот кадр.
-    let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };
-    let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);
-
-    // The ground first: an owner-drawn static answers for the whole of its rectangle, and the
-    // figure below is rounded — without this the four corners would keep whatever was there.
-    // ⛔ And since task T-92-1 this fill is also what **grounds the buffer**: `paint_rounded` blends
-    // the arc of each corner with the ground it reads back out of the DC it paints into, and the
-    // pixels of a fresh `CreateCompatibleBitmap` are undefined (the lesson of the wizard's cards,
-    // Т-33-5). The colour stays the window's — what lies under the cut corners is the window.
-    //
-    // SAFETY: `target` is this frame's buffer or, on a refusal of GDI, the DC of the message;
-    // `rect` is a live local of the caller's; the brush belongs to this window's state.
-    unsafe { FillRect(target, &rect, brushes.window_bg()) };
-
-    // The field the word is typed into.
-    theme::paint_rounded(
-        target,
-        &rect,
-        theme::scaled(theme::CORNER_RADIUS, dpi),
-        palette.field_border,
-        brushes.field_bg(),
-        dpi,
-    );
-
-    let inset = theme::scaled(10, dpi);
-    let typed: String = frame.text.chars().take(frame.shown).collect();
-
-    // The word, and the two islands beside it — the key chip and the layout badge — are laid
-    // out as one chip row: `theme::paint_chip_row` already knows how to put a figure with a
-    // word in it beside a sentence, and it is the very body the help rows of «О программе»
-    // are drawn by (§6.2).
-    let row = RECT {
-        left: rect.left + inset,
-        top: rect.top + inset / 2,
-        right: rect.right - inset,
-        bottom: rect.bottom - inset / 2,
-    };
-
-    let template = format!(
-        "{typed}   {}   {}",
-        theme::KEY_PLACEHOLDER,
-        pair.badge[usize::from(frame.converted)]
-    );
-
-    // SAFETY: `target` is this frame's buffer or, on a refusal of GDI, the DC of the message, and
-    // every handle of the style is an object this window's state owns for longer than the call.
-    let drawn = unsafe {
-        theme::paint_chip_row(
-            target,
-            row,
-            theme::chip_row(&template, &state.hotkey),
-            theme::ChipRowStyle {
-                ground: brushes.field_bg(),
-                ink: palette.text,
-                body: Some(faces.body),
-                chip_face: Some((faces.chip, faces.chip_height)),
-                chip: theme::ChipColors {
-                    outline: palette.field_border,
-                    // The key lights up in the accent while it is pressed — the mock-up's
-                    // flash, and the one place this window uses the accent at all.
-                    fill: if frame.pressed {
-                        brushes.accent_bg()
-                    } else {
-                        brushes.window_bg()
-                    },
-                    ink: if frame.pressed {
-                        palette.accent_fg
-                    } else {
-                        palette.text
-                    },
-                },
-                pitch: faces.body_pitch(),
-                dpi,
-            },
-        )
-    };
-
-    // The one moment any of this becomes visible. A refused blit leaves the demonstration showing
-    // the frame the window already had there — the previous one and never a hole; painting the
-    // body a second time into the DC of the message would be the very flicker this removes.
-    //
-    // SAFETY: `dc` is the DC of the message; `buffer` is this frame's own and is freed as it goes
-    // out of scope on this line.
-    if let Some(buffer) = buffer {
-        let _ = unsafe { buffer.blit(dc) };
-    }
-
-    drawn
-}
-
 /// Draws the feed switch of FR-102 — the one check box of «От автора».
 ///
 /// ⭐ **Решение 132.3, задача T-71-5: тем же телом, что галки мастера — [`draw_glyph`].** До этой
@@ -4836,13 +4062,7 @@ unsafe fn on_draw_item(hwnd: HWND, lparam: LPARAM) -> isize {
             return 0;
         }
 
-        // The demonstration is not a caption and is drawn by its own hand.
-        if control == IDC_LETTER_DEMO {
-            // SAFETY: see the caller.
-            return unsafe { with_state(hwnd, |state| draw_demo(dc, rect, state)) }.unwrap_or(0);
-        }
-
-        // Neither is the progress bar of the wizard: a run of steps behind and a run ahead.
+        // The progress bar of the wizard: a run of steps behind and a run ahead.
         if control == IDC_WZ_PROGRESS {
             // SAFETY: see the caller.
             return unsafe { with_state(hwnd, |state| draw_progress(dc, rect, state)) }
@@ -5167,7 +4387,6 @@ unsafe extern "system" fn letter_proc(
                     (
                         state.kind,
                         state.accent_control(),
-                        state.plan.demo,
                         state.icon_control(),
                         state.logo.as_ref().map(settings::AboutLogo::handle),
                         state.icons.as_ref().map(settings::CaptionIcons::frames),
@@ -5175,7 +4394,7 @@ unsafe extern "system" fn letter_proc(
                 })
             };
 
-            let Some((kind, accent, demo, icon, logo, frames)) = prepared else {
+            let Some((kind, accent, icon, logo, frames)) = prepared else {
                 return 0;
             };
 
@@ -5211,7 +4430,7 @@ unsafe extern "system" fn letter_proc(
                 unsafe { settings::CaptionIcons::show_on(hwnd, frames) };
             }
 
-            if let Some(logo) = logo {
+            if let (Some(logo), Some(icon)) = (logo, icon) {
                 // `STM_SETICON`, the documented way to give an `SS_ICON` static a picture —
                 // the road the about window already takes for the same 40 px logo. The shared
                 // frame it answers with is deliberately dropped: it was never ours to free.
@@ -5267,19 +4486,6 @@ unsafe extern "system" fn letter_proc(
                 crate::app::report_non_critical("PostMessageW", &error);
             }
 
-            if demo {
-                // NFR-10: the one timer of this program that is not the watchdog's, and it
-                // exists only while a window with a demonstration is open.
-                //
-                // SAFETY: `hwnd` is the live window; `None` for the callback asks for
-                // `WM_TIMER` at this window, which is what the procedure answers.
-                let started = unsafe { SetTimer(Some(hwnd), DEMO_TIMER, DEMO_TICK_MS, None) };
-
-                if started == 0 {
-                    crate::app::report_non_critical("SetTimer", &WinError::from_thread());
-                }
-            }
-
             // TRUE: let the dialog manager choose the focus.
             1
         }
@@ -5300,33 +4506,6 @@ unsafe extern "system" fn letter_proc(
         //
         // SAFETY: as above.
         WM_MEASUREITEM => unsafe { on_measure_item(hwnd, lparam) },
-
-        // The demonstration of «Привет» — one frame. SEC-05: a forged `WM_TIMER` buys the
-        // sender one frame of an animation in our own window.
-        WM_TIMER if wparam.0 == DEMO_TIMER => {
-            // SAFETY: as above.
-            let ticked = unsafe {
-                with_state(hwnd, |state| {
-                    state.tick = state.tick.wrapping_add(1);
-                    state.plan.demo
-                })
-            };
-
-            // ⭐ **Задача T-92-1, решение 156.10: без стирания — дверь Т-45-3, как выключатель
-            // «От автора» (находка Э70-Б-2).** Стирание этому статику не
-            // нужно ни для чего: [`draw_demo`] первым делом заливает весь свой прямоугольник сам. И
-            // ничего не давало — замер этапа Э92: статик `SS_OWNERDRAW` на `WM_ERASEBKGND` не
-            // рисует ни пикселя (46 стираний из 46 не изменили ни одного, кисть у окна внутри
-            // стирания не спрашивалась), — так что дверь ничего не лечит сама по себе и не меняет
-            // ни одного пикселя; лечит буфер в `draw_demo`, а здесь уходят 7,7 лишних
-            // `WM_ERASEBKGND` в секунду. ⚠ Посылка ТЗ Э92 («стирание заливает поле кистью поля —
-            // кадр без слова») была опровергнута этим замером (C1, 156.10).
-            if ticked == Some(true) {
-                widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO);
-            }
-
-            0
-        }
 
         // One second of the capture count-down of FR-104 — the wizard's own timer, and the
         // only other one this program sets.
@@ -5452,10 +4631,8 @@ unsafe extern "system" fn letter_proc(
                 }
             }
 
-            // SAFETY: `hwnd` is the live window; killing a timer that was never set answers
-            // false and is harmless (NFR-13).
-            let _ = unsafe { KillTimer(Some(hwnd), DEMO_TIMER) };
-            // SAFETY: as above — the capture count-down may or may not be running.
+            // SAFETY: `hwnd` is the live window; the capture count-down may or may not be running,
+            // and killing a timer that was never set answers false and is harmless (NFR-13).
             let _ = unsafe { KillTimer(Some(hwnd), CAPTURE_TIMER) };
 
             OPEN.with_borrow_mut(|open| open.retain(|(_, other)| *other != hwnd));
@@ -5529,10 +4706,9 @@ unsafe extern "system" fn letter_proc(
 /// `WM_DRAWITEM`, and the answer to «is this identifier one of ours» (SEC-05).
 fn owner_drawn_labels(kind: Kind) -> &'static [i32] {
     match kind {
-        Kind::Letter => &LETTER_LABELS,
-        Kind::List => &LIST_LABELS,
         Kind::Author => &AUTHOR_LABELS,
         Kind::Wizard => &WIZARD_LABELS,
+        Kind::Letter | Kind::List => &[],
     }
 }
 
@@ -5544,24 +4720,6 @@ fn owner_drawn_labels_more(kind: Kind) -> &'static [i32] {
         _ => &[],
     }
 }
-
-/// The owner-drawn statics of «Последние письма»: three per entry and the line under the
-/// window.
-const LIST_LABELS: [i32; 13] = [
-    IDC_LETTERS_T1,
-    IDC_LETTERS_T1 + 1,
-    IDC_LETTERS_T1 + 2,
-    IDC_LETTERS_T1 + 3,
-    IDC_LETTERS_D1,
-    IDC_LETTERS_D1 + 1,
-    IDC_LETTERS_D1 + 2,
-    IDC_LETTERS_D1 + 3,
-    IDC_LETTERS_X1,
-    IDC_LETTERS_X1 + 1,
-    IDC_LETTERS_X1 + 2,
-    IDC_LETTERS_X1 + 3,
-    IDC_LETTERS_FOOT,
-];
 
 /// The owner-drawn statics of «От автора».
 ///
@@ -5584,26 +4742,11 @@ const AUTHOR_LABELS: [i32; 10] = [
 /// The owner-drawn buttons of one kind of window — the list `subclass_buttons` walks.
 fn buttons_of(kind: Kind) -> &'static [i32] {
     match kind {
-        Kind::Letter => &LETTER_BUTTONS,
-        Kind::List => &LIST_BUTTONS,
         Kind::Author => &AUTHOR_BUTTONS,
         Kind::Wizard => &WIZARD_BUTTONS,
+        Kind::Letter | Kind::List => &[],
     }
 }
-
-/// The owner-drawn buttons of «Последние письма»: «Открыть письмо» and «Прочитано» for each of
-/// the four entries, and the one that closes the window.
-const LIST_BUTTONS: [i32; 9] = [
-    IDC_LETTERS_B1,
-    IDC_LETTERS_B1 + 1,
-    IDC_LETTERS_B1 + 2,
-    IDC_LETTERS_B1 + 3,
-    IDC_LETTERS_R1,
-    IDC_LETTERS_R1 + 1,
-    IDC_LETTERS_R1 + 2,
-    IDC_LETTERS_R1 + 3,
-    IDC_LETTERS_CLOSE,
-];
 
 /// The owner-drawn buttons of «От автора».
 const AUTHOR_BUTTONS: [i32; 7] = [
@@ -5859,10 +5002,9 @@ fn gregorian_month_name(locale: &[u16], month: u32) -> Option<String> {
 /// has just been created or has just been handed a new locale (FR-94, решение 99.1).
 fn fill_window(hwnd: HWND, state: &WindowState) {
     match state.kind {
-        Kind::Letter => fill_letter(hwnd, state),
-        Kind::List => fill_list(hwnd, state),
         Kind::Author => fill_author(hwnd, state),
         Kind::Wizard => fill_wizard(hwnd, state),
+        Kind::Letter | Kind::List => {}
     }
 }
 
@@ -5873,10 +5015,9 @@ fn fill_window(hwnd: HWND, state: &WindowState) {
 /// `hwnd` is the live window and `state` its own state.
 unsafe fn layout_window(hwnd: HWND, state: &WindowState) {
     match state.kind {
-        Kind::Letter => unsafe { layout_letter(hwnd, state) },
-        Kind::List => unsafe { layout_list(hwnd, state) },
         Kind::Author => unsafe { layout_author(hwnd, state) },
         Kind::Wizard => unsafe { layout_wizard(hwnd, state) },
+        Kind::Letter | Kind::List => {}
     }
 }
 
@@ -5961,224 +5102,6 @@ fn first_line(text: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default()
         .to_owned()
-}
-
-/// Puts the entries into «Последние письма» — FR-101.
-fn fill_list(hwnd: HWND, state: &WindowState) {
-    use crate::settings::{
-        IDS_CLOSE, IDS_LETTERS_CAPTION, IDS_LETTERS_FOOT, IDS_LETTERS_OPEN, IDS_NEWS_READ_BUTTON,
-        text,
-    };
-
-    let caption = settings::wide(&text(IDS_LETTERS_CAPTION));
-
-    // SAFETY: `hwnd` is the live window and `caption` a NUL-terminated buffer of this frame.
-    if let Err(error) = unsafe { SetWindowTextW(hwnd, PCWSTR(caption.as_ptr())) } {
-        crate::app::report_non_critical("SetWindowTextW", &error);
-    }
-
-    settings::set_text(hwnd, IDC_LETTERS_FOOT, &text(IDS_LETTERS_FOOT));
-    settings::set_text(hwnd, IDC_LETTERS_CLOSE, &text(IDS_CLOSE));
-
-    // Read once rather than once per entry: four entries would otherwise be eight walks of the
-    // string tables for two sentences.
-    let open = text(IDS_LETTERS_OPEN);
-    let read = text(IDS_NEWS_READ_BUTTON);
-
-    for index in 0..NEWS_KEPT + 1 {
-        let entry = state.entries.get(index);
-        let offset = i32::try_from(index).unwrap_or(0);
-
-        settings::set_text(
-            hwnd,
-            IDC_LETTERS_T1 + offset,
-            entry.map_or("", |entry| &entry.title),
-        );
-        settings::set_text(
-            hwnd,
-            IDC_LETTERS_D1 + offset,
-            entry.map_or("", |entry| &entry.meta),
-        );
-        settings::set_text(
-            hwnd,
-            IDC_LETTERS_X1 + offset,
-            entry.map_or("", |entry| &entry.excerpt),
-        );
-        settings::set_text(
-            hwnd,
-            IDC_LETTERS_B1 + offset,
-            if entry.is_some() { &open } else { "" },
-        );
-        settings::set_text(
-            hwnd,
-            IDC_LETTERS_R1 + offset,
-            if entry.is_some_and(|entry| entry.unread) {
-                &read
-            } else {
-                ""
-            },
-        );
-    }
-}
-
-/// Lays out «Последние письма»: one panel and up to four entries in it, each as tall as what it
-/// says.
-///
-/// # Safety
-///
-/// As [`layout_letter`].
-unsafe fn layout_list(hwnd: HWND, state: &WindowState) {
-    let Some(faces) = state.fonts.as_ref() else {
-        return;
-    };
-
-    let mut client = RECT::default();
-
-    // SAFETY: `hwnd` is the live window and `client` a live local the call fills.
-    if unsafe { GetClientRect(hwnd, &mut client) }.is_err() {
-        return;
-    }
-
-    // SAFETY: `hwnd` is the live window; the DC is released before every return below.
-    let dc = unsafe { GetDC(Some(hwnd)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let metrics = Metrics::of(hwnd);
-    let pad = metrics.x(air::PAD);
-    let full_width = client.right - pad * 2;
-    let inset = metrics.x(air::PANEL_PAD);
-    let inner_x = pad + inset;
-    let inner_width = full_width - inset * 2;
-    let pitch = Some(faces.body_pitch());
-    let tight = metrics.y(air::TIGHT);
-
-    // The line under the window and the button that closes it, from the bottom.
-    // ⭐⭐ **Порядок перевёрнут задачей T-81-4, решение 142.2 п. 8 и 142.3 — окно стало считать
-    // свою высоту по содержимому.**
-    //
-    // ⛔ До этой задачи оно её не считало вовсе: записи раскладывались в панель, а панель
-    // получала ту высоту, какая оставалась от шаблонных 296 единиц. ТЗ Э81 держало посылку, что
-    // «два окна уже умеют считать высоту»; замер показал, что `resize_client` звалась **ровно
-    // один раз**, из `layout_author`. Владелец решил «по содержимому» для обоих (142.2 п. 8), и
-    // это — исполнение его решения тем же телом, а не второй его копией.
-    //
-    // Поэтому счёт идёт сверху вниз: записи, потом панель ровно по ним, потом тихая строка и ряд
-    // кнопок под ней, и в конце окно берёт ту высоту, которая из этого вышла.
-    let top = metrics.y(air::TOP);
-    let mut y = top + inset;
-    let mut any = false;
-
-    for index in 0..NEWS_KEPT + 1 {
-        let offset = i32::try_from(index).unwrap_or(0);
-        let controls = [
-            IDC_LETTERS_T1 + offset,
-            IDC_LETTERS_D1 + offset,
-            IDC_LETTERS_X1 + offset,
-            IDC_LETTERS_B1 + offset,
-            IDC_LETTERS_R1 + offset,
-        ];
-
-        let Some(entry) = state.entries.get(index) else {
-            for control in controls {
-                hide(hwnd, control);
-            }
-
-            continue;
-        };
-
-        for (control, caption, face, own_pitch) in [
-            (controls[0], &entry.title, faces.number, None),
-            (controls[1], &entry.meta, faces.text, None),
-            (controls[2], &entry.excerpt, faces.body, pitch),
-        ] {
-            // SAFETY: as above.
-            let height = unsafe { measure(dc, face, inner_width, caption, own_pitch) };
-
-            place(hwnd, control, inner_x, y, inner_width, height);
-            y += height + tight;
-        }
-
-        // SAFETY: as above.
-        unsafe {
-            y = place_panel_buttons(
-                hwnd,
-                dc,
-                faces.text,
-                metrics,
-                inner_x,
-                y,
-                inner_width,
-                &[(controls[3], true), (controls[4], entry.unread)],
-            );
-        }
-
-        y += metrics.y(air::GAP);
-        any = true;
-    }
-
-    // The panel is as tall as what stands in it: the trailing air of the last entry is given
-    // back and the inset of the block put in its place. An empty list keeps a block of the head
-    // and the two insets — there is nothing to be as tall as.
-    let panel_bottom = if any {
-        y - metrics.y(air::GAP) + inset
-    } else {
-        y + inset
-    };
-
-    place(
-        hwnd,
-        IDC_LETTERS_PANEL,
-        pad,
-        top,
-        full_width,
-        panel_bottom - top,
-    );
-
-    // Then the quiet line, and the row of buttons under it — решение 142.2 п. 7.
-    let mut below = panel_bottom + metrics.y(air::GAP);
-
-    // SAFETY: `dc` is this window's DC and the faces are its own.
-    let foot = unsafe {
-        measure(
-            dc,
-            faces.text,
-            full_width,
-            &settings::get_text(hwnd, IDC_LETTERS_FOOT),
-            None,
-        )
-    };
-
-    place(hwnd, IDC_LETTERS_FOOT, pad, below, full_width, foot);
-    below += foot + tight;
-
-    // SAFETY: as above.
-    let width = unsafe {
-        button_width(
-            dc,
-            faces.text,
-            metrics,
-            &settings::get_text(hwnd, IDC_LETTERS_CLOSE),
-        )
-    };
-
-    place(
-        hwnd,
-        IDC_LETTERS_CLOSE,
-        client.right - pad - width,
-        below,
-        width,
-        metrics.y(air::BUTTON),
-    );
-
-    let wanted = below + metrics.y(air::BUTTON) + metrics.y(air::PAD);
-
-    // SAFETY: releases exactly the DC taken at the top of this function, once.
-    unsafe { ReleaseDC(Some(hwnd), dc) };
-
-    resize_client(hwnd, client.bottom, wanted);
 }
 
 /// Puts the words of [`AuthorView`] into «От автора» — FR-103.
@@ -6782,83 +5705,101 @@ pub fn close(kind: Kind) {
     }
 }
 
-/// Does what a button of a letter says it does — FR-101, FR-103.
-fn perform(hwnd: HWND, action: Action) {
-    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the box lives until
-    // `WM_NCDESTROY`. Everything needed is taken out **before** anything is done, so no action
-    // runs while the state is borrowed.
-    let taken = unsafe {
-        with_state(hwnd, |state| {
-            (
-                state.owner,
-                state.news,
-                state.link.clone(),
-                state.kind,
-                state.feedback_url(),
-                state.download_url(),
-                state.program_url(),
-            )
-        })
-    };
+/// What a window hands [`act`]: whose window it is, which news entry it is about and the link
+/// that entry carried, and the language of its words.
+pub(crate) struct Deed<'a> {
+    /// The program's window — the owner of every window an action opens.
+    pub owner: HWND,
+    /// The identifier of the feed entry a «Новость» is about — what «Прочитано» marks.
+    pub news: Option<u64>,
+    /// The link the entry carried, for «Читать на сайте».
+    pub link: &'a str,
+    /// The language of the window: the pages it opens are the pages in that language
+    /// (решения 181.1, 181.33) — the language its words are in, and not the one asked of
+    /// `settings` at the click.
+    pub language: Language,
+}
 
-    let Some((owner, news, link, _kind, feedback, download, program)) = taken else {
-        return;
-    };
-
+/// Does what a button of a letter, of «Последние письма» or of «От автора» says it does —
+/// FR-101, FR-103 — and answers whether the window it stands in closes. One body for the windows
+/// of the shell and the old ones alike.
+pub(crate) fn act(deed: &Deed<'_>, action: Action) -> bool {
     match action {
-        Action::Close => close_window(hwnd),
+        Action::Close => return true,
 
         Action::Snooze => {
             if let Some(today) = today() {
                 update_state(|state| snooze_thanks(state, today));
             }
 
-            close_window(hwnd);
+            return true;
         }
 
         Action::MarkRead => {
-            if let Some(id) = news {
+            if let Some(id) = deed.news {
                 update_state(|state| mark_read(state, id));
                 crate::tray::refresh_unread_mark();
             }
 
-            close_window(hwnd);
+            return true;
         }
 
         // FR-92 through the one door the tray already opens it by — a second `show_dialog`
         // call site would be a second place that can forget the guard of `dialog_is_open`.
-        Action::OpenSettings => crate::tray::dispatch_command(owner, crate::tray::CMD_SETTINGS),
+        Action::OpenSettings => {
+            crate::tray::dispatch_command(deed.owner, crate::tray::CMD_SETTINGS);
+        }
 
         Action::OpenChannel => open_link(links::CHANNEL_URL),
         // Решение 181.1: where this window's reader can write — the group or GitHub Issues.
-        Action::OpenFeedback => open_link(feedback),
+        Action::OpenFeedback => open_link(links::feedback_url(deed.language)),
         Action::OpenSupport => open_link(links::SUPPORT_URL),
 
         // ⭐ Task T-78-2: the download page of **this build**, never the `link` of the feed
         // entry that announced the update. See [`links::DOWNLOAD_URL`] for why the constant
         // wins — in short, the entry is signed and dated and its address goes stale.
-        //
-        // ⚠ In «От автора» this was the only address it could have opened anyway: that window
-        // is built by [`open_author`], which never fills `state.link`, so the click reached
-        // `open_link("")` and returned having done nothing. The button was never laid out, so
-        // nobody could press it to find out.
-        //
         // Решение 181.33: the page in the language of this window — Russian for the Russian side,
         // under `/en/` for the twelve of the English one.
-        Action::OpenDownload => open_link(download),
+        Action::OpenDownload => open_link(links::download_url(deed.language)),
 
         // Задача T-81-3: щелчок по имени программы в шапке «От автора». Адрес — тот же, что
         // открывает имя в «О программе», и той же дверью `open_link`, которая **и есть** ворота
         // С52: только https и только на хосте, объявленном этой сборкой. С решения 181.33 —
         // страница на языке окна.
-        Action::OpenProgram => open_link(program),
+        Action::OpenProgram => open_link(links::program_url(deed.language)),
 
-        Action::OpenLink => open_link(&link),
+        Action::OpenLink => open_link(deed.link),
 
-        Action::OpenAuthor => open_author(owner),
-        Action::OpenLetters => open_list(owner),
+        Action::OpenAuthor => open_author(deed.owner),
+        Action::OpenLetters => open_list(deed.owner),
 
-        Action::OpenWizard => open_wizard(owner),
+        Action::OpenWizard => open_wizard(deed.owner),
+    }
+
+    false
+}
+
+/// Does what a button of «От автора» says it does — [`act`] with the window's own owner and
+/// language.
+fn perform(hwnd: HWND, action: Action) {
+    // SAFETY: the pointer was stored on `WM_INITDIALOG` and the box lives until
+    // `WM_NCDESTROY`. Everything needed is taken out **before** anything is done, so no action
+    // runs while the state is borrowed.
+    let taken = unsafe { with_state(hwnd, |state| (state.owner, state.language)) };
+
+    let Some((owner, language)) = taken else {
+        return;
+    };
+
+    let deed = Deed {
+        owner,
+        news: None,
+        link: "",
+        language,
+    };
+
+    if act(&deed, action) {
+        close_window(hwnd);
     }
 }
 
@@ -6942,7 +5883,7 @@ fn raise(hwnd: HWND, activate: bool) {
 
     if activate {
         // FR-101: a letter never takes the focus **by itself**. This is the other case — the
-        // person clicked the balloon or asked for the window from the menu, and a window that
+        // person pressed «Открыть письмо» of the knock or asked for the window from the menu, and a window that
         // did not come to the front then would look broken.
         //
         // SAFETY: `hwnd` is the live window; the call takes no pointer.
@@ -7010,7 +5951,7 @@ fn hide_focus_cue(hwnd: HWND) {
 /// `activate` is FR-101's whole rule about focus: a letter that opens **by itself** is shown
 /// with `SW_SHOWNOACTIVATE` and never calls `SetForegroundWindow`, so it cannot take the
 /// keyboard from what somebody is typing into. A window the person asked for — from the menu,
-/// from «О программе», by clicking the balloon — is shown the ordinary way.
+/// from «О программе», by «Открыть письмо» of the knock — is shown the ordinary way.
 fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> {
     let kind = state.kind;
 
@@ -7037,10 +5978,10 @@ fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> 
     let module = testing::templates().unwrap_or(module);
 
     let template = match kind {
-        Kind::Letter => IDD_LETTER,
-        Kind::List => IDD_LETTERS_LIST,
         Kind::Author => IDD_AUTHOR,
         Kind::Wizard => IDD_WIZARD,
+        // The letters and the list are windows of the shell: `show_letter`, `open_list`.
+        Kind::Letter | Kind::List => return None,
     };
 
     // The state outlives this call, so it goes on the heap and the window owns it — see
@@ -7084,7 +6025,30 @@ fn open_window(owner: HWND, state: WindowState, activate: bool) -> Option<HWND> 
 /// The state one of these windows starts with — the palette out of the configuration, the
 /// hotkey as it acts, and the plan.
 fn fresh_state(owner: HWND, kind: Kind) -> WindowState {
-    let (setting, hotkey) = crate::tray::with_tray(|tray| {
+    let (setting, hotkey) = look();
+
+    let palette = theme::resolve(setting, theme::system_is_light());
+
+    WindowState {
+        kind,
+        setting,
+        palette,
+        brushes: theme::Brushes::new(palette),
+        fonts: None,
+        author: AuthorView::default(),
+        wizard: None,
+        hotkey,
+        icons: settings::CaptionIcons::load(),
+        logo: None,
+        language: settings::ui_language(),
+        owner,
+    }
+}
+
+/// The setting «Оформление» and the hotkey as it acts, out of the configuration — what every
+/// window of this module starts with.
+fn look() -> (ThemeSetting, String) {
+    crate::tray::with_tray(|tray| {
         (
             tray.config().general.theme,
             settings::effective_hotkey_name(&tray.config().hotkey),
@@ -7095,45 +6059,93 @@ fn fresh_state(owner: HWND, kind: Kind) -> WindowState {
             ThemeSetting::System,
             settings::effective_hotkey_name(&settings::Hotkey::default()),
         )
-    });
+    })
+}
 
-    let palette = theme::resolve(setting, theme::system_is_light());
+/// One open window of the shell this module made — a letter or «Последние письма».
+#[derive(Clone, Copy, Debug)]
+struct ShellWindow {
+    kind: Kind,
+    hwnd: HWND,
+    /// Which letter, for a window of [`Kind::Letter`] — what a new language opens again.
+    letter: Option<Letter>,
+    /// The locale the window was built in — what `language_switch` is asked about.
+    language: Language,
+}
 
-    WindowState {
-        kind,
-        letter: None,
-        news: None,
-        link: String::new(),
-        setting,
-        palette,
-        brushes: theme::Brushes::new(palette),
-        fonts: None,
-        plan: LetterPlan::default(),
-        author: AuthorView::default(),
-        entries: Vec::new(),
-        wizard: None,
-        hotkey,
-        icons: settings::CaptionIcons::load(),
-        logo: None,
-        tick: 0,
-        language: settings::ui_language(),
-        owner,
+thread_local! {
+    /// The windows of the shell this module opened **on this thread**: the letters and
+    /// «Последние письма» (T-120-16). Apart from [`OPEN`], because the message pump hands the
+    /// windows of `OPEN` to `IsDialogMessageW`, and a window of the shell is not a dialog — its
+    /// keys are the host's.
+    static SHELL: RefCell<Vec<ShellWindow>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The place of a window of the shell in [`SHELL`]: the content holds it, and when the host drops
+/// the content — the window is destroyed, however it was closed — the place goes with it.
+pub struct ShellRecord(Kind);
+
+impl Drop for ShellRecord {
+    fn drop(&mut self) {
+        let kind = self.0;
+        let _ = SHELL.try_with(|open| {
+            if let Ok(mut open) = open.try_borrow_mut() {
+                open.retain(|window| window.kind != kind);
+            }
+        });
     }
 }
 
-/// **Shows one letter** — FR-101.
+/// Opens `content` as a window of the shell of `kind` on `owner` and writes it into [`SHELL`];
+/// answers the window, or none — a window Windows refused is journaled, and the person is told by
+/// its absence.
+///
+/// `activate` is FR-101's whole rule about focus: a letter that opens **by itself** is shown with
+/// `SW_SHOWNOACTIVATE` and never takes the keyboard from what somebody is typing into; a window the
+/// person asked for is shown the ordinary way ([`raise`]).
+fn open_shell<C: crate::ui::host::Content + 'static>(
+    kind: Kind,
+    letter: Option<Letter>,
+    language: Language,
+    owner: HWND,
+    content: C,
+    activate: bool,
+) -> Option<HWND> {
+    match crate::ui::host::create(content, Some(owner)) {
+        Ok(hwnd) => {
+            SHELL.with_borrow_mut(|open| {
+                open.push(ShellWindow {
+                    kind,
+                    hwnd,
+                    letter,
+                    language,
+                });
+            });
+            raise(hwnd, activate);
+            Some(hwnd)
+        }
+        Err(error) => {
+            crate::app::report_non_critical("CreateWindowExW", &error);
+            None
+        }
+    }
+}
+
+/// **Shows one letter** — FR-101, a window of the shell (`ui::windows::letter`, T-120-16).
 ///
 /// Answers whether a window is on the screen. `false` means the letter had nothing to say (a
 /// letter out of the feed with no entry behind it) or the window could not be made — and the
-/// caller must then not record the letter as shown.
+/// caller must then not record the letter as shown. One letter at a time: while one is open it is
+/// raised instead.
 pub fn show_letter(owner: HWND, letter: Letter, item: Option<&FeedItem>, activate: bool) -> bool {
     let stored = state_now();
-    let version = version_string();
+    let language = settings::ui_language();
 
-    let plan = plan_for(
+    let plan = plan_in(
+        language,
         letter,
         &PlanContext {
-            version: version.clone(),
+            version: version_string(),
             hotkey: String::new(),
             snooze_offered: snooze_is_offered(&stored),
             item,
@@ -7144,17 +6156,39 @@ pub fn show_letter(owner: HWND, letter: Letter, item: Option<&FeedItem>, activat
         return false;
     }
 
-    let mut state = fresh_state(owner, Kind::Letter);
+    if let Some(hwnd) = window_of(Kind::Letter) {
+        raise(hwnd, activate);
+        return true;
+    }
 
-    state.letter = Some(letter);
-    state.news = match letter {
-        Letter::News(id) => Some(id),
-        _ => None,
+    let (theme, key) = look();
+    let product = crate::ui::windows::letter::Product {
+        view: crate::ui::windows::letter::LetterView {
+            letter,
+            plan,
+            key,
+            tick: 0,
+            language,
+            theme,
+        },
+        owner,
+        news: match letter {
+            Letter::News(id) => Some(id),
+            _ => None,
+        },
+        link: item.map(|item| item.link.clone()).unwrap_or_default(),
+        _record: ShellRecord(Kind::Letter),
     };
-    state.link = item.map(|item| item.link.clone()).unwrap_or_default();
-    state.plan = plan;
 
-    open_window(owner, state, activate).is_some()
+    open_shell(
+        Kind::Letter,
+        Some(letter),
+        language,
+        owner,
+        product,
+        activate,
+    )
+    .is_some()
 }
 
 /// **Shows «От автора»** — FR-103.
@@ -7197,7 +6231,7 @@ fn author_state(owner: HWND, version: &str) -> WindowState {
 #[cfg(feature = "testing")]
 pub mod testing {
     use super::{
-        AuthorView, Entry, HWND, Kind, Letter, ThemeSetting, author_state, fresh_state,
+        AuthorView, Entry, FeedItem, HWND, Kind, Letter, ThemeSetting, author_state, fresh_state,
         open_window, show_letter, window_of, with_state, wizard_state,
     };
     use std::cell::Cell;
@@ -7260,72 +6294,58 @@ pub mod testing {
         window
     }
 
-    /// **The door of task T-98-1** — opens «Последние письма» on `owner` out of the templates of
-    /// `module` with `entries`, and never shows it.
-    ///
-    /// The window grows by what it holds (задача T-81-4), and the entries are those of
-    /// [`super::list_entries`] the caller builds out of a feed — a test binary reads none.
-    ///
-    /// The window answered is the caller's to destroy.
-    pub fn open_list_hidden(owner: HWND, module: HMODULE, entries: Vec<Entry>) -> Option<HWND> {
+    /// Runs `f` with the windows of this module left hidden on this thread.
+    fn hidden_while<R>(f: impl FnOnce() -> R) -> R {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                HIDDEN.with(|hidden| hidden.set(false));
+            }
+        }
+
         HIDDEN.with(|hidden| hidden.set(true));
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let mut state = fresh_state(owner, Kind::List);
-        state.entries = entries;
-        let window = open_window(owner, state, false);
-
-        HIDDEN.with(|hidden| hidden.set(false));
-        TEMPLATES.with(|templates| templates.set(0));
-
-        window
+        let _reset = Reset;
+        f()
     }
 
-    /// **The door of task T-92-1** — opens `letter` on `owner` out of the templates of `module`
-    /// by the product's own [`show_letter`], and **shows** it, without activation.
+    /// **The door of the tests of «Последние письма»** — opens the window of the shell on `owner`
+    /// with `entries` by the product's own road, and never shows it. A test binary reads no feed,
+    /// so the entries are those of [`super::list_entries`] the caller builds.
     ///
-    /// Shown and not hidden, because what it is for is the painting: a hidden window gets no
-    /// `WM_PAINT`, and the demonstration of «Привет» (FR-101) is a timer that repaints a control
-    /// seven times a second. ⛔ So the caller's thread must stand on a desktop of its own
-    /// (`CreateDesktopW` + `SetThreadDesktop`, the road of stage Э85) — on the input desktop this
-    /// would be a window on the owner's screen, which is the very thing [`open_author_hidden`]
-    /// keeps its windows hidden for.
+    /// `_module` is not read: the window of the shell has no template (T-120-16). The parameter
+    /// stays while the callers that named a module of templates are moved.
     ///
     /// The window answered is the caller's to destroy.
-    pub fn show_letter_from(owner: HWND, module: HMODULE, letter: Letter) -> Option<HWND> {
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let shown = show_letter(owner, letter, None, false);
-
-        TEMPLATES.with(|templates| templates.set(0));
-
-        shown.then(|| window_of(Kind::Letter)).flatten()
+    pub fn open_list_hidden(owner: HWND, _module: HMODULE, entries: Vec<Entry>) -> Option<HWND> {
+        hidden_while(|| super::open_list_with(owner, entries, false))
     }
 
-    /// **The door of task T-94-1** — opens `letter` on `owner` out of the templates of `module`
-    /// by the product's own [`show_letter`] **with the activation**, the road of a window the
-    /// person asked for (the balloon, the menu), and keeps it **hidden**.
-    ///
-    /// What it is for is the one decision [`open_window`] takes between the creation and
-    /// [`super::raise`] — whether the focus cue is hidden (решение 158.3) — and that decision is
-    /// taken before the window would be shown. Hidden, because a shown window opened with the
-    /// activation calls `SetForegroundWindow`, which no test may call.
+    /// **The door of the tests of the letters** — opens `letter` on `owner`, about `item` when it
+    /// is a letter out of the feed, by the product's own [`show_letter`] **with the activation** —
+    /// the road of a window the person asked for — and keeps it **hidden**: a shown window opened
+    /// with the activation calls `SetForegroundWindow`, which no test may call.
     ///
     /// The window answered is the caller's to destroy.
+    pub fn open_letter_hidden(
+        owner: HWND,
+        letter: Letter,
+        item: Option<&FeedItem>,
+    ) -> Option<HWND> {
+        hidden_while(|| show_letter(owner, letter, item, true))
+            .then(|| window_of(Kind::Letter))
+            .flatten()
+    }
+
+    /// [`open_letter_hidden`] for a letter with no entry of the feed.
+    ///
+    /// `_module` is not read: the window of the shell has no template (T-120-16). The parameter
+    /// stays while the callers that named a module of templates are moved.
     pub fn open_letter_activated_hidden(
         owner: HWND,
-        module: HMODULE,
+        _module: HMODULE,
         letter: Letter,
     ) -> Option<HWND> {
-        HIDDEN.with(|hidden| hidden.set(true));
-        TEMPLATES.with(|templates| templates.set(module.0 as usize));
-
-        let shown = show_letter(owner, letter, None, true);
-
-        HIDDEN.with(|hidden| hidden.set(false));
-        TEMPLATES.with(|templates| templates.set(0));
-
-        shown.then(|| window_of(Kind::Letter)).flatten()
+        open_letter_hidden(owner, letter, None)
     }
 
     /// **The door of task T-102-3** — gives the open window `hwnd` the theme setting `setting`, the
@@ -7367,9 +6387,24 @@ pub mod testing {
     ///
     /// `hwnd` is a window of this module on the caller's thread.
     pub fn feedback_url(hwnd: HWND) -> Option<&'static str> {
-        // SAFETY: `hwnd` is a live window of this module on the caller's thread — the contract of
+        // ⚠ A window of the shell first: its `GWLP_USERDATA` is the host's, and `with_state` would
+        // read it as the state of a dialog of this module.
+        if let Some(language) = shell_language(hwnd) {
+            return Some(super::links::feedback_url(language));
+        }
+        // SAFETY: `hwnd` is a live dialog of this module on the caller's thread — the contract of
         // this door — and the borrow of its state ends with the call.
         unsafe { with_state(hwnd, |state| state.feedback_url()) }
+    }
+
+    /// The language a window of the shell of this module was built in — what its pages are
+    /// chosen by (`letters::act`).
+    fn shell_language(hwnd: HWND) -> Option<super::Language> {
+        super::SHELL.with_borrow(|open| {
+            open.iter()
+                .find(|window| window.hwnd == hwnd)
+                .map(|window| window.language)
+        })
     }
 
     /// **The door of task T-103-9** — the two pages of the site the open window `hwnd` would take
@@ -7379,26 +6414,101 @@ pub mod testing {
     ///
     /// `hwnd` is a window of this module on the caller's thread.
     pub fn site_pages(hwnd: HWND) -> Option<(&'static str, &'static str)> {
-        // SAFETY: as for `feedback_url` above.
+        if let Some(language) = shell_language(hwnd) {
+            return Some((
+                super::links::download_url(language),
+                super::links::program_url(language),
+            ));
+        }
+        // SAFETY: as for `feedback_url` above — a dialog of this module, not a window of the shell.
         unsafe { with_state(hwnd, |state| (state.download_url(), state.program_url())) }
     }
 }
 
-/// **Shows «Последние письма»** — FR-101. Built in stage А and filled in stage Б.
-pub fn open_list(owner: HWND) {
+/// What «Последние письма» shows now — [`list_entries`] of the stored state and the published
+/// feed, today.
+pub fn list_entries_now() -> Vec<Entry> {
     let stored = state_now();
     let version = version_string();
-    let mut state = fresh_state(owner, Kind::List);
+    with_feed(|feed| list_entries(&stored, today(), &version, feed))
+}
 
-    state.entries = with_feed(|feed| list_entries(&stored, today(), &version, feed));
+/// The entry of the feed the instrument of fitting (`ui::windows::catalogue`) puts into
+/// «Новость» and «Обновление»: the longest the order of the feed allows — the first line of the
+/// text 150 characters (`sign-news.ps1`), and the line «Подробности…» under it. In the words of
+/// the feed, which come in the language of the site whatever the language of the program.
+pub fn sample_entry() -> FeedItem {
+    FeedItem {
+        id: 7,
+        date: Date::from_ymd(2026, 11, 16),
+        title: "Программа теперь обновляется сама".to_owned(),
+        text: format!(
+            "{}\nПодробности — на странице программы.",
+            "С версии 0.104.0 Lang Switcher сам скачивает новые версии с сайта автора и ставит \
+             их, проверив подпись. Установите новую версию один раз — дальше"
+        ),
+        link: links::PROGRAM_URL.to_owned(),
+        version: Some("1.7.1".to_owned()),
+    }
+}
 
-    open_window(owner, state, true);
+/// «Последние письма» full, for the instrument of fitting: the letter of the update and three news
+/// items, two of them unread — each of [`sample_entry`], in `language`.
+pub fn sample_entries(language: Language) -> Vec<Entry> {
+    let item = sample_entry();
+    let date = item.date.map(format_date).unwrap_or_default();
+    let mark = |id| settings::text_in(language, id).replace("{0}", &date);
+    let entry = |news: Option<u64>, unread: bool| Entry {
+        title: item.title.clone(),
+        meta: mark(if unread {
+            settings::IDS_ENTRY_UNREAD_MARK
+        } else {
+            settings::IDS_ENTRY_READ_MARK
+        }),
+        excerpt: first_line(&item.text),
+        news,
+        unread,
+    };
+    vec![
+        entry(None, false),
+        entry(Some(9), true),
+        entry(Some(8), true),
+        entry(Some(7), false),
+    ]
+}
+
+/// **Shows «Последние письма»** — FR-101, a window of the shell (`ui::windows::letters_list`,
+/// T-120-16); the one that is open is raised instead.
+pub fn open_list(owner: HWND) {
+    open_list_with(owner, list_entries_now(), true);
+}
+
+/// [`open_list`] with the entries named — the product's road and the door of the tests.
+fn open_list_with(owner: HWND, entries: Vec<Entry>, activate: bool) -> Option<HWND> {
+    if let Some(hwnd) = window_of(Kind::List) {
+        raise(hwnd, activate);
+        return Some(hwnd);
+    }
+
+    let language = settings::ui_language();
+    let (theme, _) = look();
+    let product = crate::ui::windows::letters_list::Product {
+        list: crate::ui::windows::letters_list::LettersList {
+            entries,
+            language,
+            theme,
+        },
+        owner,
+        _record: ShellRecord(Kind::List),
+    };
+
+    open_shell(Kind::List, None, language, owner, product, activate)
 }
 
 thread_local! {
-    /// The letter the balloon announced and that nobody has opened yet — FR-101.
+    /// The letter the knock in the corner announced and that nobody has opened yet — FR-101.
     ///
-    /// Cleared when the letter is shown, however it is shown: by the click on the balloon, or
+    /// Cleared when the letter is shown, however it is shown: by «Открыть письмо» of the knock, or
     /// by itself at the next quiet moment.
     static ANNOUNCED: RefCell<Option<Letter>> = const { RefCell::new(None) };
 }
@@ -7645,7 +6755,7 @@ pub fn restore_feed() {
 /// 2. `due` is asked what is due — and it is asked with **the quiet moment**, so a person in
 ///    the middle of typing is not interrupted;
 /// 3. a letter that is due is **announced** first (every one but «Привет», which FR-101 shows
-///    at once), and the window itself opens at the next tick if the balloon went unnoticed.
+///    at once), and the window itself opens at the next tick if the knock went unnoticed.
 pub fn tick(owner: HWND) {
     let Some(today) = today() else {
         return;
@@ -7697,7 +6807,7 @@ pub fn tick(owner: HWND) {
     };
 
     // A letter that was announced at an earlier tick and not opened is **shown** now: the
-    // balloon was its knock and it went unanswered, and FR-101 says the window then opens by
+    // knock in the corner went unanswered, and FR-101 says the window then opens by
     // itself in a quiet moment, without the focus.
     if announced == Some(letter) || letter == Letter::Welcome {
         if show(owner, letter, today, &version, false) {
@@ -7707,13 +6817,13 @@ pub fn tick(owner: HWND) {
         return;
     }
 
-    // The first knock: the balloon. Nothing is recorded as shown — the letter is due until it
+    // The first knock: the window in the corner. Nothing is recorded as shown — the letter is due until it
     // is actually on the screen.
-    announce(letter);
+    announce(owner, letter);
     ANNOUNCED.with_borrow_mut(|slot| *slot = Some(letter));
 }
 
-/// Opens the letter the balloon announced — FR-101, the click on the balloon.
+/// Opens the letter the knock announced — FR-101, «Открыть письмо» of the window in the corner.
 ///
 /// The person asked for it, so the window comes up with the focus.
 pub fn open_announced(owner: HWND) {
@@ -7782,18 +6892,67 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
     }
 }
 
-/// Knocks once with the balloon of the icon — FR-101, every letter but «Привет».
-fn announce(letter: Letter) {
-    use crate::settings::text;
+/// What the window in the corner says about a letter that has come, in `language` — the knock of
+/// FR-101 on the shell (T-120-14, T-120-16): «LANG SWITCHER · ПИСЬМО ОТ АВТОРА», the heading of
+/// the letter, the words of [`toast_strings`], and one button, «Открыть письмо». `None` for the
+/// letters that do not knock.
+///
+/// One button and the ✕, not two: the ✕ does what an unnoticed knock always did — nothing, and
+/// the letter opens by itself at the next quiet moment (FR-101). A second button «позже» would
+/// promise a delay the schedule does not give.
+pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
+    use crate::settings::{IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_TITLE};
 
+    let (about, words) = toast_strings(letter)?;
+    let title = match letter {
+        Letter::Thanks => IDS_THANKS_TITLE,
+        _ => IDS_NEWS_LETTER_TITLE,
+    };
+    let text = |id| settings::text_in(language, id);
+
+    Some(crate::corner::Content {
+        about: text(about),
+        title: text(title),
+        text: text(words),
+        link: None,
+        main: (text(IDS_LETTERS_OPEN), crate::corner::Action::Close),
+        second: None,
+        picture: false,
+        check: None,
+    })
+}
+
+thread_local! {
+    /// The program's window the last knock was made for — the owner of the letter «Открыть
+    /// письмо» opens; the window in the corner tells its end through a plain `fn`.
+    static NOTICE_OWNER: std::cell::Cell<Option<HWND>> = const { std::cell::Cell::new(None) };
+}
+
+/// Knocks once with the window in the corner — FR-101, every letter but «Привет» and
+/// «Обновление»; with the sound of a notification, as the balloon of the icon had. A window in
+/// the corner already up (the hint of the flag, «Обновлено») takes the knock's place: the letter
+/// opens by itself at the next quiet moment, as after a knock nobody noticed.
+fn announce(owner: HWND, letter: Letter) {
     // «Привет» is never announced: FR-101 shows it at once, and this function is not reached
     // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks —
     // «Обновление» too, since task T-119-9 (it is not in the schedule at all).
-    let Some((title_id, body_id)) = toast_strings(letter) else {
+    let Some(content) = notice_content_in(settings::ui_language(), letter) else {
         return;
     };
 
-    crate::tray::announce_letter(&text(title_id), &text(body_id));
+    NOTICE_OWNER.with(|slot| slot.set(Some(owner)));
+    crate::corner::show(content, true, notice_ended);
+}
+
+/// The knock ended: «Открыть письмо» opens the letter, the person asked for it; the ✕ and `Esc`
+/// leave it to the schedule.
+fn notice_ended(end: crate::corner::End) {
+    if end.by != crate::corner::EndBy::Main {
+        return;
+    }
+    if let Some(owner) = NOTICE_OWNER.with(std::cell::Cell::get) {
+        open_announced(owner);
+    }
 }
 
 /// FR-94, решение 99.1 — the interface language changed while one of these windows was open.
@@ -7837,23 +6996,43 @@ pub fn language_changed(owner: HWND) {
 
             settings::LanguageSwitch::Reopen => {
                 // SAFETY: as above.
-                let letter = unsafe { with_state(hwnd, |state| (state.letter, state.kind)) };
+                let kind = unsafe { with_state(hwnd, |state| state.kind) };
 
                 close_window(hwnd);
 
-                match letter {
-                    Some((Some(letter), Kind::Letter)) => {
-                        // Its entry again — the window is being built from nothing, and
-                        // `None` here would reopen «Новость» as an empty frame.
-                        let item = item_of(letter);
-
-                        show_letter(owner, letter, item.as_ref(), false);
-                    }
-                    Some((_, Kind::Author)) => open_author(owner),
-                    Some((_, Kind::List)) => open_list(owner),
-                    _ => {}
+                if kind == Some(Kind::Author) {
+                    open_author(owner);
                 }
             }
+        }
+    }
+
+    // The windows of the shell are built again in the new language, wherever it moved: their
+    // words, their direction and their mirror are the description's, and a description is built
+    // from nothing. Shown without the activation — the person is at the settings window.
+    let shell: Vec<ShellWindow> = SHELL.with_borrow(|open| open.clone());
+
+    for window in shell {
+        if settings::language_switch(window.language, settings::ui_language())
+            == settings::LanguageSwitch::Unchanged
+        {
+            continue;
+        }
+
+        close_window(window.hwnd);
+
+        match (window.kind, window.letter) {
+            (Kind::Letter, Some(letter)) => {
+                // Its entry again — the window is being built from nothing, and `None` here
+                // would reopen «Новость» as an empty frame.
+                let item = item_of(letter);
+
+                show_letter(owner, letter, item.as_ref(), false);
+            }
+            (Kind::List, _) => {
+                open_list_with(owner, list_entries_now(), false);
+            }
+            _ => {}
         }
     }
 }
@@ -7865,23 +7044,6 @@ fn refresh_plan(state: &mut WindowState) {
     let version = version_string();
 
     match state.kind {
-        Kind::Letter => {
-            if let Some(letter) = state.letter {
-                // The entry comes back out of the published feed, not out of thin air: a
-                // «Новость» rebuilt in another language must be the same news item.
-                let item = item_of(letter);
-
-                state.plan = plan_for(
-                    letter,
-                    &PlanContext {
-                        version,
-                        hotkey: String::new(),
-                        snooze_offered: snooze_is_offered(&stored),
-                        item: item.as_ref(),
-                    },
-                );
-            }
-        }
         Kind::Author => {
             state.author = with_feed(|feed| {
                 author_view(
@@ -7893,9 +7055,8 @@ fn refresh_plan(state: &mut WindowState) {
                 )
             });
         }
-        // Nothing to rebuild: the list is built out of the feed by `fill_list` on every fill,
-        // and the window of thanks carries a plan that was made for it once.
-        Kind::List => {}
+        // The windows of the shell are built again by `language_changed`, not refilled.
+        Kind::Letter | Kind::List => {}
         // The wizard's text is the person's own and is **not** rebuilt: a change of interface
         // language in the middle of an appeal must not throw away what they wrote. What is
         // rebuilt is every label around it, by `fill_wizard`, which the caller runs next.
