@@ -319,14 +319,13 @@ impl Page {
                 self.filled(IDS_WIZARD_ATTACH_JOURNAL_SUB, &[&entries]),
             ),
         ] {
-            // ⚠ The line of what goes into the appeal stands under the box as a small paragraph
-            // until the box with an explanation is in the scene (a line to `e120-core`).
+            // The line of what goes into the appeal stands under the label of its box.
             rows.push(Node::Check {
                 id,
                 label: self.line(label),
                 on,
+                hint: Some(value),
             });
-            rows.push(Node::Text(Role::Small, value));
         }
         rows.push(Node::Text(Role::Small, self.line(IDS_WIZARD_ATTACH_FOOT)));
         Node::Rows(rows)
@@ -364,15 +363,14 @@ impl Page {
     }
 
     fn preview(&self) -> Node<Id> {
-        // ⚠ The text of the appeal is a field of many lines in the body face until the role
-        // `code` of a field is in the scene (a line to `e120-core`).
+        // The text of the appeal in the role `code` (passport §2), taking what the page leaves.
         let mut rows = vec![
             Node::Fill(Box::new(Node::Field {
                 id: Id::Appeal,
                 label: String::new(),
                 value: self.wizard.appeal().to_owned(),
                 hint: String::new(),
-                kind: FieldKind::Text,
+                kind: FieldKind::Code,
             })),
             self.field(
                 Id::Contact,
@@ -458,18 +456,27 @@ impl Content for Page {
         } else {
             Vec::new()
         };
+        let mut column = vec![Node::Header {
+            eyebrow: Some(self.eyebrow()),
+            title: self.line(words.title),
+            subtitle: words.note.map(|note| self.line(note)),
+        }];
+        // The progress of the road (passport §6) on its steps; the thanks and «Не удалось
+        // отправить» are no steps of it.
+        if step != Step::Done && !failed {
+            column.push(Node::Progress {
+                total: self.wizard.road().len(),
+                current: self.wizard.number(),
+            });
+        }
+        column.push(body);
         Window {
-            kind: WindowKind::Ordinary,
+            // The row of the wizard: «Отмена» at the edge of its own, the main button at the
+            // other (passport §6).
+            kind: WindowKind::Wizard,
             art: Some(art),
             brand: None,
-            body: Node::Column(vec![
-                Node::Header {
-                    eyebrow: Some(self.eyebrow()),
-                    title: self.line(words.title),
-                    subtitle: words.note.map(|note| self.line(note)),
-                },
-                body,
-            ]),
+            body: Node::Column(column),
             buttons: self.buttons(),
             disabled,
         }
