@@ -121,24 +121,23 @@ use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DestroyIcon, DialogBoxIndirectParamW, DialogBoxParamW, EC_LEFTMARGIN,
     EC_RIGHTMARGIN, EN_SETFOCUS, EndDialog, GW_CHILD, GW_HWNDNEXT, GWL_EXSTYLE, GWLP_USERDATA,
     GWLP_WNDPROC, GetClientRect, GetDlgCtrlID, GetDlgItem, GetDlgItemTextW, GetMessageTime,
-    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDC_HAND,
-    IDCANCEL, IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT,
-    LB_GETSELCOUNT, LB_GETSELITEMS, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCARETINDEX,
-    LB_SETSEL, LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadCursorW, LoadImageW,
-    MB_ICONWARNING, MB_OK, MessageBoxW, PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
-    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE,
-    SIF_POS, SIF_RANGE, SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, SW_ERASE, SW_INVALIDATE,
-    SW_SCROLLCHILDREN, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetCursor,
-    SetDlgItemTextW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-    SystemParametersInfoW, UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND,
-    WM_CTLCOLORBTN, WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC,
-    WM_DESTROY, WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT,
-    WM_QUERYUISTATE, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SETFOCUS,
-    WM_SETFONT, WM_SETICON, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC,
-    WS_EX_LAYOUTRTL,
+    GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect, HICON, ICON_BIG, ICON_SMALL, IDCANCEL,
+    IDOK, IMAGE_ICON, KillTimer, LB_ADDSTRING, LB_DELETESTRING, LB_GETCOUNT, LB_GETSELCOUNT,
+    LB_GETSELITEMS, LB_GETTEXT, LB_GETTEXTLEN, LB_RESETCONTENT, LB_SETCARETINDEX, LB_SETSEL,
+    LBN_SETFOCUS, LR_DEFAULTCOLOR, LR_DEFAULTSIZE, LoadImageW, MB_ICONWARNING, MB_OK, MessageBoxW,
+    PostMessageW, RT_DIALOG, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP,
+    SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_POS, SIF_RANGE,
+    SM_CXVSCROLL, SPI_GETWHEELSCROLLLINES, SW_ERASE, SW_INVALIDATE, SW_SCROLLCHILDREN,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ScrollWindowEx, SendDlgItemMessageW, SetDlgItemTextW,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, SystemParametersInfoW,
+    UISF_HIDEFOCUS, WINDOW_LONG_PTR_INDEX, WM_APP, WM_CHAR, WM_COMMAND, WM_CTLCOLORBTN,
+    WM_CTLCOLORDLG, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_DRAWITEM, WM_ERASEBKGND, WM_GETDLGCODE, WM_GETFONT, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP,
+    WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MEASUREITEM,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NOTIFY, WM_PAINT, WM_QUERYUISTATE,
+    WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SETFONT, WM_SETICON,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_VSCROLL, WNDPROC, WS_EX_LAYOUTRTL,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -8552,48 +8551,6 @@ pub const OWNER_DRAWN_LABELS: [i32; 18] = [
 pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool) -> ButtonColors {
     let border = ButtonBorderRole::ButtonBorder;
 
-    // ⭐ The name «Lang Switcher» of «О программе» — task T-78-3, решение 139.2 п. 7. The one
-    // button of this program with no face of its own: at rest it is the ground of its window, so
-    // the window looks exactly as it did while the name was a label, and under the pointer it
-    // wears the highlight **of the ground it stands on**.
-    //
-    // ⛔ `MenuHoverBg` and not `HoverBg`, and that is the whole of the decision. `hover_bg` is
-    // measured against `button_bg`, the face the other buttons rest on; against `window_bg` it
-    // stands off by 3/1/0 in «Туман» and is no highlight at all. The user saw that on the
-    // mock-up before a line of this was written: «в варианте А в тумане я подложки не увидел при
-    // наведении». See [`theme::ButtonFaceRole::MenuHoverBg`] for the numbers.
-    //
-    // ⚠ **Above `disabled` and `pressed`, and that is on purpose.** The user chose a name with
-    // two states and only two — quiet, and lit under the pointer — and neither of those gates
-    // names a state it has. It is never disabled: the address it opens is a constant of the
-    // build and never a placeholder. And a press is always made with the pointer on it (the
-    // template gives it `NOT WS_TABSTOP`, so no key can press it), so the lit face **is** the
-    // pressed face; falling through to `SelBg` would flash a selection colour across the name
-    // of the program, which is neither of the two states approved.
-    //
-    // ⭐⭐ **And it is the one control of this program with no frame** — task T-80-2. Until `e80`
-    // «no frame» was a *wrapper* round this table (`about_button_colors`), worn by every button
-    // of four windows; the user turned that down on the live product and asked for one typed
-    // mechanism instead. The frame is a column of this table now, and this is the single row in
-    // which it is `FaceItself`: a name that opens a page is not a button that looks like one.
-    //
-    // ⭐⭐ **И с задачи T-81-3 строк-номеров у этой строки таблицы два, а самой строки
-    // по-прежнему одна** — решение 142.2 п. 6. Имя программы стоит теперь в двух окнах,
-    // «О программе» и «От авторе», и оба спрашивают **эту** ветку через
-    // [`is_the_program_name`]. Второй такой же ветки в файле нет и быть не должно: расхождение
-    // двух копий одного правила — ровно то, что завёл Э78, дав ссылку одной копии шапки из двух.
-    if is_the_program_name(control) {
-        return ButtonColors {
-            face: if hot {
-                ButtonFaceRole::MenuHoverBg
-            } else {
-                ButtonFaceRole::WindowBg
-            },
-            text: ButtonTextRole::Text,
-            border: ButtonBorderRole::FaceItself,
-        };
-    }
-
     if disabled {
         return ButtonColors {
             face: ButtonFaceRole::ButtonBg,
@@ -13860,20 +13817,6 @@ const PUSH_BUTTONS: [i32; 12] = [
     IDC_APPLY,
 ];
 
-/// Whether `control` is the **name of the program** — the one button of this program with no
-/// frame of its own, and the one that opens the page of the application.
-///
-/// One window carries it: «От автора». The colour table ([`button_color_roles`]), the hand
-/// cursor of [`button_proc`] and the drawing ([`paint_program_name`]) all ask this predicate, and
-/// none of the three knows the number of its own. «О программе» carried it too until it moved
-/// to the shell (FR-92а); this goes with «От автора» when that window moves (T-120-17).
-///
-/// ⛔ The number lives in `letters.rs`, beside the other controls of that window, and is read
-/// from there rather than written down a second time here: a mirrored number can drift.
-pub fn is_the_program_name(control: i32) -> bool {
-    control == crate::letters::IDC_AUTHOR_NAME
-}
-
 /// The identifier of the button subclass — one number for all ten windows, because the key of
 /// the subclass API is the (window, procedure, identifier) triple and the window is what varies.
 /// Distinct from [`COMBO_SUBCLASS_ID`] and [`LIST_SUBCLASS_ID`] for readability alone; the pairs
@@ -13960,32 +13903,6 @@ unsafe extern "system" fn button_proc(
 
         // The far end of the notification `enter_hot` armed.
         WM_MOUSELEAVE => leave_hot(button),
-
-        // ⭐ **The hand over the name «Lang Switcher», and over nothing else** — task T-78-3.
-        //
-        // The one message of this procedure that is **answered** rather than forwarded: a
-        // `WM_SETCURSOR` that reaches `DefSubclassProc` is answered by the class with the arrow,
-        // which would put the arrow back a moment after this put the hand there. `TRUE` is the
-        // documented «the cursor is set, stop here».
-        //
-        // The identifier is asked of the control rather than carried in the subclass's reference
-        // datum: the datum is zero for every button by the discipline `subclass_buttons` keeps,
-        // and one `GetDlgCtrlID` costs less than making that datum mean something.
-        //
-        // NFR-13: a refused `LoadCursorW` falls through to the arrow, which is the cursor the
-        // window had before this task — the degraded-but-alive answer, and there is no journal
-        // row for a cursor.
-        //
-        // SAFETY: `button` is a live control this procedure was installed on; `LoadCursorW` on a
-        // **shared** system cursor answers a handle the system owns and that must not be
-        // destroyed, and `SetCursor` takes it by value.
-        WM_SETCURSOR if is_the_program_name(unsafe { GetDlgCtrlID(button) }) => {
-            if let Ok(hand) = unsafe { LoadCursorW(None, IDC_HAND) } {
-                unsafe { SetCursor(Some(hand)) };
-
-                return LRESULT(1);
-            }
-        }
 
         // The belt to the braces of the pair — see `subclass_buttons`. Forwarded on afterwards:
         // `WM_NCDESTROY` must reach every procedure of the chain.
@@ -18737,118 +18654,6 @@ fn end_dialog(hwnd: HWND, result: isize) {
 /// statement declares, so the template could not ask for 40 however it was written.
 pub const ABOUT_LOGO_SIZE: i32 = 56;
 
-/// The logo of the about window, loaded at the size the mock-up draws it and owned until the
-/// window is gone — finding **A-08**, task T-12-4.
-///
-/// # Why a handle of our own and not a bigger rectangle in the template
-///
-/// Measured, and the measurement is what settled it: an `SS_ICON` static sizes *itself* to the
-/// icon it holds and pays no attention to the width and height of its statement — the comment
-/// in `app.rc` said so before this task and the protocol confirmed it (a 21 × 20 unit
-/// statement showing a 32 × 32 picture). The documented lever is the other way round: hand the
-/// control an icon of the size wanted (`STM_SETICON`) and it resizes itself around it. Owner
-/// drawing was the alternative and is refused by a test of `tests\settings.rs` — «the about
-/// icon must stay `SS_ICON`» — so this is the one road left, and it is a documented one.
-///
-/// # Who owns the handle
-///
-/// **This value, and nothing else** — the ownership [`CaptionIcons`] spells out at length, for
-/// the same documented reason: `LR_SHARED` may only be used for an image asked for at the size
-/// the resource already holds, and 40 px is not a frame of `res\langswitcher-active.ico` (it
-/// carries 16, 20, 24, 32, 48, 64 and 256), so the loader scales one and the result belongs to
-/// the caller. Without `LR_SHARED` the handle **must** be destroyed, and `Drop` is where.
-///
-/// `STM_SETICON` does not transfer ownership either: the control is handed a handle to
-/// *display*. Its answer — the icon the control held before — is the 32 px frame the dialog
-/// manager loaded out of the resource by itself; that one is shared, was never ours, and is
-/// deliberately not touched.
-///
-/// # When it is freed
-///
-/// After the window is destroyed and not before, exactly as [`CaptionIcons`]: the value lives
-/// in the state on the frame of [`show_about_dialog`], and `DialogBoxParamW` is modal — it
-/// returns only once the window is gone, and the state is dropped after it returns.
-pub(crate) struct AboutLogo {
-    /// The frame, scaled to [`ABOUT_LOGO_SIZE`] mock-up pixels of the window's own DPI.
-    icon: HICON,
-}
-
-impl AboutLogo {
-    /// Loads the frame at the size `hwnd`'s DPI makes of [`ABOUT_LOGO_SIZE`].
-    ///
-    /// ⚠ **The size travels through the DPI of the window**, like every length of the mock-ups
-    /// in this file: [`scaled`] over the DPI of the window's own DC. A 40 written down by hand
-    /// would be a 40 px logo on a 200 % screen too, beside a name row and a template that had
-    /// both doubled.
-    ///
-    /// `None` for a refused `LoadImageW` (NFR-13): the control then keeps the 32 px frame it
-    /// loaded for itself, which is the picture this window had before this task — degraded and
-    /// alive. The refusal is deliberately **not** journaled, for the reason
-    /// [`CaptionIcons::load`] gives for its own: the `OPERATIONS` vocabulary of module `diag`
-    /// is closed and has no row for loading a picture.
-    pub(crate) fn load(hwnd: HWND) -> Option<Self> {
-        let module = resource_module();
-        let instance = HINSTANCE(module.0);
-
-        // SAFETY: `hwnd` is the live dialog, and the call answers its DC or an invalid handle;
-        // the DC is released below on both paths — the shape [`combo_row_height`] already uses.
-        let dc = unsafe { GetDC(Some(hwnd)) };
-
-        // NFR-13 is one level down: `dc_dpi` answers 96 for a DC that will not say, which is
-        // the 100 % size and a legal one.
-        let size = scaled(ABOUT_LOGO_SIZE, drawing_dpi(dc));
-
-        if !dc.is_invalid() {
-            // SAFETY: releases exactly the DC taken above, once.
-            unsafe { ReleaseDC(Some(hwnd), dc) };
-        }
-
-        // SAFETY: `instance` is the module handle whose resources carry `IDI_APP_ACTIVE` — the
-        // very module the interface strings are read from — and the "name" is an integer
-        // identifier in the `MAKEINTRESOURCE` form, so nothing is dereferenced as a string.
-        // Without `LR_SHARED` the call makes a handle this value owns; the crate turns a null
-        // result into an error, so NFR-13 is satisfied by the `ok()?`.
-        let icon = HICON(
-            unsafe {
-                LoadImageW(
-                    Some(instance),
-                    resource_id(IDI_APP_ACTIVE),
-                    IMAGE_ICON,
-                    size,
-                    size,
-                    LR_DEFAULTCOLOR,
-                )
-            }
-            .ok()?
-            .0,
-        );
-
-        Some(Self { icon })
-    }
-
-    /// The frame as a plain value — what the handler takes out of the state before it lets the
-    /// borrow go, the split every handler of this file makes.
-    pub(crate) fn handle(&self) -> HICON {
-        self.icon
-    }
-}
-
-impl Drop for AboutLogo {
-    fn drop(&mut self) {
-        // SAFETY: the handle came from a successful `LoadImageW` without `LR_SHARED`, so it is
-        // ours to destroy, and it is destroyed exactly once — the type is neither `Copy` nor
-        // `Clone`, its field is private and never reassigned, and `drop` runs once. The window
-        // that displayed it is already destroyed: this value lives in the state on the frame of
-        // the modal call and is dropped after it returns.
-        if let Err(error) = unsafe { DestroyIcon(self.icon) } {
-            // NFR-13. Not fatal, and named in the journal exactly as `CaptionIcons` names its
-            // own: a handle that would not be destroyed is a leak of one icon for the life of
-            // the process, and the program has no better answer than to say so.
-            crate::app::report_non_critical("DestroyIcon", &error);
-        }
-    }
-}
-
 /// One child's rectangle in the client coordinates of its dialog, or `None` on any refusal.
 ///
 /// The pair of [`screen_rect_in_client`] for a **named** control: [`child_rects_in_client`]
@@ -18863,305 +18668,6 @@ pub(crate) fn child_rect_in_client(hwnd: HWND, control: i32) -> Option<RECT> {
     unsafe { GetWindowRect(child, &raw mut rect) }.ok()?;
 
     screen_rect_in_client(hwnd, &rect)
-}
-
-/// Moves one child to `top`, keeping its left edge and its width — task T-42-2.
-///
-/// ⚠ **`left` comes out of [`screen_rect_in_client`], which has already put the corners back in
-/// order.** In a mirrored window `ScreenToClient` swaps the two x's, so the smaller of them is
-/// the left edge in the window's **own** coordinates — the very number `SetWindowPos` wants
-/// back. Handing it the unswapped one would move the control by the width of the client area,
-/// which is the shape defect Т-30-2 already paid for once.
-fn move_child(hwnd: HWND, control: i32, top: i32, height: Option<i32>, rect: &RECT) {
-    // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
-    let Ok(child) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        return;
-    };
-
-    // SAFETY: the control is live and the call is given plain numbers; no pointer is kept.
-    if let Err(error) = unsafe {
-        SetWindowPos(
-            child,
-            None,
-            rect.left,
-            top,
-            rect.right - rect.left,
-            height.unwrap_or(rect.bottom - rect.top),
-            SWP_NOZORDER | SWP_NOACTIVATE,
-        )
-    } {
-        // NFR-13: this one control stays where the template put it — the row above it has
-        // already moved, so the panel reads worse and still reads.
-        crate::app::report_non_critical("SetWindowPos", &error);
-    }
-}
-
-/// **Paints the name of the program** — the half of the drawing that is the same in both windows
-/// that carry it, задача T-81-3, решение 142.2 п. 6.
-///
-/// The two windows differ in where the pieces come from — «О программе» reads them out of its
-/// own state, «От авторе» out of its own — and in nothing else. So the gathering stays in each
-/// window and the **painting is one body**: the erase, the backing measured off the word, the
-/// rounded figure and the text laid at the chip's insets. ⛔ A second copy of this arithmetic in
-/// `letters.rs` is exactly the расхождение решение 142.2 п. 6 exists to close.
-///
-/// Everything the body needs is passed in, and every sentence of the reasoning is written at the
-/// step it belongs to below.
-///
-/// # Safety
-///
-/// `dc` and `rect` are the values of a `WM_DRAWITEM` this call is inside of; `face` is a font and
-/// `window` a brush the calling window's state owns for longer than this call.
-#[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn paint_program_name(
-    dc: HDC,
-    rect: RECT,
-    caption: &mut [u16],
-    face: Option<HFONT>,
-    pitch: Option<i32>,
-    ink: COLORREF,
-    colors: theme::ResolvedButtonColors,
-    window: HBRUSH,
-) -> isize {
-    // ⭐ **The backing is measured off the word, not off the control** — task T-79-2. The user
-    // accepted the colour on the live product and turned the shape down: «должно быть по слову с
-    // закругленными краями подложки». So the figure is the box the **caption** asks for, and the
-    // arithmetic of that box is [`theme::chip_box`] — the very one the key chips of «Как
-    // пользоваться» are built with, in this same window, accepted by the same eye in Э26. A
-    // second set of paddings invented here would have been a second look to keep in step.
-    //
-    // Thickness 0: this button's frame is its own face ([`ButtonBorderRole::FaceItself`]), so
-    // there is no stroke to leave room for.
-    //
-    // SAFETY: `dc` is the DC of the message and `face` a live font of the window's state; the
-    // measuring selects that face, reads the extent of the caption and puts the previous handle
-    // back. `None` — the faces were refused at initialisation (NFR-13), and the box then comes
-    // out of the rectangle, which is what this drawing did before this task.
-    let chip = unsafe { name_backing_box(dc, face, caption, rect) };
-
-    // The whole rectangle is erased with the ground of the window first: the system erases
-    // nothing before an owner-drawn button's `WM_DRAWITEM`, so whatever the backing does not
-    // cover has to be put back by hand, and a repaint has to be idempotent (task T-12-6).
-    //
-    // SAFETY: `dc` is the DC of the message, `rect` a live local, `window` a brush the window's
-    // state owns for longer than this call.
-    unsafe { FillRect(dc, &rect, window) };
-
-    let backing = RECT {
-        left: rect.left,
-        top: rect.top,
-        right: (rect.left + chip.width).min(rect.right),
-        bottom: rect.bottom,
-    };
-
-    // At rest the face **is** the ground of the window and the frame is the face, so this call
-    // puts back the very pixels the erase above laid down — the backing is invisible until the
-    // pointer arrives, which is the whole of what «в покое как раньше» means. No `if hot` here:
-    // one path, and the colour table is the only thing that knows the difference.
-    //
-    // ⓘ Safe: [`theme::paint_rounded`] owns every handle it makes and takes the DC by value, the
-    // way the rounded figure of a push button is drawn a few thousand lines above.
-    theme::paint_rounded(
-        dc,
-        &backing,
-        chip.radius,
-        colors.border,
-        colors.face,
-        theme::drawing_dpi(dc),
-    );
-
-    // ⚠⚠ And the text lands where it landed before the rectangle grew. The rectangle moved 4
-    // dialog units left and 1 up — measured to be **exactly** the 7 and 2 pixels of this inset at
-    // 96 DPI — so `rect.left + inset_x` and `rect.top + inset_y` are the 73 and 25 the name has
-    // always stood at (решение 140.5). This is the guard of развилка C5 written as arithmetic
-    // rather than as hope, and a test holds it.
-    let text = RECT {
-        left: rect.left + chip.inset_x,
-        top: rect.top + chip.inset_y,
-        right: rect.right,
-        bottom: rect.bottom,
-    };
-
-    // SAFETY: see the caller — `dc` and `text` are the values of the message and a live local;
-    // `face` is a font this window's state owns for longer than this call. The ground is not
-    // touched here: it was laid down twice above, by the erase and by the backing.
-    unsafe {
-        theme::paint_label_text(
-            dc,
-            text,
-            caption,
-            theme::LabelStyle {
-                ground: window,
-                ink,
-                face,
-                pitch,
-                reading: theme::Reading::Native,
-            },
-        )
-    }
-}
-
-/// The box of the backing behind the name — the chip of «Как пользоваться» measured around
-/// «Lang Switcher», task T-79-2.
-///
-/// Split out so that the choosing is one small body with one `unsafe` reason: it selects the
-/// name's face into the DC, asks GDI how wide the caption is in it and how tall its cell is, and
-/// hands both to the pure [`theme::chip_box`].
-///
-/// **NFR-13:** no face — the set was refused at initialisation — means no measuring either, and
-/// the answer is a box the size of the whole rectangle with no rounding and no insets. The name
-/// then draws exactly as it did before this task: a plain rectangle of the face colour with the
-/// text at the top left, which is degraded-but-alive and not a hole.
-///
-/// # Safety
-///
-/// `dc` must be the live DC of the `WM_DRAWITEM` this drawing is inside of, and `face` a font
-/// handle the window's state owns for longer than this call.
-unsafe fn name_backing_box(
-    dc: HDC,
-    face: Option<HFONT>,
-    caption: &[u16],
-    rect: RECT,
-) -> theme::ChipBox {
-    let Some(face) = face else {
-        return theme::ChipBox {
-            width: rect.right - rect.left,
-            height: rect.bottom - rect.top,
-            radius: 0,
-            inset_x: 0,
-            inset_y: 0,
-        };
-    };
-
-    // ⚠⚠ **The em is asked of the FONT and the cell of the DC, and they are two numbers.**
-    // `chip_box` wants the em for its paddings — they are percentages of it — and the height of
-    // the character cell for its interior. Handing it `tmHeight` for both would make the padding
-    // 45 % of 21 instead of 45 % of 16, that is **9 pixels instead of 7**, and the name would
-    // move two pixels to the right of where it has always stood. Measured, решение 140.5.
-    let mut declared = LOGFONTW::default();
-    // SAFETY: `face` is a live font handle and `declared` a live local of this frame; the call
-    // writes at most `size_of::<LOGFONTW>()` bytes into it.
-    let read = unsafe {
-        GetObjectW(
-            HGDIOBJ(face.0),
-            i32::try_from(size_of::<LOGFONTW>()).unwrap_or(0),
-            Some(std::ptr::from_mut(&mut declared).cast()),
-        )
-    };
-
-    // SAFETY: `dc` is the DC of the message and `face` a live font; the previous handle is put
-    // back below, and both calls only read metrics of the DC.
-    let previous = unsafe { SelectObject(dc, HGDIOBJ(face.0)) };
-
-    let mut metrics = TEXTMETRICW::default();
-    // SAFETY: as above; the structure is a live local of this frame.
-    let _ = unsafe { GetTextMetricsW(dc, &mut metrics) };
-
-    let mut size = SIZE::default();
-    // SAFETY: as above; `caption` and `size` are live locals of this frame and the caller's.
-    let _ = unsafe { GetTextExtentPoint32W(dc, caption, &mut size) };
-
-    // SAFETY: `previous` is what `SelectObject` answered for this same DC.
-    unsafe { SelectObject(dc, previous) };
-
-    // NFR-13: a refused `GetObjectW` leaves the em at zero, and the cell is the honest fallback —
-    // the paddings then come out a little larger, which is a backing a few pixels wider and
-    // never a hole.
-    let em = if read > 0 {
-        declared.lfHeight.abs()
-    } else {
-        metrics.tmHeight
-    };
-
-    theme::chip_box(size.cx, em, metrics.tmHeight, 0)
-}
-
-/// The rectangle of the name's button once it is exactly as wide as its backing — задача
-/// T-83-1, решение 143.6, долг Э81-Б-2.
-///
-/// Pure. The left edge, the top and the bottom stay where the template put them: the text is laid
-/// at `rect.left + chip.inset_x` and must not move by a pixel (развилка C5 of Э79). Only the right
-/// edge comes in, to the backing — and the backing is exactly what [`paint_program_name`] draws
-/// from the left edge, so the button and its figure become one rectangle.
-///
-/// A backing that is not narrower than the rectangle, or not wider than nothing, leaves the
-/// rectangle as it is (NFR-13): the fallback of [`name_backing_box`] answers the whole rectangle
-/// when the faces were refused, and a button of zero width would be a name nobody can click.
-pub fn name_rect_of_backing(rect: RECT, backing_width: i32) -> RECT {
-    if backing_width <= 0 || backing_width >= rect.right - rect.left {
-        return rect;
-    }
-
-    RECT {
-        right: rect.left + backing_width,
-        ..rect
-    }
-}
-
-/// **Makes the name's button exactly as wide as its backing** — задача T-83-1, решение 143.6,
-/// долг Э81-Б-2. One body for the two windows that carry the name, «О программе» and «От
-/// автора», the way [`paint_program_name`] is one body for its drawing.
-///
-/// # The defect
-///
-/// The name is a `BS_OWNERDRAW` button, and a button catches the mouse over **the whole of its
-/// window**. The template gives it the whole text column (206 units — 361 × 26 px at 100 %), and
-/// the drawing puts the backing round the word only (116 × 26), so the hand and the backing woke
-/// up over empty ground right of the word and a click there opened the page: a dead zone of two
-/// thirds of the line. Words of the owner in 142г: «должно быть только при наведении на саму
-/// надпись и область подсветки».
-///
-/// ⛔ The guard of Э81 said «the backing is narrower than the column», which is a **neighbouring**
-/// statement and was green on the defect. What is held now is that the button **is** its backing.
-///
-/// # What is done
-///
-/// On `WM_INITDIALOG`, after the faces are built, the backing is measured by the very
-/// [`name_backing_box`] the drawing measures it with, on the button's own DC, and the button is
-/// narrowed to it by [`name_rect_of_backing`]. The rectangle comes out of
-/// [`child_rect_in_client`] and goes back through [`move_child`], so a mirrored window keeps the
-/// name at its reading edge (the lesson of Т-30-2). Nothing else moves: the text lies where it
-/// lay, and the ground right of the word is the window's own, which is the colour the button
-/// erased it with.
-///
-/// NFR-13: a control, a DC or a rectangle that cannot be had leaves the button as the template
-/// made it — the defect, and a working window.
-///
-/// # Safety
-///
-/// `hwnd` is a live dialog of this thread in its `WM_INITDIALOG`; `face` is the font the name is
-/// drawn in, owned by the window's state for longer than this call.
-pub(crate) unsafe fn fit_program_name(hwnd: HWND, control: i32, face: Option<HFONT>) {
-    let Some(rect) = child_rect_in_client(hwnd, control) else {
-        return;
-    };
-
-    // SAFETY: `hwnd` is a live dialog; the call answers a handle or an error.
-    let Ok(child) = (unsafe { GetDlgItem(Some(hwnd), control) }) else {
-        return;
-    };
-
-    // SAFETY: `child` is the live button; the DC is released below on the one path out.
-    let dc = unsafe { GetDC(Some(child)) };
-
-    if dc.is_invalid() {
-        return;
-    }
-
-    let caption: Vec<u16> = get_text(hwnd, control).encode_utf16().collect();
-
-    // SAFETY: `dc` is the button's live DC and `face` a font the window's state owns; the
-    // measuring puts the previous face back before it returns.
-    let chip = unsafe { name_backing_box(dc, face, &caption, rect) };
-
-    // SAFETY: `dc` came from the `GetDC` above and is released exactly once, here.
-    unsafe { ReleaseDC(Some(child), dc) };
-
-    let narrowed = name_rect_of_backing(rect, chip.width);
-
-    if narrowed != rect {
-        move_child(hwnd, control, narrowed.top, None, &narrowed);
-    }
 }
 
 // =========================================================================================

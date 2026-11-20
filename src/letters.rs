@@ -1457,12 +1457,6 @@ pub const IDD_AUTHOR: u16 = 204;
 /// The wizard «Написать автору» — FR-104.
 pub const IDD_WIZARD: u16 = 205;
 
-/// The number the name of the program carried in the old «От автора» (`IDD_AUTHOR`, gone with
-/// T-120-17: the window is the shell's, and its address under the panda is the link).
-/// `settings::is_the_program_name` still asks it; no window carries a control of this number now,
-/// and the predicate goes with the code of the program's name that no window draws any more.
-pub const IDC_AUTHOR_NAME: i32 = 1261;
-
 // Controls of `IDD_WIZARD`, mirrored from `app.rc` — FR-104.
 const IDC_WZ_STEP: i32 = 1300;
 const IDC_WZ_PROGRESS: i32 = 1301;
