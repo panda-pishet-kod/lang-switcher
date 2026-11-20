@@ -270,14 +270,57 @@ fn release_factory() {
                         unsafe { (Interface::vtable(&factory).base__.Release)(factory.as_raw()) };
                     std::mem::forget(factory);
                     FACTORY_REFS_LEFT.store(i64::from(left), std::sync::atomic::Ordering::Relaxed);
+                    give_back_free_memory();
                 }
                 #[cfg(not(feature = "testing"))]
                 {
                     *shared = None;
+                    give_back_free_memory();
                 }
             }
         }
     });
+}
+
+/// ⭐ The free memory of the heaps of the process back to Windows, once the last canvas of the
+/// thread let the factory go (208.183, the word of the owner: the program does not eat more with
+/// every opening of a window).
+///
+/// Drawing scatters the heaps: the buffers of Direct2D of each opening go back to the heap but
+/// stay committed between blocks still alive. Measured on 300 openings of «О программе» in a test
+/// process: the memory after closing grew by 4,8…7,0 MB from the 20th to the 300th opening, and
+/// with the free memory given back here by 0,68…0,87 MB — the warming of a fresh process, which
+/// slows (+0,19 MB from the 300th to the 600th; a second window after it +0,08…0,26). `HeapCompact`
+/// alone gave nothing; a ready picture held between windows cost 515 KB at rest and gave nothing.
+/// `HeapSetInformation` with no heap: every heap of the process with a low-fragmentation heap has
+/// its caches optimized and its free memory decommitted where it can be (Windows 8.1 and later;
+/// before that the call fails, and nothing is lost). The gate: `tests\ui_memory.rs`.
+fn give_back_free_memory() {
+    use ::windows::Win32::System::Memory::{HeapOptimizeResources, HeapSetInformation};
+
+    /// `HEAP_OPTIMIZE_RESOURCES_INFORMATION` of `winnt.h`, declared by hand: its module of the
+    /// crate (`System_SystemServices`) is not among the features of SEC-03.
+    #[repr(C)]
+    struct Optimize {
+        version: u32,
+        flags: u32,
+    }
+    /// `HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION`.
+    const CURRENT_VERSION: u32 = 1;
+
+    let information = Optimize {
+        version: CURRENT_VERSION,
+        flags: 0,
+    };
+    // SAFETY: a documented class of information with its structure, a local of the size given.
+    let _ = unsafe {
+        HeapSetInformation(
+            None,
+            HeapOptimizeResources,
+            Some((&raw const information).cast()),
+            size_of::<Optimize>(),
+        )
+    };
 }
 
 /// Testing: the references the factory of Direct2D still had when the last canvas let it go —
