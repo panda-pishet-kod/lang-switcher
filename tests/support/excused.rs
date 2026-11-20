@@ -65,7 +65,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Narrow,
-        languages: &["mk", "ml", "ta"],
+        languages: &["ml", "ta"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -74,7 +74,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Ordinary,
-        languages: &["mk", "ml"],
+        languages: &["ml"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -99,19 +99,10 @@ pub const EXCUSED: &[Excuse] = &[
         why: "«Спасибо»: слово IDS_THANKS_LEAD шире колонки — укоротить в волне",
     },
     Excuse {
-        window: "letter hello",
-        class: Class::Narrow,
-        languages: &["ml", "ta"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Привет»: IDS_HELLO_LEAD не помещается в 620×500 даже при 12 — укоротить в волне",
-    },
-    Excuse {
         window: "author",
         class: Class::Narrow,
         languages: &[
-            "be", "cy", "hy", "ka", "km", "kn", "lb", "ml", "ta", "te", "uz-Cyrl",
+            "ml", "ta",
         ],
         category: Some(Category::Wave),
         until: "T-120-24",
@@ -121,7 +112,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "author",
         class: Class::Ordinary,
-        languages: &["hy", "ka", "kn", "ml", "ta", "te"],
+        languages: &["ml", "ta"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
