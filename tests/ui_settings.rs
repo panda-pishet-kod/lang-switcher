@@ -404,7 +404,9 @@ fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
             settings::IDS_SECTION_DIAGNOSTICS_SUB,
         ),
     ];
-    for language in [Language::Ru, Language::En, Language::De] {
+    // French, not German: after the wave of translations both German words are «Einstellungen», and
+    // the check could not tell the two keys apart.
+    for language in [Language::Ru, Language::En, Language::Fr] {
         let eyebrow = settings::text_in(language, settings::IDS_SETTINGS_EYEBROW);
         if language != Language::Ru {
             // ⚠ Контроль: where the two keys say the same, the check below proves nothing.
