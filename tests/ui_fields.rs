@@ -126,7 +126,7 @@ impl Content for Form {
             }
             Event::Pressed(Id::Close) => return Reply::Close,
             // A window opened with a field of code: «Apply» makes it a field of text.
-            Event::Pressed(Id::Apply) if self.note_kind == FieldKind::Code => {
+            Event::Pressed(Id::Apply) if matches!(self.note_kind, FieldKind::Code { .. }) => {
                 self.note_kind = FieldKind::Text;
             }
             _ => {}
@@ -550,7 +550,7 @@ fn a_field_of_code_is_set_in_the_monospace_face() {
         false,
         ("en-US", false),
         ThemeSetting::Light,
-        FieldKind::Code,
+        FieldKind::Code { rtl: false },
     );
     let (note, name) = (open.field(Id::Note), open.field(Id::Name));
     let (note_face, name_face) = (face_of(note), face_of(name));
@@ -584,7 +584,7 @@ fn the_monospace_font_is_held_while_a_field_of_code_is_there() {
             false,
             ("en-US", false),
             ThemeSetting::Light,
-            FieldKind::Code,
+            FieldKind::Code { rtl: false },
         )
     };
     let open = code();
@@ -602,4 +602,46 @@ fn the_monospace_font_is_held_while_a_field_of_code_is_there() {
         1,
         "the monospace font let go with the last field of code"
     );
+}
+
+/// Whether the field of Windows `field` is set right to left: aligned right, read right to left.
+fn right_to_left(field: HWND) -> (bool, bool) {
+    // SAFETY: a window of this thread.
+    let (style, extended) = unsafe {
+        (
+            GetWindowLongPtrW(field, GWL_STYLE),
+            GetWindowLongPtrW(field, GWL_EXSTYLE),
+        )
+    };
+    (
+        style & ES_RIGHT as isize != 0,
+        extended & WS_EX_RTLREADING.0 as isize != 0,
+    )
+}
+
+/// **A field of code goes by the direction of its own text** (T-120-19, the decision of the
+/// controller in C3): in a window in Hebrew a report gathered in Russian or English stays left to
+/// right — the field of Windows is not aligned right and does not read right to left; a report in
+/// a language read right to left goes as the window. The other fields go as the window.
+#[test]
+fn a_field_of_code_goes_by_the_direction_of_its_own_text() {
+    for (rtl, expected) in [(false, (false, false)), (true, (true, true))] {
+        let open = Open::with_note(
+            3,
+            false,
+            ("he-IL", true),
+            ThemeSetting::Light,
+            FieldKind::Code { rtl },
+        );
+        assert_eq!(
+            right_to_left(open.field(Id::Note)),
+            expected,
+            "a field of code with rtl {rtl} in a window in Hebrew"
+        );
+        assert_eq!(
+            right_to_left(open.field(Id::Name)),
+            (true, true),
+            "a line in a window in Hebrew"
+        );
+    }
 }

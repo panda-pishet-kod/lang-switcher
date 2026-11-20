@@ -2596,6 +2596,24 @@ impl Wizard {
         }
     }
 
+    /// **Whether the appeal reads right to left** — the direction of the language of the text
+    /// itself, not of the window (T-120-19, the C3 of the controller): the appeal is data for the
+    /// author. The first line is the name of the program and its version, Latin in every language;
+    /// the first letter after it is a label of the report in the language it was built in — the
+    /// English stand-ins until the wave included — or what the person wrote over it.
+    pub fn appeal_reads_right_to_left(&self) -> bool {
+        self.text
+            .lines()
+            .skip(1)
+            .flat_map(str::chars)
+            .find(|letter| letter.is_alphabetic())
+            .is_some_and(|letter| {
+                // Hebrew, Syriac, Arabic, Thaana, N'Ko and the presentation forms of Hebrew and
+                // Arabic — the letters of the right-to-left languages of the program.
+                matches!(u32::from(letter), 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+            })
+    }
+
     /// Where on [`Wizard::road`] the person is: 0 is the first step.
     pub fn number(&self) -> usize {
         self.step.min(self.road().len() - 1)

@@ -24,7 +24,7 @@
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
 use crate::ui::scene::{ButtonKind, Surface};
-use crate::ui::text::{Align, Measure, Style, Text, Wrap};
+use crate::ui::text::{Align, Direction, Measure, Style, Text, Wrap};
 use crate::ui::tokens::BUTTON_PAD;
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
@@ -407,6 +407,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
         Part::Input {
             multiline,
             code,
+            rtl,
             value,
             hint,
             ..
@@ -432,10 +433,17 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             } else {
                 Wrap::OneLine
             };
+            // A field of code reads in the direction of its own text (`FieldKind::Code { rtl }`).
+            let direction = match rtl {
+                Some(true) => Direction::RightToLeft,
+                Some(false) => Direction::LeftToRight,
+                None => look.text.direction(),
+            };
             painter.clip_rect(inner);
-            write(
+            write_in(
                 painter,
                 look,
+                direction,
                 if *code { Role::Code } else { Role::Body },
                 None,
                 text,
@@ -893,11 +901,35 @@ fn write(
     middle: bool,
     colour: Rgb,
 ) -> Option<crate::ui::text::Laid> {
+    let direction = look.text.direction();
+    write_in(
+        painter, look, direction, role, weight, text, rect, wrap, align, middle, colour,
+    )
+}
+
+/// [`write`] in a reading `direction` of its own, not the window's (a field of code).
+#[allow(clippy::too_many_arguments)]
+fn write_in(
+    painter: &mut Painter,
+    look: &Look,
+    direction: Direction,
+    role: Role,
+    weight: Option<u16>,
+    text: &str,
+    rect: Rect,
+    wrap: Wrap,
+    align: Align,
+    middle: bool,
+    colour: Rgb,
+) -> Option<crate::ui::text::Laid> {
     let mut style = Style::of(role, look.b, look.h);
     if let Some(weight) = weight {
         style = style.with_weight(weight);
     }
-    let laid = look.text.lay(text, style, wrap, align, rect.w).ok()?;
+    let laid = look
+        .text
+        .lay_in(direction, text, style, wrap, align, rect.w)
+        .ok()?;
     let y = if middle {
         rect.y + (rect.h - laid.size().height) / 2.0
     } else {
