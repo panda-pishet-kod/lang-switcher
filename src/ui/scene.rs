@@ -45,6 +45,8 @@ pub enum Surface {
 pub enum Art {
     /// The panda of «О программе».
     About,
+    /// The panda of the windows in the corner and of the letters.
+    Avatar,
 }
 
 impl Art {
@@ -52,6 +54,7 @@ impl Art {
     pub const fn name(self) -> &'static str {
         match self {
             Art::About => "about",
+            Art::Avatar => "avatar",
         }
     }
 }
@@ -66,6 +69,8 @@ pub enum WindowKind {
     Wizard,
     /// One element filling the window, no paddings and no buttons: the list of a choice field.
     Bare,
+    /// The window in the corner (passport §2–§3): its own sizes, the buttons in shares 1 : 2.
+    Corner,
 }
 
 /// A part of a window description.
@@ -173,6 +178,19 @@ pub enum Node<I> {
         selected: usize,
         first: usize,
     },
+    /// The header of the window in the corner: the program's icon, «LANG SWITCHER · `about`» and
+    /// the ✕ that closes it.
+    CornerHeader { about: String, close: I },
+    /// The message of the window in the corner: the picture of the window beside a title, a text
+    /// and a link.
+    Message {
+        title: String,
+        words: String,
+        link: Option<(I, String)>,
+    },
+    /// The picture of «Обновлено»: the strip of the taskbar with the person's flag, at one moment
+    /// of its animation.
+    Taskbar(Taskbar),
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
@@ -186,7 +204,7 @@ pub struct Window<I> {
     pub kind: WindowKind,
     pub art: Option<Art>,
     /// The line under the picture: a name and an address (passport §2, `brand`).
-    pub brand: Option<Brand>,
+    pub brand: Option<Brand<I>>,
     pub body: Node<I>,
     pub buttons: Vec<Node<I>>,
     /// The elements unavailable now: drawn in the look of §5, answering no press, skipped by Tab.
@@ -196,9 +214,12 @@ pub struct Window<I> {
 /// The line under the picture of the panel: the name in the main face, the address beside it in
 /// the monospace one.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Brand {
+pub struct Brand<I> {
     pub name: String,
     pub address: String,
+    /// The address is a link to the page of the program (decision of the controller on C3 of
+    /// T-120-13, as the name of the old «О программе», 139.2 п. 4): pressed, it is this element.
+    pub link: I,
 }
 
 impl<I> Node<I> {
@@ -332,6 +353,16 @@ impl<I> Node<I> {
                 selected,
                 first,
             },
+            Node::CornerHeader { about, close } => Node::CornerHeader {
+                about,
+                close: f(close),
+            },
+            Node::Message { title, words, link } => Node::Message {
+                title,
+                words,
+                link: link.map(|(id, text)| (f(id), text)),
+            },
+            Node::Taskbar(picture) => Node::Taskbar(picture),
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -414,6 +445,15 @@ impl<I> Node<I> {
             Node::List { rows, .. } => rows
                 .iter_mut()
                 .for_each(|row| f(Role::Body, &mut row.label)),
+            Node::CornerHeader { about, .. } => f(Role::CornerHeader, about),
+            Node::Message { title, words, link } => {
+                f(Role::CornerTitle, title);
+                f(Role::CornerText, words);
+                if let Some((_, link)) = link {
+                    f(Role::Link, link);
+                }
+            }
+            Node::Taskbar(_) => {}
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }
@@ -426,7 +466,11 @@ impl<I> Window<I> {
         Window {
             kind: self.kind,
             art: self.art,
-            brand: self.brand,
+            brand: self.brand.map(|brand| Brand {
+                name: brand.name,
+                address: brand.address,
+                link: f(brand.link),
+            }),
             body: self.body.map(f),
             buttons: self.buttons.into_iter().map(|node| node.map(f)).collect(),
             disabled: self.disabled.into_iter().map(f).collect(),
@@ -438,6 +482,29 @@ impl<I> Window<I> {
         self.body.texts_mut(f);
         self.buttons.iter_mut().for_each(|node| node.texts_mut(f));
     }
+}
+
+/// One moment of the picture of the taskbar (the mock-up of «Обновлено»): the strip of the
+/// taskbar with the flag of one of the person's two layouts and its code, the plate of the keys,
+/// the cursor on its way to the flag, the list of the two layouts over the strip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Taskbar {
+    /// The person's two layouts: the one in force and the next.
+    pub layouts: [crate::layouts::LayoutId; 2],
+    /// Their codes, as the flag shows them.
+    pub codes: [String; 2],
+    /// Which of the two the flag shows now.
+    pub shown: usize,
+    /// The plate «Alt + Shift» is up.
+    pub plate: bool,
+    /// The cursor, as the share of its way to the flag.
+    pub cursor: Option<f32>,
+    /// The list of the two layouts is open, its first row hovered when `hover`.
+    pub list: bool,
+    pub hover: bool,
+    /// The icons of the taskbar stand at its left: the interface of Windows reads right to left —
+    /// the picture follows Windows, not the language of the program (passport §7).
+    pub icons_left: bool,
 }
 
 /// One line or several.

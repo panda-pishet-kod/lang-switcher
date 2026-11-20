@@ -5152,12 +5152,22 @@ fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() 
         "written by the body that writes the configuration — atomically:\n{keep}"
     );
 
+    // Task T-119-13: the keys are the ones the feed is read with — `feed::sources()`, the author's
+    // in a Release image (`FEED_KEYS`), the stand's under the testing feature only.
     let kept = body_of(&source, "pub fn kept_feed(");
+    let lines: Vec<&str> = code_lines(kept).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
     assert!(
-        code_lines(kept)
-            .any(|line| line
-                .contains("feed::read_document(document, language, feed::verify_signature)")),
-        "read again through the author's keys, every time:\n{kept}"
+        matches!(
+            (at("let (_, keys) = feed::sources();"), at("feed::read_document(document, language,"), at("feed::verify_with(body, signature, &keys)")),
+            (Some(a), Some(b), Some(c)) if a < b && b < c
+        ),
+        "read again through the keys of the feed, every time:\n{kept}"
+    );
+    let sources = nested_body_of(&source, "    pub fn sources(");
+    assert!(
+        code_lines(sources).any(|line| line.contains("FEED_KEYS,")),
+        "and those keys are the author's unless the stand's doors say otherwise:\n{sources}"
     );
 
     let restore = body_of(&source, "pub fn restore_feed(");

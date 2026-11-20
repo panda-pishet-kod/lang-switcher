@@ -44,6 +44,9 @@ use ::windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
     D2D1_PIXEL_FORMAT,
 };
+use ::windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
+};
 use ::windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_DEBUG_LEVEL_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
     D2D1_ELLIPSE, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE, D2D1_FACTORY_TYPE_SINGLE_THREADED,
@@ -53,15 +56,22 @@ use ::windows::Win32::Graphics::Direct2D::{
     D2D1_ROUNDED_RECT, ID2D1Factory, ID2D1HwndRenderTarget, ID2D1Layer, ID2D1RenderTarget,
     ID2D1SolidColorBrush, ID2D1StrokeStyle,
 };
+use ::windows::Win32::Graphics::Direct2D::{D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, ID2D1Bitmap};
 use ::windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use ::windows::Win32::Graphics::Imaging::{
     CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICImagingFactory,
     WICBitmapCacheOnLoad,
 };
+use ::windows::Win32::Graphics::Imaging::{WICBitmapDitherTypeNone, WICBitmapPaletteTypeMedianCut};
 use ::windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
 };
+use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    DI_NORMAL, DestroyIcon, DrawIconEx, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
+};
+use ::windows::core::{Error, PCWSTR};
 use ::windows::core::{GUID, HRESULT, Interface, Result as WinResult};
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -953,6 +963,176 @@ impl Painter<'_, '_> {
         }
     }
 
+    /// The program's own icon (FR-90, the icon resource of `app.rc`) in `rect`, at the pixels of the
+    /// frame: the header of the window in the corner. Its bitmap is kept for the render target it
+    /// was made for and remade when the target or the size changes.
+    pub fn app_icon(&mut self, rect: Rect) {
+        let side = (rect.w * self.scale).round().max(1.0) as i32;
+        match self.kind {
+            Kind::Direct2D { target, .. } => {
+                let key = (target.as_raw() as usize, side);
+                let bitmap = APP_ICON.with(|kept| {
+                    let mut kept = kept.borrow_mut();
+                    if let Some((known, bitmap)) = kept.as_ref()
+                        && *known == key
+                    {
+                        return Some(bitmap.clone());
+                    }
+                    let bitmap = icon_bitmap(target, side).ok()?;
+                    *kept = Some((key, bitmap.clone()));
+                    Some(bitmap)
+                });
+                if let Some(bitmap) = bitmap {
+                    let at = D2D_RECT_F {
+                        left: rect.x,
+                        top: rect.y,
+                        right: rect.right(),
+                        bottom: rect.bottom(),
+                    };
+                    // SAFETY: inside a frame; the bitmap belongs to this target.
+                    unsafe {
+                        target.DrawBitmap(
+                            &bitmap,
+                            Some(&at),
+                            1.0,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                            None,
+                        );
+                    }
+                }
+            }
+            Kind::Gdi { dc } => {
+                let Some(icon) = program_icon(side) else {
+                    return;
+                };
+                let px = |points: f32| (points * self.scale).round() as i32;
+                // SAFETY: the DC of this frame; the icon made above, destroyed below.
+                unsafe {
+                    let _ = DrawIconEx(
+                        dc,
+                        px(rect.x),
+                        px(rect.y),
+                        icon,
+                        side,
+                        side,
+                        0,
+                        None,
+                        DI_NORMAL,
+                    );
+                    let _ = DestroyIcon(icon);
+                }
+            }
+        }
+    }
+    /// A closed polygon of `points`, filled. The plain look draws none (the cursor of a picture).
+    pub fn fill_polygon(&mut self, points: &[(f32, f32)], value: Rgb) {
+        let Kind::Direct2D {
+            target,
+            brush,
+            factory,
+        } = self.kind
+        else {
+            return;
+        };
+        let Some((first, rest)) = points.split_first() else {
+            return;
+        };
+        let point = |(x, y): (f32, f32)| {
+            let mut at = D2D1_ELLIPSE::default().point;
+            at.X = x;
+            at.Y = y;
+            at
+        };
+        let brush = Self::brush(brush, value);
+        // SAFETY: inside a frame; the geometry is made, closed and drawn here.
+        unsafe {
+            let Ok(geometry) = factory.CreatePathGeometry() else {
+                return;
+            };
+            let Ok(sink) = geometry.Open() else {
+                return;
+            };
+            sink.BeginFigure(point(*first), D2D1_FIGURE_BEGIN_FILLED);
+            for at in rest {
+                sink.AddLine(point(*at));
+            }
+            sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+            if sink.Close().is_ok() {
+                target.FillGeometry(&geometry, brush, None);
+            }
+        }
+    }
+
+    /// The flag of `layout` as the tray shows it (`flags::icon`), in `rect`, at the pixels of the
+    /// frame; `dark_bar` — the frame of a flag on a dark taskbar. Its bitmap is kept for the target.
+    pub fn flag(&mut self, layout: crate::layouts::LayoutId, rect: Rect, dark_bar: bool) {
+        let side = (rect.w * self.scale).round().max(1.0) as i32;
+        let make = || {
+            let look = crate::flags::Look {
+                size: u32::try_from(side).unwrap_or(1),
+                paused: false,
+                unread: false,
+                dark_bar,
+            };
+            crate::flags::icon(&crate::flags::face_of(layout), look)
+        };
+        match self.kind {
+            Kind::Direct2D { target, .. } => {
+                let key = (target.as_raw() as usize, layout, side, dark_bar);
+                let bitmap = FLAGS.with(|kept| {
+                    let mut kept = kept.borrow_mut();
+                    if let Some((_, bitmap)) = kept.iter().find(|(known, _)| *known == key) {
+                        return Some(bitmap.clone());
+                    }
+                    let bitmap = bitmap_of_icon(target, make()?).ok()?;
+                    // A few flags at a time: the two layouts of the picture, at one size.
+                    kept.retain(|(known, _)| known.0 == key.0 && known.2 == key.2);
+                    kept.push((key, bitmap.clone()));
+                    Some(bitmap)
+                });
+                if let Some(bitmap) = bitmap {
+                    let at = D2D_RECT_F {
+                        left: rect.x,
+                        top: rect.y,
+                        right: rect.right(),
+                        bottom: rect.bottom(),
+                    };
+                    // SAFETY: inside a frame; the bitmap belongs to this target.
+                    unsafe {
+                        target.DrawBitmap(
+                            &bitmap,
+                            Some(&at),
+                            1.0,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                            None,
+                        );
+                    }
+                }
+            }
+            Kind::Gdi { dc } => {
+                let Some(icon) = make() else {
+                    return;
+                };
+                let px = |points: f32| (points * self.scale).round() as i32;
+                // SAFETY: the DC of this frame; the icon made above, destroyed below.
+                unsafe {
+                    let _ = DrawIconEx(
+                        dc,
+                        px(rect.x),
+                        px(rect.y),
+                        icon,
+                        side,
+                        side,
+                        0,
+                        None,
+                        DI_NORMAL,
+                    );
+                    let _ = DestroyIcon(icon);
+                }
+            }
+        }
+    }
+
     /// The pattern of a panel: dots of `diameter` at the centre of every `step` × `step` cell of
     /// `area`. The plain look has no pattern.
     pub fn dots(&mut self, area: Rect, diameter: f32, step: f32, value: Rgb) {
@@ -1500,4 +1680,66 @@ unsafe fn new_frame(
     // SAFETY: no options — documented as allowed.
     unsafe { initialize(frame.as_raw(), std::ptr::null_mut()) }.ok()?;
     Ok(frame)
+}
+
+/// The icon resource of the program in `app.rc` (FR-90) — the one the window in the corner of
+/// E119 put in its header.
+const PROGRAM_ICON: u16 = 101;
+
+thread_local! {
+    /// The program's icon made into a bitmap of one render target at one size.
+    static APP_ICON: std::cell::RefCell<Option<((usize, i32), ID2D1Bitmap)>> =
+        const { std::cell::RefCell::new(None) };
+    /// The flags of layouts made into bitmaps: by target, layout, side and the dark taskbar.
+    static FLAGS: std::cell::RefCell<FlagBitmaps> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The flags kept for a frame: (target, layout, side, dark taskbar) and the bitmap.
+type FlagBitmaps = Vec<((usize, crate::layouts::LayoutId, i32, bool), ID2D1Bitmap)>;
+
+/// The program's icon at `side` pixels, made by Windows from its resource; the caller destroys it.
+fn program_icon(side: i32) -> Option<HICON> {
+    // SAFETY: `None` names this executable; the handle is borrowed.
+    let module = unsafe { GetModuleHandleW(None) }.ok()?;
+    // SAFETY: an icon resource of this module, by its number.
+    let handle = unsafe {
+        LoadImageW(
+            Some(module.into()),
+            PCWSTR(usize::from(PROGRAM_ICON) as *const u16),
+            IMAGE_ICON,
+            side,
+            side,
+            LR_DEFAULTCOLOR,
+        )
+    }
+    .ok()?;
+    Some(HICON(handle.0))
+}
+
+/// The program's icon as a bitmap of `target`.
+fn icon_bitmap(target: &ID2D1RenderTarget, side: i32) -> WinResult<ID2D1Bitmap> {
+    bitmap_of_icon(target, program_icon(side).ok_or_else(Error::from_thread)?)
+}
+
+/// `icon` as a bitmap of `target`, through WIC: the icon's own pixels, premultiplied; the icon is
+/// destroyed once copied.
+fn bitmap_of_icon(target: &ID2D1RenderTarget, icon: HICON) -> WinResult<ID2D1Bitmap> {
+    // SAFETY: WIC of this thread (the window's COM); the icon is destroyed once copied.
+    unsafe {
+        let wic: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let pixels = wic.CreateBitmapFromHICON(icon);
+        let _ = DestroyIcon(icon);
+        let pixels = pixels?;
+        let converter = wic.CreateFormatConverter()?;
+        converter.Initialize(
+            &pixels,
+            &GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            None,
+            0.0,
+            WICBitmapPaletteTypeMedianCut,
+        )?;
+        target.CreateBitmapFromWicBitmap(&converter, None)
+    }
 }

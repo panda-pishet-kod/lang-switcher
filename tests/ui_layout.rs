@@ -522,6 +522,7 @@ fn a_narrow_window_puts_the_circle_beside_the_header_and_the_settings_do_not() {
         brand: Some(Brand {
             name: "Panda Koder".to_owned(),
             address: "panda-pishet-kod.dev".to_owned(),
+            link: Id::Site,
         }),
         disabled: Vec::new(),
         body: header.clone(),
@@ -616,6 +617,7 @@ fn every_window() -> Vec<Window<Id>> {
         brand: Some(Brand {
             name: "Panda Koder".to_owned(),
             address: "panda-pishet-kod.dev".to_owned(),
+            link: Id::Site,
         }),
         disabled: Vec::new(),
         body: Node::Column(vec![
@@ -798,7 +800,15 @@ fn the_brand_line_is_the_name_and_the_address_beside_it() {
         brand: Some(Brand {
             name: "Panda Koder".to_owned(),
             address: "panda-pishet-kod.dev".to_owned(),
+            link: Id::Site,
         }),
+        // A button, so that Tab has another stop than the address.
+        buttons: vec![Node::Button {
+            id: Id::Close,
+            label: "Close".to_owned(),
+            kind: ButtonKind::Primary,
+            browser: false,
+        }],
         ..bare(text(Role::Body, "Body"))
     };
     for rtl in [false, true] {
@@ -810,15 +820,20 @@ fn the_brand_line_is_the_name_and_the_address_beside_it() {
             .find(|item| {
                 matches!(
                     &item.part,
-                    Part::Text {
+                    Part::Link {
                         role: Role::Brand,
                         ..
                     }
-                )
+                ) && item.id == Some(Id::Site)
             })
-            .expect("the address")
+            .expect("the address is a link to the page of the program")
             .rect;
         assert!(close(name.y, address.y), "one line");
+        assert_eq!(
+            layout.focus_order().last(),
+            Some(&Id::Site),
+            "the address is not the last stop of Tab"
+        );
         if rtl {
             assert!(
                 address.right() <= name.x,

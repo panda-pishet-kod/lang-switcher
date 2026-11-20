@@ -32,7 +32,7 @@ use crate::ui::tokens::{
     PANEL_DOT_STEP, PRESSED_MIX, RADIUS_CHECK, RADIUS_MEDIUM, RADIUS_SMALL, Rgb, Role, SECTION_PAD,
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
-use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, Face};
+use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
 
 /// What every element of one window shares: the theme, the direction, the type size and the faces.
 pub struct Look<'t> {
@@ -137,6 +137,7 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
         | Part::Segment { .. }
         | Part::Field { .. }
         | Part::Input { .. }
+        | Part::Cross
         | Part::Section { .. }
         | Part::ListRow { .. }
         | Part::MenuRow => Some(rect),
@@ -156,6 +157,7 @@ fn takes_ring(part: &Part) -> bool {
             | Part::Field { .. }
             | Part::Section { .. }
             | Part::List(_)
+            | Part::Cross
     )
 }
 
@@ -259,6 +261,36 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 painter.line(a.0, a.1, b.0, b.1, CHECK_BORDER.0, c(tick));
                 painter.line(b.0, b.1, d.0, d.1, CHECK_BORDER.0, c(tick));
             }
+        }
+        Part::AppIcon => painter.app_icon(rect),
+        Part::Taskbar(picture) => crate::ui::picture::draw(painter, look, picture, rect),
+        Part::Cross => {
+            if let Some(fill) = stepped(None, state) {
+                painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
+            }
+            let colour = if state.disabled {
+                Color::Ink3
+            } else {
+                Color::Ink2
+            };
+            let half = CORNER_CROSS.0 / 2.0;
+            let (cx, cy) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0);
+            painter.line(
+                cx - half,
+                cy - half,
+                cx + half,
+                cy + half,
+                CHECK_BORDER.0,
+                c(colour),
+            );
+            painter.line(
+                cx - half,
+                cy + half,
+                cx + half,
+                cy - half,
+                CHECK_BORDER.0,
+                c(colour),
+            );
         }
         Part::Tick => {
             let colour = if state.disabled {
@@ -435,7 +467,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 c(colour),
             );
         }
-        Part::Link { text } => {
+        Part::Link { text, role } => {
             if let Some(fill) = stepped(None, state) {
                 painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
             }
@@ -447,7 +479,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             let laid = write(
                 painter,
                 look,
-                Role::Link,
+                *role,
                 None,
                 text,
                 rect,

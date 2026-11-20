@@ -15,6 +15,7 @@ pub mod field;
 pub mod fit;
 pub mod host;
 pub mod layout;
+pub mod picture;
 #[cfg(feature = "testing")]
 pub mod probe;
 pub mod scene;
