@@ -83,16 +83,18 @@ const MITER_LIMIT: f32 = 8.0;
 const ICONS: &str = "icons/";
 
 /// The named place `place` of the picture `name` (T-120-25: `anchor-screen` and `anchor-key` of
-/// «Привет»), as shares of the field of the picture — left, top, width, height, each 0 to 1: the
-/// window lays it over the circle it draws the picture in.
+/// «Привет»), as shares of the side of the square the field of the picture is fitted to when it is
+/// drawn (its longer side, from the top left corner, as `paint` draws it): left, top, width,
+/// height. The layout lays it over the circle it draws the picture in.
 pub fn anchor(name: &str, place: &str) -> Option<[f32; 4]> {
     let (_, drawing) = find(name).ok()?;
     let found = drawing.anchors.iter().find(|anchor| anchor.name == place)?;
+    let side = drawing.width.max(drawing.height);
     Some([
-        found.x / drawing.width,
-        found.y / drawing.height,
-        found.width / drawing.width,
-        found.height / drawing.height,
+        found.x / side,
+        found.y / side,
+        found.width / side,
+        found.height / side,
     ])
 }
 

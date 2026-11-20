@@ -33,6 +33,9 @@ use crate::ui::tokens::{
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
+use crate::ui::tokens::{
+    ON_PICTURE_KEY_FRAME, ON_PICTURE_KEY_RADIUS, ON_PICTURE_WEIGHT, picture_colours,
+};
 
 /// What every element of one window shares: the theme, the direction, the type size and the faces.
 pub struct Look<'t> {
@@ -590,6 +593,45 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 true,
                 c(colour),
             );
+        }
+        Part::PictureWord { word, size, fixed } => {
+            // From the left of its place in any language (the picture is not mirrored): the start
+            // of a run that reads right to left is its right edge.
+            let colours = picture_colours();
+            let style = Style {
+                size: *size,
+                ..Style::of(Role::Code, look.b, look.h).with_weight(ON_PICTURE_WEIGHT)
+            };
+            let align = if look.rtl { Align::End } else { Align::Start };
+            if let Ok(laid) = look.text.lay(word, style, Wrap::OneLine, align, rect.w) {
+                let colour = if *fixed { colours.fixed } else { colours.word };
+                painter.text(&laid, rect.x, rect.y, colour);
+            }
+        }
+        Part::PictureKey {
+            label,
+            size,
+            pressed,
+        } => {
+            let colours = picture_colours();
+            let (radius, frame) = (
+                rect.h * ON_PICTURE_KEY_RADIUS.0,
+                rect.h * ON_PICTURE_KEY_FRAME.0,
+            );
+            let fill = if *pressed { colours.lit } else { colours.key };
+            painter.fill_rect(rect, radius, fill);
+            painter.stroke_rect(rect, radius, frame, colours.ink);
+            let style = Style {
+                size: *size,
+                ..Style::of(Role::Code, look.b, look.h).with_weight(ON_PICTURE_WEIGHT)
+            };
+            if let Ok(laid) = look
+                .text
+                .lay(label, style, Wrap::OneLine, Align::Centre, rect.w)
+            {
+                let y = rect.y + (rect.h - laid.size().height) / 2.0;
+                painter.text(&laid, rect.x, y, colours.ink);
+            }
         }
         Part::Dot(status) => {
             let colour = match status {
