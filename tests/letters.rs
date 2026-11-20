@@ -1378,7 +1378,7 @@ fn no_placeholder_address_is_left_in_the_program() {
     }
 
     assert!(
-        found.len() == 1 && found[0].starts_with("letters.rs:") && found[0].ends_with(DEFINITION),
+        found.len() == 1 && found[0].starts_with("links.rs:") && found[0].ends_with(DEFINITION),
         "in {read} files of src the reserved domain must be named by one line of code, its \
          definition, and by no address: {found:#?}"
     );
@@ -3001,13 +3001,8 @@ fn the_switch_follows_the_setting_a_click_has_written() {
 
 /// The source of `src\letters.rs`, line endings normalised — the sweep below matches on it.
 fn letters_module_source() -> String {
-    std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("letters.rs"),
-    )
-    .expect("src\\letters.rs must be readable")
-    .replace("\r\n", "\n")
+    // The module, not the file alone: `letters.rs` and the three files of T-120-23.
+    letters_source()
 }
 
 /// The source of «От автора», a window of the shell since T-120-17.
@@ -3179,16 +3174,21 @@ fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
 // settled on
 // ---------------------------------------------------------------------------------------
 
-/// `src\letters.rs` read as text with line endings normalised.
+/// The module `letters` read as text with line endings normalised — since T-120-23 the file
+/// `src\letters.rs` and the three it was divided into, `links.rs`, `feed.rs` and `appeal.rs` — the order
+/// they stood in the file: a guard that looked for something in the module, or for its absence, looks where it
+/// went, and an emptied file cannot make it green.
 fn letters_source() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("letters.rs");
-
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
-
-    text.replace("\r\n", "\n")
+    ["letters.rs", "links.rs", "feed.rs", "appeal.rs"]
+        .iter()
+        .map(|file| {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()))
+                .replace("\r\n", "\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The body of the item whose signature line starts with `signature` — from that line to the
@@ -3546,21 +3546,6 @@ fn the_mark_is_first_one_on_the_path_of_the_feed_and_nothing_else() {
     );
 }
 
-/// The body of a function **nested in a module** (indented by four): from its signature line to
-/// the first `    }` closing it — `body_of` stops at a brace in column 0, which inside `pub mod
-/// feed` would be the end of the module.
-fn nested_body_of<'a>(source: &'a str, signature: &str) -> &'a str {
-    let start = source
-        .find(signature)
-        .unwrap_or_else(|| panic!("src/letters.rs must contain \"{signature}\""));
-    let rest = &source[start..];
-    let end = rest
-        .find("\n    }\n")
-        .expect("a nested item ends at `    }`");
-
-    &rest[..end]
-}
-
 /// ⭐ **The wiring of the mark** — the roads the automaton above is fed by:
 /// * `tick` asks for the marked read by `first_query(stored.first_mark)`;
 /// * the feed thread reads through `feed::read_now_marked` and raises `FIRST_ANSWERED` only when
@@ -3602,7 +3587,7 @@ fn the_mark_of_the_first_run_is_wired_from_the_tick_to_the_answer() {
         "take_feed writes the mark as sent before it asks the mailbox:\n{take}"
     );
 
-    let read_over = nested_body_of(&source, "    fn read_over(");
+    let read_over = body_of(&source, "fn read_over(");
     let lines: Vec<&str> = code_lines(read_over).collect();
     let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
     assert!(
@@ -3789,7 +3774,7 @@ fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() 
         ),
         "read again through the keys of the feed, every time:\n{kept}"
     );
-    let sources = nested_body_of(&source, "    pub fn sources(");
+    let sources = body_of(&source, "pub fn sources(");
     assert!(
         code_lines(sources).any(|line| line.contains("FEED_KEYS,")),
         "and those keys are the author's unless the stand's doors say otherwise:\n{sources}"
