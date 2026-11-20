@@ -5036,7 +5036,7 @@ const TEMPLATE_TEXT: [&str; 35] = [
     // ⚠ Т-23-2, решение 82.2: the selection switch of FR-61 is the **last row of «Общие»**
     // now. Its group of one was dissolved when the two spin fields beside it left the
     // dialog, and it moved here to its sister check boxes.
-    "Конвертировать выделенный текст",
+    "Исправлять выделенный текст",
     // Task T-119-2, FR-90б: the flag of the layout, the last row of «Общие» now.
     "Флаг раскладки в трее",
     "Горячая клавиша",
@@ -5376,7 +5376,7 @@ fn the_selection_switch_stands_in_the_general_panel() {
         assert_eq!(
             inside,
             panel == 1090,
-            "«Конвертировать выделенный текст» (1040) must lie in «Общие» (1090) and in no \
+            "«Исправлять выделенный текст» (1040) must lie in «Общие» (1090) and in no \
              other panel — решение 82.2"
         );
     }
@@ -5541,7 +5541,7 @@ fn the_six_check_boxes_and_radio_buttons_are_owner_drawn_and_notifying() {
     const OWNER_DRAWN_GLYPHS: [(u32, &str, bool); 7] = [
         (1001, "Запускать при входе в систему", false),
         (1004, "Звуковой отклик", false),
-        (1040, "Конвертировать выделенный текст", false),
+        (1040, "Исправлять выделенный текст", false),
         (1005, "Флаг раскладки в трее", false),
         (1020, "Пара", true),
         (1021, "Несколько раскладок", false),
@@ -15548,8 +15548,8 @@ fn the_about_dialog_template_carries_its_elements() {
         template.text,
         [
             "Lang Switcher",
-            "Исправляет текст, набранный в неверной раскладке.",
-            "Перекодировка — по нажатию одной клавиши.",
+            "Исправляет текст, набранный не в той раскладке.",
+            "Исправление — по нажатию одной клавиши.",
             "Как пользоваться",
             "1",
             "2",
@@ -15561,7 +15561,7 @@ fn the_about_dialog_template_carries_its_elements() {
             // Task Т-32-4: the button that leads to «От автора». Its caption is a template
             // literal like every other, and FR-94 replaces it on the live window.
             "От автора…",
-            "ОК",
+            "Закрыть",
         ],
         "the visible strings of the about dialog came out of rc.exe wrong"
     );
@@ -15759,14 +15759,14 @@ fn the_about_template_says_what_the_russian_table_says() {
 
     for (text, id) in [
         (
-            "Исправляет текст, набранный в неверной раскладке.",
+            "Исправляет текст, набранный не в той раскладке.",
             settings::IDS_ABOUT_LINE_1,
         ),
         (
-            "Перекодировка — по нажатию одной клавиши.",
+            "Исправление — по нажатию одной клавиши.",
             settings::IDS_ABOUT_LINE_2,
         ),
-        ("ОК", settings::IDS_ABOUT_OK),
+        ("Закрыть", settings::IDS_ABOUT_OK),
         // Task Т-23-4: the caption of the «Как пользоваться» panel is a template literal like
         // the rest — the window stays readable if a string fails to load — and FR-94 replaces
         // it on the very control the block is drawn from. The five rows below it are **not**
@@ -18446,7 +18446,13 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// eight words and its balloon, and the balloon «обновлён до X» with its two — 242 − 11.
 ///
 /// ⚠ **232 since task T-119-2** — FR-90б: the check box of the flag of the layout — 231 + 1.
-const FR_94_STRINGS: [(u16, &str, &str); 232] = [
+///
+/// ⚠ **245 since stage E120, tasks T-120-21 and T-120-22** — решение 208.169, С10 and С12:
+/// «Состояние» for a person (3280…3288) and «Нашли ошибку в переводе?» (3289…3292) — 232 + 13.
+///
+/// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
+/// program's own (3265, 3266) — 245 + 2.
+const FR_94_STRINGS: [(u16, &str, &str); 260] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -18462,6 +18468,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         settings::IDS_LANGUAGE_LABEL,
         "Язык интерфейса:",
         "Interface language:",
+    ),
+    // Task T-120-22 (решение 208.169, С12): the button under the language.
+    (
+        settings::IDS_TRANSLATION_REPORT,
+        "Нашли ошибку в переводе?",
+        "Found a mistake in the translation?",
     ),
     // 3004 — «вступит в силу после перезапуска» / «takes effect after a restart» — снята
     // задачей Т-31-3 из всех четырнадцати таблиц: решение 99.4, язык действует сразу.
@@ -18490,8 +18502,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     (settings::IDS_CYCLE_DOWN, "Ниже", "Down"),
     (
         settings::IDS_SELECTION_ENABLED,
-        "Конвертировать выделенный текст",
-        "Convert the selected text",
+        "Исправлять выделенный текст",
+        "Fix the selected text",
     ),
     (settings::IDS_GROUP_EXCLUSIONS, "Исключения", "Exclusions"),
     (settings::IDS_EXCLUSION_REMOVE, "Удалить", "Remove"),
@@ -18647,6 +18659,40 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (settings::IDS_AUTOSTART_PRESENT, "есть, {0}", "yes, {0}"),
     (settings::IDS_AUTOSTART_ABSENT, "нет", "no"),
+    // Task T-120-21 (решение 208.169, С10): «Состояние» for a person, 3280…3288.
+    (settings::IDS_STATUS_WORKING, "Работает", "Working"),
+    (
+        settings::IDS_STATUS_SUSPENDED,
+        "Приостановлена",
+        "Suspended",
+    ),
+    (
+        settings::IDS_STATUS_RESTART,
+        "Нужен перезапуск",
+        "Restart needed",
+    ),
+    (settings::IDS_STATUS_FIXES, "Исправляет: {0}", "Fixes: {0}"),
+    (
+        settings::IDS_STATUS_FIXES_NONE,
+        "Раскладки не выбраны",
+        "No layouts chosen",
+    ),
+    (settings::IDS_STATUS_HOTKEY, "Клавиша: {0}", "Key: {0}"),
+    (
+        settings::IDS_STATUS_AUTOSTART_ON,
+        "Запуск при входе в систему: включён",
+        "Start when I sign in: on",
+    ),
+    (
+        settings::IDS_STATUS_AUTOSTART_OFF,
+        "Запуск при входе в систему: выключен",
+        "Start when I sign in: off",
+    ),
+    (
+        settings::IDS_STATUS_DETAILS,
+        "Подробности для автора",
+        "Details for the author",
+    ),
     (
         settings::IDS_LAYOUT_NOTE,
         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново.",
@@ -18671,15 +18717,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     (settings::IDS_ABOUT_VERSION, "версия {0}", "version {0}"),
     (
         settings::IDS_ABOUT_LINE_1,
-        "Исправляет текст, набранный в неверной раскладке.",
+        "Исправляет текст, набранный не в той раскладке.",
         "Fixes text typed in the wrong keyboard layout.",
     ),
     (
         settings::IDS_ABOUT_LINE_2,
-        "Перекодировка — по нажатию одной клавиши.",
-        "Conversion takes a single key press.",
+        "Исправление — по нажатию одной клавиши.",
+        "Fixing takes a single key press.",
     ),
-    (settings::IDS_ABOUT_OK, "ОК", "OK"),
+    (settings::IDS_ABOUT_OK, "Закрыть", "Close"),
     // The «Как пользоваться» panel of task Т-23-4, решение 82.5 — the caption and the five
     // rows the accepted mock-up writes. The `{0}` of the first three is the hotkey name and
     // is deliberately part of the literal: what a wrong code page would destroy is the text
@@ -18691,8 +18737,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_ABOUT_HELP_1,
-        "Набрали слово не в той раскладке — нажмите {0}: слово перекодируется, раскладка переключится.",
-        "You typed a word in the wrong layout — press {0}: the word is converted and the layout switches.",
+        "Набрали слово не в той раскладке — нажмите {0}: слово исправится, раскладка переключится.",
+        "You typed a word in the wrong layout — press {0}: the word is fixed and the layout switches.",
     ),
     (
         settings::IDS_ABOUT_HELP_2,
@@ -18701,8 +18747,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_ABOUT_HELP_3,
-        "Выделите текст и нажмите {0} — конвертируется выделенное (если это включено и работает Ctrl+C).",
-        "Select text and press {0} — the selection is converted (if enabled and Ctrl+C works).",
+        "Выделите текст и нажмите {0} — исправится выделенное (если это включено и работает Ctrl+C).",
+        "Select text and press {0} — the selection is fixed (if enabled and Ctrl+C works).",
     ),
     (
         settings::IDS_ABOUT_HELP_4,
@@ -18787,7 +18833,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_HELLO_LEAD,
-        "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: чинит \
+        "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: исправляет \
          слово, набранное не в той раскладке. Вот как это выглядит:",
         "I made Lang Switcher and I am glad you installed it. The program does one thing: it \
          fixes a word typed in the wrong layout. Here is what that looks like:",
@@ -18806,9 +18852,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_HELLO_ROW_1,
-        "{0} перекодирует последнее набранное слово и переключает раскладку. Работает в любом \
+        "{0} исправляет последнее набранное слово и переключает раскладку. Работает в любом \
          окне.",
-        "{0} converts the last word you typed and switches the layout. It works in any window.",
+        "{0} fixes the last word you typed and switches the layout. It works in any window.",
     ),
     (
         settings::IDS_HELLO_ROW_2,
@@ -18863,13 +18909,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_THANKS_SNOOZE,
-        "Напомнить через неделю",
-        "Remind me in a week",
+        "Напомнить позже",
+        "Remind me later",
     ),
     (
         settings::IDS_THANKS_FOOT,
-        "Это письмо показывается один раз.",
-        "This letter is shown once.",
+        "Это письмо приходит один раз. Отложить его можно только раз — на неделю.",
+        "This letter comes once. You can put it off only once, for a week.",
     ),
     (settings::IDS_AUTHOR_CAPTION, "От автора", "From the author"),
     // ⛔⛔ `IDS_AUTHOR_VERSION` (3111) стояла здесь и **снята задачей T-81-3**, решение 142.2
@@ -19070,17 +19116,21 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         "Новость от автора",
         "News from the author",
     ),
-    (settings::IDS_NEWS_LATER, "Позже", "Later"),
+    (
+        settings::IDS_NEWS_LATER,
+        "Напомнить позже",
+        "Remind me later",
+    ),
     (
         settings::IDS_NEWS_OPEN_LINK,
-        "Открыть ссылку",
-        "Open the link",
+        "Читать на сайте",
+        "Read on the site",
     ),
     (
         settings::IDS_NEWS_FOOT,
-        "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё \
+        "«Прочитано» закрывает письмо насовсем. «Напомнить позже» или крестик: напомню через неделю и ещё \
          раз через две, потом только точка на значке.",
-        "“Mark as read” closes the letter for good. “Later” or the cross: I will remind you in \
+        "“Mark as read” closes the letter for good. “Remind me later” or the cross: I will remind you in \
          a week and once more in two, after that only the dot on the icon.",
     ),
     (
@@ -19114,8 +19164,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
     ),
     (
         settings::IDS_WIZARD_CARD_WRONG_SUB,
-        "слово перекодировалось неправильно, пропали буквы, раскладка не та",
-        "the word came out converted wrongly, letters went missing, the layout was not the one",
+        "слово исправилось не так, пропали буквы, раскладка не та",
+        "the fix came out wrong, letters went missing, the layout was not the one",
     ),
     (
         settings::IDS_WIZARD_CARD_NOTHING,
@@ -19245,6 +19295,22 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         settings::IDS_WIZARD_IDEA_HELPS,
         "Чем это поможет?",
         "How would it help?",
+    ),
+    // Task T-120-22 (решение 208.169, С12): the appeal about the translation, 3290…3292.
+    (
+        settings::IDS_WIZARD_TRANSLATION_NOW,
+        "Что написано сейчас?",
+        "What does it say now?",
+    ),
+    (
+        settings::IDS_WIZARD_TRANSLATION_RIGHT,
+        "Как правильно?",
+        "What should it say?",
+    ),
+    (
+        settings::IDS_WIZARD_TRANSLATION_LINE,
+        "Ошибка в переводе: {0}",
+        "Translation mistake: {0}",
     ),
     (
         settings::IDS_WIZARD_ATTACH_TITLE,
@@ -19471,6 +19537,72 @@ const FR_94_STRINGS: [(u16, &str, &str); 232] = [
         settings::IDS_TRAY_FLAG,
         "Флаг раскладки в трее",
         "Layout flag in the tray",
+    ),
+    // Task T-119-3, part Б: the title and the link of the list of the program's own.
+    (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
+    (
+        settings::IDS_OWN_LIST_MORE,
+        "Дополнительные параметры клавиатуры",
+        "More keyboard settings",
+    ),
+    // Tasks T-119-5, T-119-6, T-119-7, T-119-10: the window in the corner, the menu, «От автора».
+    (settings::IDS_CORNER_UPDATE, "обновление", "update"),
+    (
+        settings::IDS_RELEASE_TITLE,
+        "Lang Switcher обновлён до {0}",
+        "Lang Switcher has been updated to {0}",
+    ),
+    (
+        settings::IDS_RELEASE_TEXT,
+        "Было {0}. Новое: значок программы может показывать флаг текущей раскладки. Щелчок по \
+         флагу — список раскладок Windows. Включается галочкой в настройках.",
+        "It was {0}. New: the icon of the program can show the flag of the current layout. A \
+         click on the flag opens the list of layouts of Windows. Turned on with a tick in the \
+         settings.",
+    ),
+    (
+        settings::IDS_RELEASE_CHANGES,
+        "Все изменения на сайте",
+        "All the changes on the site",
+    ),
+    (
+        settings::IDS_RELEASE_HOWTO,
+        "Как пользоваться",
+        "How to use it",
+    ),
+    (settings::IDS_CORNER_OK, "Понятно", "Got it"),
+    (
+        settings::IDS_RELEASE_NEVER,
+        "Больше не показывать окна обновлений",
+        "Do not show update windows again",
+    ),
+    (settings::IDS_CORNER_FLAG, "флаг раскладки", "layout flag"),
+    (
+        settings::IDS_HINT_TITLE,
+        "Флаг раскладки включён",
+        "The layout flag is on",
+    ),
+    (
+        settings::IDS_HINT_TEXT,
+        "Чтобы флаг всегда был виден на панели задач, включите Lang Switcher в Параметрах: Панель \
+         задач → Другие значки на панели задач. Пока он под стрелкой ^.",
+        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Taskbar → \
+         Other system tray icons. For now it is under the arrow ^.",
+    ),
+    (
+        settings::IDS_HINT_OPEN,
+        "Открыть Параметры Windows",
+        "Open Windows Settings",
+    ),
+    (
+        settings::IDS_MENU_WHATSNEW,
+        "Что нового в {0}…",
+        "What’s new in {0}…",
+    ),
+    (
+        settings::IDS_UPDATES_SWITCH,
+        "Сообщать об обновлениях программы",
+        "Tell me about updates of the program",
     ),
 ];
 
@@ -27064,8 +27196,15 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        232,
-        "two hundred and THIRTY-TWO identifiers in use since task T-119-2 (FR-90б): the check box \
+        260,
+        "two hundred and SIXTY identifiers in use since tasks T-119-5, -6, -7 and -10: the window \
+         in the corner, the entry «Что нового в X…» and the switch of «От автора» (3267…3279). \
+         Two hundred and forty-seven since task T-119-3, part Б (решение \
+         208.88): the title and the link of the list of the program's own (3265, 3266). Two \
+         hundred and forty-five since stage E120, tasks T-120-21 and \
+         T-120-22 (решение 208.169): «Состояние» for a person, nine (3280…3288), and «Нашли \
+         ошибку в переводе?», four (3289…3292). Two hundred and thirty-two since task T-119-2 \
+         (FR-90б): the check box \
          of the flag of the layout (3264). Two hundred and thirty-one since stage E119, task T-119-8 (решение \
          208.94 п. 4): the letter «Что нового» and the balloon «обновлён до X» left with eleven \
          strings. Two hundred and forty-two since stage E114, task T-114-2 (решение \
@@ -29657,7 +29796,7 @@ fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
     assert_eq!(
         letters.matches("settings::open_in_the_shell(").count(),
         2,
-        "«Открыть ссылку» and «Сохранить в папку журнала» both go through the door"
+        "«Читать на сайте» and «Сохранить в папку журнала» both go through the door"
     );
     assert_eq!(
         settings.matches("open_in_the_shell(&dir.display()").count(),
@@ -29693,7 +29832,7 @@ struct RcDialog {
 /// against the `app.rc` of another wave, which is what makes the negative control possible at all.
 ///
 /// Quoted strings are blanked before a line is split on commas — a caption of this file carries
-/// commas of its own («Исправляет текст, набранный в неверной раскладке.»), and a parser that
+/// commas of its own («Исправляет текст, набранный не в той раскладке.»), and a parser that
 /// counted them would read the wrong four numbers. The four numbers of a statement are the **last
 /// four integers** it names, whatever stands before them: `ICON` names a resource first, `CONTROL`
 /// names a class, `EDITTEXT` names nothing at all.
@@ -30277,7 +30416,12 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
     // The rows whose widths `app.rc` freezes: the slot is read off the template, so a slot and
     // a stand cannot part.
     let frozen: [(&str, &DialogTemplate, u32, u16); 4] = [
-        ("«ОК» of «О программе»", &about, 1, settings::IDS_ABOUT_OK),
+        (
+            "«Закрыть» of «О программе»",
+            &about,
+            1,
+            settings::IDS_ABOUT_OK,
+        ),
         ("«ОК» of настройки", &settings, 1, settings::IDS_OK),
         ("«Отмена» of настройки", &settings, 2, settings::IDS_CANCEL),
         ("«Применить»", &settings, 1080, settings::IDS_APPLY),

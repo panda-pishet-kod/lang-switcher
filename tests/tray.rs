@@ -103,6 +103,7 @@ const ABOUT_UP: bool = true;
 /// read behind it is nothing at all: no unread news and no newer version. The menu then has
 /// exactly the [`MENU_ENTRY_COUNT`] entries of FR-91, and the tests below are about those.
 const NOTHING_PENDING: Pending = Pending {
+    whats_new: None,
     unread: false,
     update: None,
 };
@@ -6927,4 +6928,102 @@ fn the_watch_of_the_flag_lives_exactly_while_the_check_box_is_on() {
 
     assert!(!lang_switcher::flags::is_on(), "off again");
     assert!(!tray.watches_the_list(), "and the subscription is gone");
+}
+
+/// **Task T-119-3, решение 208.88: with the flag on, a left click on the icon opens the list of
+/// layouts of Windows** — «как если бы нажали по стандартному значку rus/eng». The right click,
+/// the menu key and Shift+F10 (`WM_CONTEXTMENU`) keep the menu of FR-91; with the flag off the left
+/// click keeps it too (1.6.1).
+#[test]
+fn a_click_on_the_flag_opens_the_list_and_the_right_click_the_menu() {
+    let _flag = flag_tests();
+    let window = TestWindow::new();
+    let product = ProductImage::open();
+    let mut tray = Tray::install_at(window.handle, product.instance(), None)
+        .expect("the tray must install: the icons are in the product binary's resources");
+    let left = LPARAM(0x0400); // NIN_SELECT
+    let right = LPARAM(WM_CONTEXTMENU as isize);
+    let at = packed_point(100, 100);
+
+    let reaction = tray.handle_message(WM_APP + 2, at, left);
+    assert!(
+        matches!(reaction, Reaction::ShowMenu { .. }),
+        "flag off: the left click is the menu, as in 1.6.1 — not {reaction:?}"
+    );
+
+    let mut on = tray.config().clone();
+    on.general.tray_flag = true;
+    tray.replace_config(on);
+
+    let reaction = tray.handle_message(WM_APP + 2, at, left);
+    assert!(
+        matches!(reaction, Reaction::OpenList),
+        "flag on: the left click opens the list of layouts — not {reaction:?}"
+    );
+
+    let reaction = tray.handle_message(WM_APP + 2, at, right);
+    assert!(
+        matches!(reaction, Reaction::ShowMenu { .. }),
+        "flag on: the right click is the menu — not {reaction:?}"
+    );
+
+    let mut off = tray.config().clone();
+    off.general.tray_flag = false;
+    tray.replace_config(off);
+}
+
+/// **FR-82 since 1.8.0 — task T-119-14, решение 208.148: a second start asks the running copy to
+/// open its settings, and tells the person «уже работает» only when the request did not reach it.**
+/// A bench that silences the notification (a debug copy beside the person's own program) asks for
+/// nothing at all: the person's program must not get a settings window from a test.
+#[test]
+fn a_second_start_asks_the_running_copy_before_it_tells_the_person() {
+    use lang_switcher::app::second_start_tells_the_person;
+
+    let asked = Cell::new(0);
+
+    assert!(
+        !second_start_tells_the_person(false, || {
+            asked.set(asked.get() + 1);
+            true
+        }),
+        "the request reached the running copy: no notification"
+    );
+    assert_eq!(asked.get(), 1, "and the running copy was asked once");
+
+    assert!(
+        second_start_tells_the_person(false, || {
+            asked.set(asked.get() + 1);
+            false
+        }),
+        "the request did not reach it (no window, a refusal, another integrity level): the \
+         notification of FR-82, as before"
+    );
+    assert_eq!(asked.get(), 2);
+
+    assert!(
+        !second_start_tells_the_person(true, || {
+            asked.set(asked.get() + 1);
+            true
+        }),
+        "a bench: no notification"
+    );
+    assert_eq!(asked.get(), 2, "and nothing asked of the running copy");
+}
+
+/// **The one-shot timers of the UI window do not share an identifier** (tasks T-119-3, T-119-4,
+/// T-119-14): the re-readings of the flag, the three of a list opened by a click on the flag, the
+/// settings a second start brings forward — and the letters' tick, `2`.
+#[test]
+fn the_timers_of_the_ui_window_are_distinct() {
+    let mut ids: Vec<usize> = lang_switcher::flags::REREAD_TIMERS.to_vec();
+    ids.extend(lang_switcher::flags::LIST_TIMERS);
+    ids.push(tray::SECOND_START_TIMER);
+
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    assert_eq!(sorted.len(), ids.len(), "two timers of one window: {ids:?}");
+    assert!(!ids.contains(&2), "2 is the letters' tick");
 }

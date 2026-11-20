@@ -1805,6 +1805,27 @@ pub struct Letters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_noticed: Option<letters::Date>,
 
+    /// Whether the window «Обновлено» comes up after an important release — task T-119-6
+    /// (решения 208.93, 208.119). The check box «Больше не показывать окна обновлений» of that
+    /// window and the switch «Сообщать об обновлениях программы» of «От автора» (T-119-10) are this
+    /// one setting; it silences only that window — the entry of the menu and the fallback letter
+    /// stay. On by default. No schema of its own, as `update_noticed` before it.
+    #[serde(default = "default_true")]
+    pub release_window: bool,
+
+    /// While the window «Обновлено» is due and not yet shown, the version the program was updated
+    /// **from** («Было Y» of its text) — task T-119-6: written when the start after an important
+    /// update finds it due, emptied the moment the window is shown — so it is shown **once**, even
+    /// when it was never closed and the computer restarted, and still shown when the program
+    /// stopped before its quiet moment came. Empty — nothing is due.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub release_due: String,
+
+    /// The day of the last update — task T-119-7: the entry «Что нового в X…» of the menu stands
+    /// for a week from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_on: Option<letters::Date>,
+
     /// ⭐ **The mark of the first run — stage E116, task T-116-12, решение 208.59.** `due` only in
     /// a file this run created ([`read_from_via`], no file at all); `sent` after any HTTP answer to
     /// the read of the feed that carried `?first=1`. Absent — a file of an older build, an update —
@@ -1854,6 +1875,9 @@ impl Default for Letters {
             first_feed_letter: None,
             latest_known: String::new(),
             update_noticed: None,
+            release_window: true,
+            release_due: String::new(),
+            updated_on: None,
             first_mark: None,
             read_ids: Vec::new(),
             reminders: BTreeMap::new(),
@@ -3639,6 +3663,9 @@ pub const IDS_GROUP_GENERAL: u16 = 3001;
 pub const IDS_AUTOSTART: u16 = 3002;
 /// The label of the language combo box.
 pub const IDS_LANGUAGE_LABEL: u16 = 3003;
+/// «Нашли ошибку в переводе?» — the quiet button under the language, task T-120-22 (решение
+/// 208.169, С12); it opens the wizard on the page of the idea. Block 3280…3295 (`app.rc`).
+pub const IDS_TRANSLATION_REPORT: u16 = 3289;
 // ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was `IDS_LANGUAGE_RESTART`,
 // «вступит в силу после перезапуска». Решения 83 и 83а.2 chose that sentence and вопрос 99 took
 // its subject away: the language now takes effect at once (task Т-31-1). The number stays a hole
@@ -3736,6 +3763,25 @@ pub const IDS_STATE_AUTOSTART: u16 = 3049;
 pub const IDS_AUTOSTART_PRESENT: u16 = 3050;
 /// It is not.
 pub const IDS_AUTOSTART_ABSENT: u16 = 3051;
+/// «Работает» — the first line of «Состояние» for a person, task T-120-21 (решение 208.169, С10).
+/// The lines above (`IDS_STATE_*`) stay unchanged under [`IDS_STATUS_DETAILS`]. Block 3280…3295.
+pub const IDS_STATUS_WORKING: u16 = 3280;
+/// «Приостановлена» — the word of the menu «Приостановить» and of the tooltip.
+pub const IDS_STATUS_SUSPENDED: u16 = 3281;
+/// «Нужен перезапуск» — as the menu says it, «Возобновить — нужен перезапуск».
+pub const IDS_STATUS_RESTART: u16 = 3282;
+/// «Исправляет: {0}» — {0} the layouts, source → target, with the arrow of the cycle.
+pub const IDS_STATUS_FIXES: u16 = 3283;
+/// «Раскладки не выбраны» — the second line when there is no pair.
+pub const IDS_STATUS_FIXES_NONE: u16 = 3284;
+/// «Клавиша: {0}» — the hotkey, named as in the settings.
+pub const IDS_STATUS_HOTKEY: u16 = 3285;
+/// «Запуск при входе в систему: включён».
+pub const IDS_STATUS_AUTOSTART_ON: u16 = 3286;
+/// «Запуск при входе в систему: выключен».
+pub const IDS_STATUS_AUTOSTART_OFF: u16 = 3287;
+/// «Подробности для автора» — the quiet button that opens the lines of the developer.
+pub const IDS_STATUS_DETAILS: u16 = 3288;
 /// The note about a layout named in the file that this session does not have.
 pub const IDS_LAYOUT_NOTE: u16 = 3052;
 /// The word «источник» inside that note.
@@ -3801,6 +3847,38 @@ pub const IDS_ABOUT_HELP_6: u16 = 3263;
 /// «Флаг раскладки в трее» — the check box of FR-90б in «Общие», task T-119-2 (решения 208.88,
 /// 208.89). The first of the block 3264…3279.
 pub const IDS_TRAY_FLAG: u16 = 3264;
+/// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
+/// is hidden at the clock, task T-119-3, part Б (решение 208.88).
+pub const IDS_OWN_LIST_TITLE: u16 = 3265;
+/// «Дополнительные параметры клавиатуры» — the link at the bottom of that list.
+pub const IDS_OWN_LIST_MORE: u16 = 3266;
+/// «обновление» — what the window in the corner is about after an update (its header), T-119-6.
+pub const IDS_CORNER_UPDATE: u16 = 3267;
+/// «Lang Switcher обновлён до {0}» — the title of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_TITLE: u16 = 3268;
+/// «Было {0}. Новое: …» — the short text of the last important release (a permanent name), T-119-6.
+pub const IDS_RELEASE_TEXT: u16 = 3269;
+/// «Все изменения на сайте» — the link of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_CHANGES: u16 = 3270;
+/// «Как пользоваться» — the second button of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_HOWTO: u16 = 3271;
+/// «Понятно» — the button that closes a window in the corner, T-119-5 and T-119-6.
+pub const IDS_CORNER_OK: u16 = 3272;
+/// «Больше не показывать окна обновлений» — the check box of the window «Обновлено», T-119-6.
+pub const IDS_RELEASE_NEVER: u16 = 3273;
+/// «флаг раскладки» — what the hint of the flag is about (its header), T-119-5.
+pub const IDS_CORNER_FLAG: u16 = 3274;
+/// «Флаг раскладки включён» — the title of the hint, T-119-5.
+pub const IDS_HINT_TITLE: u16 = 3275;
+/// «Чтобы флаг всегда был виден на панели задач, …» — the text of the hint, T-119-5.
+pub const IDS_HINT_TEXT: u16 = 3276;
+/// «Открыть Параметры Windows» — the main button of the hint, T-119-5.
+pub const IDS_HINT_OPEN: u16 = 3277;
+/// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
+pub const IDS_MENU_WHATSNEW: u16 = 3278;
+/// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
+/// 3264…3279.
+pub const IDS_UPDATES_SWITCH: u16 = 3279;
 /// First item of FR-91 while the program is active.
 pub const IDS_MENU_SUSPEND: u16 = 3072;
 /// First item of FR-91 while the program is suspended.
@@ -4239,6 +4317,13 @@ pub const IDS_WIZARD_IDEA_NOTE: u16 = 3189;
 pub const IDS_WIZARD_IDEA_WHAT: u16 = 3190;
 /// «Чем это поможет?».
 pub const IDS_WIZARD_IDEA_HELPS: u16 = 3191;
+/// «Что написано сейчас?» — the first field of the page of the idea for an appeal about the
+/// translation, task T-120-22 (решение 208.169, С12). Block 3280…3295.
+pub const IDS_WIZARD_TRANSLATION_NOW: u16 = 3290;
+/// «Как правильно?» — the second field.
+pub const IDS_WIZARD_TRANSLATION_RIGHT: u16 = 3291;
+/// «Ошибка в переводе: {0}» — the first line of such an appeal; {0} the tag of the language.
+pub const IDS_WIZARD_TRANSLATION_LINE: u16 = 3292;
 
 /// Step 4: «Что приложить?».
 pub const IDS_WIZARD_ATTACH_TITLE: u16 = 3192;
@@ -4348,11 +4433,24 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and thirty-two since task T-119-2** — FR-90б: the check box of the flag of the
 /// layout, [`IDS_TRAY_FLAG`] (3264).
-pub const INTERFACE_STRINGS: [u16; 232] = [
+///
+/// ⚠ **Two hundred and forty-five since stage E120, tasks T-120-21 and T-120-22** — решение
+/// 208.169, С10 and С12: «Состояние» for a person, nine (3280…3288), and «Нашли ошибку в
+/// переводе?», four (3289…3292). 232 + 13.
+///
+/// ⚠ **Two hundred and forty-seven since task T-119-3, part Б** — решение 208.88: the title and
+/// the link of the list of the program's own, [`IDS_OWN_LIST_TITLE`] and [`IDS_OWN_LIST_MORE`]
+/// (3265, 3266). 245 + 2.
+///
+/// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
+/// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
+/// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
+pub const INTERFACE_STRINGS: [u16; 260] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
     IDS_LANGUAGE_LABEL,
+    IDS_TRANSLATION_REPORT,
     IDS_GROUP_HOTKEY,
     IDS_HOTKEY_LABEL,
     IDS_HOTKEY_SET,
@@ -4406,6 +4504,15 @@ pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_STATE_AUTOSTART,
     IDS_AUTOSTART_PRESENT,
     IDS_AUTOSTART_ABSENT,
+    IDS_STATUS_WORKING,
+    IDS_STATUS_SUSPENDED,
+    IDS_STATUS_RESTART,
+    IDS_STATUS_FIXES,
+    IDS_STATUS_FIXES_NONE,
+    IDS_STATUS_HOTKEY,
+    IDS_STATUS_AUTOSTART_ON,
+    IDS_STATUS_AUTOSTART_OFF,
+    IDS_STATUS_DETAILS,
     IDS_LAYOUT_NOTE,
     IDS_LAYOUT_WORD_SOURCE,
     IDS_LAYOUT_WORD_TARGET,
@@ -4538,6 +4645,9 @@ pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_WIZARD_IDEA_NOTE,
     IDS_WIZARD_IDEA_WHAT,
     IDS_WIZARD_IDEA_HELPS,
+    IDS_WIZARD_TRANSLATION_NOW,
+    IDS_WIZARD_TRANSLATION_RIGHT,
+    IDS_WIZARD_TRANSLATION_LINE,
     IDS_WIZARD_ATTACH_TITLE,
     IDS_WIZARD_ATTACH_NOTE,
     IDS_WIZARD_ATTACH_MACHINE,
@@ -4592,6 +4702,21 @@ pub const INTERFACE_STRINGS: [u16; 232] = [
     IDS_WIZARD_SENT_TITLE,
     IDS_WIZARD_SENT_TEXT,
     IDS_TRAY_FLAG,
+    IDS_OWN_LIST_TITLE,
+    IDS_OWN_LIST_MORE,
+    IDS_CORNER_UPDATE,
+    IDS_RELEASE_TITLE,
+    IDS_RELEASE_TEXT,
+    IDS_RELEASE_CHANGES,
+    IDS_RELEASE_HOWTO,
+    IDS_CORNER_OK,
+    IDS_RELEASE_NEVER,
+    IDS_CORNER_FLAG,
+    IDS_HINT_TITLE,
+    IDS_HINT_TEXT,
+    IDS_HINT_OPEN,
+    IDS_MENU_WHATSNEW,
+    IDS_UPDATES_SWITCH,
 ];
 
 /// How many strings one string table resource holds — fixed by the format, not by us.
@@ -7449,6 +7574,13 @@ impl Drop for DialogSession {
 /// would stop the about window from following the system theme again.
 pub fn about_is_open() -> bool {
     ABOUT_WINDOW.with(Cell::get) != 0
+}
+
+/// The window of this thread a second start of the program brings forward — FR-82 since 1.8.0,
+/// task T-119-14: the settings dialog of FR-92 if it is up, else the «О программе» window (which
+/// keeps the settings from opening, `tray::dialog_locks_command`), else `None`.
+pub fn open_window() -> Option<HWND> {
+    live_window(&DIALOG_WINDOW).or_else(|| live_window(&ABOUT_WINDOW))
 }
 
 /// The open «О программе» window of this thread, for as long as this value lives — FR-92а,

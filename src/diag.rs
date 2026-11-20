@@ -845,6 +845,11 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // the end. Named by the step, as the three rows of the probe above are; appended at the end so
     // that no index above it moves; a fact and no value, `Kind::Process`, no new `Kind`.
     ("password probe: focus events", Kind::Process),
+    // Stage E119, task T-119-2, решения 208.88 и 208.89: the system refused to make the icon of the
+    // layout flag out of the pixels `flags::render` drew. The record then carries the icon of FR-90
+    // (NFR-13). `Kind::Tray`, the group of every other icon row; appended at the end so that no
+    // index above it moves; a fact and no value — not the layout, not the size.
+    ("CreateIconIndirect(flag)", Kind::Tray),
     // Stage Э120, task T-120-3: the canvas of the interface shell (`ui::canvas`) — Direct2D refused
     // a render target, and, after two refusals in a row, the canvas turned to the plain look of
     // GDI. Appended at the end so that no index above them moves; a fact and no value.

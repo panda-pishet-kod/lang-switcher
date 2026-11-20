@@ -485,6 +485,48 @@ fn the_list_closes_on_the_hide_or_destruction_of_its_window_only() {
     );
 }
 
+/// **Windows 11 closes the list without hiding its window** (stand T-119-4, 2026-11-20, 26300): at
+/// every close — `Enter` after the arrows, a click on a row, `Esc` — `Shell_InputSwitchTopLevelWindow`
+/// gets a focus event and nothing else, while the overlay the shell puts behind the list,
+/// `Shell_InputSwitchDismissOverlay`, is hidden and destroyed (4 closes of 4, `evmon` logs). The
+/// choice by the mouse was caught by the release of the button; the choice by the arrows and
+/// `Enter` by nothing — the flag kept the old layout 12 times of 12. The overlay's hide is the
+/// sign of the list closing there; its birth and its showing are not.
+#[test]
+fn the_list_closes_on_windows_11_by_its_overlay() {
+    use flags::{LIST_OVERLAY_CLASS, closes_the_list};
+
+    const CREATE: u32 = 0x8000;
+    const DESTROY: u32 = 0x8001;
+    const SHOW: u32 = 0x8002;
+    const HIDE: u32 = 0x8003;
+
+    assert_eq!(LIST_OVERLAY_CLASS, "Shell_InputSwitchDismissOverlay");
+    assert!(closes_the_list(HIDE, 0, 0, LIST_OVERLAY_CLASS));
+    assert!(closes_the_list(DESTROY, 0, 0, LIST_OVERLAY_CLASS));
+    assert!(
+        !closes_the_list(SHOW, 0, 0, LIST_OVERLAY_CLASS),
+        "the list opening"
+    );
+    assert!(
+        !closes_the_list(CREATE, 0, 0, LIST_OVERLAY_CLASS),
+        "the list opening"
+    );
+    assert!(
+        !closes_the_list(HIDE, -4, 0, LIST_OVERLAY_CLASS),
+        "a part of it, not the window"
+    );
+    assert!(
+        !closes_the_list(
+            HIDE,
+            0,
+            0,
+            "Windows.UI.Composition.DesktopWindowContentBridge"
+        ),
+        "a window of XAML — every flyout of explorer has one"
+    );
+}
+
 /// **The guard of «флаг выключен — нового кода нет в работе», on the source:** every post of the
 /// flag's messages from the watcher, the Raw Input and the hook stands behind `flags::is_on()` in
 /// the very condition that guards it.
@@ -583,4 +625,283 @@ fn the_name_of_the_indicator_finds_the_layout_of_its_language() {
         None,
         "another icon"
     );
+}
+
+/// **The flag itself is never taken for the input indicator** (task T-119-3). Since T-119-2 the
+/// tooltip of the flag — the name of its button on the taskbar of Windows 11 — begins with the
+/// language of the layout, «Русский (Россия)», and every button of the tray there has the same
+/// automation id: on a Windows whose interface speaks the program's language the search for the
+/// indicator would find the flag first (it stands left of РУС/ENG) — the console would read the
+/// flag's own layout back, and a click on the flag would press the flag again.
+#[test]
+fn the_flag_is_not_taken_for_the_indicator() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let names = |layout: LayoutId| -> Option<String> {
+        Some(match layout.language_id() {
+            0x0409 => "Английский".to_owned(),
+            0x0419 => "Русский".to_owned(),
+            _ => return None,
+        })
+    };
+    let session = [us, ru];
+
+    assert_eq!(
+        flags::layout_named_in(
+            "Русский (Россия)\nLang Switcher — работает",
+            &session,
+            names
+        ),
+        None,
+        "the flag's own tooltip, whatever language it opens with"
+    );
+}
+
+/// **After a list the program opened has closed — what to give the window** (task T-119-3,
+/// решение 208.164): the layout chosen in the list, only where it did not arrive by itself.
+/// Edge does not get a layout chosen in a list the program opened (0 of 20 on each Windows);
+/// Блокнот and cmd do (20 of 20) — there nothing is switched a second time, nothing sounds.
+#[test]
+fn the_window_gets_the_chosen_layout_only_where_it_did_not_arrive() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let none = LayoutId::from_raw(0);
+
+    assert_eq!(
+        flags::layout_to_give(us, ru, ru, false),
+        None,
+        "arrived by itself (Блокнот)"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, us, false),
+        Some(ru),
+        "did not arrive (Edge): the program's own switch"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, us, us, false),
+        None,
+        "Esc, a click aside, the same row: nothing was chosen"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, us, true),
+        None,
+        "a console — the reading is blind, and the choice arrives there by itself"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, none, us, false),
+        None,
+        "the choice could not be read: nothing is guessed"
+    );
+    assert_eq!(
+        flags::layout_to_give(us, ru, none, false),
+        None,
+        "the window could not be read: nothing is guessed"
+    );
+}
+
+/// **The window the focus goes back to is the person's, never a part of the shell** (task
+/// T-119-3): a click on the flag puts the taskbar in front, and the list itself is a window of
+/// explorer — neither is where the person was typing.
+#[test]
+fn the_shell_is_not_the_window_the_person_typed_in() {
+    for shell in [
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "NotifyIconOverflowWindow",
+        "TopLevelWindowForOverflowXamlIsland",
+        "Shell_InputSwitchTopLevelWindow",
+        "Shell_InputSwitchDismissOverlay",
+        "Xaml_WindowedPopupClass",
+        "Windows.UI.Core.CoreWindow",
+        "#32768",
+        "Progman",
+        "WorkerW",
+    ] {
+        assert!(flags::is_shell_window_class(shell), "{shell} is the shell");
+    }
+
+    for person in [
+        "Notepad",
+        "Chrome_WidgetWin_1",
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "#32770",
+    ] {
+        assert!(
+            !flags::is_shell_window_class(person),
+            "{person} is a window a person types in"
+        );
+    }
+}
+
+/// **The list of the program's own (T-119-3, part Б): what its choice gives the window.** Nothing of
+/// it reaches the window by itself — the chosen layout is given unless the window is in it, and a
+/// console is given it too (its reading is blind; the choice of Windows' list reached it by itself,
+/// this one does not).
+#[test]
+fn the_choice_in_the_own_list_is_given_by_the_program() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let none = LayoutId::from_raw(0);
+
+    assert_eq!(flags::own_layout_to_give(ru, us, false), Some(ru));
+    assert_eq!(
+        flags::own_layout_to_give(ru, ru, false),
+        None,
+        "already in it: no second switch"
+    );
+    assert_eq!(
+        flags::own_layout_to_give(ru, none, true),
+        Some(ru),
+        "a console: given"
+    );
+    assert_eq!(
+        flags::own_layout_to_give(none, us, false),
+        None,
+        "nothing chosen"
+    );
+}
+
+/// **The geometry of the own list — the mock-up's numbers at 96 DPI, scaled with the monitor.**
+#[test]
+fn the_own_list_has_the_size_of_the_mock_up_and_scales() {
+    let at_100 = flags::own_geometry(2, 96);
+
+    assert_eq!(at_100.width, 300, "the mock-up's width");
+    assert_eq!(at_100.row, 40);
+    assert_eq!(at_100.code, 44);
+    assert_eq!(
+        at_100.height,
+        6 + 25 + 2 * 40 + 9 + 32 + 6,
+        "padding, title, two rows, separator, link, padding"
+    );
+
+    let at_150 = flags::own_geometry(2, 144);
+
+    assert_eq!(at_150.width, 450);
+    assert_eq!(at_150.row, 60);
+    assert!(
+        flags::own_geometry(5, 96).height > at_100.height,
+        "more layouts, a taller list"
+    );
+    assert_eq!(flags::own_geometry(0, 96), flags::own_geometry(1, 96));
+}
+
+/// **Where the own list stands: beside the flag, inside the work area, on every side of the
+/// taskbar** — the requirement «у значка на любой стороне панели задач … не выходя за рабочую
+/// область».
+#[test]
+fn the_own_list_stands_beside_the_flag_inside_the_work_area() {
+    use windows::Win32::Foundation::RECT;
+
+    let rect = |left, top, right, bottom| RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+    let size = (300, 160);
+    let inside = |(x, y): (i32, i32), work: RECT| {
+        x >= work.left && y >= work.top && x + size.0 <= work.right && y + size.1 <= work.bottom
+    };
+
+    // The taskbar below (1280×800, the bar 48 high): above the icon, the right edges together.
+    let work = rect(0, 0, 1280, 752);
+    let icon = rect(1054, 752, 1086, 800);
+    let at = flags::own_place(icon, work, size, 8);
+    assert_eq!(at, (1086 - 300, 752 - 8 - 160));
+    assert!(inside(at, work));
+
+    // An icon at the very right: pulled inside.
+    let at = flags::own_place(rect(1250, 752, 1280, 800), work, size, 8);
+    assert_eq!(at.0, 1280 - 300);
+    assert!(inside(at, work));
+
+    // The taskbar at the top: below the icon.
+    let work = rect(0, 48, 1280, 800);
+    let at = flags::own_place(rect(1054, 0, 1086, 48), work, size, 8);
+    assert_eq!(at.1, 48 + 8);
+    assert!(inside(at, work));
+
+    // On the right: left of the icon.
+    let work = rect(0, 0, 1232, 800);
+    let at = flags::own_place(rect(1232, 700, 1280, 732), work, size, 8);
+    assert_eq!(at.0, 1232 - 8 - 300);
+    assert!(inside(at, work));
+
+    // On the left: right of the icon.
+    let work = rect(48, 0, 1280, 800);
+    let at = flags::own_place(rect(0, 700, 48, 732), work, size, 8);
+    assert_eq!(at.0, 48 + 8);
+    assert!(inside(at, work));
+
+    // An icon at the top of a short screen: never above the work area.
+    let work = rect(0, 0, 1280, 120);
+    let at = flags::own_place(rect(1054, 120, 1086, 168), work, size, 8);
+    assert!(at.1 >= 0, "the top stays on the screen");
+}
+
+/// **The keyboard in the own list — as in the list of Windows:** arrows, Home and End, no wrapping.
+#[test]
+fn the_arrows_move_the_mark_without_wrapping() {
+    const UP: u16 = 0x26;
+    const DOWN: u16 = 0x28;
+    const HOME: u16 = 0x24;
+    const END: u16 = 0x23;
+
+    assert_eq!(flags::own_step(0, 3, DOWN), 1);
+    assert_eq!(flags::own_step(2, 3, DOWN), 2, "no wrapping at the end");
+    assert_eq!(flags::own_step(0, 3, UP), 0, "no wrapping at the start");
+    assert_eq!(flags::own_step(2, 3, UP), 1);
+    assert_eq!(flags::own_step(1, 3, HOME), 0);
+    assert_eq!(flags::own_step(0, 3, END), 2);
+    assert_eq!(
+        flags::own_step(1, 3, 0x41),
+        1,
+        "another key leaves the mark"
+    );
+}
+
+/// **A point of the own list falls on a row, on the link, or on nothing.**
+#[test]
+fn a_point_of_the_own_list_falls_on_a_row_or_the_link() {
+    let geometry = flags::own_geometry(2, 96);
+    let first = 6 + 25 + 5;
+    let second = 6 + 25 + 40 + 5;
+    let link = 6 + 25 + 2 * 40 + 9 + 5;
+
+    assert_eq!(flags::own_hit(2, &geometry, 100, first), Some(0));
+    assert_eq!(flags::own_hit(2, &geometry, 100, second), Some(1));
+    assert_eq!(flags::own_hit(2, &geometry, 100, link), Some(usize::MAX));
+    assert_eq!(flags::own_hit(2, &geometry, 100, 10), None, "the title");
+    assert_eq!(flags::own_hit(2, &geometry, 2, first), None, "the padding");
+}
+
+/// **The rows of the own list are the layouts of the session in their order, coded by language.**
+#[test]
+fn the_rows_of_the_own_list_are_the_layouts_of_the_session() {
+    use lang_switcher::layouts::LayoutId;
+
+    let us = LayoutId::from_raw(0x0409_0409);
+    let ru = LayoutId::from_raw(0x0419_0419);
+    let rows = flags::own_rows(
+        &[us, ru],
+        &[
+            "English (United States)".to_owned(),
+            "Русский (Россия)".to_owned(),
+        ],
+        flags::language_code,
+    );
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].layout, us);
+    assert_eq!(rows[0].code, "ENG");
+    assert_eq!(rows[1].code, "RUS");
+    assert_eq!(rows[1].name, "Русский (Россия)");
 }

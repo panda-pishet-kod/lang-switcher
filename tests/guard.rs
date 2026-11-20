@@ -614,6 +614,16 @@ fn code_lines_with<'a>(text: &'a str, needle: &str) -> Vec<(usize, &'a str)> {
 /// That is stronger than "the callback does not call it" and is what makes it checkable: a
 /// future edit that put a UI Automation call anywhere on the hook's path would have to name one
 /// of these symbols in `hook.rs` first.
+///
+/// ⭐ **Stage E119, tasks T-119-4 and T-119-3 (решения 208.142, 208.113, 208.164): the second owner
+/// is module `flags`, and it is admitted by the thread it runs on.** The layout flag reads the name
+/// of the input indicator of Windows (a console in front, where FR-52 is blind) and presses that
+/// indicator on Windows 11 (a click on the flag) — UI Automation of explorer's taskbar, not of the
+/// window the person types in, so nothing of FR-71's password question; and not in module guard,
+/// whose product code may not read a name at all (`module_guard_formats_nothing_it_learned…`). What
+/// FR-71 and §6.1 ask is kept: the hook never, the watcher thread only. So module `flags` reaches
+/// UI Automation through exactly two doors, `answer_console` and `answer_list_open`, and each is
+/// called once in the whole program — by the window procedure, behind `is_watcher_window(hwnd)`.
 #[test]
 fn no_ui_automation_name_occurs_anywhere_near_the_hook() {
     const UIA_NAMES: [&str; 6] = [
@@ -623,6 +633,11 @@ fn no_ui_automation_name_occurs_anywhere_near_the_hook() {
         "CurrentIsPassword",
         "UIA_IsPassword",
         "UIAutomationCore",
+    ];
+    const OWNERS: [&str; 2] = ["flags.rs", "guard.rs"];
+    const FLAG_DOORS: [&str; 2] = [
+        "crate::flags::answer_console()",
+        "crate::flags::answer_list_open()",
     ];
 
     for (path, text) in sources() {
@@ -644,12 +659,58 @@ fn no_ui_automation_name_occurs_anywhere_near_the_hook() {
                 continue;
             }
 
-            assert_eq!(
-                name, "guard.rs",
+            assert!(
+                OWNERS.contains(&name.as_str()),
                 "FR-71: {symbol} occurs in src\\{name} at lines {hits:?}; UI Automation belongs to \
-                 module guard and to the watcher thread, and above all not to the hook"
+                 module guard (and, for the input indicator, module flags) on the watcher thread, \
+                 and above all not to the hook"
             );
         }
+
+        if name != "app.rs" {
+            for door in FLAG_DOORS {
+                let bare = door.trim_start_matches("crate::").trim_end_matches("()");
+
+                assert!(
+                    code_lines_with(&text, &format!("{bare}(")).is_empty(),
+                    "src\\{name} calls {door}: the UI Automation of module flags is the watcher \
+                     window's, called from app.rs and nowhere else"
+                );
+            }
+        }
+    }
+
+    let app = source_of("app.rs");
+    let lines: Vec<&str> = app.lines().collect();
+
+    for door in FLAG_DOORS {
+        let calls: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| {
+                let line = line.trim();
+                !line.starts_with("//") && line.contains(door)
+            })
+            .map(|(at, _)| at)
+            .collect();
+
+        assert_eq!(
+            calls.len(),
+            1,
+            "src\\app.rs: {door} is called exactly once — by the watcher window"
+        );
+
+        let gate = lines[..calls[0]]
+            .iter()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(&"");
+
+        assert!(
+            gate.trim_start().starts_with("if ") && gate.contains("is_watcher_window(hwnd)"),
+            "src\\app.rs: {door} stands behind is_watcher_window(hwnd) — the line above it is \
+             {gate:?}"
+        );
     }
 }
 
@@ -683,8 +744,17 @@ fn send_message_is_used_nowhere_and_the_timeout_is_the_fifty_of_fr72() {
 }
 
 /// **Acceptance point 12.** The subscription of `EVENT_OBJECT_FOCUS` is the one task T-03-3 made,
-/// and this task raised no second one: `SetWinEventHook` occurs in `src\watchdog.rs` and nowhere
-/// else.
+/// and this task raised no second one: `SetWinEventHook` occurs in `src\watchdog.rs` — and, since
+/// stage E119, in `src\flags.rs`, which subscribes nothing of focus.
+///
+/// ⭐ **Stage E119, task T-119-4, решение 208.142.** The layout flag of FR-90б learns that the
+/// list of layouts at the clock closed (Windows 10 tells a choice by the mouse there by nothing
+/// else) from a second subscription: `flags::ListWatch`, on the UI thread, only while the flag is
+/// on, for the process `explorer` alone — SPEC §6.1 names it under the UI thread. It is admitted
+/// here by what it subscribes, not by its file name: the range is `EVENT_OBJECT_DESTROY` …
+/// `EVENT_OBJECT_HIDE`, and module `flags` names neither `EVENT_OBJECT_FOCUS` nor
+/// `EVENT_SYSTEM_FOREGROUND` anywhere in its code. A focus subscription there, or a subscription
+/// in a third module, fails this test.
 #[test]
 fn the_focus_subscription_is_still_the_only_one_in_the_program() {
     let mut owners = Vec::new();
@@ -700,10 +770,46 @@ fn the_focus_subscription_is_still_the_only_one_in_the_program() {
         }
     }
 
+    owners.sort();
+
     assert_eq!(
         owners,
-        ["watchdog.rs"],
-        "the WinEvent subscriptions belong to module watchdog and to no other"
+        ["flags.rs", "watchdog.rs"],
+        "the WinEvent subscriptions belong to module watchdog and, for the list of layouts, to \
+         module flags — to no other"
+    );
+
+    let flags = source_of("flags.rs");
+
+    for focus in ["EVENT_OBJECT_FOCUS", "EVENT_SYSTEM_FOREGROUND"] {
+        assert!(
+            code_lines_with(&flags, focus).is_empty(),
+            "src\\flags.rs: {focus} — the focus and the foreground are module watchdog's \
+             subscription, the flag's is the list of layouts only"
+        );
+    }
+
+    let lines: Vec<&str> = flags.lines().map(str::trim).collect();
+    let calls: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.starts_with("//") && line.starts_with("SetWinEventHook("))
+        .map(|(at, _)| at)
+        .collect();
+
+    assert_eq!(
+        calls.len(),
+        1,
+        "src\\flags.rs: exactly one call of SetWinEventHook, the one of ListWatch"
+    );
+
+    let range = &lines[calls[0] + 1..calls[0] + 3];
+
+    assert_eq!(
+        range,
+        ["EVENT_OBJECT_DESTROY,", "EVENT_OBJECT_HIDE,"],
+        "src\\flags.rs: ListWatch subscribes the range EVENT_OBJECT_DESTROY … EVENT_OBJECT_HIDE \
+         (the list of layouts closing) and nothing wider"
     );
 }
 

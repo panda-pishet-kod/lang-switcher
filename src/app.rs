@@ -201,8 +201,17 @@ pub fn run() -> ExitCode {
                 // it always has — the notification, unless this is a debug build on a bench
                 // (`already_running_is_silent`, task Т-25-2), and the exit code the acceptance
                 // of task T-01-2 and the installer both read.
+                //
+                // ⭐ **FR-82 since 1.8.0 — task T-119-14, решение 208.148:** the running copy is asked
+                // to open its settings window first, and the notification is what is left when the
+                // request did not reach it — no window, a refusal, another integrity level. A bench
+                // that silences the notification asks nothing either: a debug copy beside the
+                // person's own program must not put that program's settings on the screen.
                 InstanceVerdict::SecondCopy => {
-                    if !already_running_is_silent() {
+                    if second_start_tells_the_person(
+                        already_running_is_silent(),
+                        ask_the_running_copy_for_its_settings,
+                    ) {
                         notify_already_running();
                     }
 
@@ -322,6 +331,48 @@ fn a_window_of_ours_is_up() -> bool {
     }
 
     false
+}
+
+/// Whether a second start of the program still shows the notification of FR-82 — task T-119-14,
+/// решение 208.148. A bench that silences the notification (`silent`) asks the running copy for
+/// nothing and says nothing; otherwise the running copy is asked to open its settings window, and
+/// the notification is shown only when the request did not reach it. Pure but for `ask`, which is
+/// not called on a bench.
+pub fn second_start_tells_the_person(silent: bool, ask: impl FnOnce() -> bool) -> bool {
+    !silent && !ask()
+}
+
+/// The request of a second start — task T-119-14: the UI window of the running copy of this
+/// session (the top-level window of [`WINDOW_CLASS_NAME`]; the other two are message-only and
+/// `FindWindowW` does not see them) is given the right to the foreground this process holds — the
+/// person has just started it — and [`WM_APP_SHOW_SETTINGS`] is posted to it. `false` when there is
+/// no such window or the post was refused (another integrity level: UIPI answers it so).
+fn ask_the_running_copy_for_its_settings() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, FindWindowW, GetWindowThreadProcessId, PostMessageW,
+    };
+
+    // SAFETY: a `'static` UTF-16 literal of this build and no window name; a null answer is
+    // checked.
+    let Ok(window) = (unsafe { FindWindowW(WINDOW_CLASS_NAME, PCWSTR::null()) }) else {
+        return false;
+    };
+
+    let mut process = 0u32;
+
+    // SAFETY: a window handle by value and a local for the process id.
+    unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+
+    if process == 0 {
+        return false;
+    }
+
+    // SAFETY: a process id by value. Refused when this process has no right to give — then the
+    // settings window comes up behind, which is still the answer asked for.
+    let _ = unsafe { AllowSetForegroundWindow(process) };
+
+    // SAFETY: a window handle by value and a message of this program that carries nothing.
+    unsafe { PostMessageW(Some(window), WM_APP_SHOW_SETTINGS, WPARAM(0), LPARAM(0)) }.is_ok()
 }
 
 /// Writes the ring to the file on a path that never reaches the threads — task T-41-5, part (а)
@@ -586,6 +637,13 @@ pub const WM_APP_SOUND_REFUSED: u32 = WM_APP + 20;
 /// buys its sender a layout of this program's own windows and nothing else, and is answered only
 /// at the UI window.
 pub const WM_APP_OWN_LAYOUT: u32 = WM_APP + 24;
+
+/// ⭐ **FR-82 since 1.8.0 — task T-119-14, решение 208.148.** Posted by a second start of the program
+/// to the UI window of the copy already running in the session: open the settings window, or bring
+/// forward the one that is open. `WM_APP + 31`, after the flag's `+ 25` … `+ 30` (module `flags`).
+/// SEC-05: carries nothing, answered only at the UI window; a forged one buys its sender the
+/// settings window of this program on the screen — what a double click on the icon gives anybody.
+pub const WM_APP_SHOW_SETTINGS: u32 = WM_APP + 31;
 
 /// The sound of a press that replaced text — FR-100, «чк-чк».
 ///
@@ -3946,6 +4004,14 @@ unsafe extern "system" fn window_proc(
                 return LRESULT(0);
             }
 
+            // FR-90б, task T-119-3: a click on the flag — the UI thread asks for the input indicator
+            // of Windows 11 to be pressed; UI Automation is this thread's (its STA). The watcher
+            // window only (SEC-05); the message carries nothing.
+            if message == crate::flags::WM_APP_LIST_OPEN && is_watcher_window(hwnd) {
+                crate::flags::answer_list_open();
+                return LRESULT(0);
+            }
+
             if message == crate::watchdog::WM_APP_RECHECK_FOREGROUND && is_watcher_window(hwnd) {
                 crate::watchdog::arm_foreground_recheck();
 
@@ -4090,6 +4156,13 @@ unsafe extern "system" fn window_proc(
 
             if let Some(result) = crate::hook::handle_input_message(message, wparam, lparam) {
                 return result;
+            }
+
+            // FR-82 since 1.8.0, task T-119-14: a second start asks for the settings window. The UI
+            // window only (SEC-05); the message carries nothing.
+            if message == WM_APP_SHOW_SETTINGS && is_ui_window(hwnd) {
+                crate::tray::show_settings_for_a_second_start();
+                return LRESULT(0);
             }
 
             let handled = crate::tray::handle_ui_message(message, wparam, lparam);
