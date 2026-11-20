@@ -98,6 +98,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "ಫೈಲ್‌ನಲ್ಲಿ ಹೆಸರಿಸಿದ ಲೇಔಟ್ ({0}) ಸೆಷನ್‌ನಲ್ಲಿ ಇಲ್ಲ — ಮತ್ತೆ ಆಯ್ಕೆಮಾಡಿ."
     IDS_LAYOUT_WORD_SOURCE  "ಮೂಲ"
     IDS_LAYOUT_WORD_TARGET  "ಗುರಿ"

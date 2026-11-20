@@ -96,6 +96,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "An der Sessioun gëtt et kee Layout mam Numm aus der Datei ({0}) — wielt nei."
     IDS_LAYOUT_WORD_SOURCE  "Quell"
     IDS_LAYOUT_WORD_TARGET  "Zil"

@@ -101,6 +101,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "سېسسىيەدە ھۆججەتتە كۆرسىتىلگەن ھەرپتاختا ({0}) يوق — قايتا تاللاڭ."
     IDS_LAYOUT_WORD_SOURCE  "مەنبە"
     IDS_LAYOUT_WORD_TARGET  "نىشان"

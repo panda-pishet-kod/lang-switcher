@@ -96,6 +96,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "ଫାଇଲରେ ନାମ ଥିବା ଲେଆଉଟ ({0}) ସେସନରେ ନାହିଁ — ପୁଣି ବାଛନ୍ତୁ।"
     IDS_LAYOUT_WORD_SOURCE  "ଉତ୍ସ"
     IDS_LAYOUT_WORD_TARGET  "ଲକ୍ଷ୍ୟ"

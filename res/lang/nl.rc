@@ -96,6 +96,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "De sessie heeft geen toetsenbordindeling met de naam uit het bestand ({0}) — kies opnieuw."
     IDS_LAYOUT_WORD_SOURCE  "bron"
     IDS_LAYOUT_WORD_TARGET  "doel"

@@ -96,6 +96,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "ក្នុងសម័យនេះគ្មានប្លង់ដែលមានឈ្មោះក្នុងឯកសារ ({0}) ទេ — សូមជ្រើសរើសម្ដងទៀត។"
     IDS_LAYOUT_WORD_SOURCE  "ប្រភព"
     IDS_LAYOUT_WORD_TARGET  "គោលដៅ"

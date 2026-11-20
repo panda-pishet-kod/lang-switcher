@@ -101,6 +101,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Запуск при входе в систему: включён"
     IDS_STATUS_AUTOSTART_OFF "Запуск при входе в систему: выключен"
     IDS_STATUS_DETAILS      "Подробности для автора"
+    IDS_STATUS_COPY         "Копировать"
     IDS_LAYOUT_NOTE         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново."
     IDS_LAYOUT_WORD_SOURCE  "источник"
     IDS_LAYOUT_WORD_TARGET  "цель"

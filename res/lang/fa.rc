@@ -101,6 +101,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "در نشست، طرح‌بندی‌ای با نام ثبت‌شده در پرونده ({0}) وجود ندارد — دوباره انتخاب کنید."
     IDS_LAYOUT_WORD_SOURCE  "مبدأ"
     IDS_LAYOUT_WORD_TARGET  "مقصد"

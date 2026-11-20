@@ -98,6 +98,7 @@ BEGIN
     IDS_STATUS_AUTOSTART_ON "Start when I sign in: on"
     IDS_STATUS_AUTOSTART_OFF "Start when I sign in: off"
     IDS_STATUS_DETAILS      "Details for the author"
+    IDS_STATUS_COPY         "Copy"
     IDS_LAYOUT_NOTE         "கோப்பிலுள்ள தளவமைப்பு ({0}) அமர்வில் இல்லை — மீண்டும் தேர்வுசெய்யவும்."
     IDS_LAYOUT_WORD_SOURCE  "மூலம்"
     IDS_LAYOUT_WORD_TARGET  "இலக்கு"

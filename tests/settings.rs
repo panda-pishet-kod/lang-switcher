@@ -11588,7 +11588,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 265] = [
+const FR_94_STRINGS: [(u16, &str, &str); 266] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -11834,6 +11834,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 265] = [
         "Подробности для автора",
         "Details for the author",
     ),
+    (settings::IDS_STATUS_COPY, "Копировать", "Copy"),
     (
         settings::IDS_LAYOUT_NOTE,
         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново.",
@@ -18053,8 +18054,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        265,
-        "two hundred and SIXTY-FIVE identifiers in use since task T-120-20: the note of a refused \
+        266,
+        "two hundred and SIXTY-SIX since task T-120-21: «Копировать» of the window of «Подробности \
+         для автора» (3295). Two hundred and sixty-five since task T-120-20: the note of a refused \
          write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
          body (3294). Two hundred and sixty-two since the header of the window in the corner \
          that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \

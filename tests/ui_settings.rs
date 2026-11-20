@@ -175,3 +175,96 @@ fn the_list_of_exclusions_takes_what_the_section_leaves() {
         assert!(lowest <= rule, "{language:?}: nothing under the rule");
     }
 }
+
+/// The words of «Диагностика» from its block «Состояние» on: the block is the last of the section.
+fn the_block_of_the_state(language: Language, state: &str) -> Option<String> {
+    let (_, window) = window_of_settings::states(language)
+        .into_iter()
+        .find(|(name, _)| name == state)?;
+    let words = format!("{:?}", window.body);
+    let at = words.find("Status {")?;
+    Some(words[at..].to_owned())
+}
+
+/// **T-120-21 — the red before.** The block «Состояние» speaks to a person until «Подробности для
+/// автора» is pressed: the state, what is fixed, the key, the start with Windows — and not one word of
+/// the developer (the registry and its path, the published exclusions).
+#[test]
+fn the_block_of_the_state_speaks_to_a_person_before_the_details() {
+    with_product_strings();
+    for (language, words) in [
+        (Language::Ru, ["реестр", "hkcu", "опубликован", "\\"]),
+        (Language::En, ["registry", "hkcu", "published", "\\"]),
+    ] {
+        let block = the_block_of_the_state(language, "settings Diagnostics")
+            .unwrap_or_else(|| panic!("{language:?}: «Диагностика» has the block «Состояние»"));
+        println!("{language:?}: {block}");
+        let lower = block.to_lowercase();
+        for word in words {
+            assert!(
+                !lower.contains(word),
+                "{language:?}: «{word}» stands in the block before «Подробности для автора»"
+            );
+        }
+        let details = the_block_of_the_state(language, "settings Diagnostics details")
+            .expect("the block with the details open");
+        assert!(
+            details.to_lowercase().contains("hkcu"),
+            "{language:?}: «Подробности для автора» opens the lines of the author"
+        );
+    }
+}
+
+/// **Three states, three first lines, three dots — the head of the menu's own** (T-120-21): one
+/// source, `tray_menu::status`.
+#[test]
+fn the_three_states_of_the_program_are_the_menus_three() {
+    use lang_switcher::ui::windows::tray_menu;
+
+    with_product_strings();
+    for (state, enabled, fail_safe) in [
+        ("settings Diagnostics", true, false),
+        ("settings Diagnostics paused", false, false),
+        ("settings Diagnostics restart", false, true),
+    ] {
+        let (dot, words) = tray_menu::status(enabled, fail_safe);
+        let expected = format!(
+            "Status {{ state: {dot:?}, words: {:?} }}",
+            settings::text_in(Language::Ru, words)
+        );
+        let block = the_block_of_the_state(Language::Ru, state).expect("the block");
+        assert!(
+            block.starts_with(&expected),
+            "{state}: {expected} — the block begins {}",
+            &block[..block.len().min(80)]
+        );
+    }
+}
+
+/// **«Подробности для автора» shows the four lines as they were, the path of the `Run` key on a line
+/// of its own** (the mock-up's `.spath`), in the face of code.
+#[test]
+fn the_details_show_the_lines_of_the_author_with_the_path_apart() {
+    with_product_strings();
+    let block =
+        the_block_of_the_state(Language::Ru, "settings Diagnostics details").expect("the block");
+    let path = r"C:\Program Files\Lang_Switcher\LangSwitcher.exe";
+    let code_lines = block.matches("Text(Code,").count();
+    assert_eq!(code_lines, 5, "four lines and the path apart: {block}");
+    assert!(
+        block.contains(&format!("Text(Code, {path:?})")),
+        "the path is a line of its own"
+    );
+    assert!(
+        block.contains(&format!(
+            "Text(Code, {:?})",
+            settings::text_in(Language::Ru, settings::IDS_STATE_AUTOSTART).replace(
+                "{0}",
+                settings::text_in(Language::Ru, settings::IDS_AUTOSTART_PRESENT)
+                    .replace("{0}", "")
+                    .trim_end_matches([',', ' '])
+            )
+        )),
+        "the line of the `Run` key keeps its words: {block}"
+    );
+}
