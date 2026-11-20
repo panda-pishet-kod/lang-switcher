@@ -279,6 +279,7 @@ impl crate::ui::host::Content for FieldsProbe {
                         .map(|index| ListItem {
                             label: format!("{} {}", words.row, index + 1),
                             check: state.checks.get(index).copied(),
+                            mark: false,
                         })
                         .collect(),
                     selected: state.selected,

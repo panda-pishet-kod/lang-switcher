@@ -242,7 +242,12 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         Node::Choice {
             id: 1,
             label: word("IDS_LANGUAGE_LABEL"),
-            value: "Русский".to_owned(),
+            options: vec![
+                "Русский".to_owned(),
+                "English".to_owned(),
+                "Deutsch".to_owned(),
+            ],
+            selected: 0,
         },
     );
     node(
@@ -420,6 +425,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             .map(|(index, label)| ListItem {
                 label: label.clone(),
                 check: checks.then_some(index != 2),
+                mark: false,
             })
             .collect();
         node(
@@ -451,6 +457,27 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         "العربية",
     ];
     node(
+        "Список поля выбора",
+        3,
+        true,
+        wide,
+        Class::Ordinary,
+        Node::List {
+            id: 1,
+            rows: layouts
+                .iter()
+                .enumerate()
+                .map(|(index, label)| ListItem {
+                    label: (*label).to_owned(),
+                    check: None,
+                    mark: index == 1,
+                })
+                .collect(),
+            selected: 3,
+            first: 0,
+        },
+    );
+    node(
         "Список с прокруткой",
         3,
         true,
@@ -463,6 +490,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
                 .map(|label| ListItem {
                     label: (*label).to_owned(),
                     check: None,
+                    mark: false,
                 })
                 .collect(),
             selected: 5,

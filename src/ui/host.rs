@@ -50,11 +50,13 @@ use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
 use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_size};
 use crate::ui::scene::{ButtonKind, Event, Window};
+use crate::ui::scene::{ListItem, Node, WindowKind};
 use crate::ui::text::{Direction, Style, Text};
 use crate::ui::tokens::motion;
 use crate::ui::tokens::{
-    CORNER_WIDTH, Color, FIELD_PAD, LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, Theme, WINDOW_MAX,
-    WINDOW_MIN,
+    CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, LIST_PAD, LIST_ROW_PAD,
+    LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, TYPE_AHEAD_MS, Theme, WINDOW_MAX, WINDOW_MIN,
+    window_b,
 };
 use ::windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use ::windows::Win32::Globalization::{
@@ -65,6 +67,7 @@ use ::windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR, DWMWA_CLOAK, DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
+use ::windows::Win32::Graphics::Gdi::ClientToScreen;
 use ::windows::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetDC, GetDeviceCaps, GetMonitorInfoW, HDC, InvalidateRect, LOGPIXELSY,
     MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, PAINTSTRUCT,
@@ -72,6 +75,7 @@ use ::windows::Win32::Graphics::Gdi::{
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use ::windows::Win32::UI::Controls::WM_MOUSELEAVE;
+use ::windows::Win32::UI::Input::KeyboardAndMouse::VK_F4;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
     VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
@@ -95,9 +99,15 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
     WS_THICKFRAME,
 };
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS, WM_MOVE,
+    WM_SYSKEYDOWN,
+};
 use ::windows::core::{BOOL, HSTRING, PCWSTR, Result as WinResult, w};
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use std::time::Instant;
 
 /// What the window keeps: its host, borrowed by one message at a time. A message that arrives while
@@ -149,6 +159,8 @@ pub struct Probe {
     pub fields: Vec<(String, HWND)>,
     /// What the layout placed: the part, its identifier and its rectangle in client pixels.
     pub items: Vec<(String, Option<String>, Rect)>,
+    /// The list of a choice field open under the window.
+    pub dropdown: Option<HWND>,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -166,18 +178,171 @@ trait Handler {
     fn settle(&mut self, hwnd: HWND);
     /// Starts the popup's coming in, or puts it in its place at once when `moves` is false.
     fn appear(&mut self, hwnd: HWND, moves: bool);
+    /// The description again and a new frame: the list of a choice field moved by the keys of its
+    /// window.
+    fn refresh(&mut self, hwnd: HWND);
+}
+
+/// Where a popup stands.
+#[derive(Clone, Copy)]
+enum Place {
+    /// In the corner of the work area nearest the icons; the rectangle of the program's icon, when
+    /// the caller measured it.
+    Corner(Option<RECT>),
+    /// Under a choice field (its rectangle on the screen), or over it where the work area ends: its
+    /// list, at the type size `b` of the window it opens from, `rows` options in all.
+    Under { field: RECT, b: f32, rows: usize },
 }
 
 /// What a popup keeps: where it stands and how it comes in.
 struct Popup {
-    /// The rectangle of the program's icon, when the caller measured it.
-    anchor: Option<RECT>,
+    place: Place,
     /// Where the window stands once it has come in, screen pixels.
     at: (i32, i32),
     /// Its corner is on the right of the work area: it comes from the right.
     from_right: bool,
     /// When it began to come in; none once it stands.
     since: Option<Instant>,
+}
+
+/// The message the list of a choice field posts to the window it opens from: a row was clicked.
+const WM_CHOSEN: u32 = WM_APP + 1;
+
+/// The one element of the list of a choice field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropId {
+    List,
+}
+
+/// What the list of an open choice field holds — shared by the window it opens from, which takes
+/// the keys, and the list's own popup, which takes the mouse.
+struct DropState {
+    options: Vec<String>,
+    /// The value now: its row is ticked.
+    current: usize,
+    /// The row the keys are on.
+    highlight: usize,
+    first: usize,
+    /// How many rows the popup shows.
+    visible: usize,
+    /// The row a click chose.
+    chosen: Option<usize>,
+    /// The first letters typed, and when the last of them came.
+    typed: String,
+    typed_at: Option<Instant>,
+}
+
+impl DropState {
+    fn view(&self) -> ListView {
+        ListView {
+            selected: self.highlight,
+            first: self.first,
+            visible: self.visible,
+            total: self.options.len(),
+            checked: None,
+        }
+    }
+
+    /// The keys on `row`, scrolled into view.
+    fn go(&mut self, row: usize) {
+        self.highlight = row.min(self.options.len().saturating_sub(1));
+        self.first = self.view().first_showing(self.highlight);
+    }
+
+    /// A letter typed into the open list: the first row whose option begins with the letters typed
+    /// so far — a pause of `TYPE_AHEAD_MS` starts a new word.
+    fn type_letter(&mut self, letter: char) {
+        let fresh = self
+            .typed_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(TYPE_AHEAD_MS));
+        if fresh {
+            self.typed.clear();
+        }
+        self.typed.extend(letter.to_lowercase());
+        self.typed_at = Some(Instant::now());
+        if let Some(row) = self
+            .options
+            .iter()
+            .position(|option| option.to_lowercase().starts_with(&self.typed))
+        {
+            self.go(row);
+        }
+    }
+}
+
+/// The content of the list of a choice field: one drawn list filling its popup.
+struct DropList {
+    shared: Rc<RefCell<DropState>>,
+    owner: HWND,
+    locale: String,
+    rtl: bool,
+    theme: ThemeSetting,
+}
+
+impl Content for DropList {
+    type Id = DropId;
+
+    fn describe(&self) -> Window<DropId> {
+        let state = self.shared.borrow();
+        Window {
+            kind: WindowKind::Bare,
+            art: None,
+            brand: None,
+            body: Node::List {
+                id: DropId::List,
+                rows: state
+                    .options
+                    .iter()
+                    .enumerate()
+                    .map(|(index, label)| ListItem {
+                        label: label.clone(),
+                        check: None,
+                        mark: index == state.current,
+                    })
+                    .collect(),
+                selected: state.highlight,
+                first: state.first,
+            },
+            buttons: Vec::new(),
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<DropId>) -> Reply {
+        let mut state = self.shared.borrow_mut();
+        match event {
+            Event::Selected(_, row) => {
+                state.chosen = Some(row);
+                // SAFETY: a message to the window the list opened from, of this thread.
+                let _ = unsafe { PostMessageW(Some(self.owner), WM_CHOSEN, WPARAM(0), LPARAM(0)) };
+                Reply::Close
+            }
+            Event::Scrolled(_, first) => {
+                state.first = first;
+                Reply::Stay
+            }
+            _ => Reply::Stay,
+        }
+    }
+
+    fn title(&self) -> String {
+        String::new()
+    }
+
+    fn language(&self) -> (String, bool) {
+        (self.locale.clone(), self.rtl)
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        self.theme
+    }
+}
+
+/// An open list of a choice field, as the window it opens from keeps it.
+struct OpenDrop<I> {
+    id: I,
+    hwnd: HWND,
+    shared: Rc<RefCell<DropState>>,
 }
 
 /// The one timer of a window of the shell: the steps of a popup coming in.
@@ -204,6 +369,33 @@ pub fn corner(anchor: RECT, work: RECT, size: (i32, i32), margin: i32) -> (i32, 
         x.clamp(work.left, (work.right - w).max(work.left)),
         y.clamp(work.top, (work.bottom - h).max(work.top)),
     )
+}
+
+/// Where the list of a choice field stands, its left-top in screen pixels: under the field
+/// `field`, `gap` from it, or over it when the work area `work` ends below; inside the work area.
+pub fn under(field: RECT, work: RECT, size: (i32, i32), gap: i32) -> (i32, i32) {
+    let (w, h) = size;
+    let below = field.bottom + gap;
+    let y = if below + h <= work.bottom {
+        below
+    } else {
+        field.top - gap - h
+    };
+    (
+        field.left.clamp(work.left, (work.right - w).max(work.left)),
+        y.clamp(work.top, (work.bottom - h).max(work.top)),
+    )
+}
+
+/// The work area of the monitor `rect` stands on.
+fn work_of(rect: &RECT) -> RECT {
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the monitor of a rectangle; the out parameter is a local.
+    let _ = unsafe { GetMonitorInfoW(MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST), &mut info) };
+    info.rcWork
 }
 
 /// Whether Windows moves what it shows («Показывать анимацию в Windows»).
@@ -324,6 +516,8 @@ struct Host<C: Content> {
     wheel: i32,
     /// The window is a popup: no caption, in the corner, not taking the focus.
     popup: Option<Popup>,
+    /// The list of a choice field open under it.
+    drop: Option<OpenDrop<C::Id>>,
 }
 
 /// The class of the windows of the shell: the ordinary one, or the popup's, which carries the
@@ -400,7 +594,7 @@ pub fn open_popup<C: Content + 'static>(content: C, anchor: Option<RECT>) -> Win
 /// Makes the popup of `content` and places it in its corner, without showing it.
 pub fn create_popup<C: Content + 'static>(content: C, anchor: Option<RECT>) -> WinResult<HWND> {
     let popup = Popup {
-        anchor,
+        place: Place::Corner(anchor),
         at: (0, 0),
         from_right: true,
         since: None,
@@ -421,8 +615,14 @@ fn make<C: Content + 'static>(
     let raw = Box::into_raw(slot);
 
     // The fields of Windows are children: the frame of the canvas goes round them.
+    // A popup of its own stands above every window; the list of a choice field, above its owner.
     let (extended, style) = if is_popup {
-        (WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WS_POPUP | WS_CLIPCHILDREN)
+        let above = if owner.is_some() {
+            WS_EX_TOOLWINDOW
+        } else {
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+        };
+        (above, WS_POPUP | WS_CLIPCHILDREN)
     } else {
         (
             WS_EX_APPWINDOW,
@@ -654,12 +854,26 @@ impl<C: Content> Host<C> {
             fields: Fields::default(),
             wheel: 0,
             popup: None,
+            drop: None,
         }
     }
 
     /// The popup's size in points: the width of the window in the corner, the height its content
     /// takes (laid out twice: the type size follows the height).
     fn popup_size(&self) -> (f32, f32) {
+        // The list of a choice field: as wide as the field, as many rows as it shows, at the type
+        // size of its window (half a point to spare: the rows are counted by flooring).
+        if let Some(Popup {
+            place: Place::Under { field, b, rows },
+            ..
+        }) = &self.popup
+        {
+            let style = Style::of(Role::Body, *b, WINDOW_MIN.h.0);
+            let row = style.line_height() + LIST_ROW_PAD.v.at(*b) * 2.0;
+            let shown = (*rows).clamp(1, DROPDOWN_ROWS.0 as usize) as f32;
+            let w = (field.right - field.left) as f32 / self.scale;
+            return (w, LIST_PAD.at(*b) * 2.0 + row * shown + 0.5);
+        }
         let w = CORNER_WIDTH.0;
         let mut h = WINDOW_MIN.h.0;
         if let Some(text) = self.text.as_ref() {
@@ -682,7 +896,30 @@ impl<C: Content> Host<C> {
         let Some(popup) = self.popup.as_mut() else {
             return;
         };
-        let anchor = popup.anchor.unwrap_or_else(notification_area);
+        let size = (px(w), px(h));
+        if let Place::Under { field, .. } = popup.place {
+            let work = work_of(&field);
+            popup.at = under(field, work, size, px(DROPDOWN_GAP.0));
+            // SAFETY: a live window of this thread; plain values.
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    popup.at.0,
+                    popup.at.1,
+                    size.0,
+                    size.1,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            };
+            self.layout = None;
+            self.fit_canvas(hwnd);
+            return;
+        }
+        let anchor = match popup.place {
+            Place::Corner(anchor) => anchor.unwrap_or_else(notification_area),
+            Place::Under { field, .. } => field,
+        };
         let mut info = MONITORINFO {
             cbSize: size_of::<MONITORINFO>() as u32,
             ..Default::default()
@@ -695,7 +932,6 @@ impl<C: Content> Host<C> {
             )
         };
         let work = info.rcWork;
-        let size = (px(w), px(h));
         popup.at = corner(anchor, work, size, px(motion::POPUP_MARGIN.0));
         popup.from_right = popup.at.0 * 2 + size.0 >= work.left + work.right;
         let left = popup
@@ -715,8 +951,12 @@ impl<C: Content> Host<C> {
             )
         };
         self.layout = None;
-        // The size the move sends was answered by Windows (the host is borrowed): the canvas takes
-        // the new client area here.
+        self.fit_canvas(hwnd);
+    }
+
+    /// The canvas takes the client area now: the size a move of the host's own sends was answered
+    /// by Windows while the host was borrowed.
+    fn fit_canvas(&mut self, hwnd: HWND) {
         let mut client = RECT::default();
         // SAFETY: the out parameter is a local.
         let _ = unsafe { GetClientRect(hwnd, &mut client) };
@@ -752,6 +992,178 @@ impl<C: Content> Host<C> {
             // SAFETY: the window's own timer.
             let _ = unsafe { KillTimer(Some(hwnd), APPEAR_TIMER) };
         }
+    }
+
+    /// The element at `index` is a choice field.
+    fn is_choice(&self, index: usize) -> bool {
+        self.layout.as_ref().is_some_and(|layout| {
+            matches!(
+                layout.items.get(index).map(|item| &item.part),
+                Some(Part::Field { .. })
+            )
+        })
+    }
+
+    /// The focused element, when it is a choice field.
+    fn focused_choice(&self) -> Option<usize> {
+        self.focus
+            .and_then(|focus| self.index_of(focus))
+            .filter(|index| self.is_choice(*index))
+    }
+
+    /// Opens the list of the choice field at `index` under it, without taking the focus: the keys
+    /// stay here and move its rows.
+    fn open_drop(&mut self, hwnd: HWND, index: usize) {
+        self.close_drop(hwnd, false);
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let Some(item) = layout.items.get(index) else {
+            return;
+        };
+        let (Part::Field { .. }, Some(id)) = (&item.part, item.id) else {
+            return;
+        };
+        let Some((options, current)) = self.window.options(&id) else {
+            return;
+        };
+        let (options, rect, b) = (options.to_vec(), item.rect, layout.b);
+        let scale = self.scale;
+        let px = |points: f32| (points * scale).round() as i32;
+        let mut ends = [
+            POINT {
+                x: px(rect.x),
+                y: px(rect.y),
+            },
+            POINT {
+                x: px(rect.right()),
+                y: px(rect.bottom()),
+            },
+        ];
+        for end in &mut ends {
+            // SAFETY: a live window; the point is a local.
+            let _ = unsafe { ClientToScreen(hwnd, end) };
+        }
+        let field = RECT {
+            left: ends[0].x,
+            top: ends[0].y,
+            right: ends[1].x,
+            bottom: ends[1].y,
+        };
+        let rows = options.len();
+        let mut state = DropState {
+            options,
+            current,
+            highlight: current,
+            first: 0,
+            visible: rows.clamp(1, DROPDOWN_ROWS.0 as usize),
+            chosen: None,
+            typed: String::new(),
+            typed_at: None,
+        };
+        state.go(current);
+        let shared = Rc::new(RefCell::new(state));
+        let list = DropList {
+            shared: shared.clone(),
+            owner: hwnd,
+            locale: self.locale.clone(),
+            rtl: self.rtl,
+            theme: self.content.theme(),
+        };
+        let popup = Popup {
+            place: Place::Under { field, b, rows },
+            at: (0, 0),
+            from_right: true,
+            since: None,
+        };
+        let Ok(drop) = make(list, Some(hwnd), Some(popup)) else {
+            return;
+        };
+        // Shown without taking the focus — under a window on the screen only: a window that is not
+        // shown (the tests send it messages) keeps its list hidden too.
+        // SAFETY: a handle by value.
+        if unsafe { IsWindowVisible(hwnd) }.as_bool() {
+            cloak(drop, true);
+            // SAFETY: a live window of this thread.
+            let _ = unsafe { ShowWindow(drop, SW_SHOWNOACTIVATE) };
+            paint_now(drop);
+            cloak(drop, false);
+        }
+        self.drop = Some(OpenDrop {
+            id,
+            hwnd: drop,
+            shared,
+        });
+    }
+
+    /// Closes the open list: with the row the keys are on when `choose`, with the row a click
+    /// chose, or with nothing; a new value goes to the content as the choice's `Selected`.
+    fn close_drop(&mut self, hwnd: HWND, choose: bool) {
+        let Some(drop) = self.drop.take() else {
+            return;
+        };
+        // SAFETY: a handle by value.
+        if unsafe { IsWindow(Some(drop.hwnd)) }.as_bool() {
+            close_later(drop.hwnd);
+        }
+        let (row, current) = {
+            let state = drop.shared.borrow();
+            let row = if choose {
+                Some(state.chosen.unwrap_or(state.highlight))
+            } else {
+                state.chosen
+            };
+            (row, state.current)
+        };
+        invalidate(hwnd);
+        if let Some(row) = row.filter(|row| *row != current) {
+            self.deliver(hwnd, Event::Selected(drop.id, row));
+        }
+    }
+
+    /// Draws the open list again after the keys moved it.
+    fn refresh_drop(&self) {
+        if let Some(drop) = self.drop.as_ref()
+            && let Some(mut list) = slot_of(drop.hwnd).and_then(|slot| slot.try_borrow_mut().ok())
+        {
+            list.refresh(drop.hwnd);
+        }
+    }
+
+    /// The keys while a list is open: they move its rows, Enter takes the row, Esc and F4 close it,
+    /// Tab closes it and goes on. Answers whether the key was taken.
+    fn drop_key(&mut self, hwnd: HWND, key: u16) -> bool {
+        let Some(drop) = self.drop.as_ref() else {
+            return false;
+        };
+        let shared = drop.shared.clone();
+        let view = shared.borrow().view();
+        let last = view.total.saturating_sub(1);
+        let page = view.visible.saturating_sub(1).max(1);
+        let row = match key {
+            k if k == VK_UP.0 => view.selected.saturating_sub(1),
+            k if k == VK_DOWN.0 => (view.selected + 1).min(last),
+            k if k == VK_HOME.0 => 0,
+            k if k == VK_END.0 => last,
+            k if k == VK_PRIOR.0 => view.selected.saturating_sub(page),
+            k if k == VK_NEXT.0 => (view.selected + page).min(last),
+            k if k == VK_RETURN.0 => {
+                self.close_drop(hwnd, true);
+                return true;
+            }
+            k if k == VK_ESCAPE.0 || k == VK_F4.0 => {
+                self.close_drop(hwnd, false);
+                return true;
+            }
+            k if k == VK_TAB.0 => {
+                self.close_drop(hwnd, false);
+                return false;
+            }
+            _ => return true,
+        };
+        shared.borrow_mut().go(row);
+        self.refresh_drop();
+        true
     }
 
     /// The theme by the content's setting and the system's.
@@ -817,7 +1229,14 @@ impl<C: Content> Host<C> {
         );
         // k comes from the table of the language and class (T-120-11); the road of last resort
         // lowers it further only for content that still does not fit here.
-        let k = fit::k_for(&self.locale, size.class);
+        // The list of a choice field takes the type size of the window it opens from.
+        let k = match &self.popup {
+            Some(Popup {
+                place: Place::Under { b, .. },
+                ..
+            }) => b / window_b(size.w, size.h, 1.0),
+            _ => fit::k_for(&self.locale, size.class),
+        };
         self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
         self.sync_fields(hwnd);
     }
@@ -1081,7 +1500,9 @@ impl<C: Content> Host<C> {
             } => Some(Event::RowChecked(id, *index, !on)),
             Part::ListRow { index, .. } => Some(Event::Selected(id, *index)),
             // A field and the frame of a list take the focus and press nothing.
-            Part::Input { .. } | Part::List(_) => None,
+            // A field and the frame of a list take the focus and press nothing; a choice field opens
+            // its list (`open_drop`).
+            Part::Input { .. } | Part::List(_) | Part::Field { .. } => None,
             _ => Some(Event::Pressed(id)),
         }
     }
@@ -1135,6 +1556,17 @@ impl<C: Content> Host<C> {
         // A layout dropped by a change waits for the next frame; the keys need it now.
         self.lay_out(hwnd);
         self.cue = true;
+        // An open list of a choice field takes the keys first.
+        if self.drop.is_some() && self.drop_key(hwnd, key) {
+            return true;
+        }
+        // The space bar and F4 open the list of a focused choice field.
+        if (key == VK_SPACE.0 || key == VK_F4.0)
+            && let Some(index) = self.focused_choice()
+        {
+            self.open_drop(hwnd, index);
+            return true;
+        }
         let order = self.order();
         let at = self
             .focus
@@ -1228,6 +1660,20 @@ impl<C: Content> Host<C> {
     /// The next option of the group `id`, forward or back: a segment or a section.
     fn step(&self, id: C::Id, forward: bool) -> Option<Event<C::Id>> {
         let layout = self.layout.as_ref()?;
+        // A closed choice field: the arrows take the next option, as the lists of Windows do.
+        if layout
+            .items
+            .iter()
+            .any(|item| item.id == Some(id) && matches!(item.part, Part::Field { .. }))
+        {
+            let (options, now) = self.window.options(&id)?;
+            let next = if forward {
+                now + 1
+            } else {
+                now.checked_sub(1)?
+            };
+            return (next < options.len()).then_some(Event::Selected(id, next));
+        }
         let options: Vec<(usize, bool)> = layout
             .items
             .iter()
@@ -1309,6 +1755,7 @@ impl<C: Content> Handler for Host<C> {
                 Some(LRESULT(0))
             }
             WM_SIZE => {
+                self.close_drop(hwnd, false);
                 let bits = lparam.0 as u32;
                 let (w, h) = (u32::from(bits as u16), bits >> u16::BITS);
                 if let Some(canvas) = self.canvas.as_mut() {
@@ -1415,6 +1862,11 @@ impl<C: Content> Handler for Host<C> {
                 unsafe { SetCursor(LoadCursorW(None, IDC_HAND).ok()) };
                 Some(LRESULT(1))
             }
+            // A press anywhere in the window closes an open list, and only that.
+            WM_LBUTTONDOWN if self.drop.is_some() => {
+                self.close_drop(hwnd, false);
+                Some(LRESULT(0))
+            }
             WM_LBUTTONDOWN => {
                 let (x, y) = point_of(lparam);
                 self.cue = false;
@@ -1441,6 +1893,12 @@ impl<C: Content> Handler for Host<C> {
                 let released = self.hit(x, y);
                 let pressed = self.pressed.take();
                 invalidate(hwnd);
+                if let Some(index) = pressed.filter(|index| released == Some(*index))
+                    && self.is_choice(index)
+                {
+                    self.open_drop(hwnd, index);
+                    return Some(LRESULT(0));
+                }
                 let events = pressed
                     .filter(|index| released == Some(*index))
                     .map_or_else(Vec::new, |index| self.presses(index));
@@ -1500,7 +1958,38 @@ impl<C: Content> Handler for Host<C> {
                 None
             }
             WM_KEYDOWN => self.key(hwnd, wparam.0 as u16).then_some(LRESULT(0)),
+            // Alt+Down opens the list of a focused choice field.
+            WM_SYSKEYDOWN if wparam.0 as u16 == VK_DOWN.0 => {
+                self.lay_out(hwnd);
+                let index = self.focused_choice()?;
+                self.open_drop(hwnd, index);
+                Some(LRESULT(0))
+            }
+            // The first letters typed into an open list.
+            WM_CHAR if self.drop.is_some() => {
+                if let Some(letter) = char::from_u32(wparam.0 as u32).filter(|c| !c.is_control())
+                    && let Some(drop) = self.drop.as_ref()
+                {
+                    drop.shared.borrow_mut().type_letter(letter);
+                    self.refresh_drop();
+                }
+                Some(LRESULT(0))
+            }
+            WM_CHOSEN => {
+                self.close_drop(hwnd, false);
+                Some(LRESULT(0))
+            }
+            // The window leaves the keys, or moves: an open list goes.
+            WM_KILLFOCUS | WM_MOVE => {
+                self.close_drop(hwnd, false);
+                None
+            }
+            WM_ACTIVATE if wparam.0 as u16 as u32 == WA_INACTIVE => {
+                self.close_drop(hwnd, false);
+                None
+            }
             WM_DESTROY => {
+                self.close_drop(hwnd, false);
                 // The fields first, while they are still the window's children.
                 self.fields.release();
                 // The pictures first: `art.rs` keeps bitmaps with the render target, which holds
@@ -1521,6 +2010,11 @@ impl<C: Content> Handler for Host<C> {
         } else {
             place(hwnd);
         }
+    }
+
+    fn refresh(&mut self, hwnd: HWND) {
+        self.rebuild();
+        invalidate(hwnd);
     }
 
     fn appear(&mut self, hwnd: HWND, moves: bool) {
@@ -1549,6 +2043,7 @@ impl<C: Content> Handler for Host<C> {
                 .into_iter()
                 .map(|(id, hwnd)| (format!("{id:?}"), hwnd))
                 .collect(),
+            dropdown: self.drop.as_ref().map(|drop| drop.hwnd),
             items: self
                 .layout
                 .iter()

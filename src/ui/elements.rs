@@ -260,6 +260,22 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 painter.line(b.0, b.1, d.0, d.1, CHECK_BORDER.0, c(tick));
             }
         }
+        Part::Tick => {
+            let colour = if state.disabled {
+                Color::Ink3
+            } else {
+                Color::Accent
+            };
+            let point = |at: usize| {
+                (
+                    rect.x + rect.w * CHECK_TICK[at].0,
+                    rect.y + rect.h * CHECK_TICK[at].1,
+                )
+            };
+            let (a, b, d) = (point(0), point(1), point(2));
+            painter.line(a.0, a.1, b.0, b.1, CHECK_BORDER.0, c(colour));
+            painter.line(b.0, b.1, d.0, d.1, CHECK_BORDER.0, c(colour));
+        }
         Part::Radio { on } => {
             let (x, y, radius) = (rect.x + rect.w / 2.0, rect.y + rect.h / 2.0, rect.w / 2.0);
             let frame = match (state.disabled, on) {

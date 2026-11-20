@@ -64,6 +64,8 @@ pub enum WindowKind {
     Settings,
     /// The row of buttons stands closer to the content.
     Wizard,
+    /// One element filling the window, no paddings and no buttons: the list of a choice field.
+    Bare,
 }
 
 /// A part of a window description.
@@ -139,8 +141,13 @@ pub enum Node<I> {
         options: Vec<String>,
         selected: usize,
     },
-    /// A label and a choice field.
-    Choice { id: I, label: String, value: String },
+    /// A label and a choice field: the selected option shown, the list of them in a popup.
+    Choice {
+        id: I,
+        label: String,
+        options: Vec<String>,
+        selected: usize,
+    },
     /// The sections of the settings: a column, or a row of tabs in a narrow window.
     Sections {
         id: I,
@@ -284,10 +291,16 @@ impl<I> Node<I> {
                 options,
                 selected,
             },
-            Node::Choice { id, label, value } => Node::Choice {
+            Node::Choice {
+                id,
+                label,
+                options,
+                selected,
+            } => Node::Choice {
                 id: f(id),
                 label,
-                value,
+                options,
+                selected,
             },
             Node::Sections { id, items, current } => Node::Sections {
                 id: f(id),
@@ -384,9 +397,9 @@ impl<I> Node<I> {
                 f(Role::Body, label);
                 options.iter_mut().for_each(|option| f(Role::Body, option));
             }
-            Node::Choice { label, value, .. } => {
+            Node::Choice { label, options, .. } => {
                 f(Role::Body, label);
-                f(Role::Body, value);
+                options.iter_mut().for_each(|option| f(Role::Body, option));
             }
             Node::Sections { items, .. } | Node::Numbered(items) => {
                 items.iter_mut().for_each(|item| f(Role::Body, item));
@@ -440,6 +453,8 @@ pub struct ListItem {
     pub label: String,
     /// The row's check box, where it has one.
     pub check: Option<bool>,
+    /// The row is the value now (the list of a choice field): a tick at its end.
+    pub mark: bool,
 }
 
 /// What the shell answers about a window's elements.
@@ -457,4 +472,42 @@ pub enum Event<I> {
     RowChecked(I, usize, bool),
     /// A list was scrolled to show row `usize` first.
     Scrolled(I, usize),
+}
+
+impl<I: PartialEq> Node<I> {
+    /// The options of the choice `id` and the selected one: a choice field, or segments that may be
+    /// drawn as one when they do not fit (passport §6).
+    pub fn options(&self, id: &I) -> Option<(&[String], usize)> {
+        match self {
+            Node::Choice {
+                id: own,
+                options,
+                selected,
+                ..
+            }
+            | Node::Segments {
+                id: own,
+                options,
+                selected,
+                ..
+            } if own == id => Some((options, *selected)),
+            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) | Node::Steps(_, nodes) => {
+                nodes.iter().find_map(|node| node.options(id))
+            }
+            Node::Pair(a, b) => a.options(id).or_else(|| b.options(id)),
+            Node::Triple(a, b, c) => a
+                .options(id)
+                .or_else(|| b.options(id))
+                .or_else(|| c.options(id)),
+            Node::Fill(node) | Node::Surface(_, node) => node.options(id),
+            _ => None,
+        }
+    }
+}
+
+impl<I: PartialEq> Window<I> {
+    /// The options of the choice `id` anywhere in the window, and the selected one.
+    pub fn options(&self, id: &I) -> Option<(&[String], usize)> {
+        self.body.options(id)
+    }
 }

@@ -804,3 +804,11 @@ pub mod motion {
         1.0 - EASE.at(elapsed_ms as f32 / APPEAR_MS as f32)
     }
 }
+
+/// ◆ The list of a choice field: the most rows it shows at once (66 languages scroll).
+pub const DROPDOWN_ROWS: Share = Share(10.0);
+/// ◆ The list of a choice field: the gap between the field and its list.
+pub const DROPDOWN_GAP: Pt = Pt(4.0);
+/// The first letters typed into an open list are one word while no more than this passes between
+/// two of them, ms (as the lists of Windows).
+pub const TYPE_AHEAD_MS: u64 = 1000;

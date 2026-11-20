@@ -56,6 +56,7 @@ impl Content for Form {
             .map(|row| ListItem {
                 label: format!("Layout {row}"),
                 check: self.checks.as_ref().map(|checks| checks[row]),
+                mark: false,
             })
             .collect();
         Window {

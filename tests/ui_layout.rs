@@ -660,7 +660,8 @@ fn every_window() -> Vec<Window<Id>> {
                         Node::Choice {
                             id: Id::Language,
                             label: "Language".to_owned(),
-                            value: "English".to_owned(),
+                            options: vec!["English".to_owned(), "Deutsch".to_owned()],
+                            selected: 0,
                         },
                     ])),
                 )),

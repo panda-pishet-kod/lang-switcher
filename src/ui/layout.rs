@@ -189,6 +189,8 @@ pub enum Part {
         index: usize,
         check: Option<bool>,
     },
+    /// The tick of the row that is the value now, in the list of a choice field.
+    Tick,
     /// The thin scroll bar of a list that has more rows than it shows.
     Scroll {
         first: usize,
@@ -275,6 +277,7 @@ impl Part {
             Part::Input { .. } => "text field",
             Part::List(_) => "list",
             Part::Scroll { .. } => "list scroll bar",
+            Part::Tick => "tick",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -448,6 +451,14 @@ impl<I: Copy> Placer<'_, I> {
 
     /// The whole window; answers what does not fit.
     fn window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
+        // One element filling the window: the list of a choice field in its popup.
+        if window.kind == WindowKind::Bare {
+            let h = self.node(&window.body, 0.0, 0.0, size.w, Some(size.h));
+            return Shortfall {
+                w: self.over,
+                h: h - size.h,
+            };
+        }
         // One column under the width of two (208.168: 880), whatever the class of type sizes.
         let narrow = size.w < TWO_COLUMNS_FROM.0;
         let (mut area_x, mut area_w) = (0.0, size.w);
@@ -662,7 +673,15 @@ impl<I: Copy> Placer<'_, I> {
                 options,
                 selected,
             } => self.segments(*id, label, options, *selected, x, y, w),
-            Node::Choice { id, label, value } => self.choice(*id, label, value, x, y, w),
+            Node::Choice {
+                id,
+                label,
+                options,
+                selected,
+            } => {
+                let value = options.get(*selected).map_or("", String::as_str);
+                self.choice(*id, label, value, x, y, w)
+            }
             Node::Sections { id, items, current } => self.sections(*id, items, *current, x, y, w),
             Node::Field {
                 id,
@@ -1287,6 +1306,13 @@ impl<I: Copy> Placer<'_, I> {
             0.0
         };
         let checked = rows.get(selected).and_then(|row| row.check);
+        // The rows of a list with a value keep room for its tick at their end.
+        let side = CHECK.at(self.b);
+        let tick = if rows.iter().any(|row| row.mark) {
+            side + self.em(CONTROL_GAP)
+        } else {
+            0.0
+        };
         self.push(
             Part::List(ListView {
                 selected,
@@ -1311,9 +1337,15 @@ impl<I: Copy> Placer<'_, I> {
                 Rect::new(x + pad, top, end - x - pad, row),
                 Some(id),
             );
+            if item.mark {
+                self.push(
+                    Part::Tick,
+                    Rect::new(end - row_h - side, top + (row - side) / 2.0, side, side),
+                    None,
+                );
+            }
             let mut at = x + pad + row_h;
             if let Some(on) = item.check {
-                let side = CHECK.at(self.b);
                 self.push(
                     Part::Check { on },
                     Rect::new(at, top + (row - side) / 2.0, side, side),
@@ -1326,7 +1358,7 @@ impl<I: Copy> Placer<'_, I> {
                 &item.label,
                 at,
                 top + row_v,
-                end - row_h - at,
+                end - row_h - tick - at,
                 Wrap::OneLine,
             );
         }
