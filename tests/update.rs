@@ -841,3 +841,81 @@ fn phase_two_closes_the_program_that_did_not_start_before_the_rollback() {
         "the program that did not start must be closed BEFORE the rollback is installed"
     );
 }
+
+/// ⭐ **Every door of the stand stands behind `#[cfg(feature = "testing")]`** — task T-119-13, слово
+/// контролёра 2026-11-20. The updater has had its doors since stage E104 (TZ E104 §0 п. 22:
+/// `update-doors.toml`, a feed on the guest's loopback, keys of the stand), and the program's own
+/// feed reads through the very same doors since T-119-13 (`letters::feed::stand_doors`). A Release
+/// image must carry none of it: gate 6 of `tools\verify-perimeter.ps1` reads both images for the
+/// names of the doors at every delivery; this sweep holds the same line at every battery, at the
+/// source — **each line of `src\*.rs` that names a door is the item or the statement right under
+/// its `cfg`**, and the loopback of the fetch the same.
+#[test]
+fn every_door_of_the_stand_stands_behind_the_testing_feature() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let needles = [
+        "mod doors",
+        "doors::lay_over",
+        "fn stand_doors",
+        "stand_doors()",
+        "fn loopback_of",
+        "loopback_of(url)",
+    ];
+    let mut seen = std::collections::BTreeMap::<&str, usize>::new();
+    let mut naked = Vec::new();
+
+    for entry in std::fs::read_dir(&src).expect("src must be readable") {
+        let path = entry.expect("an entry of src").path();
+
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let text = std::fs::read_to_string(&path)
+            .expect("a source file")
+            .replace("\r\n", "\n");
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+
+        for (index, line) in lines.iter().enumerate() {
+            if line.starts_with("//") {
+                continue;
+            }
+
+            for needle in needles {
+                if !line.contains(needle) {
+                    continue;
+                }
+
+                *seen.entry(needle).or_default() += 1;
+
+                // The line above, skipping the doc and the comments of the item.
+                let above = lines[..index]
+                    .iter()
+                    .rev()
+                    .find(|above| !above.starts_with("//") && !above.is_empty());
+
+                if above != Some(&"#[cfg(feature = \"testing\")]") {
+                    naked.push(format!(
+                        "{}:{}: «{needle}» without #[cfg(feature = \"testing\")] right above it",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+                        index + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    // The sweep found what it is about — a sweep over nothing would pass for nothing.
+    for needle in needles {
+        assert!(
+            seen.get(needle).copied().unwrap_or(0) >= 1,
+            "«{needle}» is not in src at all: the sweep must be told where the door went"
+        );
+    }
+
+    assert!(
+        naked.is_empty(),
+        "a door of the stand outside the testing feature:\n{}",
+        naked.join("\n")
+    );
+}
