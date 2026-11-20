@@ -367,6 +367,20 @@ impl Text {
         align: Align,
         width: f32,
     ) -> WinResult<Laid> {
+        self.lay_in(self.direction, text, style, wrap, align, width)
+    }
+
+    /// [`Text::lay`] in a reading `direction` of its own, not the window's: the report in a field of
+    /// code is read in the direction of its language (T-120-19, `FieldKind::Code { rtl }`).
+    pub fn lay_in(
+        &self,
+        direction: Direction,
+        text: &str,
+        style: Style,
+        wrap: Wrap,
+        align: Align,
+        width: f32,
+    ) -> WinResult<Laid> {
         let shown = if style.caps {
             upper(&self.locale, text)
         } else {
@@ -397,7 +411,7 @@ impl Text {
 
         // SAFETY: plain values on a live format; the trimming options are a local.
         unsafe {
-            format.SetReadingDirection(match self.direction {
+            format.SetReadingDirection(match direction {
                 Direction::LeftToRight => DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
                 Direction::RightToLeft => DWRITE_READING_DIRECTION_RIGHT_TO_LEFT,
             })?;
@@ -445,7 +459,7 @@ impl Text {
             family,
             style,
             baseline,
-            direction: self.direction,
+            direction,
             align,
             wrap,
             width,
