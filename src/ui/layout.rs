@@ -2399,7 +2399,10 @@ impl<I: Copy> Placer<'_, I> {
         };
         let visible = room.min(total).max(1);
         let first = first.min(total.saturating_sub(visible));
-        let h = pad * 2.0 + row * visible as f32;
+        // Given room (a fill: the mock-up's `.grow`), the frame takes all of it, the rows from its top.
+        let h = slot.map_or(pad * 2.0 + row * visible as f32, |slot| {
+            slot.max(pad * 2.0 + row * visible as f32)
+        });
         let bar = if total > visible {
             LIST_BAR.0 + pad
         } else {
