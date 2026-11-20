@@ -33,15 +33,7 @@ pub struct Excuse {
 }
 
 /// **The windows excused from fitting** (208.175), each with its category and its term.
-pub const EXCUSED: &[Excuse] = &[Excuse {
-    window: "letters list",
-    class: Class::Ordinary,
-    languages: &["el", "ka"],
-    category: Some(Category::Owner),
-    until: "утро 2026-11-20",
-    decision: None,
-    why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
-}];
+pub const EXCUSED: &[Excuse] = &[];
 
 /// The excuse of `window` at `class` in the language `tag`, if there is one.
 pub fn excused(window: &str, class: Class, tag: &str) -> Option<&'static Excuse> {

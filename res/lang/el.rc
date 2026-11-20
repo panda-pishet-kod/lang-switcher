@@ -175,7 +175,7 @@ BEGIN
     IDS_WRITE_TO_AUTHOR     "Γράψτε στον δημιουργό"
     IDS_LETTERS_CAPTION     "Τελευταία γράμματα"
     IDS_LETTERS_FOOT        "Κρατούνται οι τρεις τελευταίες ειδήσεις. Όταν έρθει τέταρτη, η παλαιότερη φεύγει, ακόμη κι αδιάβαστη."
-    IDS_LETTERS_OPEN        "Άνοιγμα του γράμματος"
+    IDS_LETTERS_OPEN        "Άνοιγμα"
     IDS_NEWS_READ_BUTTON    "Διαβάστηκε"
     IDS_MENU_UNREAD         "Αδιάβαστο γράμμα…"
     IDS_MENU_UPDATE         "Διαθέσιμη η έκδοση {0}…"

@@ -168,7 +168,7 @@ BEGIN
     IDS_WRITE_TO_AUTHOR     "მისწერეთ ავტორს…"
     IDS_LETTERS_CAPTION     "ბოლო წერილები"
     IDS_LETTERS_FOOT        "ინახება სამი ბოლო სიახლე. მეოთხის მოსვლისას ყველაზე ძველი იშლება, წაკითხული იქნება თუ არა."
-    IDS_LETTERS_OPEN        "წერილის გახსნა"
+    IDS_LETTERS_OPEN        "გახსნა"
     IDS_NEWS_READ_BUTTON    "წაკითხულია"
     IDS_MENU_UNREAD         "წაუკითხავი წერილი…"
     IDS_MENU_UPDATE         "ხელმისაწვდომია ვერსია {0}…"
