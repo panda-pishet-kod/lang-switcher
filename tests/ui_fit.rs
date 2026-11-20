@@ -46,6 +46,8 @@ const MARGIN: f32 = 1.03;
 const STAND_IN: f32 = 1.3;
 /// Halvings of the search for k.
 const STEPS: u32 = 10;
+/// The step down of a factor of the table at which not every window fits.
+const DOWN: f32 = 0.005;
 /// **The windows excused from fitting, each with its reason** — printed by the instrument, never
 /// skipped in silence. A window, its class, why.
 const EXCUSED: &[(&str, Class, &str)] = &[(
@@ -367,6 +369,9 @@ fn pass() -> &'static Pass {
                 let size = client_size(*w, *h);
                 assert_eq!(size.class, *class, "the class of {w}×{h}");
                 let mut least: Option<(f32, String)> = None;
+                // The windows that do not fit even at 12 points, and the excused: they do not hold the
+                // factor down.
+                let mut beyond: Vec<&str> = Vec::new();
                 for (name, window) in &windows {
                     for (face, text) in &texts {
                         match k_needed(window, size, rtl, text) {
@@ -381,6 +386,7 @@ fn pass() -> &'static Pass {
                                     language.tag(),
                                     culprit(language, window, size, TYPE_FLOOR.0 / window_b(*w, *h, 1.0), rtl, text, &names)
                                 );
+                                beyond.push(name);
                                 match excused(name, *class) {
                                     Some(why) => pass.excused.push(format!("{line} — ИСКЛЮЧЕНИЕ: {why}")),
                                     None => pass.failures.push(line),
@@ -390,7 +396,20 @@ fn pass() -> &'static Pass {
                     }
                 }
                 let (k, tightest) = least.unwrap_or((1.0, "—".to_owned()));
-                ks[slot] = (k * 1000.0).floor() / 1000.0;
+                let mut k = (k * 1000.0).floor() / 1000.0;
+                // Each window was measured alone, and the rule of the pair is not monotone in k: at a
+                // smaller type a pair may stand side by side and come out taller. The factor of the
+                // table goes down further while any window does not fit at it.
+                let floor = (TYPE_FLOOR.0 / window_b(*w, *h, 1.0)).min(1.0);
+                let all_fit = |k: f32| {
+                    windows.iter().filter(|(name, _)| !beyond.contains(&name.as_str()) && excused(name, *class).is_none()).all(|(_, window)| {
+                        texts.iter().all(|(_, text)| faults(window, size, k, rtl, text).is_empty())
+                    })
+                };
+                while k > floor && !all_fit(k) {
+                    k = ((k - DOWN) * 1000.0).floor() / 1000.0;
+                }
+                ks[slot] = k;
                 if k < 1.0 {
                     pass.tightest.push(format!("{} {class:?}: k {:.3} — {tightest}", language.tag(), ks[slot]));
                 }
