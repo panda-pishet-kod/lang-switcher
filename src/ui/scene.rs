@@ -153,12 +153,14 @@ pub enum Node<I> {
         words: String,
         buttons: Vec<Node<I>>,
     },
-    /// A line of settings with a switch at its end; the whole line is pressed.
+    /// A line of settings with a switch at its end; the whole line is pressed. `badge` — the
+    /// label «new» after its words (passport §6).
     Toggle {
         id: I,
         label: String,
         hint: Option<String>,
         on: bool,
+        badge: Option<String>,
     },
     /// A check box before its label; the whole line is pressed.
     Check { id: I, label: String, on: bool },
@@ -351,11 +353,13 @@ impl<I> Node<I> {
                 label,
                 hint,
                 on,
+                badge,
             } => Node::Toggle {
                 id: f(id),
                 label,
                 hint,
                 on,
+                badge,
             },
             Node::Check { id, label, on } => Node::Check {
                 id: f(id),
@@ -521,10 +525,15 @@ impl<I> Node<I> {
                 f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
-            Node::Toggle { label, hint, .. } => {
+            Node::Toggle {
+                label, hint, badge, ..
+            } => {
                 f(Role::Body, label);
                 if let Some(hint) = hint {
                     f(Role::Small, hint);
+                }
+                if let Some(badge) = badge {
+                    f(Role::Label, badge);
                 }
             }
             Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
@@ -676,6 +685,8 @@ pub enum Event<I> {
     Scrolled(I, usize),
     /// The tick the window asked for (`host::Content::tick`, T-120-25).
     Tick,
+    /// The timer of the content's own (`host::Content::timer`, T-120-20).
+    Timer,
 }
 
 impl<I: PartialEq> Node<I> {

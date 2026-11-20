@@ -148,6 +148,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
                 label: word("IDS_AUTOSTART"),
                 hint: None,
                 on,
+                badge: None,
             },
         );
     }
@@ -351,6 +352,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             label: word("IDS_AUTOSTART"),
             hint: Some(word("IDS_SOUND")),
             on: true,
+            badge: None,
         },
     );
     node(

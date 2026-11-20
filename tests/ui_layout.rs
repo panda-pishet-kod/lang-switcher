@@ -12,7 +12,8 @@ use lang_switcher::ui::layout::{
 use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
 use lang_switcher::ui::text::{FixedAdvance, Measure, Style, Wrap};
 use lang_switcher::ui::tokens::{
-    BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role, TYPE_FLOOR,
+    BADGE_GAP, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role,
+    TYPE_FLOOR,
 };
 
 /// Every character is half the type size wide.
@@ -399,6 +400,7 @@ fn a_switch_stands_at_the_end_of_its_line_and_a_check_box_before_its_label() {
             label: "Start with Windows".to_owned(),
             hint: Some("hint".to_owned()),
             on: true,
+            badge: None,
         },
         Node::Check {
             id: Id::Sound,
@@ -642,6 +644,7 @@ fn every_window() -> Vec<Window<Id>> {
                             label: "Start with Windows".to_owned(),
                             hint: None,
                             on: true,
+                            badge: Some("new".to_owned()),
                         },
                         Node::Check {
                             id: Id::Sound,
@@ -931,4 +934,43 @@ fn the_pictures_of_the_windows_are_drawings_of_res_art() {
             art.name()
         );
     }
+}
+
+/// **The label «new» stands after the words of its switch** (passport §6, T-120-20): on their line,
+/// a gap after them, while it fits there; under them when it does not — never over them.
+#[test]
+fn the_label_new_stands_after_the_words_of_its_switch() {
+    let toggle = |label: &str| {
+        bare(Node::Toggle {
+            id: Id::Autostart,
+            label: label.to_owned(),
+            hint: None,
+            on: false,
+            badge: Some("new".to_owned()),
+        })
+    };
+    let badge_and_words = |layout: &Layout<Id>| {
+        let badge = rects_of(layout, |part| matches!(part, Part::Badge { .. }));
+        let words = texts(layout);
+        assert_eq!(badge.len(), 1, "one label «new»");
+        (badge[0], words)
+    };
+
+    let layout = lay(&toggle("Flag in the tray"), usual());
+    let (badge, words) = badge_and_words(&layout);
+    assert_eq!(words.len(), 1);
+    assert!(
+        close(badge.x, words[0].right() + BADGE_GAP.at(layout.b)) && close(badge.y, words[0].y),
+        "beside the words: {badge:?}, the words {:?}",
+        words[0]
+    );
+
+    let long = "Show the flag of the layout in the notification area ".repeat(4);
+    let layout = lay(&toggle(&long), usual());
+    let (badge, words) = badge_and_words(&layout);
+    let bottom = words.iter().map(|rect| rect.bottom()).fold(0.0, f32::max);
+    assert!(
+        close(badge.y, bottom),
+        "under the words: {badge:?}, they end at {bottom}"
+    );
 }

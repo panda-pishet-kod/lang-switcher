@@ -130,6 +130,7 @@ fn the_controls_answer_on_their_whole_line_and_a_card_on_the_whole_card() {
             label: label.clone(),
             hint: Some("подсказка".to_owned()),
             on: true,
+            badge: None,
         },
         Node::Check {
             id: 1,

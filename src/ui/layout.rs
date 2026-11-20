@@ -34,7 +34,7 @@ use crate::ui::tokens::{
     SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN,
     WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
-use crate::ui::tokens::{ART_RING, TYPE_FLOOR};
+use crate::ui::tokens::{ART_RING, BADGE_GAP, TYPE_FLOOR};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
@@ -757,6 +757,7 @@ impl<I: Copy> Placer<'_, I> {
                 label,
                 hint,
                 on,
+                badge,
             } => {
                 let track = (
                     self.em(TOGGLE.w).max(TOGGLE_MIN.w.0),
@@ -764,7 +765,7 @@ impl<I: Copy> Placer<'_, I> {
                 );
                 self.control(
                     *id,
-                    label,
+                    (label, badge.as_deref()),
                     hint.as_deref(),
                     Part::Toggle { on: *on },
                     track,
@@ -778,7 +779,7 @@ impl<I: Copy> Placer<'_, I> {
                 let side = CHECK.at(self.b);
                 self.control(
                     *id,
-                    label,
+                    (label, None),
                     None,
                     Part::Check { on: *on },
                     (side, side),
@@ -792,7 +793,7 @@ impl<I: Copy> Placer<'_, I> {
                 let side = CHECK.at(self.b);
                 self.control(
                     *id,
-                    label,
+                    (label, None),
                     None,
                     Part::Radio { on: *on },
                     (side, side),
@@ -1791,7 +1792,7 @@ impl<I: Copy> Placer<'_, I> {
     fn control(
         &mut self,
         id: I,
-        label: &str,
+        (label, badge): (&str, Option<&str>),
         hint: Option<&str>,
         part: Part,
         (cw, ch): (f32, f32),
@@ -1818,7 +1819,34 @@ impl<I: Copy> Placer<'_, I> {
 
         let hit = self.push(Part::Hit, Rect::new(x, y, w, 0.0), Some(id));
         let lift = (line - first) / 2.0;
-        let mut text = self.text(role, label, tx, y + lift, tw, Wrap::Words);
+        let mut text = match badge {
+            None => self.text(role, label, tx, y + lift, tw, Wrap::Words),
+            // The label «new» after the words, on their line while it fits there; under them when
+            // it does not.
+            Some(badge) => {
+                let badge_style = self.style(Role::Label);
+                let gap = self.em(BADGE_GAP);
+                let label_w = self.width_of(self.style(role), label);
+                let badge_w = self.width_of(badge_style, badge).min(tw);
+                let part = Part::Badge {
+                    text: badge.to_owned(),
+                };
+                if label_w + gap + badge_w <= tw {
+                    let h = self.text(role, label, tx, y + lift, label_w, Wrap::OneLine);
+                    self.push(
+                        part,
+                        Rect::new(tx + label_w + gap, y + lift, badge_w, h),
+                        None,
+                    );
+                    h
+                } else {
+                    let h = self.text(role, label, tx, y + lift, tw, Wrap::Words);
+                    let line = badge_style.line_height();
+                    self.push(part, Rect::new(tx, y + lift + h, badge_w, line), None);
+                    h + line
+                }
+            }
+        };
         if let Some(hint) = hint {
             text += self.text(Role::Small, hint, tx, y + lift + text, tw, Wrap::Words);
         }

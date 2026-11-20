@@ -648,6 +648,8 @@ pub const BRAND_FROM_EDGE: Em = Em(1.6);
 pub const BRAND_FROM_BOTTOM: Em = Em(1.2);
 /// ◆ Подпись под рисунком — между именем и адресом, доля кегля подписи (из макета).
 pub const BRAND_GAP: Share = Share(0.5);
+/// ◆ Метка «новое» — от надписи (макет: 0,6 кегля метки).
+pub const BADGE_GAP: Em = Em(0.41);
 /// ◆ Поверх рисунка — слово: кегль, доля высоты якоря (T-120-25, макет `helloOverlayReal`: 24 из 94).
 pub const ON_PICTURE_WORD: Share = Share(24.0 / 94.0);
 /// ◆ Поверх рисунка — слово: от левого края якоря, доля его высоты (макет: 16 из 94).
