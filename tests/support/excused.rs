@@ -32,36 +32,49 @@ pub struct Excuse {
     pub why: &'static str,
 }
 
+/// mi in «Последние письма», all three classes: the line «дата · не прочитано» is wider than its row —
+/// a translation, not a word of the owner; the translator shortens it (word of the controller,
+/// 208.198). The scroll of a small screen does not help: it is a lack across.
+const MI_LETTERS_LIST: &str = "«Последние письма», mi: строка «дата · не прочитано» шире строки во \
+                               всех трёх классах — перевод mi, укоротит переводчик";
+
 /// **The windows excused from fitting** (208.175), each with its category and its term.
 pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letters list",
         class: Class::Ordinary,
-        languages: &["el", "ka", "mi"],
+        languages: &["el", "ka"],
         category: Some(Category::Owner),
         until: "утро 2026-11-20",
         decision: None,
         why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
+    },
+    Excuse {
+        window: "letters list",
+        class: Class::Ordinary,
+        languages: &["mi"],
+        category: Some(Category::Wave),
+        until: "T-120-24",
+        decision: None,
+        why: MI_LETTERS_LIST,
     },
     Excuse {
         window: "letters list",
         class: Class::Large,
         languages: &["mi"],
-        category: Some(Category::Owner),
-        until: "утро 2026-11-20",
+        category: Some(Category::Wave),
+        until: "T-120-24",
         decision: None,
-        why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
+        why: MI_LETTERS_LIST,
     },
     Excuse {
         window: "letters list",
         class: Class::Narrow,
         languages: &["mi"],
-        category: Some(Category::Owner),
-        until: "T-120-24 (mi — у ядра)",
+        category: Some(Category::Wave),
+        until: "T-120-24",
         decision: None,
-        why: "«Последние письма», mi, малый экран: строка «дата · не прочитано» режется поперёк \
-              (нужно 257, есть 190) — прокрутка 208.198 лечит только высоту; для остальных языков \
-              исключение 208.166 в Narrow снято",
+        why: MI_LETTERS_LIST,
     },
     Excuse {
         window: "letter update",
