@@ -716,6 +716,8 @@ pub const CORNER_BUTTON_GAP: Pt = Pt(8.0);
 pub const CORNER_SECOND_SHARE: Share = Share(1.0);
 /// ◆ Окно в углу — доля главной кнопки ряда (справа).
 pub const CORNER_MAIN_SHARE: Share = Share(2.0);
+/// Окно в углу — высота картинки панели задач в «Обновлено» (окно Э119: 150).
+pub const CORNER_PICTURE: Pt = Pt(150.0);
 /// ◆ Окно в углу — знак крестика (макет: 13 пт шрифта, знак около 10).
 pub const CORNER_CROSS: Pt = Pt(10.0);
 /// Окно в углу — кнопка не ниже.
@@ -790,6 +792,8 @@ pub mod motion {
     pub const APPEAR_SLIDE: Pt = Pt(28.0);
     /// One step of the movement, ms.
     pub const FRAME_MS: u32 = 16;
+    /// One frame of the picture of the taskbar in «Обновлено», ms (the window of E119: 40).
+    pub const PICTURE_FRAME_MS: u32 = 40;
     /// ◆ The window in the corner keeps this far from the edges of the work area (the mock-up:
     /// `right: 12px`, `bottom: 60px` over a taskbar of 48).
     pub const POPUP_MARGIN: Pt = Pt(12.0);

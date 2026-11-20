@@ -188,6 +188,9 @@ pub enum Node<I> {
         words: String,
         link: Option<(I, String)>,
     },
+    /// The picture of «Обновлено»: the strip of the taskbar with the person's flag, at one moment
+    /// of its animation.
+    Taskbar(Taskbar),
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
@@ -356,6 +359,7 @@ impl<I> Node<I> {
                 words,
                 link: link.map(|(id, text)| (f(id), text)),
             },
+            Node::Taskbar(picture) => Node::Taskbar(picture),
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -446,6 +450,7 @@ impl<I> Node<I> {
                     f(Role::Link, link);
                 }
             }
+            Node::Taskbar(_) => {}
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }
@@ -470,6 +475,29 @@ impl<I> Window<I> {
         self.body.texts_mut(f);
         self.buttons.iter_mut().for_each(|node| node.texts_mut(f));
     }
+}
+
+/// One moment of the picture of the taskbar (the mock-up of «Обновлено»): the strip of the
+/// taskbar with the flag of one of the person's two layouts and its code, the plate of the keys,
+/// the cursor on its way to the flag, the list of the two layouts over the strip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Taskbar {
+    /// The person's two layouts: the one in force and the next.
+    pub layouts: [crate::layouts::LayoutId; 2],
+    /// Their codes, as the flag shows them.
+    pub codes: [String; 2],
+    /// Which of the two the flag shows now.
+    pub shown: usize,
+    /// The plate «Alt + Shift» is up.
+    pub plate: bool,
+    /// The cursor, as the share of its way to the flag.
+    pub cursor: Option<f32>,
+    /// The list of the two layouts is open, its first row hovered when `hover`.
+    pub list: bool,
+    pub hover: bool,
+    /// The icons of the taskbar stand at its left: the interface of Windows reads right to left —
+    /// the picture follows Windows, not the language of the program (passport §7).
+    pub icons_left: bool,
 }
 
 /// One line or several.

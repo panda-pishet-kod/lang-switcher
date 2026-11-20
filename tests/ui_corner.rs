@@ -26,7 +26,7 @@ fn content(main: &str, second: &str) -> Content {
 
 /// The window laid out at its width and the height it needs.
 fn laid(content: &Content, rtl: bool) -> Layout<Id> {
-    let window = describe(content, false);
+    let window = describe(content, false, None);
     let first = lay_out(
         &window,
         client_size(CORNER_WIDTH.0, 400.0),
@@ -124,7 +124,7 @@ fn the_window_in_the_corner_keeps_its_type_sizes() {
         assert_eq!(Style::of(Role::CornerTitle, b, 500.0).size, CORNER_TITLE.0);
         assert_eq!(Style::of(Role::CornerText, b, 500.0).size, CORNER_TEXT.0);
     }
-    let window = describe(&content("A", "B"), true);
+    let window = describe(&content("A", "B"), true, None);
     let check = window_has_check(&window);
     assert!(check, "the check box of the content is not in the window");
 }
@@ -166,13 +166,15 @@ fn print_the_windows_in_the_corner() {
     let folder = std::path::Path::new(&folder);
     std::fs::create_dir_all(folder).expect("the folder of the pictures");
 
+    let mut updated_ru = content("Что нового", "Закрыть");
+    updated_ru.picture = true;
     let windows: [(&str, &str, Content); 9] = [
         (
             "hint",
             "ru",
             hint("Флаг раскладки — у часов", "Показать", "Понятно"),
         ),
-        ("updated", "ru", content("Что нового", "Закрыть")),
+        ("updated", "ru", updated_ru),
         (
             "letter",
             "ru",
@@ -194,7 +196,7 @@ fn print_the_windows_in_the_corner() {
             letter("Ein Brief vom Autor", "Jetzt lesen", "Später erinnern"),
         ),
         ("hint", "he", hint("הדגל עכשיו ליד השעון", "הצג", "הבנתי")),
-        ("updated", "he", content("מה חדש", "סגור")),
+        ("updated", "he", with_picture(content("מה חדש", "סגור"))),
         ("letter", "he", letter("מכתב מהמחבר", "קרא", "אחר כך")),
     ];
     for (name, language, content) in &windows {
@@ -207,7 +209,8 @@ fn print_the_windows_in_the_corner() {
         let text = Text::new(language, direction).expect("the text of the language");
         for theme in [Theme::Light, Theme::Dark] {
             for scale in [1.0_f32, 1.5] {
-                let window = describe(content, false);
+                let picture = (*name == "updated").then(|| taskbar(rtl));
+                let window = describe(content, false, picture);
                 let first = lay_out(&window, client_size(CORNER_WIDTH.0, 400.0), 1.0, rtl, &text);
                 let size = client_size(CORNER_WIDTH.0, 400.0 + first.shortfall.h);
                 let layout = lay_out(&window, size, 1.0, rtl, &text);
@@ -267,4 +270,74 @@ fn letter(title: &str, main: &str, second: &str) -> Content {
         picture: false,
         check: None,
     }
+}
+
+fn taskbar(icons_left: bool) -> lang_switcher::ui::scene::Taskbar {
+    use lang_switcher::layouts::LayoutId;
+    lang_switcher::ui::scene::Taskbar {
+        layouts: [
+            LayoutId::from_raw(0x0409_0409),
+            LayoutId::from_raw(0x0419_0419),
+        ],
+        codes: ["EN".to_owned(), "RU".to_owned()],
+        shown: 0,
+        plate: true,
+        cursor: Some(0.5),
+        list: true,
+        hover: true,
+        icons_left,
+    }
+}
+
+/// «Обновлено» carries the picture of the taskbar between the message and the buttons, at its
+/// height; a content without a picture has none even when a moment is given.
+#[test]
+fn the_picture_of_the_taskbar_stands_between_the_message_and_the_buttons() {
+    use lang_switcher::ui::tokens::CORNER_PICTURE;
+    let mut with = content("Что нового", "Закрыть");
+    with.picture = true;
+    let window = describe(&with, false, Some(taskbar(false)));
+    let first = lay_out(
+        &window,
+        client_size(CORNER_WIDTH.0, 400.0),
+        1.0,
+        false,
+        &MEASURE,
+    );
+    let layout = lay_out(
+        &window,
+        client_size(CORNER_WIDTH.0, 400.0 + first.shortfall.h),
+        1.0,
+        false,
+        &MEASURE,
+    );
+    let picture = first_of(&layout, |part| matches!(part, Part::Taskbar(_)));
+    assert_eq!(picture.h, CORNER_PICTURE.0, "the height of the picture");
+    let main = rect_of(&layout, Id::Main);
+    assert!(
+        picture.bottom() <= main.y,
+        "the picture is not above the buttons"
+    );
+
+    let without = describe(&content("A", "B"), false, Some(taskbar(false)));
+    let layout = lay_out(
+        &without,
+        client_size(CORNER_WIDTH.0, 400.0),
+        1.0,
+        false,
+        &MEASURE,
+    );
+    assert!(
+        !layout
+            .items
+            .iter()
+            .any(|item| matches!(item.part, Part::Taskbar(_))),
+        "a content without a picture shows one"
+    );
+}
+
+#[cfg(feature = "testing")]
+fn with_picture(mut content: Content) -> Content {
+    content.picture = true;
+    content
 }

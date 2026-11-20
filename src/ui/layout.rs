@@ -36,7 +36,7 @@ use crate::ui::tokens::{
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
-    CORNER_HEADER_ROW, CORNER_ICON, CORNER_ICON_GAP, CORNER_MAIN_SHARE, CORNER_PAD,
+    CORNER_HEADER_ROW, CORNER_ICON, CORNER_ICON_GAP, CORNER_MAIN_SHARE, CORNER_PAD, CORNER_PICTURE,
     CORNER_SECOND_SHARE, CORNER_TITLE_GAP,
 };
 
@@ -201,6 +201,8 @@ pub enum Part {
     AppIcon,
     /// The ✕ that closes the window in the corner.
     Cross,
+    /// The picture of the taskbar in «Обновлено», at one moment.
+    Taskbar(crate::ui::scene::Taskbar),
     /// The thin scroll bar of a list that has more rows than it shows.
     Scroll {
         first: usize,
@@ -290,6 +292,7 @@ impl Part {
             Part::Tick => "tick",
             Part::AppIcon => "program icon",
             Part::Cross => "close cross",
+            Part::Taskbar(_) => "taskbar picture",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -714,6 +717,11 @@ impl<I: Copy> Placer<'_, I> {
                 first,
             } => self.list(*id, rows, *selected, *first, x, y, w, slot),
             Node::CornerHeader { about, close } => self.corner_header(about, *close, x, y, w),
+            Node::Taskbar(picture) => {
+                let h = CORNER_PICTURE.0;
+                self.push(Part::Taskbar(picture.clone()), Rect::new(x, y, w, h), None);
+                h
+            }
             Node::Message { title, words, link } => {
                 self.message(title, words, link.as_ref(), x, y, w)
             }

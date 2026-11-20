@@ -185,13 +185,43 @@ struct CornerWindow {
     content: Content,
     checked: bool,
     language: crate::settings::Language,
+    /// When the window came: the clock of its picture.
+    started: std::time::Instant,
+    /// The person's two layouts the picture shows.
+    layouts: (LayoutId, LayoutId),
+    /// The interface of Windows reads right to left: the picture is turned.
+    icons_left: bool,
+}
+
+impl CornerWindow {
+    /// The picture of the taskbar at this moment of its round.
+    fn picture(&self) -> crate::ui::scene::Taskbar {
+        let ms =
+            u32::try_from(self.started.elapsed().as_millis() % u128::from(ROUND_MS)).unwrap_or(0);
+        let now = frame(ms);
+        let (one, two) = self.layouts;
+        crate::ui::scene::Taskbar {
+            layouts: [one, two],
+            codes: [
+                crate::flags::language_code(one),
+                crate::flags::language_code(two),
+            ],
+            shown: now.flag,
+            plate: now.plate,
+            cursor: now.cursor.map(|share| share as f32 / 1000.0),
+            list: now.list,
+            hover: now.hover,
+            icons_left: self.icons_left,
+        }
+    }
 }
 
 impl crate::ui::host::Content for CornerWindow {
     type Id = crate::ui::windows::corner::Id;
 
     fn describe(&self) -> crate::ui::scene::Window<Self::Id> {
-        crate::ui::windows::corner::describe(&self.content, self.checked)
+        let picture = self.content.picture.then(|| self.picture());
+        crate::ui::windows::corner::describe(&self.content, self.checked, picture)
     }
 
     fn event(&mut self, event: crate::ui::scene::Event<Self::Id>) -> crate::ui::host::Reply {
@@ -260,10 +290,14 @@ pub fn show(content: Content, sound: bool, on_end: fn(End)) -> bool {
         return false;
     }
     let main = content.main.1;
+    let session = crate::layouts::enumerate().unwrap_or_default();
     let window = CornerWindow {
         content,
         checked: false,
         language: crate::settings::ui_language(),
+        started: std::time::Instant::now(),
+        layouts: picture_layouts(&session, crate::switch::read().layout),
+        icons_left: crate::ui::host::windows_reads_right_to_left(),
     };
     let Ok(hwnd) = crate::ui::host::open_popup(window, notification_area()) else {
         return false;

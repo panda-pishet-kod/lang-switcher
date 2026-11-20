@@ -7,7 +7,7 @@
 //! as every window of the shell.
 
 use crate::corner::Content;
-use crate::ui::scene::{Art, ButtonKind, Node, Window, WindowKind};
+use crate::ui::scene::{Art, ButtonKind, Node, Taskbar, Window, WindowKind};
 
 /// The elements of the window in the corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,8 +19,9 @@ pub enum Id {
     Check,
 }
 
-/// The window in the corner saying `content`; its check box ticked when `checked`.
-pub fn describe(content: &Content, checked: bool) -> Window<Id> {
+/// The window in the corner saying `content`; its check box ticked when `checked`; `picture` —
+/// the moment of the picture of the taskbar, for a content that has one.
+pub fn describe(content: &Content, checked: bool, picture: Option<Taskbar>) -> Window<Id> {
     let mut parts = vec![
         Node::CornerHeader {
             about: format!("{} · {}", crate::APP_NAME, content.about),
@@ -35,6 +36,9 @@ pub fn describe(content: &Content, checked: bool) -> Window<Id> {
                 .map(|(label, _)| (Id::Link, label.clone())),
         },
     ];
+    if let Some(picture) = picture.filter(|_| content.picture) {
+        parts.push(Node::Taskbar(picture));
+    }
     let mut buttons = Vec::new();
     if let Some((label, _)) = &content.second {
         buttons.push(Node::Button {

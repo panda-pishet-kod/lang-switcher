@@ -263,6 +263,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             }
         }
         Part::AppIcon => painter.app_icon(rect),
+        Part::Taskbar(picture) => crate::ui::picture::draw(painter, look, picture, rect),
         Part::Cross => {
             if let Some(fill) = stepped(None, state) {
                 painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));

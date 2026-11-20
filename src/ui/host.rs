@@ -353,8 +353,9 @@ struct OpenDrop<I> {
     shared: Rc<RefCell<DropState>>,
 }
 
-/// The one timer of a window of the shell: the steps of a popup coming in.
+/// The timers of a window of the shell: the steps of a popup coming in, the frames of a picture.
 const APPEAR_TIMER: usize = 1;
+const PICTURE_TIMER: usize = 2;
 
 /// Where a popup stands, its left-top in screen pixels: in the corner of the work area `work`
 /// nearest the notification area `anchor` (the program's icon, or the end of the taskbar where the
@@ -423,7 +424,7 @@ fn animation_on() -> bool {
 
 /// Whether the interface of Windows reads right to left: its icons then stand at the left end of a
 /// taskbar along the bottom or the top.
-fn windows_reads_right_to_left() -> bool {
+pub fn windows_reads_right_to_left() -> bool {
     // SAFETY: reads the language of the interface of the person.
     let language = u32::from(unsafe { GetUserDefaultUILanguage() });
     // SAFETY: asks the length first, then fills a local of that length.
@@ -526,6 +527,8 @@ struct Host<C: Content> {
     popup: Option<Popup>,
     /// The list of a choice field open under it.
     drop: Option<OpenDrop<C::Id>>,
+    /// A picture moves in the window: its timer runs.
+    animating: bool,
 }
 
 /// The class of the windows of the shell: the ordinary one, or the popup's, which carries the
@@ -863,6 +866,7 @@ impl<C: Content> Host<C> {
             wheel: 0,
             popup: None,
             drop: None,
+            animating: false,
         }
     }
 
@@ -1193,6 +1197,28 @@ impl<C: Content> Host<C> {
         true
     }
 
+    /// The timer of the frames runs while a picture that moves is in the window.
+    fn keep_picture_moving(&mut self, hwnd: HWND) {
+        let moving = self.layout.as_ref().is_some_and(|layout| {
+            layout
+                .items
+                .iter()
+                .any(|item| matches!(item.part, Part::Taskbar(_)))
+        });
+        if moving == self.animating {
+            return;
+        }
+        self.animating = moving;
+        // SAFETY: the window's own timer.
+        unsafe {
+            if moving {
+                SetTimer(Some(hwnd), PICTURE_TIMER, motion::PICTURE_FRAME_MS, None);
+            } else {
+                let _ = KillTimer(Some(hwnd), PICTURE_TIMER);
+            }
+        }
+    }
+
     /// The theme by the content's setting and the system's.
     fn read_theme(&mut self, hwnd: HWND) {
         let palette = resolve(self.content.theme(), system_is_light());
@@ -1425,6 +1451,7 @@ impl<C: Content> Host<C> {
         self.lay_out(hwnd);
         // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
         self.sync_fields(hwnd);
+        self.keep_picture_moving(hwnd);
         if self.canvas.is_none() {
             let mut client = RECT::default();
             // SAFETY: the out parameter is a local.
@@ -1765,6 +1792,12 @@ impl<C: Content> Handler for Host<C> {
                 None
             }
             WM_ERASEBKGND => Some(LRESULT(1)),
+            // The next frame of a picture: the description again, from the content's clock.
+            WM_TIMER if wparam.0 == PICTURE_TIMER => {
+                self.rebuild();
+                invalidate(hwnd);
+                Some(LRESULT(0))
+            }
             WM_TIMER if wparam.0 == APPEAR_TIMER => {
                 self.step_in(hwnd);
                 Some(LRESULT(0))
