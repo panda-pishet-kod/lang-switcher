@@ -36,16 +36,6 @@ pub struct Excuse {
 pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letters list",
-        class: Class::Narrow,
-        languages: &[],
-        category: Some(Category::Owner),
-        until: "утро 2026-11-20",
-        decision: None,
-        why: "«Последние письма»: высота списка из четырёх карточек не помещается в 620×500 и после \
-              уступок §3а; 208.166 — «без прокрутки»: меньше карточек, прокрутка в узком окне или иное",
-    },
-    Excuse {
-        window: "letters list",
         class: Class::Ordinary,
         languages: &["el", "ka", "mi"],
         category: Some(Category::Owner),
@@ -63,13 +53,15 @@ pub const EXCUSED: &[Excuse] = &[
         why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
     },
     Excuse {
-        window: "letter update",
+        window: "letters list",
         class: Class::Narrow,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
+        languages: &["mi"],
+        category: Some(Category::Owner),
+        until: "T-120-24 (mi — у ядра)",
         decision: None,
-        why: "«Обновление»: временные образцы строк ×1,3 и длинный перевод — укоротить в волне",
+        why: "«Последние письма», mi, малый экран: строка «дата · не прочитано» режется поперёк \
+              (нужно 257, есть 190) — прокрутка 208.198 лечит только высоту; для остальных языков \
+              исключение 208.166 в Narrow снято",
     },
     Excuse {
         window: "letter update",
@@ -97,15 +89,6 @@ pub const EXCUSED: &[Excuse] = &[
         until: "T-120-24",
         decision: None,
         why: "«Спасибо»: слово IDS_THANKS_LEAD шире колонки — укоротить в волне",
-    },
-    Excuse {
-        window: "author",
-        class: Class::Narrow,
-        languages: &["ml", "ta"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«От автора»: перевод IDS_AUTHOR_TEXT или заголовка IDS_ABOUT_LINE_1 не помещается даже при 12 после слова 208.178 (короткие кнопки, шапка без подписи) — укоротить в волне",
     },
     Excuse {
         window: "author",
