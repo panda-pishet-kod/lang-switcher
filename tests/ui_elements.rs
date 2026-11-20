@@ -288,3 +288,61 @@ fn a_button_label_wraps_only_where_the_layout_made_the_button_taller() {
         "made taller for it"
     );
 }
+
+/// **The drawn value of a field of code reads in the direction of its own text** (T-120-19,
+/// `FieldKind::Code { rtl }`): in a window in Hebrew a report in Latin letters drawn with `rtl`
+/// false starts at the left of the field — the picture of the window (C3, the instrument of fitting)
+/// shows it as the field of Windows does; with the window's direction it stands at the right.
+#[test]
+fn the_drawn_value_of_a_field_of_code_reads_in_its_own_direction() {
+    use lang_switcher::ui::elements::draw as draw_part;
+
+    let text = Text::new("he-IL", Direction::RightToLeft).expect("DirectWrite");
+    let look = Look {
+        theme: Theme::Light,
+        rtl: true,
+        b: b(),
+        h: 512.0,
+        text: &text,
+    };
+    let rect = Rect::new(MARGIN, MARGIN, 600.0, 120.0);
+    let first_ink = |rtl: Option<bool>| {
+        let part = Part::Input {
+            multiline: true,
+            code: true,
+            rtl,
+            capture: None,
+            value: "Lang Switcher 1.8.0".to_owned(),
+            hint: String::new(),
+        };
+        let mut canvas = Canvas::in_memory(
+            rect.w + MARGIN * 2.0,
+            rect.h + MARGIN * 2.0,
+            1.0,
+            Mode::Direct2D,
+        )
+        .expect("a canvas");
+        let background = Color::Bg.get(look.theme);
+        canvas.frame(|painter| {
+            painter.clear(background);
+            draw_part(painter, &look, &part, rect, State::default());
+        });
+        let image = canvas.image().expect("pixels");
+        let ink = Color::Ink.get(look.theme);
+        let width = image.width as usize;
+        image
+            .pixels()
+            .iter()
+            .enumerate()
+            .filter(|(_, pixel)| **pixel == ink)
+            .map(|(at, _)| at % width)
+            .min()
+            .expect("the value drawn in ink")
+    };
+    let own = first_ink(Some(false));
+    let window = first_ink(None);
+    assert!(
+        own + 200 < window,
+        "left to right from x {own}; the window's direction from x {window}"
+    );
+}
