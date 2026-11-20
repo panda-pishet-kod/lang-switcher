@@ -756,6 +756,11 @@ fn series(rounds: usize, mut open: impl FnMut() -> windows::Win32::Foundation::H
 /// * (б) right after it, 300 openings of the letter with the panda: the 300th no more than the
 ///   20th + 0,5 MB — no growth with every opening, the process warm (+0,08…0,26 measured).
 ///
+/// «The 20th» and «the 300th» are levels, not single openings: the median of the openings 11…30
+/// and of the openings 281…300. The memory after one closing can catch a spike — committed for a
+/// moment, given back within some 25 openings, 0,25…0,45 MB measured — and a spike on either
+/// single opening turned the gate red one run in two (+0,59 and +0,60 MB on a flat line).
+///
 /// The only test of this binary run without `--ignored`: alone in its process, as the gate needs.
 #[test]
 fn the_memory_does_not_grow_with_every_opening() {
@@ -798,28 +803,37 @@ fn the_memory_does_not_grow_with_every_opening() {
         )
         .expect("the window of the shell")
     });
-    let line = |name: &str, after: &[f64]| {
+    // The level about the n-th opening: the median of the 20 openings `from..=to` (counted from 1).
+    let level = |after: &[f64], from: usize, to: usize| {
+        let mut window = after[from - 1..to].to_vec();
+        window.sort_by(f64::total_cmp);
+        let half = window.len() / 2;
+        (window[half - 1] + window[half]) / 2.0
+    };
+    let (about_20, about_300) = (level(&about, 11, 30), level(&about, 281, ROUNDS));
+    let (letter_20, letter_300) = (level(&letter, 11, 30), level(&letter, 281, ROUNDS));
+    let line = |name: &str, after: &[f64], at_20: f64, at_300: f64| {
         format!(
-            "{name}: 1st {:.2}, 20th {:.2}, 100th {:.2}, 300th {:.2} MB — {:+.2} from the 20th",
+            "{name}: 1st {:.2}, 20th {:.2} (level {at_20:.2}), 300th {:.2} (level {at_300:.2}) MB — \
+             {:+.2} from the 20th",
             after[0],
             after[19],
-            after[99],
             after[ROUNDS - 1],
-            after[ROUNDS - 1] - after[19]
+            at_300 - at_20
         )
     };
     let report = format!(
         "{}; {}",
-        line("«О программе»", &about),
-        line("the letter", &letter)
+        line("«О программе»", &about, about_20, about_300),
+        line("the letter", &letter, letter_20, letter_300)
     );
     println!("{report}");
     assert!(
-        about[ROUNDS - 1] <= about[19] + WARMING_MB,
+        about_300 <= about_20 + WARMING_MB,
         "(а) «О программе» grows past the warming of a fresh process: {report}"
     );
     assert!(
-        letter[ROUNDS - 1] <= letter[19] + GROWTH_MB,
+        letter_300 <= letter_20 + GROWTH_MB,
         "(б) the letter grows with every opening: {report}"
     );
 }
