@@ -404,7 +404,9 @@ fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
             settings::IDS_SECTION_DIAGNOSTICS_SUB,
         ),
     ];
-    for language in [Language::Ru, Language::En, Language::De] {
+    // French, not German: after the wave of translations both German words are «Einstellungen», and
+    // the check could not tell the two keys apart.
+    for language in [Language::Ru, Language::En, Language::Fr] {
         let eyebrow = settings::text_in(language, settings::IDS_SETTINGS_EYEBROW);
         if language != Language::Ru {
             // ⚠ Контроль: where the two keys say the same, the check below proves nothing.
@@ -432,4 +434,73 @@ fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
             );
         }
     }
+}
+
+/// **T-120-22 Б: «Нашли ошибку в переводе?» stands under «Язык интерфейса» in every language but
+/// Russian** — the language the others are translated from. A quiet button, the very next element
+/// after the choice of the language and before the theme.
+#[test]
+fn the_translation_button_stands_under_the_language_in_every_language_but_russian() {
+    with_product_strings();
+    for language in LANGUAGES {
+        let states = window_of_settings::states(language);
+        let (_, window) = states
+            .iter()
+            .find(|(name, _)| name == "settings General")
+            .expect("the window has «Общие»");
+        let body = format!("{:?}", window.body);
+        let choice = body.find("id: Language").expect("«Язык интерфейса»");
+        let theme = body.find("id: Theme").expect("«Тема»");
+        let button = body.find("id: Translation");
+        println!("{language:?}: language at {choice}, button at {button:?}, theme at {theme}");
+
+        if language == Language::Ru {
+            assert_eq!(button, None, "Russian has no «Нашли ошибку в переводе?»");
+            continue;
+        }
+        let at = button.unwrap_or_else(|| panic!("{language:?}: the button is there"));
+        let between = &body[at..theme];
+        let label = format!(
+            "{:?}",
+            settings::text_in(language, settings::IDS_TRANSLATION_REPORT)
+        );
+        assert!(
+            choice < at && between.contains("kind: Quiet") && between.contains(&label),
+            "{language:?}: the quiet {label} under the language and above the theme: {between}"
+        );
+    }
+}
+
+/// **T-120-22 Б, C6 of the sheet, (г): the note of a refused write takes the place of «Нашли ошибку
+/// в переводе?»** — with the note over «Общие», the button is not there; without it, it is. The note
+/// is temporary, and the button comes back with the next change.
+#[test]
+fn the_note_of_a_refused_write_takes_the_place_of_the_translation_button() {
+    with_product_strings();
+    let states = window_of_settings::states(Language::De);
+    let body = |name: &str| {
+        let (_, window) = states
+            .iter()
+            .find(|(state, _)| state == name)
+            .unwrap_or_else(|| panic!("the window has the state {name}"));
+        format!("{:?}", window.body)
+    };
+    let (plain, refused) = (body("settings General"), body("settings General refused"));
+    let note = format!(
+        "{:?}",
+        settings::text_in(Language::De, settings::IDS_SETTINGS_NOT_SAVED)
+    );
+
+    assert!(
+        refused.contains(&note) && !plain.contains(&note),
+        "the control: the note stands in the one state and not in the other"
+    );
+    assert!(
+        plain.contains("id: Translation"),
+        "without the note, the button is there"
+    );
+    assert!(
+        !refused.contains("id: Translation"),
+        "with the note, the button is not"
+    );
 }

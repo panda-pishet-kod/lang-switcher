@@ -34,6 +34,7 @@ fn full_draft() -> Draft {
         idea: String::new(),
         helps: String::new(),
         attach: Attach::default(),
+        translation: None,
     }
 }
 
@@ -655,7 +656,24 @@ fn the_text_of_the_appeal_reads_in_the_direction_of_its_own_language() {
         .edit_appeal("Lang Switcher 1.8.0\n==========\n\nמה קרה: התוכנה עשתה משהו אחר".to_owned());
     let hebrew = field_of(hebrew);
 
-    println!("ru in he: {russian}; he in he: {hebrew}");
+    // T-120-22: a report about the translation has its mark above the name, skipped with the name.
+    let mut marked = letters::Wizard::with(
+        Draft {
+            trouble: Trouble::Idea,
+            translation: Some(settings::Language::He),
+            ..Draft::default()
+        },
+        Facts::default(),
+        Vec::new(),
+    );
+    let _ = marked.forward();
+    let _ = marked.forward();
+    marked.edit_appeal(
+        "טעות בתרגום: he\nLang Switcher 1.8.0\n==========\n\nמה קרה: רעיון".to_owned(),
+    );
+    let marked = field_of(marked);
+
+    println!("ru in he: {russian}; he in he: {hebrew}; marked he in he: {marked}");
 
     assert!(
         russian.starts_with("kind: Code { rtl: false }"),
@@ -664,5 +682,9 @@ fn the_text_of_the_appeal_reads_in_the_direction_of_its_own_language() {
     assert!(
         hebrew.starts_with("kind: Code { rtl: true }"),
         "an appeal in Hebrew goes right to left: {hebrew}"
+    );
+    assert!(
+        marked.starts_with("kind: Code { rtl: true }"),
+        "a report about the translation in Hebrew goes right to left: {marked}"
     );
 }

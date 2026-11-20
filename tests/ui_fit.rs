@@ -289,27 +289,65 @@ fn culprit(
     window
         .clone()
         .texts_mut(&mut |_, line| strings.push(line.clone()));
-    for (index, line) in strings.iter().enumerate() {
-        let mut without = window.clone();
+    // The window with the string `index` changed by `change`.
+    let with = |index: usize, change: &dyn Fn(&mut String)| {
+        let mut changed = window.clone();
         let mut at = 0;
-        without.texts_mut(&mut |_, other| {
+        changed.texts_mut(&mut |_, other| {
             if at == index {
-                other.clear();
+                change(other);
             }
             at += 1;
         });
-        if faults(&without, size, k, rtl, text).is_empty() {
-            let id = INTERFACE_STRINGS.iter().find(|id| {
-                let own = settings::text_in(language, **id);
-                !own.is_empty() && (own == *line || own.replace("{0}", "Pause") == *line)
-            });
-            return match id {
-                Some(id) => format!(
-                    "{} «{line}»",
-                    names.get(id).cloned().unwrap_or_else(|| id.to_string())
-                ),
-                None => format!("«{line}» (a string of no identifier)"),
-            };
+        changed
+    };
+    let across = |window: &Window<u16>| {
+        lay_out_with(window, size, k, rtl, text, Concession::ALL)
+            .shortfall
+            .w
+    };
+    let name = |line: &str| {
+        let id = INTERFACE_STRINGS.iter().find(|id| {
+            let own = settings::text_in(language, **id);
+            !own.is_empty() && (own == line || own.replace("{0}", "Pause") == line)
+        });
+        match id {
+            Some(id) => format!(
+                "{} «{line}»",
+                names.get(id).cloned().unwrap_or_else(|| id.to_string())
+            ),
+            None => format!("«{line}» (a string of no identifier)"),
+        }
+    };
+
+    // Across: the run of one line wider than its room — a string that, made longer, runs over
+    // further, and taken away leaves nothing over. A paragraph that wraps is not it, even when
+    // taking it away changes the steps of giving way so that the window fits (ml «Спасибо»: the
+    // lead was named for the label of the button of a card, 208.193).
+    let over = across(window);
+    if over > 0.5 {
+        for (index, line) in strings.iter().enumerate() {
+            let longer = with(index, &|s: &mut String| *s = s.repeat(2));
+            if across(&longer) <= over + 0.5 {
+                continue;
+            }
+            if across(&with(index, &|s: &mut String| s.clear())) <= 0.5 {
+                return name(line);
+            }
+        }
+    }
+
+    for (index, line) in strings.iter().enumerate() {
+        if faults(
+            &with(index, &|s: &mut String| s.clear()),
+            size,
+            k,
+            rtl,
+            text,
+        )
+        .is_empty()
+        {
+            return name(line);
         }
     }
     "no single string".to_owned()
@@ -779,4 +817,272 @@ fn the_table_has_a_factor_for_every_language() {
         .filter(|tag| !fit::TABLE.iter().any(|(known, _)| known == tag))
         .collect();
     assert!(missing.is_empty(), "not in fit::TABLE: {missing:?}");
+}
+
+/// **A button whose label is wider than its room is named with its key** (the C6 of ml
+/// «Спасибо», 208.193): the label of the button of the card «Поддержать автора» ran over, and the
+/// instrument named the lead — taking the lead away changed the steps of giving way so that the
+/// window fitted. Here the label in English is made long — another string of the program, not in
+/// this window — and the instrument must name its key, not a paragraph. It does not set the trap of the
+/// case — a paragraph whose removal also makes the window fit — and does not catch the rule
+/// «across» taken away; the next test does.
+#[test]
+fn a_button_too_wide_for_its_room_is_named_with_its_key() {
+    with_product_strings();
+    let names = string_names();
+    let support = settings::text_in(Language::En, settings::IDS_SUPPORT_OPEN);
+    let long = settings::text_in(Language::En, settings::IDS_HELLO_LEAD);
+    let (windows, _) = windows_of(Language::En);
+    let (_, thanks) = windows
+        .iter()
+        .find(|(name, _)| name == "letter thanks")
+        .expect("«Спасибо» among the windows");
+    let mut window = thanks.clone();
+    let mut replaced = 0;
+    window.texts_mut(&mut |role, s| {
+        if matches!(role, Role::Button) && *s == support {
+            *s = long.clone();
+            replaced += 1;
+        }
+    });
+    assert_eq!(replaced, 1, "the label of the button of the card");
+
+    let face = faces()[0];
+    let text = Text::with_faces(face, MONO_FACES[1], "en-US", Direction::LeftToRight)
+        .expect("DirectWrite");
+    let (class, w, h) = CLASSES[0];
+    let size = client_size(w, h);
+    let k = fit::k_for("en-US", class);
+    assert!(
+        !faults(&window, size, k, false, &text).is_empty(),
+        "the long label runs over"
+    );
+    let named = culprit(Language::En, &window, size, k, false, &text, &names);
+    assert!(
+        named.starts_with("IDS_HELLO_LEAD"),
+        "the label of the button is named with its key: {named}"
+    );
+}
+
+/// **The case itself** (ml «Спасибо», 20.11): the label of the button of the card ran over, and
+/// taking the lead away also made the window fit — the steps of giving way changed — so the
+/// instrument named the lead. The label of that day is kept here, so that the case outlives the
+/// translator's shorter label; if the window changes so that taking the lead away no longer makes
+/// it fit, the case is gone and this test says so, not passes for nothing.
+#[test]
+fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
+    const LABEL: &str = "നിർമ്മാതാവിനെ പിന്തുണയ്ക്കുക";
+    with_product_strings();
+    let names = string_names();
+    let support = settings::text_in(Language::Ml, settings::IDS_SUPPORT_OPEN);
+    let lead = settings::text_in(Language::Ml, settings::IDS_THANKS_LEAD);
+    let (windows, _) = windows_of(Language::Ml);
+    let (_, thanks) = windows
+        .iter()
+        .find(|(name, _)| name == "letter thanks")
+        .expect("«Спасибо» among the windows");
+    let mut window = thanks.clone();
+    window.texts_mut(&mut |role, s| {
+        if matches!(role, Role::Button) && *s == support {
+            *s = LABEL.to_owned();
+        }
+    });
+    let face = faces()[0];
+    let text = Text::with_faces(
+        face,
+        MONO_FACES[1],
+        Language::Ml.tag(),
+        Direction::LeftToRight,
+    )
+    .expect("DirectWrite");
+    let (class, w, h) = CLASSES[0];
+    let size = client_size(w, h);
+    let k = fit::k_for(Language::Ml.tag(), class);
+    assert!(
+        !faults(&window, size, k, false, &text).is_empty(),
+        "the label runs over"
+    );
+    let mut without_lead = window.clone();
+    without_lead.texts_mut(&mut |_, s| {
+        if *s == lead {
+            s.clear();
+        }
+    });
+    assert!(
+        faults(&without_lead, size, k, false, &text).is_empty(),
+        "the case is gone: taking the lead away no longer makes the window fit — build it anew"
+    );
+    let named = culprit(Language::Ml, &window, size, k, false, &text, &names);
+    assert!(
+        named.contains(LABEL),
+        "the label of the button is named: {named}"
+    );
+}
+
+/// **The entry of the feed is the one a person sees** (word of the controller on the C6 of ml and ta,
+/// 208.193): the instrument measures «Обновление» and «Новость» with the update of the last real
+/// feed in the language of the window — its own entry, else English, else Russian, as the product's
+/// `feed::parse_body` picks; the feed is read in the language of the program, not in Russian.
+#[cfg(feature = "testing")]
+#[test]
+fn the_sample_of_the_feed_is_in_the_language_of_the_window() {
+    use lang_switcher::letters;
+
+    with_product_strings();
+    let in_script = |s: &str, from: char, to: char| s.chars().any(|c| (from..=to).contains(&c));
+    let ml = letters::sample_entry_in(Language::Ml);
+    let ta = letters::sample_entry_in(Language::Ta);
+    let ru = letters::sample_entry_in(Language::Ru);
+    let en = letters::sample_entry_in(Language::En);
+    assert!(
+        in_script(&ml.title, '\u{0D00}', '\u{0D7F}'),
+        "Malayalam: {}",
+        ml.title
+    );
+    assert!(
+        in_script(&ta.title, '\u{0B80}', '\u{0BFF}'),
+        "Tamil: {}",
+        ta.title
+    );
+    assert!(in_script(&ru.title, 'А', 'я'), "Russian: {}", ru.title);
+    assert!(en.title.is_ascii(), "English: {}", en.title);
+}
+
+/// The letters that show an entry of the feed — «Новость» and «Обновление» — built in `language`
+/// with `item`.
+#[cfg(feature = "testing")]
+fn feed_letters(
+    language: Language,
+    item: &lang_switcher::letters::FeedItem,
+) -> Vec<(String, Window<u16>)> {
+    use lang_switcher::ui::windows::letter;
+    letter::states_with(language, item)
+        .into_iter()
+        .filter(|(name, _)| name == "letter news" || name == "letter update")
+        .map(|(name, window)| (name, window.map(&letter::Id::number)))
+        .collect()
+}
+
+/// Whether an entry with a text of `points` code points fits «Новость» and «Обновление» in the
+/// narrow and the ordinary window at the factor of the table, on every main face, with the steps of
+/// giving way the table is counted with (`Concession::TABLE`, as [`k_needed`] first tries): an entry
+/// that fitted only with more steps would ask the table a lower factor.
+#[cfg(feature = "testing")]
+fn entry_fits(language: Language, points: usize, faces: &[&str]) -> bool {
+    use lang_switcher::letters;
+    let mut item = letters::sample_entry_in(language);
+    item.text = letters::sample_text(language, points);
+    let rtl = language.is_rtl();
+    let direction = if rtl {
+        Direction::RightToLeft
+    } else {
+        Direction::LeftToRight
+    };
+    let windows = feed_letters(language, &item);
+    faces.iter().all(|face| {
+        let text =
+            Text::with_faces(face, MONO_FACES[1], language.tag(), direction).expect("DirectWrite");
+        CLASSES[..2].iter().all(|&(class, w, h)| {
+            let size = client_size(w, h);
+            let k = fit::k_for(language.tag(), class);
+            // At the edge of its cap an entry may fit at the factor of the table and fail a step
+            // under it — the lines break otherwise — and the search of the factor, which halves its
+            // range, then lands under the table (measured: «Обновление» ru, fits at 0,916, the
+            // search found 0,897). So the entry fits only where the search agrees.
+            windows.iter().all(|(_, window)| {
+                faults_with(window, size, k, rtl, &text, Concession::TABLE).is_empty()
+                    && k_needed(window, size, rtl, &text).is_some_and(|need| need >= k - 0.0005)
+            })
+        })
+    })
+}
+
+/// The cap of the text of an entry in `language`: the longest that fits its letters
+/// ([`entry_fits`]); 0 — the letter does not fit even without a text.
+#[cfg(feature = "testing")]
+fn cap_of(language: Language, faces: &[&str]) -> usize {
+    const MOST: usize = 4000;
+    if !entry_fits(language, 0, faces) {
+        return 0;
+    }
+    if entry_fits(language, MOST, faces) {
+        return MOST;
+    }
+    let (mut fits, mut not) = (0, MOST);
+    while not - fits > 1 {
+        let middle = (fits + not) / 2;
+        if entry_fits(language, middle, faces) {
+            fits = middle;
+        } else {
+            not = middle;
+        }
+    }
+    fits
+}
+
+/// **The caps of the feed, printed** (word of the controller on the C6 of ru and en, 208.193): the
+/// factor of the table stays, and every entry of the feed is held to the length that fits its
+/// letters in its language at that factor. With `LANGSW_FEED_CAPS_WRITE` set the caps are written to
+/// `tools\feed-caps.tsv`, which `sign-news.ps1` reads; without it this test does nothing.
+#[cfg(feature = "testing")]
+#[test]
+fn print_the_caps_of_the_feed() {
+    if std::env::var_os("LANGSW_FEED_CAPS_WRITE").is_none() {
+        return;
+    }
+    with_product_strings();
+    let faces = faces();
+    let mut text = String::from(
+        "# The cap of the text of an entry of the feed (FR-102), by language: code points, line \
+         breaks not\r\n# counted. Printed by the instrument of fitting (tests/ui_fit.rs, \
+         print_the_caps_of_the_feed with\r\n# LANGSW_FEED_CAPS_WRITE); read by \
+         tools/sign-news.ps1, which refuses a longer text. 0 -- the letter\r\n# does not fit even \
+         without a text in that language yet.\r\n",
+    );
+    for language in Language::ALL {
+        let cap = cap_of(language, &faces);
+        println!("{}\t{cap}", language.tag());
+        text.push_str(&format!("{}\t{cap}\r\n", language.tag()));
+    }
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tools")
+        .join("feed-caps.tsv");
+    std::fs::write(path, text).expect("the caps written");
+}
+
+/// **An entry of its cap fits its letters, in every language** — the gate of the caps of the feed:
+/// the instrument measures «Новость» and «Обновление» with an entry as long as `sign-news.ps1`
+/// lets through, so a longer entry cannot lower the factor of the table. A language with no cap,
+/// or whose entry of its cap no longer fits, asks the caps to be printed again.
+#[cfg(feature = "testing")]
+#[test]
+fn every_entry_of_its_cap_fits_its_letters() {
+    use lang_switcher::letters;
+    with_product_strings();
+    let faces = faces();
+    let mut wrong = Vec::new();
+    for language in Language::ALL {
+        match letters::feed_cap(language) {
+            None => wrong.push(format!("{}: no cap", language.tag())),
+            Some(0) => {}
+            Some(cap) => {
+                // Fitting is not monotone at the edge (the lines break otherwise), and the feed
+                // lets through every length up to the cap: a few of them are tried, not the cap
+                // alone.
+                for points in [cap, cap * 3 / 4, cap / 2, cap / 4] {
+                    if !entry_fits(language, points, &faces) {
+                        wrong.push(format!(
+                            "{}: an entry of {points} points (the cap {cap}) does not fit",
+                            language.tag()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "print the caps again (LANGSW_FEED_CAPS_WRITE):\n{}",
+        wrong.join("\n")
+    );
 }

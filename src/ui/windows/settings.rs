@@ -19,9 +19,9 @@ use crate::settings::{
     IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_OPEN,
     IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
     IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
-    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRAY_FLAG,
-    IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow,
-    Modifiers, Refusal,
+    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRANSLATION_REPORT,
+    IDS_TRAY_FLAG, IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode,
+    LayoutRow, Modifiers, Refusal,
 };
 use crate::settings::{
     IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
@@ -51,6 +51,7 @@ pub enum Id {
     TrayFlag,
     Updates,
     Language,
+    Translation,
     Theme,
     Hotkey,
     HotkeySet,
@@ -285,7 +286,7 @@ impl Settings {
 
     fn general(&self) -> Vec<Node<Id>> {
         let language = self.config.general.language.in_force();
-        vec![
+        let mut nodes = vec![
             toggle(
                 Id::Autostart,
                 self.line(IDS_AUTOSTART),
@@ -327,15 +328,29 @@ impl Settings {
                     .position(|candidate| *candidate == language)
                     .unwrap_or(0),
             },
-            Node::Segments {
-                id: Id::Theme,
-                label: self.line(IDS_THEME_LABEL),
-                options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
-                    .map(|id| self.line(id))
-                    .to_vec(),
-                selected: settings::theme_combo_index(self.config.general.theme),
-            },
-        ]
+        ];
+        // T-120-22: under «Язык интерфейса», the quiet «Нашли ошибку в переводе?» — in every
+        // language of the window but Russian, the language the others are translated from.
+        // ⚠ Not while the note of a refused write stands over the section (C6 of the sheet, (г)):
+        // with the note, the button pushes «Общие» of the narrow window out of it in ta, ml, tt
+        // and ka; the note goes with the next change, and the button comes back with it.
+        if self.language != Language::Ru && !self.refused {
+            nodes.push(Node::Buttons(vec![Node::Button {
+                id: Id::Translation,
+                label: self.line(IDS_TRANSLATION_REPORT),
+                kind: ButtonKind::Quiet,
+                browser: false,
+            }]));
+        }
+        nodes.push(Node::Segments {
+            id: Id::Theme,
+            label: self.line(IDS_THEME_LABEL),
+            options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
+                .map(|id| self.line(id))
+                .to_vec(),
+            selected: settings::theme_combo_index(self.config.general.theme),
+        });
+        nodes
     }
 
     /// The field of the hotkey and «Задать» beside it; under them, one line: at rest the ways a
@@ -1082,6 +1097,11 @@ impl Content for Product {
         let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
+                Reply::Stay
+            }
+            // T-120-22: the wizard on the page of the idea, marked with the language read here.
+            Event::Pressed(Id::Translation) => {
+                crate::letters::open_wizard_for_translation(self.owner, self.settings.language);
                 Reply::Stay
             }
             // C6 (а) of T-120-21: the lines for the author in a small window of their own.
