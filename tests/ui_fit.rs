@@ -171,6 +171,18 @@ fn faults_with(
             layout.shortfall.w, layout.shortfall.h
         ));
     }
+    // 208.198: on a small screen a body that still lacks height after the steps of giving way
+    // scrolls — no fault while every element of it can be reached, that is while its room holds a
+    // line of it at least.
+    if let Some(body) = layout.scroll {
+        let line = Style::of(Role::Body, layout.b, size.h).line_height();
+        if body.viewport.h < line {
+            found.push(format!(
+                "the room of the scrolled body is {:.1}, under a line ({line:.1}): not reachable",
+                body.viewport.h
+            ));
+        }
+    }
     if layout.b < TYPE_FLOOR.0 {
         found.push(format!("B {:.2} under 12", layout.b));
     }
@@ -503,6 +515,8 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     let mut found = Vec::new();
     let mut excused_found = Vec::new();
     let mut matched: Vec<(String, Class, String)> = Vec::new();
+    // 208.198: who scrolls on a small screen — printed, not counted.
+    let mut scrolled: Vec<String> = Vec::new();
 
     for language in Language::ALL {
         let (windows, _) = windows_of(language);
@@ -520,6 +534,16 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
                 let k = fit::k_for(language.tag(), class);
                 for (name, window) in &windows {
                     let faults = faults(window, size, k, rtl, &text);
+                    if size.scrolls
+                        && lay_out_with(window, size, k, rtl, &text, Concession::ALL)
+                            .scroll
+                            .is_some()
+                    {
+                        let who = format!("{}: {name}, {class:?}", language.tag());
+                        if !scrolled.contains(&who) {
+                            scrolled.push(who);
+                        }
+                    }
                     if !faults.is_empty() {
                         let who = culprit(language, window, size, k, rtl, &text, &names);
                         let line = format!(
@@ -568,6 +592,13 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     );
     for excuse in EXCUSED {
         println!("- {}", excuse_line(excuse));
+    }
+    println!(
+        "scrolls on a small screen (208.198, 620 × 500): {}",
+        scrolled.len()
+    );
+    for line in &scrolled {
+        println!("- {line}");
     }
     // How far the windows gave way (§3а) at the factors of the table.
     let steps = &pass().steps;
@@ -970,12 +1001,20 @@ fn feed_letters(
         .collect()
 }
 
-/// Whether an entry with a text of `points` code points fits «Новость» and «Обновление» in the
-/// narrow and the ordinary window at the factor of the table, on every main face, with the steps of
+/// Whether an entry of `kind` with a text of `points` code points fits its letter — «Обновление» for
+/// an update, «Новость» for a news item (word of the owner, 2026-11-20) — in the
+/// window of the reference (decision 208.197: the size it opens in, two thirds of the work area and
+/// not less than Ordinary 900 × 540 — a smaller window scrolls) at the factor of the table, on every
+/// main face, with the steps of
 /// giving way the table is counted with (`Concession::TABLE`, as [`k_needed`] first tries): an entry
 /// that fitted only with more steps would ask the table a lower factor.
 #[cfg(feature = "testing")]
-fn entry_fits(language: Language, points: usize, faces: &[&str]) -> bool {
+fn entry_fits(
+    language: Language,
+    points: usize,
+    faces: &[&str],
+    kind: lang_switcher::letters::FeedKind,
+) -> bool {
     use lang_switcher::letters;
     let mut item = letters::sample_entry_in(language);
     item.text = letters::sample_text(language, points);
@@ -985,40 +1024,48 @@ fn entry_fits(language: Language, points: usize, faces: &[&str]) -> bool {
     } else {
         Direction::LeftToRight
     };
-    let windows = feed_letters(language, &item);
+    let letter = format!("letter {}", kind.name());
+    let windows: Vec<_> = feed_letters(language, &item)
+        .into_iter()
+        .filter(|(name, _)| *name == letter)
+        .collect();
+    assert_eq!(windows.len(), 1, "the letter of {letter}");
     faces.iter().all(|face| {
         let text =
             Text::with_faces(face, MONO_FACES[1], language.tag(), direction).expect("DirectWrite");
-        CLASSES[..2].iter().all(|&(class, w, h)| {
+        [CLASSES[1]].iter().all(|&(class, w, h)| {
             let size = client_size(w, h);
             let k = fit::k_for(language.tag(), class);
             // At the edge of its cap an entry may fit at the factor of the table and fail a step
             // under it — the lines break otherwise — and the search of the factor, which halves its
             // range, then lands under the table (measured: «Обновление» ru, fits at 0,916, the
-            // search found 0,897). So the entry fits only where the search agrees.
+            // search found 0,897). So the entry fits only where the search agrees. The search of the table
+            // floors the factor to thousandths, and so does this: an entry that needed 0,8776 fitted
+            // here and asked the table 0,877 (208.198, the merge of 4c3318d).
             windows.iter().all(|(_, window)| {
                 faults_with(window, size, k, rtl, &text, Concession::TABLE).is_empty()
-                    && k_needed(window, size, rtl, &text).is_some_and(|need| need >= k - 0.0005)
+                    && k_needed(window, size, rtl, &text)
+                        .is_some_and(|need| (need * 1000.0).floor() / 1000.0 + 0.0005 >= k)
             })
         })
     })
 }
 
-/// The cap of the text of an entry in `language`: the longest that fits its letters
+/// The cap of the text of an entry of `kind` in `language`: the longest that fits its letter
 /// ([`entry_fits`]); 0 — the letter does not fit even without a text.
 #[cfg(feature = "testing")]
-fn cap_of(language: Language, faces: &[&str]) -> usize {
+fn cap_of(language: Language, faces: &[&str], kind: lang_switcher::letters::FeedKind) -> usize {
     const MOST: usize = 4000;
-    if !entry_fits(language, 0, faces) {
+    if !entry_fits(language, 0, faces, kind) {
         return 0;
     }
-    if entry_fits(language, MOST, faces) {
+    if entry_fits(language, MOST, faces, kind) {
         return MOST;
     }
     let (mut fits, mut not) = (0, MOST);
     while not - fits > 1 {
         let middle = (fits + not) / 2;
-        if entry_fits(language, middle, faces) {
+        if entry_fits(language, middle, faces, kind) {
             fits = middle;
         } else {
             not = middle;
@@ -1040,16 +1087,19 @@ fn print_the_caps_of_the_feed() {
     with_product_strings();
     let faces = faces();
     let mut text = String::from(
-        "# The cap of the text of an entry of the feed (FR-102), by language: code points, line \
-         breaks not\r\n# counted. Printed by the instrument of fitting (tests/ui_fit.rs, \
-         print_the_caps_of_the_feed with\r\n# LANGSW_FEED_CAPS_WRITE); read by \
-         tools/sign-news.ps1, which refuses a longer text. 0 -- the letter\r\n# does not fit even \
-         without a text in that language yet.\r\n",
+        "# The cap of the text of an entry of the feed (FR-102), by language and by the kind of the \
+         entry:\r\n# tag<TAB>update<TAB>news. Code points, line breaks not counted. An update is \
+         measured by the letter\r\n# \"Obnovlenie\", a news item by \"Novost\" -- the only windows \
+         that show the whole text. Printed by the\r\n# instrument of fitting (tests/ui_fit.rs, \
+         print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE);\r\n# read by \
+         tools/sign-news.ps1, which refuses a longer text of that kind. 0 -- the letter does not\r\n# \
+         fit even without a text in that language yet.\r\n",
     );
     for language in Language::ALL {
-        let cap = cap_of(language, &faces);
-        println!("{}\t{cap}", language.tag());
-        text.push_str(&format!("{}\t{cap}\r\n", language.tag()));
+        let [update, news] =
+            lang_switcher::letters::FeedKind::ALL.map(|kind| cap_of(language, &faces, kind));
+        println!("{}\t{update}\t{news}", language.tag());
+        text.push_str(&format!("{}\t{update}\t{news}\r\n", language.tag()));
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools")
@@ -1057,30 +1107,34 @@ fn print_the_caps_of_the_feed() {
     std::fs::write(path, text).expect("the caps written");
 }
 
-/// **An entry of its cap fits its letters, in every language** — the gate of the caps of the feed:
-/// the instrument measures «Новость» and «Обновление» with an entry as long as `sign-news.ps1`
-/// lets through, so a longer entry cannot lower the factor of the table. A language with no cap,
+/// **An entry of its cap fits its letter, in every language and of both kinds** — the gate of the caps
+/// of the feed: the instrument measures «Обновление» with an update and «Новость» with a news item
+/// as long as `sign-news.ps1` lets through for that kind, so a longer entry cannot lower the factor of the table. A language with no cap,
 /// or whose entry of its cap no longer fits, asks the caps to be printed again.
 #[cfg(feature = "testing")]
 #[test]
-fn every_entry_of_its_cap_fits_its_letters() {
+fn every_entry_of_its_cap_fits_its_letter() {
     use lang_switcher::letters;
     with_product_strings();
     let faces = faces();
     let mut wrong = Vec::new();
-    for language in Language::ALL {
-        match letters::feed_cap(language) {
-            None => wrong.push(format!("{}: no cap", language.tag())),
+    for (language, kind) in Language::ALL
+        .into_iter()
+        .flat_map(|language| letters::FeedKind::ALL.map(|kind| (language, kind)))
+    {
+        match letters::feed_cap(language, kind) {
+            None => wrong.push(format!("{} {}: no cap", language.tag(), kind.name())),
             Some(0) => {}
             Some(cap) => {
                 // Fitting is not monotone at the edge (the lines break otherwise), and the feed
                 // lets through every length up to the cap: a few of them are tried, not the cap
                 // alone.
                 for points in [cap, cap * 3 / 4, cap / 2, cap / 4] {
-                    if !entry_fits(language, points, &faces) {
+                    if !entry_fits(language, points, &faces, kind) {
                         wrong.push(format!(
-                            "{}: an entry of {points} points (the cap {cap}) does not fit",
-                            language.tag()
+                            "{} {}: an entry of {points} points (the cap {cap}) does not fit",
+                            language.tag(),
+                            kind.name()
                         ));
                     }
                 }

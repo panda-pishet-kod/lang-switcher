@@ -61,7 +61,7 @@ use crate::ui::tokens::MENU_MIN_WIDTH;
 use crate::ui::tokens::motion;
 use crate::ui::tokens::{CHECK, CONTROL_GAP, LIST_BAR};
 use crate::ui::tokens::{
-    CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, LIST_PAD, LIST_ROW_PAD,
+    CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, FRAME_MIN, LIST_PAD, LIST_ROW_PAD,
     LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, TYPE_AHEAD_MS, Theme, WINDOW_MAX, WINDOW_MIN,
     window_b,
 };
@@ -667,6 +667,8 @@ struct Host<C: Content> {
     fields: Fields<C::Id>,
     /// What the wheel turned short of a whole notch.
     wheel: i32,
+    /// How far the body of a small screen is scrolled, in points (208.198); 0 — at its top.
+    scroll_y: f32,
     /// The window is a popup: no caption, in the corner, not taking the focus.
     popup: Option<Popup>,
     /// The list of a choice field open under it.
@@ -1029,6 +1031,7 @@ impl<C: Content> Host<C> {
             pictures: Some(Box::new(crate::ui::art::Art::new())),
             fields: Fields::default(),
             wheel: 0,
+            scroll_y: 0.0,
             popup: None,
             drop: None,
             animating: false,
@@ -1343,7 +1346,7 @@ impl<C: Content> Host<C> {
         let Some((options, current)) = self.window.options(&id) else {
             return;
         };
-        let (options, rect, b) = (options.to_vec(), item.rect, layout.b);
+        let (options, rect, b) = (options.to_vec(), self.on_screen(index, item.rect), layout.b);
         let scale = self.scale;
         let px = |points: f32| (points * scale).round() as i32;
         let mut ends = [
@@ -1672,7 +1675,92 @@ impl<C: Content> Host<C> {
             _ => fit::k_for(&self.locale, size.class),
         };
         self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
+        self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_most());
         self.sync_fields(hwnd);
+    }
+
+    /// How far the body can scroll, in points: 0 where nothing scrolls (208.198).
+    fn scroll_most(&self) -> f32 {
+        self.layout
+            .as_ref()
+            .and_then(|layout| layout.scroll)
+            .map_or(0.0, |body| (body.content - body.viewport.h).max(0.0))
+    }
+
+    /// How far the element at `index` stands from where the layout put it: the elements of the body
+    /// of a small screen move by the offset, the head and the buttons do not (208.198).
+    fn shift_of(&self, index: usize) -> f32 {
+        match self.layout.as_ref().and_then(|layout| layout.scroll) {
+            Some(body) if (body.start..body.end).contains(&index) => self.scroll_y,
+            _ => 0.0,
+        }
+    }
+
+    /// The rectangle of the element at `index` as it stands on the screen, in points.
+    fn on_screen(&self, index: usize, rect: Rect) -> Rect {
+        Rect::new(rect.x, rect.y - self.shift_of(index), rect.w, rect.h)
+    }
+
+    /// Whether the point `x`, `y` (points) is where the element at `index` can be seen: an element
+    /// of the body only in its room.
+    fn seen_at(&self, index: usize, x: f32, y: f32) -> bool {
+        match self.layout.as_ref().and_then(|layout| layout.scroll) {
+            Some(body) if (body.start..body.end).contains(&index) => {
+                let room = body.viewport;
+                x >= room.x && y >= room.y && x < room.right() && y < room.bottom()
+            }
+            _ => true,
+        }
+    }
+
+    /// Whether `rect` (points, on the screen) lies whole in the room of the body, for the element at
+    /// `index`; an element out of the body always does.
+    fn room_holds(&self, index: usize, rect: Rect) -> bool {
+        match self.layout.as_ref().and_then(|layout| layout.scroll) {
+            Some(body) if (body.start..body.end).contains(&index) => {
+                let room = body.viewport;
+                rect.x >= room.x
+                    && rect.y >= room.y
+                    && rect.right() <= room.right()
+                    && rect.bottom() <= room.bottom()
+            }
+            _ => true,
+        }
+    }
+
+    /// Scrolls the body to `y` points from its top, kept within it; answers whether it moved.
+    fn scroll_body(&mut self, hwnd: HWND, y: f32) -> bool {
+        let y = y.clamp(0.0, self.scroll_most());
+        if (y - self.scroll_y).abs() < f32::EPSILON {
+            return false;
+        }
+        self.scroll_y = y;
+        self.sync_fields(hwnd);
+        invalidate(hwnd);
+        true
+    }
+
+    /// Brings the element `id` into the room of the body, when it is one of the body's and stands
+    /// out of it — Tab to an element the scroll hid (208.198).
+    fn reveal(&mut self, hwnd: HWND, id: C::Id) {
+        let (Some(index), Some(body)) = (
+            self.index_of(id),
+            self.layout.as_ref().and_then(|layout| layout.scroll),
+        ) else {
+            return;
+        };
+        if !(body.start..body.end).contains(&index) {
+            return;
+        }
+        let Some(rect) = self.layout.as_ref().map(|layout| layout.items[index].rect) else {
+            return;
+        };
+        let (top, bottom) = (rect.y - body.viewport.y, rect.bottom() - body.viewport.y);
+        if top < self.scroll_y {
+            self.scroll_body(hwnd, top);
+        } else if bottom > self.scroll_y + body.viewport.h {
+            self.scroll_body(hwnd, bottom - body.viewport.h);
+        }
     }
 
     /// The fields of Windows where the layout put their wrappers, in the font and colours now.
@@ -1711,8 +1799,10 @@ impl<C: Content> Host<C> {
                 };
                 let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };
                 let (pad_h, pad_v) = (pad.h.at(layout.b), pad.v.at(layout.b));
-                let rect = item.rect;
+                let rect = self.on_screen(index, item.rect);
                 let state = self.state_of(index, item.id);
+                // A field of the body out of its room hides behind the edge (208.198).
+                let shown = self.room_holds(index, rect);
                 let ink = if state.disabled {
                     Color::Ink3
                 } else {
@@ -1735,6 +1825,7 @@ impl<C: Content> Host<C> {
                     disabled: state.disabled,
                     ink: ink.get(self.theme),
                     fill: input_fill(state).get(self.theme),
+                    shown,
                 })
             })
             .collect();
@@ -1786,12 +1877,14 @@ impl<C: Content> Host<C> {
             .as_ref()?
             .items
             .iter()
-            .find_map(|item| match (&item.part, item.id) {
+            .enumerate()
+            .find_map(|(index, item)| match (&item.part, item.id) {
                 (Part::List(view), Some(id))
-                    if x >= item.rect.x
-                        && y >= item.rect.y
+                    if self.seen_at(index, x, y)
+                        && x >= item.rect.x
+                        && y + self.shift_of(index) >= item.rect.y
                         && x < item.rect.right()
-                        && y < item.rect.bottom()
+                        && y + self.shift_of(index) < item.rect.bottom()
                         && !self.window.disabled.contains(&id) =>
                 {
                     Some((id, *view))
@@ -1866,6 +1959,7 @@ impl<C: Content> Host<C> {
                 .collect(),
             None => Vec::new(),
         };
+        let scroll_y = self.scroll_y;
         let pictures = self.pictures.as_deref_mut();
         let (Some(canvas), Some(layout), Some(text)) = (
             self.canvas.as_mut(),
@@ -1881,10 +1975,36 @@ impl<C: Content> Host<C> {
             h: layout.size.h,
             text,
         };
+        let body = layout.scroll;
+        let in_body =
+            |index: usize| body.is_some_and(|body| (body.start..body.end).contains(&index));
         canvas.frame_with(pictures, |painter| {
             painter.clear(background);
-            for (item, state) in layout.items.iter().zip(&states) {
-                elements::draw(painter, &look, &item.part, item.rect, *state);
+            for (index, (item, state)) in layout.items.iter().zip(&states).enumerate() {
+                if !in_body(index) {
+                    elements::draw(painter, &look, &item.part, item.rect, *state);
+                }
+            }
+            // 208.198: the body of a small screen, moved by the offset and shown in its room only;
+            // the bar at its edge, as a list has.
+            if let Some(body) = body {
+                painter.clip_rect(body.viewport);
+                let (items, shown) = (
+                    &layout.items[body.start..body.end],
+                    &states[body.start..body.end],
+                );
+                for (item, state) in items.iter().zip(shown) {
+                    let r = item.rect;
+                    let rect = Rect::new(r.x, r.y - scroll_y, r.w, r.h);
+                    elements::draw(painter, &look, &item.part, rect, *state);
+                }
+                painter.unclip();
+                let scroll = Part::Scroll {
+                    first: scroll_y.round() as usize,
+                    visible: body.viewport.h.round() as usize,
+                    total: body.content.round() as usize,
+                };
+                elements::draw(painter, &look, &scroll, body.bar, State::NORMAL);
             }
         });
         self.frames += 1;
@@ -1902,9 +2022,13 @@ impl<C: Content> Host<C> {
             .rev()
             .find_map(|(index, item)| {
                 let state = self.state_of(index, item.id);
-                let area = hit_area(&item.part, item.rect, state)?;
-                (x >= area.x && y >= area.y && x < area.right() && y < area.bottom())
-                    .then_some(index)
+                let area = hit_area(&item.part, self.on_screen(index, item.rect), state)?;
+                (self.seen_at(index, x, y)
+                    && x >= area.x
+                    && y >= area.y
+                    && x < area.right()
+                    && y < area.bottom())
+                .then_some(index)
             })
     }
 
@@ -2125,6 +2249,9 @@ impl<C: Content> Host<C> {
                     (Some(at), true, n) => Some((at + n - 1) % n),
                 };
                 self.focus = next.map(|next| order[next]);
+                if let Some(focus) = self.focus {
+                    self.reveal(hwnd, focus);
+                }
                 self.give_keyboard(hwnd);
             }
             k if [VK_LEFT.0, VK_RIGHT.0, VK_UP.0, VK_DOWN.0].contains(&k) => {
@@ -2182,6 +2309,24 @@ impl<C: Content> Host<C> {
                     }
                     None => close_later(hwnd),
                 }
+                return true;
+            }
+            // 208.198: the body of a small screen — a room up or down, its top, its end.
+            k if [VK_PRIOR.0, VK_NEXT.0, VK_HOME.0, VK_END.0].contains(&k)
+                && self.scroll_most() > 0.0 =>
+            {
+                let room = self
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.scroll)
+                    .map_or(0.0, |body| body.viewport.h);
+                let y = match k {
+                    k if k == VK_PRIOR.0 => self.scroll_y - room,
+                    k if k == VK_NEXT.0 => self.scroll_y + room,
+                    k if k == VK_HOME.0 => 0.0,
+                    _ => self.scroll_most(),
+                };
+                self.scroll_body(hwnd, y);
                 return true;
             }
             _ => return false,
@@ -2337,9 +2482,16 @@ impl<C: Content> Handler for Host<C> {
                 let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
                 let (frame_w, frame_h) = frame_of(hwnd);
                 let px = |points: f32| (points * self.scale).round() as i32;
+                // 208.198: a window of the shell is not dragged under the reference it opens in,
+                // 900 × 540; a small window (`Content::least`) keeps its own least, 620 × 500.
+                let least = if self.content.least() {
+                    WINDOW_MIN
+                } else {
+                    FRAME_MIN
+                };
                 info.ptMinTrackSize = POINT {
-                    x: px(WINDOW_MIN.w.0) + frame_w,
-                    y: px(WINDOW_MIN.h.0) + frame_h,
+                    x: px(least.w.0) + frame_w,
+                    y: px(least.h.0) + frame_h,
                 };
                 info.ptMaxTrackSize = POINT {
                     x: px(WINDOW_MAX.w.0) + frame_w,
@@ -2499,14 +2651,25 @@ impl<C: Content> Handler for Host<C> {
                 // SAFETY: a live window; the point is a local.
                 let _ = unsafe { ScreenToClient(hwnd, &mut point) };
                 self.lay_out(hwnd);
-                let (id, view) = self.list_at(point.x as f32, point.y as f32)?;
+                let list = self.list_at(point.x as f32, point.y as f32);
+                // 208.198: no list under the mouse — the body of a small screen scrolls.
+                if list.is_none() && self.scroll_most() <= 0.0 {
+                    return None;
+                }
                 let notch = WHEEL_DELTA as i32;
                 self.wheel += i32::from((wparam.0 >> u16::BITS) as u16 as i16);
                 let notches = self.wheel / notch;
                 self.wheel -= notches * notch;
-                let first = view.scrolled(-(notches as isize) * LIST_WHEEL_ROWS.0 as isize);
-                if first != view.first {
-                    self.deliver(hwnd, Event::Scrolled(id, first));
+                if let Some((id, view)) = list {
+                    let first = view.scrolled(-(notches as isize) * LIST_WHEEL_ROWS.0 as isize);
+                    if first != view.first {
+                        self.deliver(hwnd, Event::Scrolled(id, first));
+                    }
+                } else if let Some(layout) = self.layout.as_ref() {
+                    // As many lines of the body a notch as rows of a list.
+                    let line = Style::of(Role::Body, layout.b, layout.size.h).line_height();
+                    let by = notches as f32 * line * LIST_WHEEL_ROWS.0;
+                    self.scroll_body(hwnd, self.scroll_y - by);
                 }
                 Some(LRESULT(0))
             }
@@ -2701,9 +2864,9 @@ impl<C: Content> Handler for Host<C> {
             items: self
                 .layout
                 .iter()
-                .flat_map(|layout| layout.items.iter())
-                .map(|item| {
-                    let r = item.rect;
+                .flat_map(|layout| layout.items.iter().enumerate())
+                .map(|(index, item)| {
+                    let r = self.on_screen(index, item.rect);
                     let s = self.scale;
                     (
                         format!("{:?}", item.part),

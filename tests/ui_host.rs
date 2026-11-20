@@ -9,13 +9,14 @@ use lang_switcher::ui::tokens::{Color, Role, Theme};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_DOWN, VK_ESCAPE, VK_RETURN, VK_RIGHT, VK_TAB,
+    VK_DOWN, VK_END, VK_ESCAPE, VK_RETURN, VK_RIGHT, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetClientRect, GetWindowRect, IsWindow, MINMAXINFO, MSG, PM_REMOVE,
-    PeekMessageW, SendMessageW, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN, WM_PAINT,
-    WM_THEMECHANGED,
+    DestroyWindow, DispatchMessageW, GetClientRect, GetWindowRect, IsWindow, MINMAXINFO, MSG,
+    PM_REMOVE, PeekMessageW, SendMessageW, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT, WM_THEMECHANGED,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -303,7 +304,9 @@ fn a_change_of_theme_draws_the_new_background_in_the_same_window() {
     assert!(after.frames > before.frames);
 }
 
-/// The frame is dragged between 620 × 500 and 1280 × 720 points: at 100 % and twice that at 200 %.
+/// The frame is dragged between 900 × 540 and 1280 × 720 points: at 100 % and twice that at 200 %.
+/// 900 × 540 is the least frame of a window of the shell since 208.198 — the reference it opens in;
+/// until then it was 620 × 500.
 #[test]
 fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
     let open = Open::new();
@@ -334,7 +337,7 @@ fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
 
         assert_eq!(
             client(limits.ptMinTrackSize),
-            (620 * scale, 500 * scale),
+            (900 * scale, 540 * scale),
             "the least at {dpi} DPI"
         );
         assert_eq!(
@@ -459,4 +462,185 @@ fn the_host_holds_the_pictures_while_the_frame_is_dragged() {
     send(WM_PAINT);
     assert_eq!(drawn(), first + 1, "let go: drawn afresh once");
     send(WM_CLOSE);
+}
+
+/// A tall content in a small window (208.198): a switch at the top of the body, forty lines, the
+/// link of the site at its end, and «Close» in the row of buttons. A small window (`least`) opens at
+/// 620 × 500 points — under the least frame, a small screen, so its body scrolls.
+struct Tall {
+    events: Rc<RefCell<Vec<Event<Id>>>>,
+}
+
+impl Content for Tall {
+    type Id = Id;
+
+    fn describe(&self) -> Window<Id> {
+        let mut body = vec![
+            Node::Header {
+                eyebrow: None,
+                title: "Tall".to_owned(),
+                subtitle: None,
+            },
+            Node::Toggle {
+                id: Id::Autostart,
+                label: "Autostart".to_owned(),
+                hint: None,
+                on: true,
+                badge: None,
+            },
+        ];
+        body.extend((0..40).map(|row| Node::Text(Role::Body, format!("Line {row}"))));
+        body.push(Node::Link {
+            id: Id::Site,
+            words: "The site".to_owned(),
+        });
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(body),
+            buttons: vec![Node::Button {
+                id: Id::Close,
+                label: "Close".to_owned(),
+                kind: ButtonKind::Primary,
+                browser: false,
+            }],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<Id>) -> Reply {
+        self.events.borrow_mut().push(event);
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Tall".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        ("en-US".to_owned(), false)
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Light
+    }
+
+    fn least(&self) -> bool {
+        true
+    }
+}
+
+/// The rectangle, in client pixels, of the element `id` as the window shows it now.
+fn rect_of(hwnd: HWND, id: &str) -> lang_switcher::ui::canvas::Rect {
+    // SAFETY: a window of this thread; a frame lays it out.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    host::probe(hwnd)
+        .expect("a live host")
+        .items
+        .into_iter()
+        .find(|(_, item, _)| item.as_deref() == Some(id))
+        .map(|(_, _, rect)| rect)
+        .unwrap_or_else(|| panic!("the element {id}"))
+}
+
+/// A press of the mouse at the middle of `rect`, client pixels.
+fn click_at(hwnd: HWND, rect: lang_switcher::ui::canvas::Rect) {
+    let (x, y) = (
+        (rect.x + rect.w / 2.0) as i32,
+        (rect.y + rect.h / 2.0) as i32,
+    );
+    let point = LPARAM((((y & 0xFFFF) << 16) | (x & 0xFFFF)) as isize);
+    for message in [WM_LBUTTONDOWN, WM_LBUTTONUP] {
+        // SAFETY: a press to a window of this thread.
+        unsafe { SendMessageW(hwnd, message, Some(WPARAM(1)), Some(point)) };
+    }
+}
+
+fn open_tall() -> (HWND, Rc<RefCell<Vec<Event<Id>>>>) {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let hwnd = host::create(
+        Tall {
+            events: events.clone(),
+        },
+        None,
+    )
+    .expect("the window of the shell");
+    (hwnd, events)
+}
+
+/// **208.198 — the mouse finds the body where it shows.** The link at the end of a tall body lies
+/// under the room at first; End scrolls the body to its end, and a click at where the link now shows
+/// presses it. The wheel moves the body too.
+///
+/// ⚠ Control: before End the link is under the row of buttons — out of the room.
+#[test]
+fn a_click_presses_the_element_of_a_scrolled_body_where_it_shows() {
+    let (hwnd, events) = open_tall();
+    let close = rect_of(hwnd, "Close");
+    let before = rect_of(hwnd, "Site");
+    assert!(
+        before.y >= close.y,
+        "the control: the link is out of the room at first: {before:?}, the button {close:?}"
+    );
+
+    // One notch of the wheel down moves the body up.
+    let mut origin = POINT::default();
+    // SAFETY: a window of this thread; the point is a local.
+    let _ = unsafe { ClientToScreen(hwnd, &mut origin) };
+    let point = LPARAM((((origin.y + 100) << 16) | ((origin.x + 100) & 0xFFFF)) as isize);
+    // SAFETY: as above; WHEEL_DELTA down in the high word.
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_MOUSEWHEEL,
+            Some(WPARAM((-120i16 as u16 as usize) << 16)),
+            Some(point),
+        )
+    };
+    let wheeled = rect_of(hwnd, "Site");
+
+    // SAFETY: a key to a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(usize::from(VK_END.0))), None) };
+    let after = rect_of(hwnd, "Site");
+    click_at(hwnd, after);
+    let pressed = events.borrow().contains(&Event::Pressed(Id::Site));
+    println!("before {before:?}; wheeled {wheeled:?}; after End {after:?}; pressed {pressed}");
+    // SAFETY: a window of this thread.
+    let _ = unsafe { DestroyWindow(hwnd) };
+
+    assert!(wheeled.y < before.y, "the wheel moves the body up");
+    assert!(
+        after.bottom() <= close.y,
+        "End brings the end of the body into the room"
+    );
+    assert!(pressed, "the click at where the link shows presses it");
+}
+
+/// **208.198 — Tab brings a hidden element into view.** Tab goes to the switch at the top and then to
+/// the link at the end of the body, under the room: the body scrolls until the link shows.
+#[test]
+fn tab_to_an_element_the_scroll_hid_brings_it_into_view() {
+    let (hwnd, _events) = open_tall();
+    let close = rect_of(hwnd, "Close");
+    let hidden = rect_of(hwnd, "Site");
+    for _ in 0..2 {
+        // SAFETY: a key to a window of this thread.
+        unsafe { SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(usize::from(VK_TAB.0))), None) };
+    }
+    let shown = rect_of(hwnd, "Site");
+    let focus = host::probe(hwnd).expect("a live host").focus;
+    println!("hidden {hidden:?}; after Tab, Tab {shown:?}; focus {focus:?}");
+    // SAFETY: a window of this thread.
+    let _ = unsafe { DestroyWindow(hwnd) };
+
+    assert_eq!(focus.as_deref(), Some("Site"), "Tab, Tab reaches the link");
+    assert!(
+        hidden.y >= close.y,
+        "the control: the link was out of the room"
+    );
+    assert!(
+        shown.y >= 0.0 && shown.bottom() <= close.y,
+        "the link shows in the room: {shown:?}, the button {close:?}"
+    );
 }

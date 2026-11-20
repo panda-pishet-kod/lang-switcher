@@ -19,12 +19,14 @@
       * a field of [download] or [stop] missing, given twice or unknown; [[download]], [[stop]]
       * a [stop] in a file not signed with -Reserve -- the updater honours it only from the reserve
     and since stage E120 (decision 208.194), about the length of a text:
-      * a text longer than the cap of its language in tools\feed-caps.tsv -- the whole text, in
-        code points, line breaks not counted; the caps are printed by the instrument of fitting
-        (tests\ui_fit.rs, print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE), and a text at
-        its cap fits the window "Obnovlenie" without lowering the type size of the program
-      * a language whose cap is 0 -- the letter does not fit even without a text: a person of that
-        language sees the en table instead
+      * a text longer than the cap of its language and of the kind of its entry in
+        tools\feed-caps.tsv (tag, update, news) -- the whole text, in code points, line breaks not
+        counted; the caps are printed by the instrument of fitting (tests\ui_fit.rs,
+        print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE), and an update at its cap fits the
+        letter "Obnovlenie", a news item at its cap the letter "Novost", without lowering the type
+        size of the program
+      * a language whose cap of that kind is 0 -- the letter does not fit even without a text: a
+        person of that language sees the en table instead
       * a language the caps file does not name
 
     A refusal writes nothing: the file on disk is left exactly as it was, and the exit code is
@@ -92,11 +94,14 @@ function Test-FirstLine($entry, [string]$tag, [string]$line) {
     }
 }
 
-# STAGE E120 (decision 208.194): the cap of the WHOLE text of an entry, by language. The instrument
-# of fitting prints it into tools\feed-caps.tsv ("tag<TAB>number", '#' lines explain): a text at its
-# cap still fits the window "Obnovlenie" of its language, narrow and ordinary, at the type size of
-# the table -- the feed is ours, and a letter must not lower the type size of the whole program.
-# The file is never edited by hand; a missing file or a malformed line is a refusal.
+# STAGE E120 (decision 208.194; word of the owner on the kinds, 2026-11-20): the cap of the WHOLE text
+# of an entry, by language AND by the kind of the entry. The instrument of fitting prints it into
+# tools\feed-caps.tsv ("tag<TAB>update<TAB>news", '#' lines explain): an update at its cap still fits
+# the letter "Obnovlenie" of its language, a news item at its cap the letter "Novost" -- narrow and
+# ordinary, at the type size of the table. Those two letters are the only windows that show the whole
+# text ("Recent letters" shows the first line, held to $EXCERPT_CAP above). The feed is ours, and a
+# letter must not lower the type size of the whole program. The file is never edited by hand; a
+# missing file or a malformed line is a refusal.
 $CapsFile = Join-Path $PSScriptRoot 'feed-caps.tsv'
 $Caps = @{}
 
@@ -111,37 +116,46 @@ function Read-Caps {
         $number++
         $row = $raw.Trim()
         if ($row -eq '' -or $row.StartsWith('#')) { continue }
-        if ($row -notmatch '^([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\t(\d+)$') {
-            Fail ("{0}, line {1}: not 'tag<TAB>number': {2}" -f $CapsFile, $number, $raw)
+        if ($row -notmatch '^([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\t(\d+)\t(\d+)$') {
+            Fail ("{0}, line {1}: not 'tag<TAB>update<TAB>news': {2}" -f $CapsFile, $number, $raw)
         }
-        $Caps[$Matches[1]] = [pscustomobject]@{ Cap = [int]$Matches[2]; Line = $number }
+        $Caps[$Matches[1]] = [pscustomobject]@{ update = [int]$Matches[2]; news = [int]$Matches[3]; Line = $number }
     }
 }
 
-# A language table of an entry: its language must be in the caps file, with a cap above 0.
+# The cap of the kind of `entry` in `tag`: an entry of another type has no cap and is refused.
+function Cap-Of($entry, [string]$tag) {
+    if (@('update', 'news') -notcontains $entry.Type) {
+        Fail ("entry {0} [{1}]: the type must come before the languages and be news or update, found '{2}'" -f $entry.Id, $tag, $entry.Type)
+    }
+    return $Caps[$tag].($entry.Type)
+}
+
+# A language table of an entry: its language must be in the caps file, with a cap of its kind above 0.
 function Test-Language($entry, [string]$tag) {
     if (-not $Caps.ContainsKey($tag)) {
         $why = "entry {0} [{1}]: the language has no cap in {2} -- print the caps again with the " +
             "instrument of fitting; nothing is signed with a text nobody measured"
         Fail ($why -f $entry.Id, $tag, $CapsFile)
     }
-    $cap = $Caps[$tag]
-    if ($cap.Cap -eq 0) {
-        $why = "entry {0} [{1}]: the letter does not fit even without a text in this language (cap 0, " +
-            "{2}, line {3}) -- remove this language from the entry; a person of it will see en"
-        Fail ($why -f $entry.Id, $tag, $CapsFile, $cap.Line)
+    if ((Cap-Of $entry $tag) -eq 0) {
+        $why = "entry {0} ({1}) [{2}]: the letter does not fit even without a text in this language " +
+            "(cap 0, {3}, line {4}) -- remove this language from the entry; a person of it will see en"
+        Fail ($why -f $entry.Id, $entry.Type, $tag, $CapsFile, $Caps[$tag].Line)
     }
 }
 
-# A whole text: its code points, line breaks not counted and the ends trimmed, against the cap.
+# A whole text: its code points, line breaks not counted and the ends trimmed, against the cap of
+# its kind.
 function Test-Text($entry, [string]$tag, [string]$body) {
     $points = @((($body -replace "[`r`n]", '').Trim()).EnumerateRunes()).Count
-    $cap = $Caps[$tag]
-    if ($points -gt $cap.Cap) {
-        $why = "entry {0} [{1}]: the text is {2} characters (code points, line breaks not counted), " +
-            "the cap is {3} ({4}, line {5}) -- a longer text makes the window 'Obnovlenie' lower the " +
+    $cap = Cap-Of $entry $tag
+    if ($points -gt $cap) {
+        $letter = if ($entry.Type -eq 'update') { 'Obnovlenie' } else { 'Novost' }
+        $why = "entry {0} ({1}) [{2}]: the text is {3} characters (code points, line breaks not counted), " +
+            "the cap of {1} is {4} ({5}, line {6}) -- a longer text makes the letter '{7}' lower the " +
             "type size of the program; shorten the text"
-        Fail ($why -f $entry.Id, $tag, $points, $cap.Cap, $CapsFile, $cap.Line)
+        Fail ($why -f $entry.Id, $entry.Type, $tag, $points, $cap, $CapsFile, $Caps[$tag].Line, $letter)
     }
     $script:TextsChecked++
 }

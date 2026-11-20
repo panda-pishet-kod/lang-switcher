@@ -4041,7 +4041,15 @@ pub fn sample_entry_in(language: Language) -> FeedItem {
         let mut item = sample_entry();
         let (title, text) = fixture_words(language);
         item.title = title;
-        item.text = match feed_cap(language) {
+        // One entry stands in both letters of the catalogue: it is as long as the smaller of the
+        // two caps, so neither letter is measured with more than its kind lets through. Each kind
+        // at its own cap is the gate's (`every_entry_of_its_cap_fits_its_letter`).
+        let cap = FeedKind::ALL
+            .iter()
+            .map(|kind| feed_cap(language, *kind))
+            .min()
+            .flatten();
+        item.text = match cap {
             Some(cap) if cap > 0 => sample_text(language, cap),
             _ => text,
         };
@@ -4099,17 +4107,53 @@ pub fn sample_text(language: Language, points: usize) -> String {
     text
 }
 
-/// The cap of the text of an entry of the feed in `language`, in code points (line breaks not
-/// counted): `tools\feed-caps.tsv`, printed by the instrument of fitting
-/// (`print_the_caps_of_the_feed`); 0 — the letter does not fit even without a text (testing).
+/// The two kinds of an entry of the feed, each held to a cap of its own (word of the owner on the
+/// cap of the feed, 2026-11-20): `type = "update"` — a summary and the address of the site, measured
+/// by «Обновление»; `type = "news"` — the author's news, measured by «Новость». They are the only
+/// windows that show the whole text; «Последние письма» shows its first line, which
+/// `sign-news.ps1` holds to 150 points apart (testing).
 #[cfg(feature = "testing")]
-pub fn feed_cap(language: Language) -> Option<usize> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedKind {
+    Update,
+    News,
+}
+
+#[cfg(feature = "testing")]
+impl FeedKind {
+    pub const ALL: [Self; 2] = [Self::Update, Self::News];
+
+    /// The column of `tools\feed-caps.tsv` and the `type` of the entry.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Update => "update",
+            Self::News => "news",
+        }
+    }
+}
+
+/// The cap of the text of an entry of the feed of `kind` in `language`, in code points (line breaks
+/// not counted): `tools\feed-caps.tsv`, «tag<TAB>update<TAB>news», printed by the instrument of
+/// fitting (`print_the_caps_of_the_feed`); 0 — the letter does not fit even without a text
+/// (testing).
+#[cfg(feature = "testing")]
+pub fn feed_cap(language: Language, kind: FeedKind) -> Option<usize> {
     const CAPS: &str = include_str!("../tools/feed-caps.tsv");
     CAPS.lines()
         .filter(|line| !line.starts_with('#'))
         .find_map(|line| {
-            let (tag, cap) = line.split_once('\t')?;
-            (tag.trim() == language.tag()).then(|| cap.trim().parse().ok())?
+            let mut cells = line.split('\t');
+            if cells.next()?.trim() != language.tag() {
+                return None;
+            }
+            let (update, news) = (cells.next()?, cells.next()?);
+            match kind {
+                FeedKind::Update => update,
+                FeedKind::News => news,
+            }
+            .trim()
+            .parse()
+            .ok()
         })
 }
 

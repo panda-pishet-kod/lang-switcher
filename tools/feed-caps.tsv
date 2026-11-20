@@ -1,70 +1,72 @@
-# The cap of the text of an entry of the feed (FR-102), by language: code points, line breaks not
-# counted. Printed by the instrument of fitting (tests/ui_fit.rs, print_the_caps_of_the_feed with
-# LANGSW_FEED_CAPS_WRITE); read by tools/sign-news.ps1, which refuses a longer text. 0 -- the letter
-# does not fit even without a text in that language yet.
-ru	126
-en	134
-uk	179
-de	181
-fr	195
-es	184
-pt	187
-it	190
-pl	177
-cs	187
-tr	169
-el	169
-he	155
-ar	239
-hi	178
-bn	175
-ur	178
-pa	173
-mr	165
-te	181
-ta	103
-fa	168
-gu	172
-th	218
-kn	172
-or	167
-ml	0
-uz	183
-uz-Cyrl	170
-ne	160
-as	170
-az	173
-km	167
-kk	154
-sr	181
-sr-Latn	183
-ug	175
-bg	170
-hy	163
-lo	201
-be	172
-tt	162
-ka	161
-mk	173
-vi	146
-nl	155
-ro	172
-hu	179
-sv	168
-sq	169
-da	155
-fi	149
-hr	163
-sk	158
-nb	152
-lt	168
-sl	158
-bs	162
-lv	175
-et	155
-cy	156
-mt	188
-is	164
-lb	164
-mi	0
-nn	156
+# The cap of the text of an entry of the feed (FR-102), by language and by the kind of the entry:
+# tag<TAB>update<TAB>news. Code points, line breaks not counted. An update is measured by the letter
+# "Obnovlenie", a news item by "Novost" -- the only windows that show the whole text. Printed by the
+# instrument of fitting (tests/ui_fit.rs, print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE);
+# read by tools/sign-news.ps1, which refuses a longer text of that kind. 0 -- the letter does not
+# fit even without a text in that language yet.
+ru	198	798
+en	134	827
+uk	179	763
+de	258	893
+fr	195	856
+es	184	890
+pt	187	862
+it	190	907
+pl	177	887
+cs	187	837
+tr	169	794
+el	169	830
+he	155	695
+ar	239	794
+hi	178	846
+bn	175	836
+ur	178	861
+pa	173	822
+mr	165	768
+te	181	811
+ta	170	660
+fa	168	823
+gu	172	698
+th	218	723
+kn	172	764
+or	167	705
+ml	0	457
+uz	183	812
+uz-Cyrl	170	754
+ne	160	768
+as	170	728
+az	173	762
+km	167	774
+kk	154	738
+sr	181	810
+sr-Latn	183	748
+ug	175	883
+bg	170	764
+hy	163	830
+lo	201	681
+be	172	768
+tt	162	762
+ka	161	578
+mk	173	818
+vi	146	756
+nl	155	790
+ro	172	793
+hu	179	816
+sv	238	814
+sq	169	727
+da	155	766
+fi	149	808
+hr	163	834
+sk	158	790
+nb	152	737
+lt	234	806
+sl	158	761
+bs	162	808
+lv	175	776
+et	155	746
+cy	156	754
+mt	188	901
+is	236	926
+lb	235	824
+mi	174	658
+nn	156	786
