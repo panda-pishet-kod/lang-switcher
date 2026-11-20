@@ -128,7 +128,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         Class::Ordinary,
         Node::Link {
             id: 1,
-            text: word("IDS_ABOUT_CAPTION"),
+            words: word("IDS_ABOUT_CAPTION"),
         },
     );
 
@@ -148,6 +148,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
                 label: word("IDS_AUTOSTART"),
                 hint: None,
                 on,
+                badge: None,
             },
         );
     }
@@ -226,7 +227,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             Node::ChoiceCard {
                 id: 1,
                 title: word("IDS_THEME_SYSTEM"),
-                text: word("IDS_THEME_LABEL"),
+                words: word("IDS_THEME_LABEL"),
                 selected,
             },
         );
@@ -319,7 +320,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             Surface::Block,
             Box::new(Node::Action {
                 title: word("IDS_GROUP_HOTKEY"),
-                text: word("IDS_AUTOSTART"),
+                words: word("IDS_AUTOSTART"),
                 buttons: vec![button(word("IDS_LOG_SAVE"), ButtonKind::Normal, false)],
             }),
         ),
@@ -351,6 +352,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             label: word("IDS_AUTOSTART"),
             hint: Some(word("IDS_SOUND")),
             on: true,
+            badge: None,
         },
     );
     node(

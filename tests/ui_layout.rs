@@ -7,12 +7,13 @@ use lang_switcher::diag;
 use lang_switcher::ui::canvas::Rect;
 use lang_switcher::ui::fit;
 use lang_switcher::ui::layout::{
-    Class, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
+    Class, Concession, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
 };
 use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
 use lang_switcher::ui::text::{FixedAdvance, Measure, Style, Wrap};
 use lang_switcher::ui::tokens::{
-    BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role, TYPE_FLOOR,
+    BADGE_GAP, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role,
+    TYPE_FLOOR,
 };
 
 /// Every character is half the type size wide.
@@ -156,7 +157,7 @@ fn a_column_stands_its_blocks_a_block_gap_apart_and_rows_a_line_gap_apart() {
 fn a_row_wraps_like_the_words_of_a_line() {
     let link = |id, s: &str| Node::Link {
         id,
-        text: s.to_owned(),
+        words: s.to_owned(),
     };
     // Each link is 20 characters, 10 B at 0.5 B a character; the column is 40 B wide at most.
     let long = "a".repeat(30);
@@ -327,7 +328,7 @@ fn the_steps_of_a_wizard_are_as_tall_as_the_tallest_and_the_buttons_do_not_move(
 // ---- The row of buttons ---------------------------------------------------------------------
 
 #[test]
-fn the_buttons_press_to_the_right_with_the_main_one_rightmost_and_stack_main_first() {
+fn the_buttons_press_to_the_right_with_the_main_one_rightmost_and_give_way_by_step_1() {
     let row = |label_length: usize| {
         let label = "x".repeat(label_length);
         bare(Node::Buttons(vec![
@@ -345,28 +346,50 @@ fn the_buttons_press_to_the_right_with_the_main_one_rightmost_and_stack_main_fir
     };
 
     let fits = lay(&row(4), usual());
+    assert_eq!(fits.step, None, "a row that fits gives way in nothing");
     let fits = order(&fits);
     assert_eq!(fits[1].0, Id::Close, "the main one is the rightmost");
     assert!(fits[1].1.x > fits[0].1.x && close(fits[0].1.y, fits[1].1.y));
 
-    let stacked = lay(&row(60), usual());
-    let b = stacked.b;
+    // §3а step 1: each fits the width, both do not — two rows, the main one in the lower at its
+    // edge.
+    let two = lay(&row(40), usual());
+    assert_eq!(two.step, Some(Concession::Buttons));
+    let two = order(&two);
+    let (copy, main) = (two[0], two[1]);
+    assert_eq!((copy.0, main.0), (Id::Copy, Id::Close));
+    assert!(
+        main.1.y > copy.1.bottom(),
+        "the main one in the lower row: {two:?}"
+    );
+    assert!(
+        close(main.1.right(), copy.1.right()),
+        "both at the edge: {two:?}"
+    );
+
+    // Wider than the width each — one under another across it, the main one on top.
+    let stacked = lay(&row(90), usual());
     let stacked = order(&stacked);
     assert_eq!(stacked[0].0, Id::Close, "the main one on top");
     assert!(stacked[1].1.y > stacked[0].1.bottom(), "one under another");
     assert!(close(stacked[0].1.w, stacked[1].1.w), "across the width");
-    let _ = b;
 }
 
-/// The second step of the rule of the pair: when the content does not fit the height, the buttons
-/// of an action card move beside its text.
+/// §3а step 3 (the second step of the rule of the pair before the order): in a pair standing side
+/// by side, when the content does not fit the height, the buttons of an action card move beside its
+/// text; a card alone keeps them under its text.
 #[test]
-fn the_buttons_of_an_action_card_move_beside_its_text_when_the_window_is_tight() {
-    let card = |lines: usize| {
-        let mut column = vec![Node::Action {
-            title: "Title".to_owned(),
-            text: "Text".to_owned(),
-            buttons: vec![button(Id::Copy, "Copy", ButtonKind::Normal)],
+fn the_buttons_of_a_card_in_a_pair_move_beside_its_text_by_step_3() {
+    let card = |id| Node::Action {
+        title: "Title".to_owned(),
+        words: "Text".to_owned(),
+        buttons: vec![button(id, "Copy", ButtonKind::Normal)],
+    };
+    let window = |lines: usize, pair: bool| {
+        let mut column = vec![if pair {
+            Node::Pair(Box::new(card(Id::Copy)), Box::new(card(Id::Close)))
+        } else {
+            card(Id::Copy)
         }];
         column.extend((0..lines).map(|_| text(Role::Body, "filler")));
         bare(Node::Column(column))
@@ -377,15 +400,125 @@ fn the_buttons_of_an_action_card_move_beside_its_text_when_the_window_is_tight()
         (button, text)
     };
 
-    let roomy = lay(&card(2), usual());
+    let roomy = lay(&window(2, true), usual());
     let (b, t) = button_and_text(&roomy);
     assert!(b.y >= t.bottom(), "roomy: the button under the text");
 
-    let tight = lay(&card(12), usual());
+    let tight = lay(&window(11, true), usual());
+    assert_eq!(tight.step, Some(Concession::Card));
     let (b, t) = button_and_text(&tight);
     assert!(
         b.x >= t.right() && b.y < t.bottom(),
         "tight: the button beside the text, {b:?} {t:?}"
+    );
+
+    let alone = lay(&window(11, false), usual());
+    let (b, t) = button_and_text(&alone);
+    assert!(b.y >= t.bottom(), "a card alone: the button under the text");
+}
+
+/// §3а step 2: a pair stands in a column when a half is narrower than its widest unbreakable
+/// content — here a button — although the half is not narrower than its least, 15 B.
+#[test]
+fn a_pair_whose_half_is_narrower_than_its_button_stands_in_a_column_by_step_2() {
+    let half = |id, label: &str| Node::Action {
+        title: "Title".to_owned(),
+        words: "Text".to_owned(),
+        buttons: vec![button(id, label, ButtonKind::Normal)],
+    };
+    let window = |label: &str| {
+        bare(Node::Pair(
+            Box::new(half(Id::Copy, label)),
+            Box::new(half(Id::Close, "Close")),
+        ))
+    };
+    let titles = |layout: &Layout<Id>| {
+        texts(layout)
+            .into_iter()
+            .filter(|rect| rect.h > 0.0)
+            .collect::<Vec<_>>()
+    };
+
+    let side = lay(&window("Copy"), usual());
+    assert!(columns_fit(
+        2,
+        usual().w - 2.0 * CONTENT_PAD.h.at(side.b),
+        side.b
+    ));
+    let t = titles(&side);
+    assert!(close(t[0].y, t[2].y), "side by side: {t:?}");
+
+    let wide = lay(&window(&"w".repeat(50)), usual());
+    assert_eq!(wide.step, Some(Concession::Pair));
+    assert!(wide.shortfall.fits(), "{:?}", wide.shortfall);
+    let t = titles(&wide);
+    assert!(t[2].y > t[0].bottom(), "in a column: {t:?}");
+}
+
+/// §3а step 4: in a narrow window that does not fit, the circle with the panda leaves the header.
+#[test]
+fn a_narrow_window_loses_the_circle_by_step_4() {
+    let narrow = WindowSize {
+        w: 640.0,
+        h: 500.0,
+        class: Class::Narrow,
+        scrolls: false,
+    };
+    let window = |title: &str| Window {
+        art: Some(Art::About),
+        ..bare(Node::Header {
+            eyebrow: None,
+            title: title.to_owned(),
+            subtitle: None,
+        })
+    };
+    let pictures = |layout: &Layout<Id>| rects_of(layout, |part| matches!(part, Part::Art(_)));
+
+    let roomy = lay(&window("About"), narrow);
+    assert_eq!(roomy.step, None);
+    assert_eq!(pictures(&roomy).len(), 1, "the circle beside the header");
+
+    // A word that fits the column, but not beside the circle: the room of the title with the
+    // circle and without it, read from the roomy window.
+    let (circle, title) = (pictures(&roomy)[0], texts(&roomy)[0]);
+    let (beside, room) = (title.w, title.right() - circle.x);
+    let advance = MEASURE.0 * Role::Title.style().size.at(roomy.b);
+    let word = "w".repeat(((beside + room) / 2.0 / advance) as usize);
+    let tight = lay(&window(&word), narrow);
+    assert_eq!(tight.step, Some(Concession::Circle));
+    assert!(tight.shortfall.fits(), "{:?}", tight.shortfall);
+    assert!(pictures(&tight).is_empty(), "the circle left");
+}
+
+/// §3а step 5: the label of a button wider than its place goes on to a second line, and the button
+/// grows — the last step; a word wider than the place is beyond it.
+#[test]
+fn a_label_wider_than_its_button_goes_on_to_a_second_line_by_step_5() {
+    let label = "word ".repeat(30);
+    let one = lay(&bare(button(Id::Copy, "Copy", ButtonKind::Normal)), usual());
+    let one_line = rects_of(&one, |part| matches!(part, Part::Button { .. }))[0].h;
+
+    let long = lay(
+        &bare(button(Id::Copy, label.trim(), ButtonKind::Normal)),
+        usual(),
+    );
+    assert_eq!(long.step, Some(Concession::Wrap));
+    assert!(long.shortfall.fits(), "{:?}", long.shortfall);
+    let rect = rects_of(&long, |part| matches!(part, Part::Button { .. }))[0];
+    assert!(
+        rect.h > one_line,
+        "the button grew: {rect:?}, one line {one_line}"
+    );
+
+    let word = lay(
+        &bare(button(Id::Copy, &"w".repeat(200), ButtonKind::Normal)),
+        usual(),
+    );
+    assert_eq!(word.step, Some(Concession::Wrap));
+    assert!(
+        !word.shortfall.fits(),
+        "an unbreakable word does not fit: {:?}",
+        word.shortfall
     );
 }
 
@@ -399,6 +532,7 @@ fn a_switch_stands_at_the_end_of_its_line_and_a_check_box_before_its_label() {
             label: "Start with Windows".to_owned(),
             hint: Some("hint".to_owned()),
             on: true,
+            badge: None,
         },
         Node::Check {
             id: Id::Sound,
@@ -642,6 +776,7 @@ fn every_window() -> Vec<Window<Id>> {
                             label: "Start with Windows".to_owned(),
                             hint: None,
                             on: true,
+                            badge: Some("new".to_owned()),
                         },
                         Node::Check {
                             id: Id::Sound,
@@ -670,7 +805,7 @@ fn every_window() -> Vec<Window<Id>> {
             ),
             Node::Row(vec![Node::Link {
                 id: Id::Site,
-                text: "The site".to_owned(),
+                words: "The site".to_owned(),
             }]),
         ]),
         buttons: vec![
@@ -683,8 +818,9 @@ fn every_window() -> Vec<Window<Id>> {
 }
 
 /// **The mirror is an exact reflection**: every rectangle of the right-to-left layout equals the
-/// left-to-right one reflected in the vertical axis of the window — for every description, at a
-/// wide and a narrow size — and the order of Tab does not change.
+/// left-to-right one reflected in the vertical axis of the window (what lies over the picture of the
+/// panel moves with the picture instead, T-120-25) — for every description, at a wide and a narrow
+/// size — and the order of Tab does not change.
 #[test]
 fn the_mirror_reflects_every_rectangle_and_keeps_the_order_of_tab() {
     let narrow = WindowSize {
@@ -707,8 +843,8 @@ fn the_mirror_reflects_every_rectangle_and_keeps_the_order_of_tab() {
             );
 
             for (left, right) in straight.items.iter().zip(&mirrored.items) {
-                let Placed { part, rect, .. } = left;
-                let reflected = Rect::new(size.w - rect.x - rect.w, rect.y, rect.w, rect.h);
+                let Placed { part, .. } = left;
+                let reflected = mirrored.reflection_of(&straight, left);
                 if right.part != *part
                     || !(close(right.rect.x, reflected.x)
                         && close(right.rect.y, reflected.y)
@@ -759,7 +895,7 @@ fn the_mirror_reflects_the_window_descriptions_of_the_shell() {
             let mirrored = lay_out(&window, size, 1.0, true, &MEASURE);
             assert_eq!(straight.focus_order(), mirrored.focus_order());
             for (left, right) in straight.items.iter().zip(&mirrored.items) {
-                let reflected = size.w - left.rect.x - left.rect.w;
+                let reflected = mirrored.reflection_of(&straight, left).x;
                 assert!(
                     close(right.rect.x, reflected) && close(right.rect.y, left.rect.y),
                     "{language:?} {} at {}",
@@ -882,7 +1018,7 @@ fn the_card_of_a_letter_has_its_buttons_at_the_end() {
     let window = bare(Node::LetterCard {
         label: "Письмо".to_owned(),
         title: "Обновление 1.8.0".to_owned(),
-        text: "Очень длинный текст письма, который не помещается в одну строку карточки письма \
+        words: "Очень длинный текст письма, который не помещается в одну строку карточки письма \
                и обрезается многоточием"
             .to_owned(),
         buttons: vec![Node::Button {
@@ -930,4 +1066,123 @@ fn the_pictures_of_the_windows_are_drawings_of_res_art() {
             art.name()
         );
     }
+}
+
+/// **The label «new» stands after the words of its switch** (passport §6, T-120-20): on their line,
+/// a gap after them, while it fits there; under them when it does not — never over them.
+#[test]
+fn the_label_new_stands_after_the_words_of_its_switch() {
+    let toggle = |label: &str| {
+        bare(Node::Toggle {
+            id: Id::Autostart,
+            label: label.to_owned(),
+            hint: None,
+            on: false,
+            badge: Some("new".to_owned()),
+        })
+    };
+    let badge_and_words = |layout: &Layout<Id>| {
+        let badge = rects_of(layout, |part| matches!(part, Part::Badge { .. }));
+        let words = texts(layout);
+        assert_eq!(badge.len(), 1, "one label «new»");
+        (badge[0], words)
+    };
+
+    let layout = lay(&toggle("Flag in the tray"), usual());
+    let (badge, words) = badge_and_words(&layout);
+    assert_eq!(words.len(), 1);
+    assert!(
+        close(badge.x, words[0].right() + BADGE_GAP.at(layout.b)) && close(badge.y, words[0].y),
+        "beside the words: {badge:?}, the words {:?}",
+        words[0]
+    );
+
+    let long = "Show the flag of the layout in the notification area ".repeat(4);
+    let layout = lay(&toggle(&long), usual());
+    let (badge, words) = badge_and_words(&layout);
+    let bottom = words.iter().map(|rect| rect.bottom()).fold(0.0, f32::max);
+    assert!(
+        close(badge.y, bottom),
+        "under the words: {badge:?}, they end at {bottom}"
+    );
+}
+
+/// **The sections of the settings stand in the panel, under its picture** (T-120-20, the mock-up's
+/// `.panel.setp`): in a wide window the picture at the top of the panel, the column of sections
+/// under it inside the panel, taking no room in the flow; in a narrow one — the row of tabs in the
+/// flow, and no circle.
+#[test]
+fn the_sections_of_the_settings_stand_in_the_panel_under_the_picture() {
+    let sections = Node::Sections {
+        id: Id::Sections,
+        items: ["General", "Hotkey", "Layouts", "Exceptions", "Diagnostics"]
+            .map(str::to_owned)
+            .to_vec(),
+        current: 1,
+    };
+    let header = Node::Header {
+        eyebrow: Some("Settings".to_owned()),
+        title: "Hotkey".to_owned(),
+        subtitle: None,
+    };
+    let settings = |with_sections: bool| {
+        let mut column = vec![header.clone()];
+        if with_sections {
+            column.push(sections.clone());
+        }
+        column.push(text(Role::Body, "The key that switches the layout"));
+        Window {
+            kind: WindowKind::Settings,
+            art: Some(Art::About),
+            ..bare(Node::Column(column))
+        }
+    };
+    let section_rects =
+        |layout: &Layout<Id>| rects_of(layout, |p| matches!(p, Part::Section { .. }));
+
+    let wide = lay(&settings(true), usual());
+    let panel = rects_of(&wide, |p| matches!(p, Part::Panel))[0];
+    let picture = rects_of(&wide, |p| matches!(p, Part::Art(_)))[0];
+    let rows = section_rects(&wide);
+    assert_eq!(rows.len(), 5);
+    assert!(
+        picture.y < panel.h / 2.0 - picture.h / 2.0,
+        "the picture at the top: {picture:?}"
+    );
+    assert!(
+        rows.iter().all(|row| row.x >= panel.x
+            && row.right() <= panel.right()
+            && row.y >= picture.bottom()),
+        "the sections inside the panel under the picture: {rows:?}, the panel {panel:?}"
+    );
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[1].y > pair[0].y && close(pair[1].x, pair[0].x)),
+        "a column: {rows:?}"
+    );
+    assert_eq!(
+        texts(&wide),
+        texts(&lay(&settings(false), usual())),
+        "the sections took room in the flow"
+    );
+
+    let narrow = WindowSize {
+        w: 640.0,
+        h: 500.0,
+        class: Class::Narrow,
+        scrolls: false,
+    };
+    let layout = lay(&settings(true), narrow);
+    let tabs = section_rects(&layout);
+    assert!(rects_of(&layout, |p| matches!(p, Part::Panel)).is_empty());
+    assert!(
+        rects_of(&layout, |p| matches!(p, Part::Art(_))).is_empty(),
+        "no circle"
+    );
+    assert!(close(tabs[1].y, tabs[0].y), "a row of tabs: {tabs:?}");
+    let title = texts(&layout)[1];
+    assert!(
+        tabs[0].y >= title.bottom(),
+        "the tabs in the flow under the header"
+    );
 }

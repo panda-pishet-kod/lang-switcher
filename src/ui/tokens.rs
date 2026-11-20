@@ -204,6 +204,34 @@ impl Color {
     }
 }
 
+/// The colours of what lies over the picture of the panel (T-120-25, the mock-up's
+/// `helloOverlayReal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PictureColours {
+    /// The word being typed.
+    pub word: Rgb,
+    /// The word fixed.
+    pub fixed: Rgb,
+    /// The frame and the name of a key.
+    pub ink: Rgb,
+    /// A key.
+    pub key: Rgb,
+    /// A key pressed.
+    pub lit: Rgb,
+}
+
+/// The picture is the same in both themes, and so is what lies on it: the light values of §1 —
+/// and the pressed key in the accent of the dark theme, as in the mock-up.
+pub const fn picture_colours() -> PictureColours {
+    PictureColours {
+        word: Color::Ink2.pair().light,
+        fixed: Color::Accent.pair().light,
+        ink: Color::Ink.pair().light,
+        key: Color::ButtonFg.pair().light,
+        lit: Color::Accent.pair().dark,
+    }
+}
+
 // §2. Кегль и шрифт
 
 /// A length in points at 100 % scale.
@@ -612,6 +640,10 @@ pub const PANEL_DOT_STEP: Pt = Pt(18.0);
 pub const PANEL_ART: Circle = Circle::new(0.29, 0.64, Pt(520.0));
 /// Рисунок в окне настроек — диаметр круга.
 pub const SETTINGS_ART: Circle = Circle::new(0.17, 0.30, Pt(240.0));
+/// ◆ Окно настроек, панель — поля сверху и по бокам (макет `authors.html`, `.panel.setp`).
+pub const SETTINGS_PANEL_PAD: Pad = Pad::em(1.8, 1.4);
+/// ◆ Окно настроек, панель — от рисунка до столбца разделов.
+pub const SETTINGS_PANEL_GAP: Em = Em(1.2);
 /// Рисунок — кольцо цвета `bg`.
 pub const ART_RING: Pt = Pt(6.0);
 /// Подпись под рисунком — от края.
@@ -620,6 +652,28 @@ pub const BRAND_FROM_EDGE: Em = Em(1.6);
 pub const BRAND_FROM_BOTTOM: Em = Em(1.2);
 /// ◆ Подпись под рисунком — между именем и адресом, доля кегля подписи (из макета).
 pub const BRAND_GAP: Share = Share(0.5);
+/// ◆ Метка «новое» — от надписи (макет: 0,6 кегля метки).
+pub const BADGE_GAP: Em = Em(0.41);
+/// ◆ Поверх рисунка — слово: кегль, доля высоты якоря (T-120-25, макет `helloOverlayReal`: 24 из 94).
+pub const ON_PICTURE_WORD: Share = Share(24.0 / 94.0);
+/// ◆ Поверх рисунка — слово: от левого края якоря, доля его высоты (макет: 16 из 94).
+pub const ON_PICTURE_WORD_INSET: Share = Share(16.0 / 94.0);
+/// ◆ Поверх рисунка — клавиша: высота, доля высоты якоря (макет: 30 из 42).
+pub const ON_PICTURE_KEY: Share = Share(30.0 / 42.0);
+/// ◆ Поверх рисунка — клавиша: кегль имени, доля высоты якоря (макет: 16 из 42).
+pub const ON_PICTURE_KEY_LABEL: Share = Share(16.0 / 42.0);
+/// ◆ Поверх рисунка — клавиша: не уже, доля высоты якоря (макет: 76 из 42).
+pub const ON_PICTURE_KEY_MIN: Share = Share(76.0 / 42.0);
+/// ◆ Поверх рисунка — клавиша: поле у имени с каждой стороны, доля высоты якоря (макет: 11 из 42).
+pub const ON_PICTURE_KEY_PAD: Share = Share(11.0 / 42.0);
+/// ◆ Поверх рисунка — между клавишами, доля высоты якоря (макет: 10 из 42).
+pub const ON_PICTURE_KEY_GAP: Share = Share(10.0 / 42.0);
+/// ◆ Поверх рисунка — клавиша: скругление, доля её высоты (макет: 7 из 30).
+pub const ON_PICTURE_KEY_RADIUS: Share = Share(7.0 / 30.0);
+/// ◆ Поверх рисунка — клавиша: рамка, доля её высоты (макет: 4 из 30).
+pub const ON_PICTURE_KEY_FRAME: Share = Share(4.0 / 30.0);
+/// ◆ Поверх рисунка — начертание слова и имени клавиши (моноширинный).
+pub const ON_PICTURE_WEIGHT: u16 = 700;
 /// Блок — поля.
 pub const BLOCK_PAD: Pad = Pad::em(0.8, 1.0);
 /// Блок — между строками.

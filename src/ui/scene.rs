@@ -150,15 +150,17 @@ pub enum Node<I> {
     /// A card with a title, a text and buttons under the text — beside it when the window is tight.
     Action {
         title: String,
-        text: String,
+        words: String,
         buttons: Vec<Node<I>>,
     },
-    /// A line of settings with a switch at its end; the whole line is pressed.
+    /// A line of settings with a switch at its end; the whole line is pressed. `badge` — the
+    /// label «new» after its words (passport §6).
     Toggle {
         id: I,
         label: String,
         hint: Option<String>,
         on: bool,
+        badge: Option<String>,
     },
     /// A check box before its label; the whole line is pressed.
     Check { id: I, label: String, on: bool },
@@ -168,7 +170,7 @@ pub enum Node<I> {
     ChoiceCard {
         id: I,
         title: String,
-        text: String,
+        words: String,
         selected: bool,
     },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
@@ -243,15 +245,23 @@ pub enum Node<I> {
         key: String,
         fixed: String,
     },
+    /// What lies over the picture of the panel, each element in a named place of the picture
+    /// (`anchor-…` of `resrt`, T-120-25) — when the window has the panel; `otherwise` in the flow
+    /// when it stands in one column. Over the picture it takes no room in the flow, and neither the
+    /// picture nor it is mirrored.
+    OverPicture {
+        over: Vec<(&'static str, OnPicture)>,
+        otherwise: Box<Node<I>>,
+    },
     /// The card of a letter (passport §6): its label, title, one line of its text, its buttons.
     LetterCard {
         label: String,
         title: String,
-        text: String,
+        words: String,
         buttons: Vec<Node<I>>,
     },
     /// A link to the site.
-    Link { id: I, text: String },
+    Link { id: I, words: String },
     /// A line across.
     Divider,
 }
@@ -279,6 +289,16 @@ pub struct Brand<I> {
     /// The address is a link to the page of the program (decision of the controller on C3 of
     /// T-120-13, as the name of the old «О программе», 139.2 п. 4): pressed, it is this element.
     pub link: I,
+}
+
+/// An element over the picture of the panel (T-120-25), in the colours of the picture.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OnPicture {
+    /// A word on the little screen, as much of it as is typed; `fixed` — the word after the press.
+    /// It starts at the left of its place in any language and reads as it is typed.
+    Word { word: String, fixed: bool },
+    /// Keys side by side in the middle of their place; `pressed` — lit.
+    Keys { labels: Vec<String>, pressed: bool },
 }
 
 impl<I> Node<I> {
@@ -321,11 +341,11 @@ impl<I> Node<I> {
             Node::Buttons(nodes) => Node::Buttons(all(nodes)),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => Node::Action {
                 title,
-                text,
+                words,
                 buttons: all(buttons),
             },
             Node::Toggle {
@@ -333,11 +353,13 @@ impl<I> Node<I> {
                 label,
                 hint,
                 on,
+                badge,
             } => Node::Toggle {
                 id: f(id),
                 label,
                 hint,
                 on,
+                badge,
             },
             Node::Check { id, label, on } => Node::Check {
                 id: f(id),
@@ -352,12 +374,12 @@ impl<I> Node<I> {
             Node::ChoiceCard {
                 id,
                 title,
-                text,
+                words,
                 selected,
             } => Node::ChoiceCard {
                 id: f(id),
                 title,
-                text,
+                words,
                 selected,
             },
             Node::Segments {
@@ -438,18 +460,22 @@ impl<I> Node<I> {
             },
             Node::MenuRule => Node::MenuRule,
             Node::Example { typed, key, fixed } => Node::Example { typed, key, fixed },
+            Node::OverPicture { over, otherwise } => Node::OverPicture {
+                over,
+                otherwise: one(otherwise),
+            },
             Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons,
             } => Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons: buttons.into_iter().map(|node| node.map(f)).collect(),
             },
-            Node::Link { id, text } => Node::Link { id: f(id), text },
+            Node::Link { id, words } => Node::Link { id: f(id), words },
             Node::Divider => Node::Divider,
         }
     }
@@ -492,23 +518,28 @@ impl<I> Node<I> {
             Node::Button { label, .. } => f(Role::Button, label),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => {
                 f(Role::Strong, title);
-                f(Role::Body, text);
+                f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
-            Node::Toggle { label, hint, .. } => {
+            Node::Toggle {
+                label, hint, badge, ..
+            } => {
                 f(Role::Body, label);
                 if let Some(hint) = hint {
                     f(Role::Small, hint);
                 }
+                if let Some(badge) = badge {
+                    f(Role::Label, badge);
+                }
             }
             Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
-            Node::ChoiceCard { title, text, .. } => {
+            Node::ChoiceCard { title, words, .. } => {
                 f(Role::Strong, title);
-                f(Role::Small, text);
+                f(Role::Small, words);
             }
             Node::Segments { label, options, .. } => {
                 f(Role::Body, label);
@@ -554,18 +585,20 @@ impl<I> Node<I> {
                 f(Role::Code, typed);
                 f(Role::Code, fixed);
             }
+            // The words over the picture are sized by their place in it, not by a role.
+            Node::OverPicture { otherwise, .. } => otherwise.texts_mut(f),
             Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons,
             } => {
                 f(Role::Label, label);
                 f(Role::Strong, title);
-                f(Role::Body, text);
+                f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
-            Node::Link { text, .. } => f(Role::Link, text),
+            Node::Link { words, .. } => f(Role::Link, words),
             Node::Divider => {}
         }
     }
@@ -623,6 +656,12 @@ pub struct Taskbar {
 pub enum FieldKind {
     Line,
     Text,
+    /// A field of a key (T-120-20): it shows the key and is not typed in; `capturing` — it takes
+    /// every key now (`Event::KeyDown`, `Event::KeyUp`, `Event::FocusLost`). Out of the capture it
+    /// is no stop of Tab.
+    Key {
+        capturing: bool,
+    },
 }
 
 /// A row of a list.
@@ -652,6 +691,16 @@ pub enum Event<I> {
     Scrolled(I, usize),
     /// The tick the window asked for (`host::Content::tick`, T-120-25).
     Tick,
+    /// The timer of the content's own (`host::Content::timer`, T-120-20).
+    Timer,
+    /// A key went down in the field of a key `id` in its capture: its virtual code. Sent at once,
+    /// inside the key's own message — the keys held with it are read now as they were then.
+    KeyDown { id: I, vk: u16 },
+    /// A key went up there.
+    KeyUp { id: I, vk: u16 },
+    /// The field of a key `id` in its capture lost the keyboard: to the element `to`, or to none —
+    /// a press beside the elements, another window.
+    FocusLost { id: I, to: Option<I> },
 }
 
 impl<I: PartialEq> Node<I> {

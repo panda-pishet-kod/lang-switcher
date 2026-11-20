@@ -24,7 +24,8 @@
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
 use crate::ui::scene::{ButtonKind, Surface};
-use crate::ui::text::{Align, Style, Text, Wrap};
+use crate::ui::text::{Align, Measure, Style, Text, Wrap};
+use crate::ui::tokens::BUTTON_PAD;
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
@@ -33,6 +34,9 @@ use crate::ui::tokens::{
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
+use crate::ui::tokens::{
+    ON_PICTURE_KEY_FRAME, ON_PICTURE_KEY_RADIUS, ON_PICTURE_WEIGHT, picture_colours,
+};
 
 /// What every element of one window shares: the theme, the direction, the type size and the faces.
 pub struct Look<'t> {
@@ -404,6 +408,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             multiline,
             value,
             hint,
+            ..
         } => {
             field(painter, look, rect, state);
             let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };
@@ -591,6 +596,45 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 c(colour),
             );
         }
+        Part::PictureWord { word, size, fixed } => {
+            // From the left of its place in any language (the picture is not mirrored): the start
+            // of a run that reads right to left is its right edge.
+            let colours = picture_colours();
+            let style = Style {
+                size: *size,
+                ..Style::of(Role::Code, look.b, look.h).with_weight(ON_PICTURE_WEIGHT)
+            };
+            let align = if look.rtl { Align::End } else { Align::Start };
+            if let Ok(laid) = look.text.lay(word, style, Wrap::OneLine, align, rect.w) {
+                let colour = if *fixed { colours.fixed } else { colours.word };
+                painter.text(&laid, rect.x, rect.y, colour);
+            }
+        }
+        Part::PictureKey {
+            label,
+            size,
+            pressed,
+        } => {
+            let colours = picture_colours();
+            let (radius, frame) = (
+                rect.h * ON_PICTURE_KEY_RADIUS.0,
+                rect.h * ON_PICTURE_KEY_FRAME.0,
+            );
+            let fill = if *pressed { colours.lit } else { colours.key };
+            painter.fill_rect(rect, radius, fill);
+            painter.stroke_rect(rect, radius, frame, colours.ink);
+            let style = Style {
+                size: *size,
+                ..Style::of(Role::Code, look.b, look.h).with_weight(ON_PICTURE_WEIGHT)
+            };
+            if let Ok(laid) = look
+                .text
+                .lay(label, style, Wrap::OneLine, Align::Centre, rect.w)
+            {
+                let y = rect.y + (rect.h - laid.size().height) / 2.0;
+                painter.text(&laid, rect.x, y, colours.ink);
+            }
+        }
         Part::Dot(status) => {
             let colour = match status {
                 Status::Working => Color::Accent,
@@ -765,14 +809,34 @@ fn button(
     if let Some(frame) = frame {
         painter.stroke_rect(rect, radius, LINE.0, c(frame));
     }
+    // A label wider than its button (§3а, step 5: the layout made the button taller) goes on to a
+    // second line, inside the paddings.
+    let pad = BUTTON_PAD.h.at(look.b);
+    let mut style = Style::of(Role::Button, look.b, look.h);
+    if let Some(weight) = weight {
+        style = style.with_weight(weight);
+    }
+    let wide = look
+        .text
+        .measure(label, style, Wrap::OneLine, f32::MAX)
+        .width
+        > rect.w - pad * 2.0;
+    let (place, wrap) = if wide {
+        (
+            Rect::new(rect.x + pad, rect.y, (rect.w - pad * 2.0).max(0.0), rect.h),
+            Wrap::Words,
+        )
+    } else {
+        (rect, Wrap::OneLine)
+    };
     write(
         painter,
         look,
         Role::Button,
         weight,
         label,
-        rect,
-        Wrap::OneLine,
+        place,
+        wrap,
         Align::Centre,
         true,
         text,

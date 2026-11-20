@@ -130,6 +130,7 @@ fn the_controls_answer_on_their_whole_line_and_a_card_on_the_whole_card() {
             label: label.clone(),
             hint: Some("подсказка".to_owned()),
             on: true,
+            badge: None,
         },
         Node::Check {
             id: 1,
@@ -144,7 +145,7 @@ fn the_controls_answer_on_their_whole_line_and_a_card_on_the_whole_card() {
         Node::ChoiceCard {
             id: 1,
             title: label.clone(),
-            text: "строка".to_owned(),
+            words: "строка".to_owned(),
             selected: true,
         },
     ] {
