@@ -7580,7 +7580,12 @@ fn keep_feed_document(document: &str) {
 /// time**, exactly as an answer of the site does. A file that is spoilt, cut, foreign or signed by
 /// anybody else is **no feed at all** (`None`), never half of one.
 pub fn kept_feed(document: &str, language: &str) -> Option<feed::Feed> {
-    feed::read_document(document, language, feed::verify_signature).ok()
+    let (_, keys) = feed::sources();
+
+    feed::read_document(document, language, |body, signature| {
+        feed::verify_with(body, signature, &keys)
+    })
+    .ok()
 }
 
 /// **Puts the kept feed back after a start** — task T-119-9, решение 208.98: a restart on the
@@ -12578,7 +12583,45 @@ pub mod feed {
     /// ⭐ Task T-119-9: the good feed comes **with its document**, the signed text as the site gave
     /// it — the program keeps it on disk ([`super::keep_feed_document`]).
     pub fn read_now_marked(language: &str, first: bool) -> (Option<(Feed, String)>, bool) {
-        read_document_from_marked(&super::links::FEED_URLS, language, first)
+        let (urls, keys) = sources();
+        let urls: Vec<&str> = urls.iter().map(String::as_str).collect();
+
+        read_document_from_marked_with(&urls, language, first, &keys)
+    }
+
+    /// **Where the program reads the feed from, and with which keys** — [`super::links::FEED_URLS`]
+    /// and [`FEED_KEYS`], and nothing else in a Release image. ⭐ Task T-119-13 (слово контролёра
+    /// 2026-11-20): under the `testing` feature only, the doors of the stand ([`stand_doors`]) may
+    /// name another address and other keys. The kept copy of the feed is read again with the same
+    /// keys (`super::kept_feed`).
+    pub fn sources() -> (Vec<String>, [[u8; 64]; 2]) {
+        #[cfg(feature = "testing")]
+        if let Some(stand) = stand_doors() {
+            return stand;
+        }
+
+        (
+            super::links::FEED_URLS
+                .iter()
+                .map(|url| (*url).to_owned())
+                .collect(),
+            FEED_KEYS,
+        )
+    }
+
+    /// ⭐ **The doors of the stand for the program's own feed** — task T-119-13, слово контролёра
+    /// 2026-11-20: **the very file and the very keys of the updater's doors** (TZ E104 §0 п. 22,
+    /// `update-doors.toml` beside the program, laid over by
+    /// [`crate::update::Places::of_this_machine`]), so that the guest without a network can show
+    /// the seventh day and the kept feed. Only under the `testing` feature: a Release image has no
+    /// trace of it — gate 6 of `tools\verify-perimeter.ps1` reads both images for the doors, and
+    /// `tests\update.rs` holds every door behind its `cfg`. `None` when the doors name no feed.
+    #[cfg(feature = "testing")]
+    fn stand_doors() -> Option<(Vec<String>, [[u8; 64]; 2])> {
+        let places = crate::update::Places::of_this_machine()?;
+
+        (places.feed_url != super::links::FEED_URLS[0])
+            .then(|| (vec![places.feed_url], places.keys))
     }
 
     /// ⭐ **The address of the feed with the mark of the first run** — stage E116, task T-116-12:
@@ -12603,6 +12646,17 @@ pub mod feed {
         language: &str,
         first: bool,
     ) -> (Option<(Feed, String)>, bool) {
+        read_document_from_marked_with(urls, language, first, &FEED_KEYS)
+    }
+
+    /// [`read_document_from_marked`] against named keys — the product passes [`FEED_KEYS`], or,
+    /// under the `testing` feature, the keys of the doors of the stand ([`sources`]).
+    fn read_document_from_marked_with(
+        urls: &[&str],
+        language: &str,
+        first: bool,
+        keys: &[[u8; 64]; 2],
+    ) -> (Option<(Feed, String)>, bool) {
         let mut answered = false;
 
         for &url in urls {
@@ -12621,7 +12675,9 @@ pub mod feed {
                 continue;
             };
 
-            match read_document(&text, language, verify_signature) {
+            match read_document(&text, language, |body, signature| {
+                verify_with(body, signature, keys)
+            }) {
                 Ok(feed) => return (Some((feed, text)), answered),
                 Err(refusal) => {
                     // SEC-07: the name of what went wrong and not a word of the document.
