@@ -7262,3 +7262,92 @@ mod window_of_the_settings {
         );
     }
 }
+
+/// Presses the `index`-th part whose printed form begins with `part` that the layout of `hwnd` placed — the sections of the
+/// window of the settings share one identifier, so they are told apart by their order.
+#[cfg(feature = "testing")]
+fn click_the_part(hwnd: HWND, part: &str, index: usize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
+    };
+
+    // SAFETY: a message to a live window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let Some(probe) = lang_switcher::ui::host::probe(hwnd) else {
+        return false;
+    };
+    let Some((_, _, rect)) = probe
+        .items
+        .iter()
+        .filter(|(kind, _, _)| kind.starts_with(part))
+        .nth(index)
+    else {
+        return false;
+    };
+    let (x, y) = (
+        (rect.x + rect.w / 2.0) as i32,
+        (rect.y + rect.h / 2.0) as i32,
+    );
+    let point = LPARAM(((y & 0xFFFF) << 16 | (x & 0xFFFF)) as isize);
+    for message in [WM_LBUTTONDOWN, WM_LBUTTONUP] {
+        // SAFETY: a press to a live window of this thread.
+        unsafe { SendMessageW(hwnd, message, Some(WPARAM(1)), Some(point)) };
+    }
+    true
+}
+
+/// **T-120-21 Б, C6 (а): «Подробности для автора» in the window of the settings opens the small
+/// window of the details, owned by the window of the settings.** The press goes through the product's
+/// own content, as a person's click does.
+#[cfg(feature = "testing")]
+#[test]
+fn the_details_button_opens_their_window_over_the_settings() {
+    use lang_switcher::ui::windows::settings as window_of_settings;
+    use windows::Win32::UI::WindowsAndMessaging::{GW_OWNER, GetWindow};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("settings-details");
+    let _locale = locale_turn();
+    let _toggle = toggle_turn();
+    let _ui = attach_ui(&window, &home);
+
+    window_of_settings::testing::hidden_while(|| {
+        tray::dispatch_command(window.handle, tray::CMD_SETTINGS);
+    });
+    let opened = settings::open_window();
+    // «Диагностика»: the last of the five sections.
+    let section = opened.is_some_and(|hwnd| click_the_part(hwnd, "Section {", 4));
+    let before = shell_windows_of_this_thread();
+    let pressed = opened.is_some_and(|hwnd| {
+        window_of_settings::testing::hidden_while(|| click_the_element(hwnd, "Details"))
+    });
+    let after = shell_windows_of_this_thread();
+    let details: Vec<HWND> = after
+        .iter()
+        .filter(|hwnd| !before.contains(hwnd))
+        .copied()
+        .collect();
+    // SAFETY: windows of this thread.
+    let owner = details
+        .first()
+        .and_then(|hwnd| unsafe { GetWindow(*hwnd, GW_OWNER) }.ok());
+    println!(
+        "settings {opened:?}; section {section}, pressed {pressed}; new windows {details:?}, owner {owner:?}"
+    );
+    for hwnd in details.iter().chain(opened.iter()) {
+        // SAFETY: windows of this thread; a gone one refuses.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert!(opened.is_some(), "«Настройки…» opens the window");
+    assert!(
+        section && pressed,
+        "«Диагностика» and its button are there to press"
+    );
+    assert_eq!(
+        details.len(),
+        1,
+        "the press opens one window of the details"
+    );
+    assert_eq!(owner, opened, "owned by the window of the settings");
+}
