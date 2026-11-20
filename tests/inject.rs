@@ -3754,14 +3754,16 @@ fn the_dialog_template_is_copied_into_a_buffer_that_declares_its_alignment() {
         );
     }
 
-    // Both calls take the pointer from the aligned buffer.
+    // The call takes the pointer from the aligned buffer. One call since T-120-20: the modal one
+    // opened «Настройки» and «О программе», which went to the shell; the modeless one opens the
+    // windows of the letters.
     let handed = code_lines_with(&settings, "copy.as_ptr()");
 
     assert_eq!(
         handed.len(),
-        2,
-        "the modal and the modeless call both hand over the aligned pointer, and nobody else \
-         hands over one at all: {handed:?}"
+        1,
+        "the modeless call hands over the aligned pointer, and nobody else hands over one at \
+         all: {handed:?}"
     );
 
     // The measurement that cannot fail, kept for the two things it does prove: the buffer of a

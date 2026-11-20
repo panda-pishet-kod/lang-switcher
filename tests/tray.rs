@@ -1561,44 +1561,6 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
 // pointer to nothing, and the shape of the arm in the source.
 // ---------------------------------------------------------------------------------------
 
-/// **The rule itself, all twelve rows.** Two windows and three themes, and the string is
-/// worth reading in exactly two of the twelve states.
-#[test]
-fn the_setting_change_string_is_wanted_in_exactly_two_of_the_twelve_states() {
-    for (dialog_open, about_open, setting, expected) in [
-        // Nobody on the screen. Whatever the theme says, there is no window to repaint —
-        // this is the row the audit found the program reading a foreign pointer in.
-        (false, false, ThemeSetting::System, false),
-        (false, false, ThemeSetting::Light, false),
-        (false, false, ThemeSetting::Dark, false),
-        // The settings dialog of FR-92 is up. Only `system` gives the system a say: under
-        // the two fixed themes FR-92а pins the palette and a broadcast changes nothing.
-        (true, false, ThemeSetting::System, true),
-        (true, false, ThemeSetting::Light, false),
-        (true, false, ThemeSetting::Dark, false),
-        // The «О программе» window of task T-13-17, alone. This disjunct has to carry the
-        // gate by itself, or that task's repair is undone.
-        (false, true, ThemeSetting::System, true),
-        (false, true, ThemeSetting::Light, false),
-        (false, true, ThemeSetting::Dark, false),
-        // Both records set. Not a state the program reaches — «О программе» is modal — and
-        // the rule answers it all the same, because a rule with a hole in it is a rule that
-        // depends on somebody keeping the hole unreachable.
-        (true, true, ThemeSetting::System, true),
-        (true, true, ThemeSetting::Light, false),
-        (true, true, ThemeSetting::Dark, false),
-    ] {
-        let wanted = tray::setting_name_is_wanted(dialog_open, about_open, setting);
-
-        println!("dialog={dialog_open} about={about_open} {setting:?} -> wanted={wanted}");
-
-        assert_eq!(
-            wanted, expected,
-            "setting_name_is_wanted({dialog_open}, {about_open}, {setting:?})"
-        );
-    }
-}
-
 /// **Criterion 5 of task T-13-20, on the product's own road.** A real tray, a real
 /// `Tray::handle_message`, a real `WM_SETTINGCHANGE` — and an `lParam` that is a pointer to
 /// nothing.
@@ -2088,44 +2050,24 @@ fn nothing_of_a_window_message_is_dereferenced_in_the_tray() {
         .expect("the unit-test module must be at the foot of this file");
     let source = &source[..at];
 
-    assert_eq!(
-        source.matches("pub fn setting_name_is_wanted(").count(),
-        1,
-        "one rule, one definition"
-    );
-    assert!(
-        source.contains("(dialog_open || about_open) && setting == theme::ThemeSetting::System"),
-        "and the rule is «есть кому отдать» — either window — **and** the theme that lets the \
-         system have a say"
-    );
-
-    // The arm of `handle_message`: the theme travels in, and nothing else does.
-    assert!(
-        source.contains("on_setting_change(self.config().general.theme)"),
-        "the arm hands over the one cheap local fact and does not hand over `lparam`"
-    );
-
-    let at = source
-        .find("fn on_setting_change(setting: theme::ThemeSetting) {")
-        .expect("on_setting_change must be in this file, and must take no `lparam`");
-    let body = &source[at..];
-    let end = body.find("\n}").expect("a function closes with its brace");
+    // The theme arm of `handle_message` (since stage Э120 it only follows the taskbar — the
+    // windows of the shell follow the theme on their own): it takes nothing of the message.
+    let arm = source
+        .find("WM_SETTINGCHANGE | WM_THEMECHANGED => {")
+        .expect("the two theme messages share one arm of handle_message");
+    let body = &source[arm..];
+    let end = body
+        .find("\n            }")
+        .expect("an arm closes with its brace");
     let body = &body[..end];
 
-    println!("--- on_setting_change ---\n{body}");
+    println!("--- the theme arm ---\n{body}");
 
     assert!(
-        body.contains("settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET))"),
-        "and what goes on to the far side is this build's own word, not the message's"
-    );
-    assert!(
-        body.contains("settings::dialog_is_open()") && body.contains("settings::about_is_open()"),
-        "«кому отдать» is both windows of FR-92а: task T-13-17 made the about window a \
-         listener, and a gate asking only the dialog would silently undo it"
-    );
-    assert!(
-        !body.contains("lparam") && !body.contains("LPARAM"),
-        "and the message is not so much as named inside the function"
+        body.contains("self.follow_taskbar_theme();")
+            && !body.contains("lparam")
+            && !body.contains("wparam"),
+        "the arm follows the taskbar and does not so much as name the message"
     );
 
     // The claim of the whole file, and the one the finding asks for. Both spellings, because
@@ -2584,15 +2526,6 @@ fn both_theme_arms_follow_the_taskbar_switch_outside_the_gate_of_t_13_20() {
     fixed.general.theme = ThemeSetting::Dark;
     tray.replace_config(fixed);
 
-    assert!(
-        !tray::setting_name_is_wanted(
-            settings::dialog_is_open(),
-            settings::about_is_open(),
-            tray.config().general.theme
-        ),
-        "the gate of T-13-20 is shut"
-    );
-
     for (name, message) in [
         ("WM_SETTINGCHANGE", WM_SETTINGCHANGE),
         ("WM_THEMECHANGED", WM_THEMECHANGED),
@@ -2640,126 +2573,6 @@ fn both_theme_arms_follow_the_taskbar_switch_outside_the_gate_of_t_13_20() {
             "{name}: the same answer again costs nothing"
         );
     }
-}
-
-/// **Task T-86-2, guard (4), the text half: the two arms call the following BEFORE the gate,
-/// and the following reaches the switch and the update.**
-///
-/// Swept over the product half of `src\tray.rs` without its comment lines — the sweep of task
-/// T-85-1: a claim about a branch is made of its calls, not of its prose. Four claims: the
-/// `WM_SETTINGCHANGE` arm names `self.follow_taskbar_theme()` and names it before
-/// `on_setting_change(`; the `WM_THEMECHANGED` arm names it before
-/// `settings::on_system_theme_message(`; `follow_taskbar_theme` reaches
-/// `theme::taskbar_is_light()` and its seam reaches `self.refresh_icon()`; and none of the four
-/// bodies goes through `setting_name_is_wanted(`. Plus the count: the following is called from
-/// exactly the two arms.
-///
-/// The negative control is measured: the same sweep over the tree before the arms were wired
-/// fails on the first claim — `scratchpad-E86\red-before-T-86-2-arms.log`.
-#[test]
-fn the_theme_arms_call_the_following_before_the_gate_by_their_calls_and_not_their_prose() {
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tray.rs"),
-    )
-    .expect("src\\tray.rs must be readable")
-    .replace("\r\n", "\n");
-
-    let at = source
-        .find("\n#[cfg(test)]\nmod tests {")
-        .expect("the unit-test module must be at the foot of this file");
-    let product: String = source[..at]
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .map(|line| format!("{line}\n"))
-        .collect();
-
-    // An arm of `handle_message`: from its pattern to the next arm's.
-    let arm = |pattern: &str, next: &str| -> String {
-        let start = product
-            .find(pattern)
-            .unwrap_or_else(|| panic!("{pattern} must be an arm of handle_message"));
-        let rest = &product[start..];
-        let end = rest
-            .find(next)
-            .unwrap_or_else(|| panic!("{next} must follow {pattern}"));
-
-        rest[..end].to_owned()
-    };
-    let setting_change = arm("WM_SETTINGCHANGE => {", "WM_THEMECHANGED => {");
-    let theme_changed = arm("WM_THEMECHANGED => {", "_ => Reaction::Ignored,");
-
-    println!(
-        "--- WM_SETTINGCHANGE arm ---\n{setting_change}--- WM_THEMECHANGED arm ---\n{theme_changed}"
-    );
-
-    let before = |body: &str, first: &str, second: &str| {
-        let a = body
-            .find(first)
-            .unwrap_or_else(|| panic!("«{first}» must be in the arm"));
-        let b = body
-            .find(second)
-            .unwrap_or_else(|| panic!("«{second}» must be in the arm"));
-
-        assert!(a < b, "«{first}» must stand before «{second}»");
-    };
-    before(
-        &setting_change,
-        "self.follow_taskbar_theme()",
-        "on_setting_change(",
-    );
-    before(
-        &theme_changed,
-        "self.follow_taskbar_theme()",
-        "settings::on_system_theme_message(",
-    );
-
-    // The body of a method: from its signature to the first brace that closes at its depth.
-    let method = |signature: &str| -> String {
-        let start = product
-            .find(signature)
-            .unwrap_or_else(|| panic!("{signature} must be in src\\tray.rs"));
-        let rest = &product[start..];
-        let end = rest
-            .find("\n    }\n")
-            .expect("a method closes with a brace of its own");
-
-        rest[..end].to_owned()
-    };
-    let follow = method("fn follow_taskbar_theme(&mut self) {");
-    let follow_with =
-        method("pub fn follow_taskbar_theme_with(&mut self, taskbar_is_light: bool) {");
-
-    println!(
-        "--- follow_taskbar_theme ---\n{follow}\n--- follow_taskbar_theme_with ---\n{follow_with}"
-    );
-
-    assert!(
-        follow.contains("theme::taskbar_is_light()"),
-        "the following reads the switch"
-    );
-    assert!(
-        follow.contains("self.follow_taskbar_theme_with("),
-        "and hands the answer to the seam"
-    );
-    assert!(
-        follow_with.contains("self.refresh_icon()"),
-        "the seam reaches the update"
-    );
-
-    for body in [&setting_change, &theme_changed, &follow, &follow_with] {
-        assert!(
-            !body.contains("setting_name_is_wanted("),
-            "the following does not go through the gate of T-13-20"
-        );
-    }
-
-    assert_eq!(
-        product.matches("self.follow_taskbar_theme()").count(),
-        2,
-        "the following is called from exactly the two arms"
-    );
 }
 
 /// **Задача Т-33а-1, находка глазом пользователя: «размытая иконка в уведомлении».**
@@ -4427,8 +4240,8 @@ fn the_promise_over_the_registry_write_is_kept_by_the_code_under_it() {
     // And the product itself goes through the seam with the real registry write in its hand —
     // the seam is a way in for the tests, never a way round FR-93 for «Применить».
     let at = source
-        .find("fn apply_settings(config: &Config) {")
-        .expect("apply_settings must be in this file");
+        .find("fn apply_settings_in_force(config: &Config) {")
+        .expect("apply_settings_in_force must be in this file");
     let entry = &source[at..];
     let end = entry.find("\n}").expect("a function closes with its brace");
     let entry = &entry[..end];
@@ -5762,6 +5575,86 @@ fn the_menu_is_a_window_of_the_shell_and_no_code_calls_track_popup_menu() {
     assert!(opens, "`show_menu` must open the menu of the shell");
 }
 
+/// Clicks the element `id` of the window of the shell `hwnd`, at the middle of where the layout put
+/// it — the press of a person's mouse, through the host.
+#[cfg(feature = "testing")]
+fn click_the_element(hwnd: HWND, id: &str) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
+    };
+
+    // A hidden window has drawn no frame and laid nothing out yet: one frame, as the core's own
+    // tests of the host draw it.
+    // SAFETY: a message to a live window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let Some(probe) = lang_switcher::ui::host::probe(hwnd) else {
+        return false;
+    };
+    let Some((_, _, rect)) = probe
+        .items
+        .iter()
+        .find(|(_, item, _)| item.as_deref() == Some(id))
+    else {
+        return false;
+    };
+    let (x, y) = (
+        (rect.x + rect.w / 2.0) as i32,
+        (rect.y + rect.h / 2.0) as i32,
+    );
+    let point = LPARAM(((y & 0xFFFF) << 16 | (x & 0xFFFF)) as isize);
+    for message in [WM_LBUTTONDOWN, WM_LBUTTONUP] {
+        // SAFETY: a press to a live window of this thread.
+        unsafe { SendMessageW(hwnd, message, Some(WPARAM(1)), Some(point)) };
+    }
+    true
+}
+
+/// **Task T-120-20 — the red before.** A click on the switch «Звуковой отклик» of the window of
+/// the settings changes the setting in force — in the tray and in the file — with no other button
+/// pressed: the window applies at once.
+#[cfg(feature = "testing")]
+#[test]
+fn a_click_on_the_sound_switch_changes_the_setting_in_force_at_once() {
+    use lang_switcher::ui::windows::settings as window_of_settings;
+
+    let window = TestWindow::new();
+    let home = TestDir::new("settings-sound");
+    let _locale = locale_turn();
+    let _toggle = toggle_turn();
+    let _ui = attach_ui(&window, &home);
+    let before = live(|tray| tray.config().feedback.sound);
+
+    window_of_settings::testing::hidden_while(|| {
+        tray::dispatch_command(window.handle, tray::CMD_SETTINGS);
+    });
+    let opened = settings::open_window();
+    let clicked = opened.is_some_and(|hwnd| click_the_element(hwnd, "Sound"));
+    let in_force = live(|tray| tray.config().feedback.sound);
+    let on_disk = settings::read_or_default(&home.config()).0.feedback.sound;
+    if let Some(hwnd) = opened {
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
+
+    println!(
+        "window {opened:?}, clicked {clicked}; sound {before} → in force {in_force}, on disk {on_disk}"
+    );
+
+    assert!(
+        opened.is_some(),
+        "«Настройки…» opens the window of the shell"
+    );
+    assert!(
+        clicked,
+        "and its switch «Звуковой отклик» is there to click"
+    );
+    assert_ne!(
+        in_force, before,
+        "the click changes the setting in force at once"
+    );
+    assert_eq!(on_disk, in_force, "and the file holds it");
+}
+
 // ---------------------------------------------------------------------------------------
 // The menu of the icon on the shell — task T-120-15
 // ---------------------------------------------------------------------------------------
@@ -5903,6 +5796,49 @@ fn esc_closes_the_menu_and_runs_nothing() {
         "and the window is gone"
     );
     assert!(!chosen, "and nothing runs");
+}
+
+/// **Finding of the stand of T-120-15: a press on the icon right after Esc opens the menu again.**
+/// Esc is no press on the icon, so the guard of the second press (`tray::MENU_REPRESS`) has nothing
+/// to swallow; it swallowed the press all the same, and the stand lost two checks of the menu.
+#[cfg(feature = "testing")]
+#[test]
+fn a_press_on_the_icon_right_after_esc_opens_the_menu_again() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_KEYDOWN};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-esc-again");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window().expect("the press opens the menu");
+    // SAFETY: a key to a live window of this thread.
+    unsafe {
+        SendMessageW(
+            menu,
+            WM_KEYDOWN,
+            Some(WPARAM(usize::from(VK_ESCAPE.0))),
+            None,
+        )
+    };
+    pump_the_menu(menu);
+    let closed = tray::open_menu_window();
+
+    press_the_icon(WM_CONTEXTMENU);
+    let again = shell_windows_of_this_thread();
+    println!("after Esc: {closed:?}; a press at once: {again:?}");
+    for hwnd in &again {
+        // SAFETY: windows of this thread.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert_eq!(closed, None, "Esc closes the menu");
+    assert_eq!(
+        again.len(),
+        1,
+        "and a press on the icon at once opens it again"
+    );
 }
 
 /// **Losing the foreground closes the menu** — a click beside it, Win, Alt+Tab: the menu must not
@@ -6264,6 +6200,12 @@ fn install(window: &TestWindow, home: &TestDir) -> Tray {
 fn attach_ui(window: &TestWindow, home: &TestDir) -> Attachment {
     let product = ProductImage::open();
 
+    // Finding of task T-120-20: the window of the settings puts every change in force at once, and
+    // the product's road writes the `Run` key — on the machine the tests run on, with the path of
+    // the test image. Every test that attaches a tray writes it here instead.
+    #[cfg(feature = "testing")]
+    tray::testing::write_run_key_with(record_run_key);
+
     tray::attach_at(window.handle, product.instance(), Some(home.config()))
         .expect("the tray must attach: the icons are in the product binary's resources")
 }
@@ -6596,4 +6538,727 @@ fn the_timers_of_the_ui_window_are_distinct() {
 
     assert_eq!(sorted.len(), ids.len(), "two timers of one window: {ids:?}");
     assert!(!ids.contains(&2), "2 is the letters' tick");
+}
+
+#[cfg(feature = "testing")]
+thread_local! {
+    /// What the product last asked of the `Run` key on this thread — the stand-in of
+    /// [`attach_ui`]; none — it asked nothing.
+    static RUN_KEY_ASKED: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+/// The writer of the `Run` key every test that attaches a tray hands in: it writes nothing and
+/// remembers what was asked.
+#[cfg(feature = "testing")]
+fn record_run_key(on: bool) -> windows::core::Result<()> {
+    RUN_KEY_ASKED.with(|asked| asked.set(Some(on)));
+    Ok(())
+}
+
+/// What the product last asked of the `Run` key on this thread.
+#[cfg(feature = "testing")]
+fn run_key_asked() -> Option<bool> {
+    RUN_KEY_ASKED.with(Cell::get)
+}
+
+// ---------------------------------------------------------------------------------------
+// The window of the settings on the shell — task T-120-20
+// ---------------------------------------------------------------------------------------
+//
+// The content of the window is spoken to as the shell speaks to it — `Content::event`. Where a
+// setting is checked, the window stands over the tray this thread attached and puts its changes in
+// force the product's way (`tray::apply_settings_now`): what is read is the setting in force — the
+// tray's configuration, the file, and what the thread of the input reads — and not the look.
+// Where the window's own behaviour is checked (the capture, the counts, the refused write), its
+// changes are only recorded.
+
+#[cfg(feature = "testing")]
+mod window_of_the_settings {
+    use super::*;
+    use lang_switcher::settings::Config;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Event;
+    use lang_switcher::ui::windows::settings::{Id, Section, Settings};
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    /// `VK_F9`, `VK_ESCAPE`, `VK_SHIFT`, `VK_CONTROL`.
+    const F9: u16 = 0x78;
+    const ESCAPE: u16 = 0x1B;
+    const SHIFT: u16 = 0x10;
+    const CONTROL: u16 = 0x11;
+
+    /// The window over the tray of this thread, putting its changes in force the product's way.
+    fn over_the_tray() -> Settings {
+        let config = tray::config_now().expect("a tray is attached");
+        let language = config.general.language.in_force();
+        Settings::new(
+            config,
+            language,
+            Box::new(|config| tray::apply_settings_now(config).unwrap_or(false)),
+        )
+    }
+
+    /// A window over the default configuration in Russian whose changes are only recorded; the
+    /// file takes them while `answers` says so, one answer per change asked.
+    fn recorded(answers: &[bool]) -> (Settings, Rc<RefCell<Vec<Config>>>) {
+        let applied = Rc::new(RefCell::new(Vec::new()));
+        let log = Rc::clone(&applied);
+        let answers = answers.to_vec();
+        let window = Settings::with_session(
+            Config::default(),
+            Language::Ru,
+            Vec::new(),
+            Box::new(move |config| {
+                let mut log = log.borrow_mut();
+                log.push(config.clone());
+                answers.get(log.len() - 1).copied().unwrap_or(true)
+            }),
+        );
+        (window, applied)
+    }
+
+    /// Every word and value the window shows now.
+    fn shown(window: &Settings) -> String {
+        format!("{:?}", window.describe())
+    }
+
+    /// A string of the window in Russian.
+    fn ru(id: u16) -> String {
+        settings::text_in(Language::Ru, id)
+    }
+
+    /// One setting changed in the window: in force in the tray, in the file, and where the thread
+    /// of the input reads it. The tray starts from the default configuration changed by `start`,
+    /// written to the file, and everything is put back afterwards.
+    fn goes_in_force<T: PartialEq + std::fmt::Debug>(
+        label: &str,
+        start: impl FnOnce(&mut Config),
+        act: impl FnOnce(&mut Settings, &Config),
+        read: impl Fn(&Config) -> T,
+        read_by_input: impl Fn() -> T,
+    ) {
+        let window = TestWindow::new();
+        let home = TestDir::new(label);
+        let mut first = Config::default();
+        start(&mut first);
+        settings::write_to(&home.config(), &first).expect("the first file is written");
+        let _locale = locale_turn();
+        let _toggle = toggle_turn();
+        let _ui = attach_ui(&window, &home);
+        let before = live(|tray| tray.config().clone());
+        let mut settings_window = over_the_tray();
+
+        act(&mut settings_window, &before);
+
+        let in_force = live(|tray| read(tray.config()));
+        let on_disk = read(&settings::read_or_default(&home.config()).0);
+        let input = read_by_input();
+        let shows = read(&settings_window.config);
+        tray::apply_settings_now(&before);
+
+        println!(
+            "{label}: {:?} → in force {in_force:?}, on disk {on_disk:?}, input {input:?}, window \
+             {shows:?}",
+            read(&before)
+        );
+        assert_ne!(
+            in_force,
+            read(&before),
+            "{label}: the change made in the window is in force at once, no other button pressed"
+        );
+        assert_eq!(on_disk, in_force, "{label}: the file holds it");
+        assert_eq!(input, in_force, "{label}: the thread of the input reads it");
+        assert_eq!(
+            shows, in_force,
+            "{label}: and the window shows what is in force"
+        );
+    }
+
+    #[test]
+    fn autostart_goes_in_force_and_to_the_run_key() {
+        goes_in_force(
+            "t20-autostart",
+            |_| {},
+            |window, before| {
+                window.event(Event::Toggled(Id::Autostart, !before.general.autostart));
+            },
+            |config| config.general.autostart,
+            || run_key_asked().expect("the change asks the `Run` key of FR-93"),
+        );
+    }
+
+    #[test]
+    fn the_sound_goes_in_force() {
+        goes_in_force(
+            "t20-sound",
+            |_| {},
+            |window, before| {
+                window.event(Event::Toggled(Id::Sound, !before.feedback.sound));
+            },
+            |config| config.feedback.sound,
+            lang_switcher::app::sound_enabled,
+        );
+    }
+
+    #[test]
+    fn the_selected_text_goes_in_force() {
+        goes_in_force(
+            "t20-selection",
+            |_| {},
+            |window, before| {
+                window.event(Event::Toggled(Id::Selection, !before.selection.enabled));
+            },
+            |config| config.selection.enabled,
+            || live(|tray| lang_switcher::selection::is_enabled(&tray.config().selection)),
+        );
+    }
+
+    /// From on to off: turning it on brings the hint of T-119-5 up by the notification area, a
+    /// window on the screen of the machine the tests run on.
+    #[test]
+    fn the_flag_of_the_layout_goes_in_force() {
+        let _flag = flag_tests();
+        goes_in_force(
+            "t20-flag",
+            |config| config.general.tray_flag = true,
+            |window, _| {
+                window.event(Event::Toggled(Id::TrayFlag, false));
+            },
+            |config| config.general.tray_flag,
+            || live(Tray::flag_on),
+        );
+    }
+
+    /// The switch of the window and the switch of «От автора» are one setting: what the window
+    /// turned off is what «От автора» reads (T-120-17).
+    #[test]
+    fn the_news_go_in_force_for_both_switches() {
+        goes_in_force(
+            "t20-feed",
+            |_| {},
+            |window, before| {
+                window.event(Event::Toggled(Id::Updates, !before.letters.feed));
+            },
+            |config| config.letters.feed,
+            || tray::config_now().expect("a tray is attached").letters.feed,
+        );
+    }
+
+    #[test]
+    fn the_journal_goes_in_force() {
+        goes_in_force(
+            "t20-log",
+            |_| {},
+            |window, before| {
+                window.event(Event::Toggled(Id::Log, !before.diagnostics.log_enabled));
+            },
+            |config| config.diagnostics.log_enabled,
+            diag::log_enabled,
+        );
+    }
+
+    #[test]
+    fn the_language_goes_in_force() {
+        let session = lang_switcher::layouts::enumerate().unwrap_or_default();
+        let order = settings::language_order_on_this_machine(&session);
+        goes_in_force(
+            "t20-language",
+            |_| {},
+            |window, before| {
+                let now = before.general.language.in_force();
+                let other = order
+                    .languages
+                    .iter()
+                    .position(|language| *language != now)
+                    .expect("more than one language");
+                window.event(Event::Selected(Id::Language, other));
+            },
+            |config| config.general.language.in_force(),
+            settings::ui_language,
+        );
+    }
+
+    #[test]
+    fn the_theme_goes_in_force() {
+        goes_in_force(
+            "t20-theme",
+            |_| {},
+            |window, before| {
+                let dark = settings::theme_combo_index(ThemeSetting::Dark);
+                let light = settings::theme_combo_index(ThemeSetting::Light);
+                let index = if before.general.theme == ThemeSetting::Dark {
+                    light
+                } else {
+                    dark
+                };
+                window.event(Event::Selected(Id::Theme, index));
+            },
+            |config| config.general.theme,
+            || {
+                tray::config_now()
+                    .expect("a tray is attached")
+                    .general
+                    .theme
+            },
+        );
+    }
+
+    /// A key taken by the capture is put in force once the capture is over.
+    #[test]
+    fn the_hotkey_goes_in_force() {
+        goes_in_force(
+            "t20-hotkey",
+            |_| {},
+            |window, _| {
+                window.event(Event::Pressed(Id::HotkeySet));
+                window.event(Event::KeyDown {
+                    id: Id::Hotkey,
+                    vk: F9,
+                });
+            },
+            |config| config.hotkey.binding(),
+            || Some(hook::hotkey()),
+        );
+    }
+
+    #[test]
+    fn the_mode_of_the_layouts_goes_in_force() {
+        goes_in_force(
+            "t20-mode",
+            |_| {},
+            |window, before| {
+                let cycle = before.layouts.mode == settings::LayoutMode::Pair;
+                window.event(Event::Selected(Id::Mode, usize::from(cycle)));
+            },
+            |config| lang_switcher::layouts::Configured::from_settings(&config.layouts),
+            lang_switcher::layouts::published,
+        );
+    }
+
+    /// The second layout of the pair, where the machine has two layouts at least.
+    #[test]
+    fn the_pair_goes_in_force() {
+        let session = lang_switcher::layouts::enumerate().unwrap_or_default();
+        if session.len() < 2 {
+            println!("SKIP: {} layout(s) on this machine", session.len());
+            return;
+        }
+        goes_in_force(
+            "t20-pair",
+            |_| {},
+            |window, before| {
+                let other = (0..session.len())
+                    .find(|index| {
+                        settings::spec_text(session[*index], &session) != before.layouts.pair_target
+                    })
+                    .expect("another layout");
+                window.event(Event::Selected(Id::PairTarget, other));
+            },
+            |config| lang_switcher::layouts::Configured::from_settings(&config.layouts),
+            lang_switcher::layouts::published,
+        );
+    }
+
+    #[test]
+    fn an_exclusion_added_goes_in_force() {
+        const NAME: &str = "t120-probe.exe";
+        goes_in_force(
+            "t20-exclusion-add",
+            |_| {},
+            |window, _| {
+                window.event(Event::Edited(Id::ExclusionName, NAME.to_owned()));
+                window.event(Event::Pressed(Id::Add));
+            },
+            |config| config.exclusions.processes.iter().any(|name| name == NAME),
+            || lang_switcher::guard::is_excluded_name(NAME),
+        );
+    }
+
+    #[test]
+    fn an_exclusion_removed_goes_in_force() {
+        const NAME: &str = "t120-probe.exe";
+        goes_in_force(
+            "t20-exclusion-remove",
+            |config| config.exclusions.processes = vec![NAME.to_owned()],
+            |window, _| {
+                window.event(Event::RowChecked(Id::Exclusions, 0, true));
+                window.event(Event::Pressed(Id::Remove));
+            },
+            |config| config.exclusions.processes.iter().any(|name| name == NAME),
+            || lang_switcher::guard::is_excluded_name(NAME),
+        );
+    }
+
+    /// A file that refuses the write: the note at the top of the section, the switch back, the
+    /// setting in force as it was — and the note gone after the next write that succeeds.
+    #[test]
+    fn a_refused_write_steps_the_change_back_and_says_so() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, applied) = recorded(&[false, true, true]);
+        let sound = window.config.feedback.sound;
+        let note = ru(settings::IDS_SETTINGS_NOT_SAVED);
+
+        window.event(Event::Toggled(Id::Sound, !sound));
+        let refused = shown(&window);
+        let asked = applied.borrow().len();
+        let back = window.config.feedback.sound;
+        window.event(Event::Toggled(
+            Id::Selection,
+            !window.config.selection.enabled,
+        ));
+        let after = shown(&window);
+
+        println!("asked {asked}; sound {sound} → {back}");
+        assert_eq!(back, sound, "the switch went back");
+        assert_eq!(
+            asked, 2,
+            "the change asked, and the configuration in force put back in its place"
+        );
+        assert_eq!(
+            applied.borrow()[1].feedback.sound,
+            sound,
+            "what was put back is the setting as it was"
+        );
+        assert!(
+            refused.contains(&note),
+            "the note says the change was not saved"
+        );
+        assert!(
+            !after.contains(&note),
+            "and goes after the next write that succeeds"
+        );
+    }
+
+    /// The capture: the hotkey is suspended while it lives, nothing is put in force in it, and the
+    /// key taken is put in force after the hotkey came back — C6 of the sheet.
+    #[test]
+    fn a_key_taken_is_put_in_force_after_the_capture_ends() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        let before = hook::hotkey();
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        let suspended = hook::hotkey();
+        let prompt = shown(&window).contains(&ru(settings::IDS_CAPTURE_PROMPT));
+        let during = applied.borrow().len();
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: F9,
+        });
+        let after = hook::hotkey();
+
+        println!("hotkey {before:?} → in the capture {suspended:?} → after {after:?}");
+        assert!(prompt, "the field invites the key");
+        assert_eq!(
+            suspended.0, 0,
+            "the hotkey is suspended in the capture (FR-02)"
+        );
+        assert_eq!(during, 0, "nothing is put in force while it is");
+        assert!(!window.capturing(), "the press ends the capture");
+        assert_eq!(
+            after, before,
+            "the session gave the callback its hotkey back"
+        );
+        assert_eq!(
+            applied
+                .borrow()
+                .last()
+                .and_then(|config| config.hotkey.binding()),
+            Some((F9, 0)),
+            "and the key taken was put in force"
+        );
+    }
+
+    #[test]
+    fn escape_cancels_the_capture_and_changes_nothing() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        let before = hook::hotkey();
+        let name = settings::effective_hotkey_name(&window.config.hotkey);
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: ESCAPE,
+        });
+
+        assert!(!window.capturing(), "Esc ends the capture");
+        assert!(applied.borrow().is_empty(), "and puts nothing in force");
+        assert_eq!(hook::hotkey(), before, "the hotkey is back");
+        assert!(
+            shown(&window).contains(&name),
+            "the field shows the key it had"
+        );
+    }
+
+    #[test]
+    fn a_modifier_alone_is_refused_and_the_capture_waits() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        let refusals = settings::capture_refusals();
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: CONTROL,
+        });
+
+        assert!(
+            window.capturing(),
+            "a refusal is «not that one», the capture stays"
+        );
+        assert!(
+            shown(&window).contains(&ru(settings::IDS_CAPTURE_MODIFIER)),
+            "and the line under the field says why"
+        );
+        assert!(applied.borrow().is_empty(), "nothing is put in force");
+        assert!(
+            settings::capture_refusals() > refusals,
+            "the refusal is counted (T-71-3)"
+        );
+        window.event(Event::Pressed(Id::HotkeySet));
+        assert!(!window.capturing(), "«Отмена» ends it");
+    }
+
+    #[test]
+    fn two_shifts_are_the_double_press() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        for _ in 0..2 {
+            window.event(Event::KeyDown {
+                id: Id::Hotkey,
+                vk: SHIFT,
+            });
+            window.event(Event::KeyUp {
+                id: Id::Hotkey,
+                vk: SHIFT,
+            });
+        }
+
+        assert!(!window.capturing(), "the second tap ends the capture");
+        assert!(
+            applied
+                .borrow()
+                .last()
+                .is_some_and(|config| config.hotkey.is_double_tap()),
+            "with the double press of Shift taken"
+        );
+        assert!(
+            shown(&window).contains(&ru(settings::IDS_CAPTURE_DOUBLE_NOTE)),
+            "and said once under the field"
+        );
+    }
+
+    /// The moments 3 and 4 of 157.18: «Shift…» while the pair is open, the invitation again once the
+    /// timer of the pair ends it; the line «Ещё раз Shift…» stays.
+    #[test]
+    fn a_pair_the_second_shift_never_came_to_ends_on_the_timer() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Hotkey;
+        let again = ru(settings::IDS_CAPTURE_SHIFT_AGAIN);
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        let at_rest = window.timer();
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: SHIFT,
+        });
+        window.event(Event::KeyUp {
+            id: Id::Hotkey,
+            vk: SHIFT,
+        });
+        let open = shown(&window);
+        let ticking = window.timer();
+        window.hurry(Duration::from_millis(hook::DOUBLE_TAP_MS.into()));
+        window.event(Event::Timer);
+        let over = shown(&window);
+
+        println!(
+            "timer at rest {at_rest:?}, in the pair {ticking:?}, after {:?}",
+            window.timer()
+        );
+        assert_eq!(at_rest, None, "nothing ticks in a capture with no pair");
+        assert!(
+            open.contains("Shift…") && open.contains(&again),
+            "«Shift…» in the pair"
+        );
+        assert!(
+            ticking.is_some_and(|ms| ms <= hook::DOUBLE_TAP_MS),
+            "the timer of the pair runs"
+        );
+        assert!(
+            window.capturing(),
+            "the end of the pair is not the end of the capture"
+        );
+        assert!(
+            !over.contains("Shift…"),
+            "the field says the invitation again"
+        );
+        assert!(over.contains(&again), "the line stays till the next press");
+        assert_eq!(window.timer(), None, "and the timer is dead");
+    }
+
+    #[test]
+    fn the_capture_ends_when_the_field_loses_the_keyboard() {
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        let before = hook::hotkey();
+
+        window.event(Event::Pressed(Id::HotkeySet));
+        window.event(Event::FocusLost {
+            id: Id::Hotkey,
+            to: Some(Id::HotkeySet),
+        });
+        let to_the_button = window.capturing();
+        window.event(Event::FocusLost {
+            id: Id::Hotkey,
+            to: None,
+        });
+        let away = window.capturing();
+        window.event(Event::Pressed(Id::HotkeySet));
+        window.event(Event::Selected(Id::Sections, 0));
+
+        assert!(
+            to_the_button,
+            "the keyboard going to «Отмена» keeps the capture"
+        );
+        assert!(!away, "going anywhere else ends it");
+        assert!(
+            !window.capturing(),
+            "and so does anything else done in the window"
+        );
+        assert!(applied.borrow().is_empty(), "nothing put in force");
+        assert_eq!(hook::hotkey(), before, "the hotkey back");
+    }
+
+    /// «Выбрать окно программы»: the seconds counted on the button, then the program of the window
+    /// in front is taken — added, already listed, or not picked, and the line under the button says
+    /// which.
+    #[test]
+    fn the_pick_counts_the_seconds_and_then_takes_the_window_in_front() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Exclusions;
+        let count = |seconds: u32| {
+            ru(settings::IDS_EXCLUSION_PICK_COUNT).replace("{0}", &seconds.to_string())
+        };
+        let said = [
+            settings::IDS_EXCLUSION_ADDED,
+            settings::IDS_EXCLUSION_ALREADY,
+            settings::IDS_EXCLUSION_NOT_PICKED,
+        ]
+        .map(|id| ru(id).split("{0}").next().unwrap_or_default().to_owned());
+
+        window.event(Event::Pressed(Id::Pick));
+        let five = shown(&window).contains(&count(5));
+        let first = window.timer();
+        window.hurry(Duration::from_secs(1));
+        window.event(Event::Timer);
+        let four = shown(&window).contains(&count(4));
+        window.hurry(Duration::from_secs(5));
+        window.event(Event::Timer);
+        let over = shown(&window);
+
+        println!("first period {first:?}; then {:?}", window.timer());
+        assert!(five, "the count begins at five seconds");
+        assert!(
+            first.is_some_and(|ms| ms <= 1_000),
+            "and looks again within a second"
+        );
+        assert!(four, "a second later it says four");
+        assert!(
+            over.contains(&ru(settings::IDS_EXCLUSION_PICK)),
+            "the button is back"
+        );
+        assert!(
+            said.iter().any(|words| over.contains(words.as_str())),
+            "and the line under it says what was found"
+        );
+        assert_eq!(window.timer(), None, "nothing ticks after it");
+    }
+
+    #[test]
+    fn a_second_press_stops_the_pick() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Exclusions;
+
+        window.event(Event::Pressed(Id::Pick));
+        window.event(Event::Pressed(Id::Pick));
+
+        assert_eq!(window.timer(), None, "the count is stopped");
+        assert!(shown(&window).contains(&ru(settings::IDS_EXCLUSION_PICK)));
+        assert!(applied.borrow().is_empty(), "and nothing is taken");
+    }
+
+    /// «Журнал сохранён» stands on the button for `JOURNAL_SAVED_MS`; a failure says so and needs no
+    /// timer.
+    #[test]
+    fn a_saved_journal_says_so_for_two_seconds() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Diagnostics;
+        window.saving_the_journal_with(|| true);
+
+        window.event(Event::Pressed(Id::SaveJournal));
+        let saved = shown(&window).contains(&ru(settings::IDS_LOG_SAVED));
+        let period = window.timer();
+        window.hurry(Duration::from_millis(settings::JOURNAL_SAVED_MS.into()));
+        window.event(Event::Timer);
+        let after = shown(&window);
+
+        window.saving_the_journal_with(|| false);
+        window.event(Event::Pressed(Id::SaveJournal));
+        let failed = shown(&window).contains(&ru(settings::IDS_LOG_SAVE_FAILED));
+
+        assert!(saved, "the button says the journal was saved");
+        assert!(
+            period.is_some_and(|ms| ms <= settings::JOURNAL_SAVED_MS),
+            "for two seconds"
+        );
+        assert!(
+            !after.contains(&ru(settings::IDS_LOG_SAVED)),
+            "and then it is gone"
+        );
+        assert!(
+            after.contains(&ru(settings::IDS_LOG_SAVE)),
+            "the button is back"
+        );
+        assert!(failed, "a failure says so");
+        assert_eq!(window.timer(), None, "and needs no timer");
+    }
+
+    /// At rest nothing ticks (NFR-10); the badge «новое» by «Флаг раскладки в трее»; the picture in
+    /// the panel.
+    #[test]
+    fn the_window_at_rest() {
+        let _strings = product_strings(Language::Ru);
+        let (window, _) = recorded(&[]);
+        let described = window.describe();
+        let words = format!("{described:?}");
+
+        assert_eq!(window.timer(), None, "nothing ticks at rest");
+        assert!(
+            words.contains(&format!("badge: Some({:?})", ru(settings::IDS_NEW_BADGE))),
+            "the badge «новое» stands by a toggle"
+        );
+        assert_eq!(
+            described.art,
+            Some(lang_switcher::ui::scene::Art::About),
+            "and the picture is in the panel"
+        );
+    }
 }

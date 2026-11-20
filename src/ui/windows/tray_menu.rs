@@ -33,6 +33,8 @@ pub enum Id {
     Write,
     About,
     Exit,
+    /// Esc — no item: the menu goes, and the tray learns it went by the key (T-120-15).
+    Escape,
 }
 
 impl Id {
@@ -64,6 +66,7 @@ impl Id {
             Self::Write => CMD_WRITE,
             Self::About => CMD_ABOUT,
             Self::Exit => CMD_EXIT,
+            Self::Escape => 0,
         }
     }
 }
@@ -119,6 +122,8 @@ impl Content for TrayMenu {
                 Id::Write => "pen",
                 Id::About => "info",
                 Id::Exit => "exit",
+                // Never an item: `Id::of` gives no command `Escape`.
+                Id::Escape => continue,
             };
             let trailing = match id {
                 // The key that suspends and resumes — not while a restart is the only way back.
@@ -209,6 +214,8 @@ struct Product {
     owner: HWND,
     /// The command of the item pressed — run by the tray once the menu is gone.
     chosen: Option<u32>,
+    /// The menu went by Esc: no press on the icon closed it, so the next press opens it again.
+    escaped: bool,
 }
 
 impl Content for Product {
@@ -227,6 +234,10 @@ impl Content for Product {
                     self.menu.now = now;
                 }
                 Reply::Stay
+            }
+            Event::Pressed(Id::Escape) => {
+                self.escaped = true;
+                Reply::Close
             }
             Event::Pressed(id) => {
                 self.chosen = Some(id.command());
@@ -247,13 +258,17 @@ impl Content for Product {
     fn theme(&self) -> ThemeSetting {
         self.menu.theme()
     }
+
+    fn escape(&self) -> Option<Id> {
+        Some(Id::Escape)
+    }
 }
 
 impl Drop for Product {
     /// The host drops the content when the menu is destroyed, however it went: the tray forgets the
     /// menu and runs the command chosen in it, if one was.
     fn drop(&mut self) {
-        tray::menu_closed(self.owner, self.chosen.take());
+        tray::menu_closed(self.owner, self.chosen.take(), self.escaped);
     }
 }
 
@@ -268,6 +283,7 @@ pub fn open(owner: HWND, at: POINT, keyboard: bool) -> Option<HWND> {
         },
         owner,
         chosen: None,
+        escaped: false,
     };
 
     #[cfg(feature = "testing")]
