@@ -65,7 +65,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Narrow,
-        languages: &["mk", "ml", "ta"],
+        languages: &["ml", "ta"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -74,7 +74,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Ordinary,
-        languages: &["mk", "ml"],
+        languages: &["ml"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -101,7 +101,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter hello",
         class: Class::Narrow,
-        languages: &["ml", "ta"],
+        languages: &["ta"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
@@ -111,7 +111,7 @@ pub const EXCUSED: &[Excuse] = &[
         window: "author",
         class: Class::Narrow,
         languages: &[
-            "hy", "ka", "km", "kn", "ml", "ta", "te",
+            "ml", "ta",
         ],
         category: Some(Category::Wave),
         until: "T-120-24",
@@ -121,7 +121,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "author",
         class: Class::Ordinary,
-        languages: &["hy", "ka", "kn", "ml", "ta", "te"],
+        languages: &["ml", "ta"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
