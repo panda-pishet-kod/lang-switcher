@@ -3998,6 +3998,9 @@ pub const IDS_HELLO_ROW_1: u16 = 3090;
 pub const IDS_HELLO_ROW_2: u16 = 3091;
 /// «Привет» — the third row.
 pub const IDS_HELLO_ROW_3: u16 = 3092;
+/// «Привет» — the line under the body: pause and settings by a right-click on the tray icon, the
+/// flag in the settings (208.106 п. 3, T-120-16). Block 3293…3295 of stage E120.
+pub const IDS_HELLO_FOOT: u16 = 3294;
 /// «Привет» — the left button, which opens the settings window (FR-92).
 pub const IDS_HELLO_SETTINGS: u16 = 3093;
 /// «Привет» — the accented button.
@@ -4486,7 +4489,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and sixty-two since task T-120-16** — the header of the window in the corner that
 /// knocks with a letter, [`IDS_CORNER_LETTER`] (3293). 261 + 1.
-pub const INTERFACE_STRINGS: [u16; 262] = [
+///
+/// ⚠ **Two hundred and sixty-three since the texts of «Привет» (T-120-16, 208.106 п. 3)** — the line
+/// under its body, [`IDS_HELLO_FOOT`] (3294). 262 + 1.
+pub const INTERFACE_STRINGS: [u16; 263] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4596,6 +4602,7 @@ pub const INTERFACE_STRINGS: [u16; 262] = [
     IDS_HELLO_ROW_1,
     IDS_HELLO_ROW_2,
     IDS_HELLO_ROW_3,
+    IDS_HELLO_FOOT,
     IDS_HELLO_SETTINGS,
     IDS_HELLO_OK,
     IDS_THANKS_TITLE,

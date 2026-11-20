@@ -1880,13 +1880,13 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
     use crate::settings::{
         IDS_CLOSE, IDS_FALLBACK_NOTICE, IDS_FALLBACK_REPEATS, IDS_FALLBACK_SUB, IDS_FALLBACK_TITLE,
         IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT,
-        IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1,
-        IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION,
-        IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
-        IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL,
-        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE,
-        IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3,
-        IDS_WRITE_TO_AUTHOR,
+        IDS_HELLO_DEMO_CAP, IDS_HELLO_FOOT, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL,
+        IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE,
+        IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
+        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
+        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE,
+        IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2,
+        IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR,
     };
 
     let text = |id| settings::text_in(language, id);
@@ -1925,6 +1925,9 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
             rows: numbered([IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3]),
             left: Some(Button::live(text(IDS_HELLO_SETTINGS), Action::OpenSettings)),
             accent: Some(Button::live(text(IDS_HELLO_OK), Action::Close)),
+            // 208.106 п. 3: pause and settings by a right-click on the icon, the flag in the settings —
+            // what the third row of the old letter said of the icon, said for the icon of 1.8.0.
+            foot: text(IDS_HELLO_FOOT),
             ..LetterPlan::default()
         },
 

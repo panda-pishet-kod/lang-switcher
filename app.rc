@@ -1234,6 +1234,8 @@ END
 // Stage E120, task T-120-16: the header of the window in the corner that knocks with a letter — the word
 // after «LANG SWITCHER · », as IDS_CORNER_UPDATE and IDS_CORNER_FLAG are.
 #define IDS_CORNER_LETTER       3293
+// Stage E120, task T-120-16: the line under the body of «Привет» — the tray icon (208.106 п. 3).
+#define IDS_HELLO_FOOT          3294
 
 // ---------------------------------------------------------------------------------------
 // FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.

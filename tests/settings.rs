@@ -16493,7 +16493,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 262] = [
+const FR_94_STRINGS: [(u16, &str, &str); 263] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -16869,15 +16869,15 @@ const FR_94_STRINGS: [(u16, &str, &str); 262] = [
     ),
     (
         settings::IDS_HELLO_TITLE,
-        "Здравствуйте! Меня зовут Панда.",
+        "Привет! Меня зовут Панда.",
         "Hello! My name is Panda.",
     ),
     (
         settings::IDS_HELLO_LEAD,
-        "Я сделал Lang Switcher и рад, что вы его поставили. Программа делает одну вещь: исправляет \
-         слово, набранное не в той раскладке. Вот как это выглядит:",
-        "I made Lang Switcher and I am glad you installed it. The program does one thing: it \
-         fixes a word typed in the wrong layout. Here is what that looks like:",
+        "Я сделал Lang Switcher и рад, что вы его поставили. Главное, что он делает, — \
+         исправляет текст, набранный не в той раскладке.",
+        "I made Lang Switcher and I am glad you installed it. Its main job is to fix text typed \
+         in the wrong layout.",
     ),
     (
         settings::IDS_HELLO_DEMO_CAP,
@@ -16893,19 +16893,29 @@ const FR_94_STRINGS: [(u16, &str, &str); 262] = [
     ),
     (
         settings::IDS_HELLO_ROW_1,
-        "{0} исправляет последнее набранное слово и переключает раскладку. Работает в любом \
-         окне.",
-        "{0} fixes the last word you typed and switches the layout. It works in any window.",
+        "Набрали слово не в той раскладке — нажмите {0}: слово исправится, раскладка \
+         переключится.",
+        "Typed a word in the wrong layout — press {0}: the word is fixed and the layout switches.",
     ),
     (
         settings::IDS_HELLO_ROW_2,
-        "Ещё раз {0}: слово вернётся к исходному, буква в букву.",
-        "Press {0} again and the word comes back exactly as it was, letter for letter.",
+        "Выделили текст — {0} исправит выделенное. Ничего не набрано — просто переключит \
+         раскладку.",
+        "Selected some text — {0} fixes the selection. Nothing typed — it just switches the \
+         layout.",
     ),
     (
         settings::IDS_HELLO_ROW_3,
-        "Значок в трее: пауза, настройки и «О программе», где есть раздел «Как пользоваться».",
-        "The tray icon: pause, settings and “About”, which has a “How to use it” section.",
+        "Ещё раз {0} — всё вернётся как было, буква в букву.",
+        "Press {0} again and everything comes back as it was, letter for letter.",
+    ),
+    // T-120-16 (208.106 п. 3): the line under the body of «Привет».
+    (
+        settings::IDS_HELLO_FOOT,
+        "Пауза и настройки — правым щелчком по значку в трее. В настройках можно включить флаг \
+         раскладки в трее.",
+        "Pause and settings are a right-click on the tray icon. In the settings you can turn on \
+         the layout flag in the tray.",
     ),
     (
         settings::IDS_HELLO_SETTINGS,
@@ -16920,7 +16930,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 262] = [
     ),
     (
         settings::IDS_THANKS_LEAD,
-        "Здравствуйте, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, \
+        "Привет, это снова Панда. Месяц назад вы поставили Lang Switcher, и я надеюсь, \
          что вам с ним удобно: я потратил много сил, чтобы программа была лёгкой и просто \
          работала.",
         "Hello, it is Panda again. You installed Lang Switcher a month ago, and I hope it suits \
@@ -25076,8 +25086,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        262,
-        "two hundred and SIXTY-TWO since task T-120-16: the header of the window in the corner \r
+        263,
+        "two hundred and SIXTY-THREE since the texts of «Привет» (T-120-16): the line under its \
+         body (3294). Two hundred and sixty-two since the header of the window in the corner \
          that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \
          the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \
          changed (3140, 3143); the honest letter came with six (3297…3302). Two hundred and \

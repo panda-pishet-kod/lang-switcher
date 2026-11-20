@@ -2598,7 +2598,11 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
     assert!(hello.left.is_some(), "«Открыть настройки»");
     assert!(hello.accent.is_some(), "«Понятно»");
     assert!(hello.cards.is_empty(), "and no cards");
-    assert!(hello.foot.is_empty(), "and no line under the buttons");
+    assert_eq!(
+        hello.foot,
+        settings::text(settings::IDS_HELLO_FOOT),
+        "and the line about the tray icon under the body — 208.106 п. 3"
+    );
 
     let thanks = letters::plan_for(Letter::Thanks, &context);
     assert!(!thanks.demo);
