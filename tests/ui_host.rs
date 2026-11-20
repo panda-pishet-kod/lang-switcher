@@ -76,7 +76,7 @@ impl Content for Probe {
                 Node::Text(Role::Small, "A line".to_owned()),
                 Node::Link {
                     id: Id::Site,
-                    text: "The site".to_owned(),
+                    words: "The site".to_owned(),
                 },
             ]),
             buttons: vec![

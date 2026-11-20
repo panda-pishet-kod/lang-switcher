@@ -694,9 +694,9 @@ impl<I: Copy> Placer<'_, I> {
             Node::Buttons(buttons) => self.buttons(buttons, x, y, w),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
-            } => self.action(title, text, buttons, x, y, w),
+            } => self.action(title, words, buttons, x, y, w),
             Node::Toggle {
                 id,
                 label,
@@ -750,9 +750,9 @@ impl<I: Copy> Placer<'_, I> {
             Node::ChoiceCard {
                 id,
                 title,
-                text,
+                words,
                 selected,
-            } => self.choice_card(*id, title, text, *selected, x, y, w),
+            } => self.choice_card(*id, title, words, *selected, x, y, w),
             Node::Segments {
                 id,
                 label,
@@ -792,9 +792,9 @@ impl<I: Copy> Placer<'_, I> {
             Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons,
-            } => self.letter_card(label, title, text, buttons, x, y, w),
+            } => self.letter_card(label, title, words, buttons, x, y, w),
             Node::MenuRule => {
                 let (pad_h, pad_v) = (MENU_RULE_PAD.w.0, MENU_RULE_PAD.h.0);
                 self.push(
@@ -812,13 +812,13 @@ impl<I: Copy> Placer<'_, I> {
             Node::Message { title, words, link } => {
                 self.message(title, words, link.as_ref(), x, y, w)
             }
-            Node::Link { id, text } => {
+            Node::Link { id, words } => {
                 let style = self.style(Role::Link);
-                let width = self.width_of(style, text).min(w);
+                let width = self.width_of(style, words).min(w);
                 let h = style.line_height();
                 self.push(
                     Part::Link {
-                        text: text.clone(),
+                        text: words.clone(),
                         role: Role::Link,
                     },
                     Rect::new(x, y, width, h),
@@ -1370,7 +1370,7 @@ impl<I: Copy> Placer<'_, I> {
     fn natural_width(&self, node: &Node<I>) -> f32 {
         match node {
             Node::Button { .. } => self.button_size(node).0,
-            Node::Link { text, .. } => self.width_of(self.style(Role::Link), text),
+            Node::Link { words, .. } => self.width_of(self.style(Role::Link), words),
             Node::Line(role, text) | Node::Text(role, text) => {
                 self.width_of(self.style(*role), text)
             }

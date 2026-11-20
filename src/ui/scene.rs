@@ -150,7 +150,7 @@ pub enum Node<I> {
     /// A card with a title, a text and buttons under the text — beside it when the window is tight.
     Action {
         title: String,
-        text: String,
+        words: String,
         buttons: Vec<Node<I>>,
     },
     /// A line of settings with a switch at its end; the whole line is pressed.
@@ -168,7 +168,7 @@ pub enum Node<I> {
     ChoiceCard {
         id: I,
         title: String,
-        text: String,
+        words: String,
         selected: bool,
     },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
@@ -247,11 +247,11 @@ pub enum Node<I> {
     LetterCard {
         label: String,
         title: String,
-        text: String,
+        words: String,
         buttons: Vec<Node<I>>,
     },
     /// A link to the site.
-    Link { id: I, text: String },
+    Link { id: I, words: String },
     /// A line across.
     Divider,
 }
@@ -321,11 +321,11 @@ impl<I> Node<I> {
             Node::Buttons(nodes) => Node::Buttons(all(nodes)),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => Node::Action {
                 title,
-                text,
+                words,
                 buttons: all(buttons),
             },
             Node::Toggle {
@@ -352,12 +352,12 @@ impl<I> Node<I> {
             Node::ChoiceCard {
                 id,
                 title,
-                text,
+                words,
                 selected,
             } => Node::ChoiceCard {
                 id: f(id),
                 title,
-                text,
+                words,
                 selected,
             },
             Node::Segments {
@@ -441,15 +441,15 @@ impl<I> Node<I> {
             Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons,
             } => Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons: buttons.into_iter().map(|node| node.map(f)).collect(),
             },
-            Node::Link { id, text } => Node::Link { id: f(id), text },
+            Node::Link { id, words } => Node::Link { id: f(id), words },
             Node::Divider => Node::Divider,
         }
     }
@@ -492,11 +492,11 @@ impl<I> Node<I> {
             Node::Button { label, .. } => f(Role::Button, label),
             Node::Action {
                 title,
-                text,
+                words,
                 buttons,
             } => {
                 f(Role::Strong, title);
-                f(Role::Body, text);
+                f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
             Node::Toggle { label, hint, .. } => {
@@ -506,9 +506,9 @@ impl<I> Node<I> {
                 }
             }
             Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
-            Node::ChoiceCard { title, text, .. } => {
+            Node::ChoiceCard { title, words, .. } => {
                 f(Role::Strong, title);
-                f(Role::Small, text);
+                f(Role::Small, words);
             }
             Node::Segments { label, options, .. } => {
                 f(Role::Body, label);
@@ -557,15 +557,15 @@ impl<I> Node<I> {
             Node::LetterCard {
                 label,
                 title,
-                text,
+                words,
                 buttons,
             } => {
                 f(Role::Label, label);
                 f(Role::Strong, title);
-                f(Role::Body, text);
+                f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
-            Node::Link { text, .. } => f(Role::Link, text),
+            Node::Link { words, .. } => f(Role::Link, words),
             Node::Divider => {}
         }
     }

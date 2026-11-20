@@ -156,7 +156,7 @@ fn a_column_stands_its_blocks_a_block_gap_apart_and_rows_a_line_gap_apart() {
 fn a_row_wraps_like_the_words_of_a_line() {
     let link = |id, s: &str| Node::Link {
         id,
-        text: s.to_owned(),
+        words: s.to_owned(),
     };
     // Each link is 20 characters, 10 B at 0.5 B a character; the column is 40 B wide at most.
     let long = "a".repeat(30);
@@ -365,7 +365,7 @@ fn the_buttons_of_an_action_card_move_beside_its_text_when_the_window_is_tight()
     let card = |lines: usize| {
         let mut column = vec![Node::Action {
             title: "Title".to_owned(),
-            text: "Text".to_owned(),
+            words: "Text".to_owned(),
             buttons: vec![button(Id::Copy, "Copy", ButtonKind::Normal)],
         }];
         column.extend((0..lines).map(|_| text(Role::Body, "filler")));
@@ -670,7 +670,7 @@ fn every_window() -> Vec<Window<Id>> {
             ),
             Node::Row(vec![Node::Link {
                 id: Id::Site,
-                text: "The site".to_owned(),
+                words: "The site".to_owned(),
             }]),
         ]),
         buttons: vec![
@@ -882,7 +882,7 @@ fn the_card_of_a_letter_has_its_buttons_at_the_end() {
     let window = bare(Node::LetterCard {
         label: "Письмо".to_owned(),
         title: "Обновление 1.8.0".to_owned(),
-        text: "Очень длинный текст письма, который не помещается в одну строку карточки письма \
+        words: "Очень длинный текст письма, который не помещается в одну строку карточки письма \
                и обрезается многоточием"
             .to_owned(),
         buttons: vec![Node::Button {
