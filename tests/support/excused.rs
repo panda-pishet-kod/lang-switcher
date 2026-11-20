@@ -32,87 +32,16 @@ pub struct Excuse {
     pub why: &'static str,
 }
 
-/// mi in «Последние письма», all three classes: the line «дата · не прочитано» is wider than its row —
-/// a translation, not a word of the owner; the translator shortens it (word of the controller,
-/// 208.198). The scroll of a small screen does not help: it is a lack across.
-const MI_LETTERS_LIST: &str = "«Последние письма», mi: строка «дата · не прочитано» шире строки во \
-                               всех трёх классах — перевод mi, укоротит переводчик";
-
 /// **The windows excused from fitting** (208.175), each with its category and its term.
-pub const EXCUSED: &[Excuse] = &[
-    Excuse {
-        window: "letters list",
-        class: Class::Ordinary,
-        languages: &["el", "ka"],
-        category: Some(Category::Owner),
-        until: "утро 2026-11-20",
-        decision: None,
-        why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
-    },
-    Excuse {
-        window: "letters list",
-        class: Class::Ordinary,
-        languages: &["mi"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: MI_LETTERS_LIST,
-    },
-    Excuse {
-        window: "letters list",
-        class: Class::Large,
-        languages: &["mi"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: MI_LETTERS_LIST,
-    },
-    Excuse {
-        window: "letters list",
-        class: Class::Narrow,
-        languages: &["mi"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: MI_LETTERS_LIST,
-    },
-    Excuse {
-        window: "letter update",
-        class: Class::Ordinary,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Обновление»: временные образцы строк ×1,3 и длинный перевод — укоротить в волне",
-    },
-    Excuse {
-        window: "letter thanks",
-        class: Class::Narrow,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Спасибо»: слово IDS_THANKS_LEAD шире колонки — укоротить в волне",
-    },
-    Excuse {
-        window: "letter thanks",
-        class: Class::Ordinary,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Спасибо»: слово IDS_THANKS_LEAD шире колонки — укоротить в волне",
-    },
-    Excuse {
-        window: "author",
-        class: Class::Ordinary,
-        languages: &["ml", "ta"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«От автора»: перевод IDS_AUTHOR_TEXT или заголовка IDS_ABOUT_LINE_1 не помещается даже при 12 после слова 208.178 (короткие кнопки, шапка без подписи) — укоротить в волне",
-    },
-];
+pub const EXCUSED: &[Excuse] = &[Excuse {
+    window: "letters list",
+    class: Class::Ordinary,
+    languages: &["el", "ka"],
+    category: Some(Category::Owner),
+    until: "утро 2026-11-20",
+    decision: None,
+    why: "«Последние письма»: та же высота списка из четырёх карточек (208.166)",
+}];
 
 /// The excuse of `window` at `class` in the language `tag`, if there is one.
 pub fn excused(window: &str, class: Class, tag: &str) -> Option<&'static Excuse> {
