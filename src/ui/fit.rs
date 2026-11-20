@@ -609,8 +609,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "mi",
         K {
-            narrow: 0.899,
-            ordinary: 0.882,
+            narrow: 0.916,
+            ordinary: 0.878,
             large: 1.0,
         },
     ),
