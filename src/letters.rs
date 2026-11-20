@@ -4481,6 +4481,10 @@ pub struct AuthorView {
     pub letters: bool,
     /// The paragraph of the «Обратная связь» panel.
     pub feedback_text: String,
+    /// The feed has been read — the dot of its line is the accent; else the quiet one.
+    pub feed_read: bool,
+    /// A newer version is announced — the dot of the line of the version warns.
+    pub update_waiting: bool,
 }
 
 impl AuthorView {
@@ -4586,6 +4590,8 @@ pub fn author_view_in(
         // assignment away from creeping back into that button.
         letters: !feed.news.is_empty() || update.is_some(),
         feedback_text: text(IDS_FEEDBACK_TEXT),
+        feed_read: state.feed_last_read.is_some(),
+        update_waiting: update.and_then(|item| item.version.as_deref()).is_some(),
     }
 }
 

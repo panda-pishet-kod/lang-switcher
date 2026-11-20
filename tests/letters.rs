@@ -4738,6 +4738,74 @@ fn hello_shows_the_frame_of_its_tick() {
     }
 }
 
+/// **T-120-17: the two lines of the state of «От автора» are the element `Status` of the shell, and
+/// its dot says whether the line is good** (passport §6): the feed read — the accent, never read —
+/// the quiet dot; the version the latest — the accent, a newer one announced — the warning. Both
+/// ways, so that a window that put one dot on every line is caught; and through `author_view_in`,
+/// so that the view says it from the state and not the test.
+#[test]
+fn the_lines_of_the_state_of_the_author_window_say_by_their_dot_whether_they_are_good() {
+    use lang_switcher::letters::{FeedView, author_view_in, sample_entry};
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{MenuState, Node};
+    use lang_switcher::ui::windows::author::{Author, Id};
+
+    let _guard = with_product_strings();
+
+    let newer = sample_entry();
+    let today = newer.date.expect("the sample entry carries its day");
+    let cases = [
+        (
+            Some(today),
+            Some(&newer),
+            MenuState::Working,
+            MenuState::Restart,
+        ),
+        (None, None, MenuState::Paused, MenuState::Working),
+    ];
+
+    for (read, update, feed, version) in cases {
+        let state = Letters {
+            feed_last_read: read,
+            ..Letters::default()
+        };
+        let view = author_view_in(
+            Language::Ru,
+            &state,
+            today,
+            "1.7.0",
+            FeedView { update, news: &[] },
+        );
+        let lines = [
+            Node::<Id>::Status {
+                state: feed,
+                words: view.feed_state.clone(),
+            },
+            Node::<Id>::Status {
+                state: version,
+                words: view.version_state.clone(),
+            },
+        ];
+        let window = Author {
+            view,
+            language: Language::Ru,
+            theme: ThemeSetting::Light,
+        }
+        .describe();
+        let body = format!("{:?}", window.body);
+
+        for line in lines {
+            println!("read {read:?}, update {}: {line:?}", update.is_some());
+            assert!(
+                body.contains(&format!("{line:?}")),
+                "read {read:?}, update {}: the window must carry {line:?}",
+                update.is_some()
+            );
+        }
+    }
+}
+
 /// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
 /// window, 620 × 500, at a type not under 12 points** — in every language, at the factor of the
 /// table, laid out by the layout of the shell and measured by DirectWrite; the pair of its cards

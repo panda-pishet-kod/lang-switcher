@@ -13,7 +13,9 @@ use crate::settings::{
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
-use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Surface, Window, WindowKind};
+use crate::ui::scene::{
+    Art, Brand, ButtonKind, Event, MenuState, Node, Role, Surface, Window, WindowKind,
+};
 use ::windows::Win32::Foundation::HWND;
 
 /// The elements of the window.
@@ -86,11 +88,27 @@ impl Author {
     fn news(&self) -> Node<Id> {
         let view = &self.view;
         let mut rows = vec![Node::Line(Role::Strong, self.line(IDS_NEWS_PANEL))];
-        // ⚠ The two lines of the state, until the element «строка состояния» is in the scene (a
-        // line to `e120-core`): plain sentences.
-        for line in [&view.feed_about, &view.feed_state, &view.version_state] {
+        if !view.feed_about.is_empty() {
+            rows.push(Node::Text(Role::Body, view.feed_about.clone()));
+        }
+        // The two lines of the state (passport §6): the feed read — the accent, not yet — the quiet
+        // dot; the version the latest — the accent, a newer one announced — the warning.
+        let feed = if view.feed_read {
+            MenuState::Working
+        } else {
+            MenuState::Paused
+        };
+        let version = if view.update_waiting {
+            MenuState::Restart
+        } else {
+            MenuState::Working
+        };
+        for (state, line) in [(feed, &view.feed_state), (version, &view.version_state)] {
             if !line.is_empty() {
-                rows.push(Node::Text(Role::Body, line.clone()));
+                rows.push(Node::Status {
+                    state,
+                    words: line.clone(),
+                });
             }
         }
         let mut buttons = Vec::new();
