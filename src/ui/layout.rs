@@ -96,6 +96,21 @@ pub fn client_size(w: f32, h: f32) -> WindowSize {
     }
 }
 
+/// The least window of the passport, 620 × 500, while the work area holds it — a small window of a
+/// few lines (`host::Content::least`); a work area smaller still gives the window all of it, as
+/// [`window_size`] does.
+pub fn least_window_size(area_w: f32, area_h: f32) -> WindowSize {
+    if area_w < WINDOW_MIN.w.0 || area_h < WINDOW_MIN.h.0 {
+        return window_size(area_w, area_h);
+    }
+    WindowSize {
+        w: WINDOW_MIN.w.0,
+        h: WINDOW_MIN.h.0,
+        class: class_of(WINDOW_MIN.w.0, WINDOW_MIN.h.0),
+        scrolls: false,
+    }
+}
+
 /// The window for a work area of `area_w` × `area_h` points (passport §3).
 pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
     if area_w < WINDOW_MIN.w.0 || area_h < WINDOW_MIN.h.0 {

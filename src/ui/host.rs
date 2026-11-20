@@ -50,7 +50,9 @@ use crate::ui::elements::{self, Look, State, hit_area, input_fill};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
 use crate::ui::layout::menu_width;
-use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_size};
+use crate::ui::layout::{
+    Layout, ListView, Part, client_size, lay_out, least_window_size, window_size,
+};
 use crate::ui::scene::{ButtonKind, Event, Window};
 use crate::ui::scene::{ListItem, Node, WindowKind};
 use crate::ui::text::{Direction, Style, Text};
@@ -151,6 +153,12 @@ pub trait Content {
     /// double Shift, a count of seconds. Read again after every event; None — no timer.
     fn timer(&self) -> Option<u32> {
         None
+    }
+    /// The window opens at the least size of the passport (620 × 500) rather than at two thirds of
+    /// the work area — a small window of a few lines (T-120-21 Б: the details for the author). The
+    /// person may still make it larger.
+    fn least(&self) -> bool {
+        false
     }
 }
 
@@ -890,8 +898,9 @@ fn frame_of(hwnd: HWND) -> (i32, i32) {
     )
 }
 
-/// Sizes the window by its monitor's work area and centres it there.
-fn place(hwnd: HWND) {
+/// Sizes the window by its monitor's work area — at its least size when the content asks — and
+/// centres it there.
+fn place(hwnd: HWND, least: bool) {
     let mut cursor = POINT::default();
     // SAFETY: the out parameter is a local.
     let _ = unsafe { GetCursorPos(&mut cursor) };
@@ -913,7 +922,11 @@ fn place(hwnd: HWND) {
         (work.right - work.left) as f32 / scale,
         (work.bottom - work.top) as f32 / scale,
     );
-    let size = window_size(area.0, area.1);
+    let size = if least {
+        least_window_size(area.0, area.1)
+    } else {
+        window_size(area.0, area.1)
+    };
     let (frame_w, frame_h) = frame_of(hwnd);
     let (w, h) = (
         (size.w * scale).round() as i32 + frame_w,
@@ -2608,7 +2621,7 @@ impl<C: Content> Handler for Host<C> {
         if self.popup.is_some() {
             self.place_popup(hwnd);
         } else {
-            place(hwnd);
+            place(hwnd, self.content.least());
         }
     }
 

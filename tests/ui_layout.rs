@@ -1384,3 +1384,22 @@ fn a_list_given_room_fills_it_with_its_frame() {
         "the rows from the top of the frame: {rows:?}"
     );
 }
+
+/// **A small window opens at the least size of the passport** (T-120-21 Б: the details for the
+/// author — five lines and two buttons): 620 × 500 while the work area holds it; a work area smaller
+/// still gives it all of itself, as to any window.
+#[test]
+fn a_small_window_opens_at_the_least_size() {
+    use lang_switcher::ui::layout::least_window_size;
+
+    let small = least_window_size(1920.0, 1040.0);
+    assert_eq!(
+        (small.w, small.h, small.class, small.scrolls),
+        (620.0, 500.0, Class::Narrow, false)
+    );
+    assert_eq!(
+        least_window_size(600.0, 400.0),
+        window_size(600.0, 400.0),
+        "a tiny work area"
+    );
+}
