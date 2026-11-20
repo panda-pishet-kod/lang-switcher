@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod corner;
+pub mod tray_menu;
 
 use crate::settings::Language;
 use crate::ui::scene::Window;
@@ -26,6 +27,12 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
             crate::corner::release_content_in(language, "1.6.1"),
         ),
     ];
+    // The menu of the icon (T-120-15) in its five states.
+    all.extend(
+        tray_menu::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&|id| id as u16))),
+    );
     for (name, content) in corners {
         let window = corner::describe(&content, false, None);
         all.push((name.to_owned(), window.map(&|id| id as u16)));

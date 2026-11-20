@@ -48,14 +48,14 @@ use windows::Win32::System::LibraryLoader::{
     FindResourceW, GetModuleHandleW, LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW, LoadResource,
     LockResource, SizeofResource,
 };
-use windows::Win32::UI::Controls::{MEASUREITEMSTRUCT, ODT_MENU};
+
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyIcon, DestroyWindow, GetIconInfo, GetSystemMetrics, HICON, ICONINFO,
     IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, NONCLIENTMETRICSW, RT_GROUP_ICON, RT_VERSION,
-    SM_CXICON, SM_CXMENUCHECK, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
+    SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SPI_GETNONCLIENTMETRICS,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW, WM_APP, WM_CONTEXTMENU,
-    WM_DRAWITEM, WM_ENDSESSION, WM_MEASUREITEM, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
-    WM_THEMECHANGED, WS_EX_TOOLWINDOW, WS_POPUP,
+    WM_ENDSESSION, WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_THEMECHANGED, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 use windows::core::{Error as WinError, PCWSTR, w};
 
@@ -299,8 +299,7 @@ fn the_menu_is_the_block_of_fr_91_entry_for_entry() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu of FR-91 must be creatable");
+    );
 
     assert_menu_is(&menu, &FR_91);
 }
@@ -318,8 +317,7 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu of FR-91 must be creatable");
+    );
 
     assert_menu_is(&menu, &FR_91_ENGLISH);
 
@@ -331,8 +329,7 @@ fn the_menu_of_fr_91_is_the_same_menu_in_english() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
     assert_eq!(suspended.items()[0].label, "Resume");
 
     settings::set_ui_language(settings::Language::Ru);
@@ -348,8 +345,7 @@ fn the_first_entry_follows_the_state() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
     let suspended = Menu::build(
         false,
         true,
@@ -357,8 +353,7 @@ fn the_first_entry_follows_the_state() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     assert_eq!(active.items()[0].label, "Приостановить");
     assert_eq!(suspended.items()[0].label, "Возобновить");
@@ -392,8 +387,7 @@ fn the_greyed_resume_entry_says_why_it_is_grey() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
     let refused = Menu::build(
         false,
         true,
@@ -401,8 +395,7 @@ fn the_greyed_resume_entry_says_why_it_is_grey() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     let plain_label = &plain.items()[0].label;
     let refused_label = &refused.items()[0].label;
@@ -625,8 +618,7 @@ fn a_disarmed_program_greys_the_resumption_and_cannot_be_asked_for_it() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     println!(
         "entry 0: label={:?} enabled={} grayed={} disabled={}",
@@ -691,8 +683,7 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     assert_eq!(ordinary.items()[0].label, "Возобновить");
     assert!(ordinary.items()[0].enabled);
@@ -701,8 +692,7 @@ fn nothing_is_greyed_while_fr99_is_not_holding_and_nothing_when_it_suspends() {
 
     // FR-99 has just disarmed an armed program. The move it is about to make is the
     // suspension, and that one must stay available or the icon never becomes honest.
-    let suspending = Menu::build(true, true, FAIL_SAFE, NO_DIALOG, NO_ABOUT, &NOTHING_PENDING)
-        .expect("the menu must be creatable");
+    let suspending = Menu::build(true, true, FAIL_SAFE, NO_DIALOG, NO_ABOUT, &NOTHING_PENDING);
 
     assert_eq!(suspending.items()[0].label, "Приостановить");
     assert!(suspending.items()[0].enabled);
@@ -767,8 +757,7 @@ fn an_open_dialog_greys_the_two_entries_that_edit_the_configuration() {
         DIALOG_UP,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     for position in LOCKED_POSITIONS {
         println!(
@@ -851,8 +840,7 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     for position in LOCKED_POSITIONS
         .iter()
@@ -873,8 +861,7 @@ fn a_closed_dialog_greys_nothing_and_the_two_rules_add_up() {
         DIALOG_UP,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     println!(
         "fail-safe and dialog together: entry 0 grayed={} entry 3 grayed={}",
@@ -949,8 +936,7 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
         NO_DIALOG,
         ABOUT_UP,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     for position in DOOR_POSITIONS {
         println!(
@@ -1003,8 +989,7 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
             settings::dialog_is_open(),
             settings::about_is_open(),
             &NOTHING_PENDING,
-        )
-        .expect("the menu must be creatable");
+        );
 
         for position in DOOR_POSITIONS {
             assert!(
@@ -1023,8 +1008,7 @@ fn an_open_about_window_greys_both_doors_and_nothing_else() {
         settings::dialog_is_open(),
         settings::about_is_open(),
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     assert!(
         after.items().iter().all(|item| item.enabled),
@@ -1171,8 +1155,7 @@ fn closing_the_dialog_gives_both_entries_back() {
         settings::dialog_is_open(),
         settings::about_is_open(),
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     for position in LOCKED_POSITIONS.iter().chain(DOOR_POSITIONS.iter()) {
         assert!(
@@ -1200,8 +1183,7 @@ fn closing_the_dialog_gives_both_entries_back() {
         settings::dialog_is_open(),
         settings::about_is_open(),
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     for position in LOCKED_POSITIONS {
         println!(
@@ -1463,9 +1445,10 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
 
     // The other half of the same rule: the menu asks it for both entries, and asks this very
     // function rather than a condition of its own.
+    // `Menu::build` hands the language of the interface to `Menu::build_in`, which is the body.
     let at = source
-        .find("    pub fn build(")
-        .expect("Menu::build must be in this file");
+        .find("    pub fn build_in(")
+        .expect("Menu::build_in must be in this file");
     let build = &source[at..];
     let end = build
         .find("\n    }")
@@ -1519,155 +1502,6 @@ fn the_lock_is_one_door_in_front_of_the_table_and_the_rule_is_defined_once() {
 const CMD_NAMES_OF_THE_RULE: [&str; 4] =
     ["CMD_TOGGLE", "CMD_SETTINGS", "CMD_AUTOSTART", "CMD_ABOUT"];
 
-/// **The shape of the re-entry gate — task T-13-18.**
-///
-/// What the gate *does* is measured where it can be measured, in the unit tests of
-/// `src\tray.rs`: those reach `show_menu`, `MENU_PAINT` and the flag, all of which are private
-/// to the module by design and are going to stay that way. What no test can drive is the one
-/// thing this task is about — the boundary. `TrackPopupMenuEx` is modal, and a test that let
-/// `show_menu` reach it would hang instead of failing. So the boundary is swept, for the reason
-/// the two sweeps above this one are swept.
-///
-/// Three claims, and each of them is a defect the task's own terms of reference name:
-///
-/// * the flag goes up **before** `MenuPaint::new` and `set_menu_background` — otherwise the
-///   window between them stays open and the finding reproduces inside it;
-/// * it comes down **after** `TrackPopupMenuEx` has returned — a bare pair of assignments
-///   around the call would not survive an unwind, so the lowering is a `Drop`;
-/// * and it comes down **before** `dispatch_command` — the modal dialog of FR-92 opens there,
-///   and a menu shown over that dialog is the legitimate showing task T-13-14 greys two
-///   entries of. Holding the gate across it would undo that task.
-///
-/// Insensitive to line endings by construction: `.gitattributes` declares `* text=auto
-/// eol=crlf`, so a fresh worktree holds the file in CRLF while the index holds LF, and the
-/// needles below are written with `\n`. Every boundary is an `expect` and not a fallback — a
-/// body whose closing brace cannot be found is a failure of this test, not an invitation to
-/// read to the end of the file.
-#[test]
-fn the_re_entry_gate_wraps_the_modal_call_and_lets_go_before_the_dialog() {
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tray.rs"),
-    )
-    .expect("src\\tray.rs must be readable")
-    .replace("\r\n", "\n");
-
-    // The product half of the file. The unit tests of the same module read and write the flag
-    // too, and counting their mentions in with the product's would make the counts below say
-    // nothing.
-    let end = source
-        .find("\n#[cfg(test)]\nmod tests {")
-        .expect("src\\tray.rs must carry its unit tests at the end");
-    let product = &source[..end];
-
-    // ⚠ The signature grew a third argument in task T-41-3 (finding Н44): whose point the menu
-    // opens at depends on whether the showing came from the mouse or the keyboard.
-    let at = product
-        .find("fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {")
-        .expect("show_menu must be in this file");
-    let body = &product[at..];
-    let end = body
-        .find("\n}")
-        .expect("show_menu must close with a brace of its own");
-    let body = &body[..end];
-
-    println!("--- show_menu ---\n{body}");
-
-    let raise = body
-        .find("let Some(on_screen) = MenuOnScreen::raise() else {")
-        .expect("show_menu must ask for the right to the screen and turn round without it");
-    let borrow = body
-        .find("with_tray(|tray| {")
-        .expect("show_menu reads the tray through with_tray");
-    let paint = body
-        .find("MenuPaint::new(menu.items().to_vec(), palette)")
-        .expect("show_menu builds the paint state of the showing");
-    let ground = body
-        .find("set_menu_background(menu.handle(), paint.window_bg)")
-        .expect("and hands the ground brush to Windows");
-    let track = body
-        .find("TrackPopupMenuEx(")
-        .expect("show_menu shows the menu with TrackPopupMenuEx");
-    let take = body
-        .find("MENU_PAINT.with(|slot| slot.borrow_mut().take())")
-        .expect("the SEC-05 gate comes down after the modal call");
-    let release = body
-        .find("drop(on_screen);")
-        .expect("the right to the screen is given up by name, like the frame hook");
-    let dispatch = body
-        .find("dispatch_command(hwnd, command)")
-        .expect("and the chosen command is carried out at the end");
-
-    println!(
-        "offsets in show_menu: raise {raise}, with_tray {borrow}, MenuPaint::new {paint}, \
-         set_menu_background {ground}, TrackPopupMenuEx {track}, take {take}, \
-         drop(on_screen) {release}, dispatch_command {dispatch}"
-    );
-
-    assert!(
-        raise < borrow,
-        "the gate is the first thing in the function — a refused entry must not even reach \
-         the tray"
-    );
-    assert!(
-        raise < paint && raise < ground,
-        "and it is up before the paint state is built and before the ground brush is handed \
-         to Windows, or the finding reproduces in the window between"
-    );
-    assert!(
-        track < take && take < release,
-        "it comes down after TrackPopupMenuEx has returned and after the paint state has \
-         been taken out"
-    );
-    assert!(
-        release < dispatch,
-        "and before dispatch_command opens the modal dialog of FR-92 — a menu shown over \
-         that dialog is the legitimate showing task T-13-14 greys two entries of"
-    );
-
-    // The gates are two, and they are not each other's spare. `MENU_PAINT` answers «is our
-    // drawing active», the flag answers «is a menu of ours up», and the degraded showing is
-    // where the two part company.
-    assert_eq!(
-        body.matches("MenuOnScreen::raise()").count(),
-        1,
-        "one door into the showing"
-    );
-    assert!(
-        !body.contains("MENU_PAINT.with(|slot| slot.borrow().is_some())"),
-        "and it is not a reading of the paint slot — that gate is down for the whole of a \
-         degraded showing"
-    );
-    assert!(
-        body.contains("MENU_PAINT.with(|slot| slot.replace(Some(paint)))"),
-        "the SEC-05 gate itself is untouched by this task"
-    );
-
-    // The lowering is a `Drop` and the flag has no other writer. A bare `set(true) …
-    // set(false)` pair around the modal call is exactly what these two counts forbid.
-    let writes = product
-        .matches("MENU_ON_SCREEN.with(|flag| flag.set(")
-        .count();
-    let guard_at = product
-        .find("impl Drop for MenuOnScreen {")
-        .expect("the flag must be lowered by a Drop and not by a call");
-    let lower = product
-        .find("MENU_ON_SCREEN.with(|flag| flag.set(false));")
-        .expect("and that Drop must be what lowers it");
-
-    println!("writers of MENU_ON_SCREEN in the product half: {writes}");
-
-    assert_eq!(
-        writes, 2,
-        "the flag has exactly two writers — one raise and one lowering"
-    );
-    assert!(
-        guard_at < lower,
-        "and the lowering lives inside the Drop, so no path out of a showing can miss it"
-    );
-}
-
 #[test]
 fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     let _locale = product_strings(settings::Language::Ru);
@@ -1678,8 +1512,7 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
     let off = Menu::build(
         true,
         false,
@@ -1687,8 +1520,7 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must be creatable");
+    );
 
     assert!(
         is_checked(&on, 3),
@@ -1708,86 +1540,6 @@ fn the_autostart_entry_shows_the_check_mark_of_the_configuration() {
     // The check mark is the only difference: FR-93 is task T-08-1's, and this task must not
     // have grown a second way of showing the same thing.
     assert_eq!(on.items()[2].label, off.items()[2].label);
-}
-
-#[test]
-fn measure_and_draw_are_ignored_while_no_menu_of_ours_is_on_the_screen() {
-    // **SEC-05, criterion 10 of T-11-10.** `WM_MEASUREITEM` and `WM_DRAWITEM` are handled
-    // only while the program itself holds the menu on the screen. This tray has never
-    // shown one, so the gate is down for the whole test, and both messages must come back
-    // `Ignored` — like everything foreign.
-    let window = TestWindow::new();
-    let home = TestDir::new("od_gate");
-    let mut tray = install(&window, &home);
-
-    // A null lParam first: the handler must refuse before looking at any pointer.
-    assert_eq!(
-        tray.handle_message(WM_MEASUREITEM, WPARAM(0), LPARAM(0)),
-        Reaction::Ignored,
-        "WM_MEASUREITEM with the gate down"
-    );
-    assert_eq!(
-        tray.handle_message(WM_DRAWITEM, WPARAM(0), LPARAM(0)),
-        Reaction::Ignored,
-        "WM_DRAWITEM with the gate down"
-    );
-
-    // A well-formed forgery next — a real `MEASUREITEMSTRUCT` naming a real command,
-    // exactly what a process of our integrity level could send. The gate, not the shape
-    // of the structure, is what refuses it; and the structure must come back untouched.
-    let mut forged = MEASUREITEMSTRUCT {
-        CtlType: ODT_MENU,
-        CtlID: 0,
-        itemID: tray::CMD_TOGGLE,
-        itemWidth: 0xDEAD,
-        itemHeight: 0xBEEF,
-        itemData: usize::try_from(tray::CMD_TOGGLE).expect("a command fits in a usize"),
-    };
-
-    let reaction = tray.handle_message(
-        WM_MEASUREITEM,
-        WPARAM(0),
-        LPARAM((&raw mut forged) as isize),
-    );
-
-    println!("forged WM_MEASUREITEM -> {reaction:?}");
-
-    assert_eq!(reaction, Reaction::Ignored, "the gate is down: not ours");
-    assert_eq!(
-        (forged.itemWidth, forged.itemHeight),
-        (0xDEAD, 0xBEEF),
-        "and nothing was written into the forgery"
-    );
-
-    // The same forgery naming a **rule** — the second kind of entry the drawing knows since
-    // task T-11-22, and the second thing that must be behind the very same gate.
-    let mut forged_rule = MEASUREITEMSTRUCT {
-        CtlType: ODT_MENU,
-        CtlID: 0,
-        itemID: 0,
-        itemWidth: 0xDEAD,
-        itemHeight: 0xBEEF,
-        itemData: usize::try_from(tray::MENU_SEPARATOR_DATA).expect("a number fits in a usize"),
-    };
-
-    let reaction = tray.handle_message(
-        WM_MEASUREITEM,
-        WPARAM(0),
-        LPARAM((&raw mut forged_rule) as isize),
-    );
-
-    println!("forged WM_MEASUREITEM naming a rule -> {reaction:?}");
-
-    assert_eq!(
-        reaction,
-        Reaction::Ignored,
-        "the gate is down for rules too"
-    );
-    assert_eq!(
-        (forged_rule.itemWidth, forged_rule.itemHeight),
-        (0xDEAD, 0xBEEF),
-        "and nothing was written into that forgery either"
-    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2196,99 +1948,52 @@ fn show_menu_takes_the_foreground_unconditionally(body: &str) -> bool {
 /// task T-08-2, and a failure of the call is reported under it.
 #[test]
 fn the_menu_takes_the_foreground_without_asking() {
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tray.rs"),
-    )
-    .expect("src\\tray.rs must be readable")
-    .replace("\r\n", "\n");
+    // Since task T-120-15 the menu is a window of the shell: the tray opens it by
+    // `tray_menu::open`, which makes it by `host::open_menu`, and that is where the foreground is
+    // asked for — with no gate of the program in front of the call.
+    let read = |path: &[&str]| -> String {
+        let mut file = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for part in path {
+            file.push(part);
+        }
+        fs::read_to_string(&file)
+            .unwrap_or_else(|_| panic!("{} must be readable", file.display()))
+            .replace("\r\n", "\n")
+    };
+    let body_of = |source: &str, head: &str| -> String {
+        let at = source
+            .find(head)
+            .unwrap_or_else(|| panic!("«{head}» must be in its file"));
+        let rest = &source[at..];
+        let end = rest.find("\n}").expect("a function closes with its brace");
+        rest[..end].to_owned()
+    };
 
-    let body = source
-        .split_once("fn show_menu(x: i32, y: i32, from_the_keyboard: bool) {")
-        .expect("the module must still declare `show_menu`")
-        .1
-        .split_once("\n}\n")
-        .expect("`show_menu` must end at a brace in the first column")
-        .0;
+    let menu = read(&["src", "ui", "windows", "tray_menu.rs"]);
+    let host = read(&["src", "ui", "host.rs"]);
+    let open = body_of(&menu, "pub fn open(owner: HWND, at: POINT, keyboard: bool)");
+    let shown = body_of(&host, "pub fn open_menu<C: Content + 'static>(");
 
-    println!("длина тела show_menu: {} знаков", body.len());
-    println!(
-        "SetForegroundWindow: {}, may_take_the_foreground: {}, note_foreground_refused: {}",
-        body.contains("SetForegroundWindow(hwnd)"),
-        body.contains("may_take_the_foreground"),
-        body.contains("note_foreground_refused")
-    );
+    println!("--- tray_menu::open ---\n{open}\n--- host::open_menu ---\n{shown}");
 
     assert!(
-        body.len() > 2_000,
-        "the sweep must have taken the body of `show_menu` and not a scrap of it"
+        open.contains("host::open_menu(product, Some(owner), at, keyboard)"),
+        "the product opens the menu by host::open_menu"
     );
-
     assert!(
-        show_menu_takes_the_foreground_unconditionally(body),
-        "T-73-3: `show_menu` must call `SetForegroundWindow` with no gate of its own in front of \
-         it — the gate refused sixteen of the owner's own clicks on `e73`"
+        show_menu_takes_the_foreground_unconditionally(&shown),
+        "and host::open_menu asks Windows for the foreground with no gate of ours — decision 134в"
     );
 
-    // The gate is not merely unused: it is gone, and so is the name its refusal was written
-    // under. A rule nobody calls is a rule somebody calls again.
-    for dead in [
-        "FOREGROUND_GRACE_MS",
-        "fn may_take_the_foreground",
-        "fn tick_distance",
-        "fn last_input_tick",
-        "fn note_foreground_refused",
-    ] {
-        assert!(
-            !source.contains(dead),
-            "T-73-3: `{dead}` must be gone from the module, not left behind unused"
-        );
-    }
-
-    let vocabulary = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("diag.rs"),
-    )
-    .expect("src\\diag.rs must be readable");
-
-    // The needle is the **row**, not the words: the note that records why the row was taken out
-    // names it in prose, and a guard that could not tell the two apart would forbid the history
-    // as well as the row.
+    // Контроль прибора: the shape of e73 — a gate in front of the call — is refused.
+    let gated = shown.replace(
+        "SetForegroundWindow(hwnd)",
+        "if may_take_the_foreground() { SetForegroundWindow(hwnd) }",
+    );
     assert!(
-        !vocabulary.contains("(\"tray foreground refused\""),
-        "T-73-3: the vocabulary must not keep a row nothing can produce any more"
+        !show_menu_takes_the_foreground_unconditionally(&gated),
+        "the control: a gated call must be refused"
     );
-
-    // Отрицательные контроли: the two shapes this stage shipped, and one with no call at all.
-    let e73 = "\n    let may_take_it = match last_input_tick() {\n        None => true,\n        \
-               Some(last_input) => may_take_the_foreground(message_tick(), last_input),\n    \
-               };\n    if may_take_it {\n        let foreground = unsafe { \
-               SetForegroundWindow(hwnd) };\n    } else {\n        note_foreground_refused();\n    \
-               }\n";
-    let e72 = "\n    if may_take_the_foreground(last_input_gap()) {\n        let foreground = \
-               unsafe { SetForegroundWindow(hwnd) };\n    }\n";
-
-    for (candidate, what) in [
-        (
-            e73,
-            "the body of `e73`: the symmetric gate that refused sixteen clicks",
-        ),
-        (
-            e72,
-            "the body of `e72`: the one-sided gate the stage was opened for",
-        ),
-        (
-            "\n    let palette = theme::resolve(theme_setting, theme::system_is_light());\n",
-            "no call to SetForegroundWindow at all, which is no workaround either",
-        ),
-    ] {
-        assert!(
-            !show_menu_takes_the_foreground_unconditionally(candidate),
-            "отрицательный контроль обязан быть отвергнут: {what}"
-        );
-    }
 }
 
 /// **Task T-41-3, finding Н44 — a forged menu point does not put the menu off the desktop.**
@@ -2443,417 +2148,6 @@ fn nothing_of_a_window_message_is_dereferenced_in_the_tray() {
 // FR-92а, task T-11-21 — the menu drawn as the mock-up draws it
 // ---------------------------------------------------------------------------------------
 
-/// The three points of the menu's check mark as `scratchpad\chrome.ps1` strokes them, in
-/// **tenths of a mock-up pixel** and measured from `($bx, $by)` — the left edge of the mark
-/// and the vertical middle of the entry.
-///
-/// Written out here rather than imported, for the reason the FR-91 block above is written
-/// out: a test that read the crate's own constant and then asserted the crate's own constant
-/// would pass whatever the constant said. These are the numbers of the generator the mock-up
-/// `ui-06-chrome.png` was drawn by — `(PtF $bx ($by+1))`, `(PtF ($bx+4) ($by+5))`,
-/// `(PtF ($bx+11) ($by-6))`.
-const CHROME_CHECK_POINTS: [(i32, i32); 3] = [(0, 10), (40, 50), (110, -60)];
-
-/// The pen of that mark, in tenths of a mock-up pixel — `Pen($T.Fg,[single]2.1)`.
-const CHROME_CHECK_PEN: i32 = 21;
-
-/// Inset of the highlight from the left and right edges of the menu, in mock-up pixels —
-/// the `($mX+5)` … `($mW-10)` of `FillR $g ($mX+5) $iy ($mW-10) $itemH $T.Hover 6`.
-const CHROME_HOVER_INSET: i32 = 5;
-
-/// Corner radius of that highlight, in mock-up pixels — the trailing `6` of the same call.
-const CHROME_HOVER_RADIUS: i32 = 6;
-
-/// The DPI the «при 96 DPI» column of the report is written at.
-const SCREEN_DPI: i32 = 96;
-
-#[test]
-fn the_check_mark_of_the_menu_is_the_figure_the_mock_up_strokes() {
-    // **Criterion 9 of T-11-21, the figure half.** The mark of FR-93 used to be two lines
-    // of a step invented from `SM_CXMENUCHECK`; it is now the generator's own polyline,
-    // moved by `MENU_CHECK_AIR` so that the square handed to the smoothing holds the pen
-    // and its fading edge as well as the path.
-    let air = tray::MENU_CHECK_AIR * 10;
-    let across: [i32; 3] = CHROME_CHECK_POINTS.map(|point| point.0);
-    let down: [i32; 3] = CHROME_CHECK_POINTS.map(|point| point.1);
-
-    let left = across.into_iter().min().expect("three points");
-    let top = down.into_iter().min().expect("three points");
-    let right = across.into_iter().max().expect("three points");
-    let bottom = down.into_iter().max().expect("three points");
-
-    let expected = CHROME_CHECK_POINTS.map(|(x, y)| (x - left + air, y - top + air));
-
-    println!("chrome.ps1 {CHROME_CHECK_POINTS:?} + air {air} -> {expected:?}");
-
-    assert_eq!(
-        tray::MENU_CHECK_MARK.points_tenths,
-        expected,
-        "the polyline of the menu is the generator's, moved by the air around it"
-    );
-    assert_eq!(
-        tray::MENU_CHECK_MARK.pen_tenths,
-        CHROME_CHECK_PEN,
-        "and the pen is the generator's 2,1 mock-up pixels"
-    );
-
-    // The path is square — eleven mock-up pixels each way — so the square around it is that
-    // plus the air on all four sides.
-    assert_eq!(right - left, bottom - top, "the path of the mark is square");
-    assert_eq!(
-        tray::MENU_CHECK_CELL,
-        (right - left) / 10 + 2 * tray::MENU_CHECK_AIR,
-        "the square is the path plus the air on each side"
-    );
-}
-
-#[test]
-fn the_smoothing_tile_of_the_check_mark_cuts_nothing_off_it() {
-    // **Criterion 9 of T-11-21, the reason `MENU_CHECK_AIR` exists.**
-    // `theme::draw_check_mark` clamps the tile it smooths in to the square it is given,
-    // and everything of the stroke outside that tile is simply never drawn. So the stroke —
-    // the path plus half a pen plus the row the smoothed edge fades into, which is exactly
-    // what `stroke_bounds` answers — has to fit inside the square at every scale.
-    for dpi in [SCREEN_DPI, 120, 144, 192] {
-        let side = theme::scaled(tray::MENU_CHECK_CELL, dpi);
-        // Task Т-30-3: a rectangle and a mirror flag. The square is the cell the tick is drawn
-        // in, and `false` is the way round the twelve left-to-right locales draw it — the
-        // mirrored way round is the reflection of this one, so it fits the square exactly when
-        // this one does.
-        let cell = RECT {
-            left: 0,
-            top: 0,
-            right: side,
-            bottom: side,
-        };
-        let points = theme::check_mark_points(&cell, tray::MENU_CHECK_MARK, dpi, false);
-        let thickness = theme::scaled_tenths(tray::MENU_CHECK_MARK.pen_tenths, dpi);
-        let bounds = theme::stroke_bounds(&points, thickness);
-
-        println!(
-            "{dpi} DPI: square {side}, points {points:?}, pen {thickness}, stroke \
-             {}..{} x {}..{}",
-            bounds.left, bounds.right, bounds.top, bounds.bottom
-        );
-
-        assert!(
-            bounds.left >= 0 && bounds.top >= 0,
-            "the stroke may not start above or left of the square at {dpi} DPI"
-        );
-        assert!(
-            bounds.right <= side && bounds.bottom <= side,
-            "the stroke may not run past the square at {dpi} DPI"
-        );
-    }
-}
-
-#[test]
-fn the_highlight_of_an_entry_is_the_inset_rounded_stripe_of_the_mock_up() {
-    // **Criterion 9 of T-11-21, the highlight half.** The entry under the cursor used to be
-    // a `FillRect` of the whole row; the mock-up holds the stripe five of its pixels off
-    // each edge, gives it the whole height of the entry and rounds it by six.
-    let item = windows::Win32::Foundation::RECT {
-        left: 0,
-        top: 0,
-        right: 200,
-        bottom: 27,
-    };
-
-    let inset = theme::scaled(CHROME_HOVER_INSET, SCREEN_DPI);
-    let stripe = tray::menu_hover_rect(&item, SCREEN_DPI);
-
-    println!(
-        "inset {CHROME_HOVER_INSET} px макета -> {inset} px at 96 DPI; stripe \
-         {}..{} x {}..{}",
-        stripe.left, stripe.right, stripe.top, stripe.bottom
-    );
-
-    assert_eq!(
-        inset, 4,
-        "five mock-up pixels are four screen pixels at 96 DPI"
-    );
-    assert_eq!(
-        (stripe.left, stripe.right),
-        (item.left + inset, item.right - inset),
-        "the stripe is held off both edges"
-    );
-    assert_eq!(
-        (stripe.top, stripe.bottom),
-        (item.top, item.bottom),
-        "and takes the whole height of the entry"
-    );
-
-    // The radius is the one number the generator gives every rounded figure it draws, which
-    // is the constant the dialog already rounds by — there is no second radius for the menu.
-    assert_eq!(theme::CORNER_RADIUS, CHROME_HOVER_RADIUS);
-    assert_eq!(
-        theme::scaled(theme::CORNER_RADIUS, SCREEN_DPI),
-        4,
-        "six mock-up pixels are four screen pixels at 96 DPI"
-    );
-}
-
-/// **Criterion 10 of task T-12-9.** The mock-up hands **every** entry the same ink — line 167
-/// of `chrome.ps1` gives `$brFg` to the row under the cursor and to every other row alike —
-/// and the highlight is the whole of what marks the hot one. The product used to brighten
-/// that row's text to `sel_fg` instead.
-///
-/// Swept over the source, and that is deliberate rather than lazy: the ink is chosen inside
-/// the answer to `WM_DRAWITEM`, and SEC-05 keeps that answer behind a gate which is **down**
-/// unless the program itself has a menu on the screen — the test right above this file's
-/// drawing tests exists to prove the gate stays down. So there is no way to make the drawing
-/// run from here, and the live half of the criterion is a shot of the menu with the cursor on
-/// an entry plus a histogram of its glyph cores: 155 px of `text` where 155 px of `sel_fg`
-/// used to be. That measurement is in `reports\T-12-9.md`; this guards the line it changed.
-#[test]
-fn the_ink_of_a_menu_entry_does_not_depend_on_the_cursor() {
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("tray.rs"),
-    )
-    .expect("src\\tray.rs must be readable");
-
-    let hits: Vec<usize> = source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| {
-            let code = line.trim_start();
-            line.contains("sel_fg") && !code.starts_with("//") && !code.starts_with("///")
-        })
-        .map(|(index, _)| index + 1)
-        .collect();
-
-    println!("lines of src\\tray.rs naming sel_fg outside a comment: {hits:?}");
-
-    assert!(
-        hits.is_empty(),
-        "T-12-9: src\\tray.rs picks up sel_fg at lines {hits:?}; the menu paints every entry \
-         in `text`, hot or not"
-    );
-
-    // And the sweep guards something a shot can see. The two roles are the same number on
-    // «Тумане», which is why the defect hid there for a whole stage, and twelve levels apart
-    // on «Графите» — read from the palettes rather than written out, because what matters
-    // here is that the roles *differ*, not what either of them is this month.
-    let graphite = (
-        lang_switcher::theme::GRAPHITE.text.0,
-        lang_switcher::theme::GRAPHITE.sel_fg.0,
-    );
-    let fog = (
-        lang_switcher::theme::FOG.text.0,
-        lang_switcher::theme::FOG.sel_fg.0,
-    );
-
-    println!("graphite text/sel_fg {graphite:?}; fog text/sel_fg {fog:?}");
-
-    assert_ne!(
-        graphite.0, graphite.1,
-        "«Графит» is the palette where choosing the wrong role is visible"
-    );
-    assert_eq!(
-        fog.0, fog.1,
-        "«Туман» is the palette where it was invisible — which is why the sweep above, and \
-         not a shot of one theme, is what keeps it fixed"
-    );
-}
-
-#[test]
-fn the_check_mark_stands_inside_the_check_column_of_the_entry() {
-    // The square of the mark is centred on the check column and on the middle of the entry,
-    // and it may not grow out of that column — the width of an entry and the left edge of
-    // its text are both built on the same metric (task T-11-10, untouched here).
-    let column = check_column();
-    let item = windows::Win32::Foundation::RECT {
-        left: 0,
-        top: 0,
-        right: 200,
-        bottom: 27,
-    };
-
-    let cell = tray::menu_check_cell(&item, column, SCREEN_DPI);
-
-    println!(
-        "SM_CXMENUCHECK={column}; cell {}..{} x {}..{}",
-        cell.left, cell.right, cell.top, cell.bottom
-    );
-
-    assert_eq!(
-        cell.right - cell.left,
-        cell.bottom - cell.top,
-        "the square of the mark is square"
-    );
-    assert_eq!(
-        cell.right - cell.left,
-        theme::scaled(tray::MENU_CHECK_CELL, SCREEN_DPI),
-        "and is the mock-up's own side through the scale"
-    );
-    assert_eq!(
-        (cell.top + cell.bottom) / 2,
-        (item.top + item.bottom) / 2,
-        "centred on the middle of the entry, as `$by = $iy + $itemH/2` centres it"
-    );
-
-    // The square fits in the column, and therefore cannot reach the text: the left edge of
-    // the label is the column plus the gap of T-11-10, and that layout is not this task's.
-    let text_left = item.left + tray::MENU_H_PAD + column + tray::MENU_CHECK_GAP;
-
-    assert!(
-        cell.right - cell.left <= column,
-        "the square of the mark fits inside the check column"
-    );
-    assert!(
-        cell.left >= item.left && cell.right <= text_left,
-        "and stands between the edge of the entry and its text"
-    );
-}
-
-/// Height of one entry as `scratchpad\chrome.ps1` lays it out, in mock-up pixels — `$itemH = 38`.
-const CHROME_ITEM_H: i32 = 38;
-
-/// Height of the stripe of one rule, in mock-up pixels — the `$sepH = 11` of the same line.
-const CHROME_SEP_H: i32 = 11;
-
-/// Inset of the line of a rule from the edge of the menu, in mock-up pixels — the `($mX+12)`
-/// and `($mX+$mW-12)` of
-/// `$g.DrawLine($pen, ($mX+12), ($iy + $sepH/2), ($mX+$mW-12), ($iy + $sepH/2))`.
-const CHROME_SEP_INSET: i32 = 12;
-
-/// The height the system menu face measures at 96 DPI, in screen pixels.
-///
-/// Measured, not chosen: `GetTextExtentPoint32W` with `lfMenuFont` answers 15 on this machine,
-/// and the entry of task T-11-10 — text plus five screen pixels above and below — came out the
-/// 25 px the controller measured off the live menu, which is the same 15 read backwards. The
-/// mock-up draws that face at 140 %, so it is 21 of the mock-up's own pixels there.
-const MENU_FACE_HEIGHT: i32 = 15;
-
-#[test]
-fn an_entry_is_as_tall_as_the_mock_up_draws_it_and_still_grows_with_the_face() {
-    // **Point 5 of T-11-22.** The entry was 25 px against the mock-up's 38 mock-up pixels —
-    // 27,1 screen pixels — because the padding of task T-11-10 was five *screen* pixels.
-    // The mock-up number now enters as padding and not as a replacement for the measurement:
-    // what is padded is still what `GetTextExtentPoint32W` said.
-    let reference = theme::scaled(CHROME_ITEM_H, SCREEN_DPI);
-    let ours = tray::menu_item_height(MENU_FACE_HEIGHT, SCREEN_DPI);
-
-    println!(
-        "chrome.ps1 $itemH = {CHROME_ITEM_H} px макета -> {reference} px at 96 DPI; \
-         face {MENU_FACE_HEIGHT} + air -> {ours}"
-    );
-
-    assert_eq!(
-        reference, 27,
-        "38 mock-up pixels are 27,1 screen pixels at 96 DPI"
-    );
-    assert_eq!(
-        ours, reference,
-        "the entry of the mock-up's own face lands on the mock-up's own height"
-    );
-
-    // The measurement is still a measurement: a face two pixels taller makes a row two
-    // pixels taller, which is what «высота по-прежнему растёт вместе с начертанием» means.
-    for taller in [1, 2, 7, 40] {
-        assert_eq!(
-            tray::menu_item_height(MENU_FACE_HEIGHT + taller, SCREEN_DPI),
-            ours + taller,
-            "the air is added to the measurement, not substituted for it"
-        );
-    }
-
-    // And the air itself scales with the display, or the row would be squat at 150 %.
-    let mut previous = 0;
-
-    for dpi in [SCREEN_DPI, 120, 144, 192] {
-        let height = tray::menu_item_height(MENU_FACE_HEIGHT, dpi);
-
-        println!("  {dpi} DPI: {height} px for a {MENU_FACE_HEIGHT} px face");
-
-        assert!(
-            height > previous,
-            "the air of the entry must grow with the display scale"
-        );
-
-        previous = height;
-    }
-}
-
-#[test]
-fn the_rule_of_the_menu_is_the_line_the_mock_up_strokes() {
-    // **Point 2 of T-11-22.** The rule used to be the system's engraved groove — two lines,
-    // 160,160,160 and 255,255,255, on a 9 px band of 240,240,240. The mock-up draws a band of
-    // the ground with one line of `$T.Sep` across its middle, held off both edges.
-    let item = windows::Win32::Foundation::RECT {
-        left: 0,
-        top: 40,
-        right: 214,
-        bottom: 48,
-    };
-
-    let inset = theme::scaled(CHROME_SEP_INSET, SCREEN_DPI);
-    let line = tray::menu_separator_line(&item, SCREEN_DPI);
-
-    println!(
-        "inset {CHROME_SEP_INSET} px макета -> {inset} px at 96 DPI; band \
-         {CHROME_SEP_H} px макета -> {} px; line {}..{} x {}..{}",
-        theme::scaled(CHROME_SEP_H, SCREEN_DPI),
-        line.left,
-        line.right,
-        line.top,
-        line.bottom
-    );
-
-    assert_eq!(
-        theme::scaled(CHROME_SEP_H, SCREEN_DPI),
-        8,
-        "eleven mock-up pixels are 7,9 screen pixels at 96 DPI"
-    );
-    assert_eq!(
-        inset, 9,
-        "twelve mock-up pixels are 8,6 screen pixels at 96 DPI"
-    );
-    assert_eq!(
-        (line.left, line.right),
-        (item.left + inset, item.right - inset),
-        "the line is held off both edges of the entry"
-    );
-    assert_eq!(
-        line.bottom - line.top,
-        1,
-        "and is one screen pixel thick, at this scale and at every other"
-    );
-
-    // On the vertical middle of the band — `($iy + $sepH/2)`.
-    for dpi in [SCREEN_DPI, 120, 144, 192] {
-        let band = theme::scaled(CHROME_SEP_H, dpi);
-        let stripe = windows::Win32::Foundation::RECT {
-            left: 0,
-            top: 40,
-            right: 214,
-            bottom: 40 + band,
-        };
-        let line = tray::menu_separator_line(&stripe, dpi);
-
-        println!(
-            "  {dpi} DPI: band {band} px, line y {}..{} x {}..{}",
-            line.top, line.bottom, line.left, line.right
-        );
-
-        assert_eq!(
-            line.top,
-            (stripe.top + stripe.bottom) / 2,
-            "the line lies on the middle of the band at {dpi} DPI"
-        );
-        assert!(
-            line.top >= stripe.top && line.bottom <= stripe.bottom,
-            "and inside it at {dpi} DPI"
-        );
-        assert!(
-            line.left > stripe.left && line.right < stripe.right,
-            "held off both edges at {dpi} DPI"
-        );
-    }
-}
-
 #[test]
 fn the_entries_are_drawn_in_the_face_this_program_names_for_itself() {
     // **Criterion 10 of T-11-21.** The entries are measured and drawn in `lfMenuFont` of
@@ -2947,14 +2241,6 @@ fn menu_logfont() -> LOGFONTW {
     .expect("SPI_GETNONCLIENTMETRICS must answer");
 
     metrics.lfMenuFont
-}
-
-/// `SM_CXMENUCHECK`, the width of the check column of a menu entry.
-fn check_column() -> i32 {
-    // SAFETY: reads a system-wide metric, takes no pointer and touches no memory of ours.
-    let metric = unsafe { GetSystemMetrics(SM_CXMENUCHECK) };
-
-    if metric > 0 { metric } else { 16 }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -5833,8 +5119,7 @@ fn applying_a_configuration_publishes_its_language_into_the_running_process() {
         NO_DIALOG,
         NO_ABOUT,
         &NOTHING_PENDING,
-    )
-    .expect("the menu must build");
+    );
     let labels: Vec<&str> = menu
         .items()
         .iter()
@@ -6315,7 +5600,8 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     assert_eq!(tray::file_version(), None);
 }
 
-/// The windows of the shell (`ui::host`, class `LangSwitcher.Shell`) this thread has, top-level.
+/// The windows of the shell (`ui::host`, classes `LangSwitcher.Shell` and `.Popup`) this thread
+/// has, top-level.
 #[cfg(feature = "testing")]
 fn shell_windows_of_this_thread() -> Vec<HWND> {
     use windows::Win32::Foundation::TRUE;
@@ -6328,7 +5614,7 @@ fn shell_windows_of_this_thread() -> Vec<HWND> {
         // SAFETY: a window Windows enumerates and a buffer of this frame.
         let length = unsafe { GetClassNameW(hwnd, &mut name) };
         let class = String::from_utf16_lossy(&name[..usize::try_from(length).unwrap_or(0)]);
-        if class == "LangSwitcher.Shell" {
+        if class.starts_with("LangSwitcher.Shell") {
             // SAFETY: the pointer `shell_windows_of_this_thread` passed, alive across the call.
             unsafe { &mut *(found.0 as *mut Vec<HWND>) }.push(hwnd);
         }
@@ -6474,6 +5760,319 @@ fn the_menu_is_a_window_of_the_shell_and_no_code_calls_track_popup_menu() {
         "the menu must not be Windows' own any more: {calls:#?}"
     );
     assert!(opens, "`show_menu` must open the menu of the shell");
+}
+
+// ---------------------------------------------------------------------------------------
+// The menu of the icon on the shell — task T-120-15
+// ---------------------------------------------------------------------------------------
+//
+// The menu is made as the product makes it and left hidden (`tray_menu::testing`): nothing shows
+// on the screen of the machine the tests run on. The test window is a `STATIC`, whose procedure
+// does not hand messages to the tray, so what the menu posts to the program's window is taken off
+// the queue here and given to `tray::handle_ui_message` by hand.
+
+/// The callback of the icon: `event` in the low word of `lParam`, the point in `wParam`.
+#[cfg(feature = "testing")]
+fn press_the_icon(event: u32) {
+    use lang_switcher::ui::windows::tray_menu;
+
+    const WM_APP_TRAY: u32 = WM_APP + 2;
+    tray_menu::testing::hidden_while(|| {
+        tray::handle_ui_message(
+            WM_APP_TRAY,
+            packed_point(1800, 1000),
+            LPARAM(event as isize),
+        )
+    });
+}
+
+/// Lets the menu `menu` handle what is queued for it — the close it posted to itself.
+#[cfg(feature = "testing")]
+fn pump_the_menu(menu: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, MSG, PM_REMOVE, PeekMessageW};
+
+    let mut message = MSG::default();
+    for _ in 0..50 {
+        // SAFETY: the queue of this thread, read for one window of it.
+        if !unsafe { PeekMessageW(&mut message, Some(menu), 0, 0, PM_REMOVE) }.as_bool() {
+            break;
+        }
+        // SAFETY: a message just taken off this thread's queue.
+        unsafe { DispatchMessageW(&message) };
+    }
+}
+
+/// Takes the «command chosen» the menu posted to `owner` off the queue, and says whether there was
+/// one.
+#[cfg(feature = "testing")]
+fn take_the_chosen(owner: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{MSG, PM_REMOVE, PeekMessageW};
+
+    let mut message = MSG::default();
+    // SAFETY: the queue of this thread, read for one message of one window.
+    unsafe {
+        PeekMessageW(
+            &mut message,
+            Some(owner),
+            tray::WM_APP_MENU_CHOSEN,
+            tray::WM_APP_MENU_CHOSEN,
+            PM_REMOVE,
+        )
+    }
+    .as_bool()
+}
+
+/// **The menu is a window of the shell; a second press on the icon closes it and opens nothing;**
+/// the press that has just closed it opens nothing either, and a press after that opens it again.
+#[cfg(feature = "testing")]
+#[test]
+fn a_second_press_on_the_icon_closes_the_menu_and_a_later_one_opens_it_again() {
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-press");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window();
+    let first = shell_windows_of_this_thread();
+
+    press_the_icon(WM_CONTEXTMENU);
+    if let Some(menu) = menu {
+        pump_the_menu(menu);
+    }
+    let after_second = (
+        tray::open_menu_window(),
+        shell_windows_of_this_thread().len(),
+    );
+
+    press_the_icon(WM_CONTEXTMENU);
+    let at_once = shell_windows_of_this_thread().len();
+
+    std::thread::sleep(tray::MENU_REPRESS + std::time::Duration::from_millis(100));
+    press_the_icon(WM_CONTEXTMENU);
+    let later = shell_windows_of_this_thread();
+
+    println!(
+        "menu {menu:?}, windows {first:?}; after the second press {after_second:?}; a press at \
+         once: {at_once}; later: {later:?}"
+    );
+    for hwnd in later.iter().chain(first.iter()) {
+        // SAFETY: windows of this thread; a gone one refuses.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert_eq!(first.len(), 1, "the press opens one menu of the shell");
+    assert_eq!(menu, first.first().copied(), "and the tray records it");
+    assert_eq!(after_second, (None, 0), "the second press closes it");
+    assert_eq!(
+        at_once, 0,
+        "the press that has just closed it opens nothing"
+    );
+    assert_eq!(later.len(), 1, "a press after that opens it again");
+}
+
+/// **Esc closes the menu, and nothing is chosen.**
+#[cfg(feature = "testing")]
+#[test]
+fn esc_closes_the_menu_and_runs_nothing() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_KEYDOWN};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-esc");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window().expect("the press opens the menu");
+    // SAFETY: a key to a live window of this thread.
+    unsafe {
+        SendMessageW(
+            menu,
+            WM_KEYDOWN,
+            Some(WPARAM(usize::from(VK_ESCAPE.0))),
+            None,
+        )
+    };
+    pump_the_menu(menu);
+
+    let chosen = take_the_chosen(window.handle);
+    println!("after Esc: {:?}, chosen {chosen}", tray::open_menu_window());
+
+    assert_eq!(tray::open_menu_window(), None, "Esc closes the menu");
+    assert!(
+        shell_windows_of_this_thread().is_empty(),
+        "and the window is gone"
+    );
+    assert!(!chosen, "and nothing runs");
+}
+
+/// **Losing the foreground closes the menu** — a click beside it, Win, Alt+Tab: the menu must not
+/// stay hanging (the lesson of Э73).
+#[cfg(feature = "testing")]
+#[test]
+fn losing_the_foreground_closes_the_menu() {
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WA_INACTIVE, WM_ACTIVATE};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-focus");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window().expect("the press opens the menu");
+    // SAFETY: a message to a live window of this thread.
+    unsafe { SendMessageW(menu, WM_ACTIVATE, Some(WPARAM(WA_INACTIVE as usize)), None) };
+    pump_the_menu(menu);
+
+    // Read before the windows of a failed run are cleaned away: the cleaning clears the record.
+    let left = shell_windows_of_this_thread();
+    let recorded = tray::open_menu_window();
+    let chosen = take_the_chosen(window.handle);
+    println!("after losing the foreground: {recorded:?}, windows {left:?}");
+    for hwnd in &left {
+        // SAFETY: windows of this thread.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert_eq!(recorded, None, "the menu goes with the foreground");
+    assert!(left.is_empty(), "and its window is gone");
+    assert!(!chosen, "and nothing runs");
+}
+
+/// **A chosen item runs its command once the menu is gone** — the order of the menu of Windows:
+/// «Приостановить» chosen by the keys, the menu closes, the command arrives after it.
+#[cfg(feature = "testing")]
+#[test]
+fn a_chosen_item_runs_its_command_once_the_menu_is_gone() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_RETURN};
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_KEYDOWN};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-choice");
+    let _ui = attach_ui(&window, &home);
+    let before = live(Tray::enabled);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window().expect("the press opens the menu");
+    for key in [VK_DOWN, VK_RETURN] {
+        // SAFETY: a key to a live window of this thread.
+        unsafe { SendMessageW(menu, WM_KEYDOWN, Some(WPARAM(usize::from(key.0))), None) };
+    }
+    let unchanged_while_up = live(Tray::enabled);
+    pump_the_menu(menu);
+    let gone = tray::open_menu_window().is_none() && shell_windows_of_this_thread().is_empty();
+    let chosen = take_the_chosen(window.handle);
+    if chosen {
+        tray::handle_ui_message(tray::WM_APP_MENU_CHOSEN, WPARAM(0), LPARAM(0));
+    }
+    let after = live(Tray::enabled);
+
+    println!(
+        "enabled {before} → while the menu goes {unchanged_while_up} → after {after}; gone {gone}, \
+         chosen {chosen}"
+    );
+
+    assert_eq!(
+        unchanged_while_up, before,
+        "nothing runs while the menu is up"
+    );
+    assert!(gone, "the choice closes the menu");
+    assert!(chosen, "and the command is posted to the program's window");
+    assert_ne!(after, before, "«Приостановить» ran once the menu was gone");
+}
+
+/// **Opened from the keyboard — Enter or Space on the icon — the first item is marked.**
+#[cfg(feature = "testing")]
+#[test]
+fn the_menu_opened_from_the_keyboard_marks_its_first_item() {
+    const NIN_KEYSELECT: u32 = 0x0401;
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-keys");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(NIN_KEYSELECT);
+    let menu = tray::open_menu_window().expect("the keys open the menu");
+    let focus = lang_switcher::ui::host::probe(menu).and_then(|probe| probe.focus);
+    println!("the menu opened from the keyboard marks {focus:?}");
+    // SAFETY: a window of this thread.
+    let _ = unsafe { DestroyWindow(menu) };
+
+    assert_eq!(focus.as_deref(), Some("Toggle"), "the first item is marked");
+}
+
+/// Prints the menu of the icon into `LANGSW_UI_MENU_DIR` for C3: its five states (plain, with the
+/// letters, suspended, needing a restart, with the settings window up), in Russian and in Hebrew
+/// (mirrored), both themes, 100 and 150 %. Drawn into memory by the code that draws the window.
+#[cfg(feature = "testing")]
+#[test]
+fn print_the_menu_of_the_icon() {
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::layout::{client_size, lay_out, menu_width};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::{Color, Theme};
+    use lang_switcher::ui::windows::tray_menu;
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    let Some(folder) = std::env::var_os("LANGSW_UI_MENU_DIR") else {
+        return;
+    };
+    // SAFETY: the apartment of this test's thread, for the whole test (`Art` outlives each canvas).
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut art = lang_switcher::ui::art::Art::new();
+    let folder = std::path::Path::new(&folder);
+    std::fs::create_dir_all(folder).expect("the folder of the pictures");
+    let _strings = product_strings(Language::Ru);
+
+    for language in [Language::Ru, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("the text of the language");
+        for (name, window) in tray_menu::states(language) {
+            let width = menu_width(&window, &text);
+            let first = lay_out(&window, client_size(width, 200.0), 1.0, rtl, &text);
+            let size = client_size(width, 200.0 + first.shortfall.h);
+            let layout = lay_out(&window, size, 1.0, rtl, &text);
+            for theme in [Theme::Light, Theme::Dark] {
+                for scale in [1.0_f32, 1.5] {
+                    let look = Look {
+                        theme,
+                        rtl,
+                        b: layout.b,
+                        h: size.h,
+                        text: &text,
+                    };
+                    let mut canvas =
+                        Canvas::in_memory(size.w, size.h, scale, Mode::Direct2D).expect("a canvas");
+                    canvas.frame_with(Some(&mut art), |painter| {
+                        painter.clear(Color::Bg.get(theme));
+                        for item in &layout.items {
+                            let state = if item.id.is_some_and(|id| window.disabled.contains(&id)) {
+                                State::DISABLED
+                            } else {
+                                State::NORMAL
+                            };
+                            elements::draw(painter, &look, &item.part, item.rect, state);
+                        }
+                    });
+                    let file = folder.join(format!(
+                        "{name}-{}-{}-{}.png",
+                        language.tag(),
+                        if theme == Theme::Dark {
+                            "dark"
+                        } else {
+                            "light"
+                        },
+                        (scale * 100.0) as u32
+                    ));
+                    canvas.save_png(&file).expect("the picture is written");
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
