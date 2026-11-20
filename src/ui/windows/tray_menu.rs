@@ -79,13 +79,20 @@ pub struct TrayMenu {
 
 impl TrayMenu {
     fn state(&self) -> (MenuState, u16) {
-        if tray::resume_is_refused(self.now.enabled, self.now.fail_safe) {
-            (MenuState::Restart, IDS_STATUS_RESTART)
-        } else if self.now.enabled {
-            (MenuState::Working, IDS_STATUS_WORKING)
-        } else {
-            (MenuState::Paused, IDS_STATUS_SUSPENDED)
-        }
+        status(self.now.enabled, self.now.fail_safe)
+    }
+}
+
+/// The state of the program — its dot and its words: «Работает», «Приостановлена», «Нужен
+/// перезапуск». One source for the head of this menu and for the block «Состояние» of the window of
+/// the settings (T-120-21).
+pub fn status(enabled: bool, fail_safe: bool) -> (MenuState, u16) {
+    if tray::resume_is_refused(enabled, fail_safe) {
+        (MenuState::Restart, IDS_STATUS_RESTART)
+    } else if enabled {
+        (MenuState::Working, IDS_STATUS_WORKING)
+    } else {
+        (MenuState::Paused, IDS_STATUS_SUSPENDED)
     }
 }
 

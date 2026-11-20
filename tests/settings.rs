@@ -8941,8 +8941,8 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 /// program's own (3265, 3266) — 245 + 2.
 ///
 /// ⚠ **267 since task T-120-17** — the two buttons of the card «Поддержать автора» of «От автора»
-/// (слово владельца 208.178), keys of their own — 265 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 267] = [
+/// (слово владельца 208.178), keys of their own — 272 + 2 = 274 since the merge of the shell after Б.
+const FR_94_STRINGS: [(u16, &str, &str); 274] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -9188,6 +9188,33 @@ const FR_94_STRINGS: [(u16, &str, &str); 267] = [
         "Подробности для автора",
         "Details for the author",
     ),
+    (settings::IDS_STATUS_COPY, "Копировать", "Copy"),
+    (
+        settings::IDS_SECTION_GENERAL_SUB,
+        "Запуск, звук, флаг в трее, язык и вид программы",
+        "Startup, sound, tray flag, language and look",
+    ),
+    (
+        settings::IDS_SECTION_HOTKEY_SUB,
+        "Одна клавиша исправляет набранный текст и переключает раскладку",
+        "One key fixes the typed text and switches the layout",
+    ),
+    (
+        settings::IDS_SECTION_LAYOUTS_SUB,
+        "Между какими раскладками переводить текст",
+        "Which layouts the text is fixed between",
+    ),
+    (
+        settings::IDS_SECTION_EXCLUSIONS_SUB,
+        "Программы, в которых Lang Switcher не вмешивается",
+        "Programs Lang Switcher stays out of",
+    ),
+    (
+        settings::IDS_SECTION_DIAGNOSTICS_SUB,
+        "Журнал помогает автору разобраться, если что-то пошло не так",
+        "The journal helps the author see what went wrong",
+    ),
+    (settings::IDS_SETTINGS_EYEBROW, "Настройки", "Settings"),
     (
         settings::IDS_LAYOUT_NOTE,
         "В сеансе нет раскладки, названной в файле ({0}) — выберите заново.",
@@ -15412,8 +15439,14 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        267,
-        "two hundred and SIXTY-SEVEN identifiers in use since task T-120-17: the two buttons of $e         the card «Поддержать автора» of «От автора» (3305, 3306). Two hundred and sixty-five since $e         task T-120-20: the note of a refused write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
+        274,
+        "two hundred and SEVENTY-FOUR identifiers in use since the merge of the shell after Б: \
+         the two buttons of the card «Поддержать автора» of «От автора» (3305, 3306, task \
+         T-120-17). \
+         Two hundred and seventy-two since the C3 of task T-120-20: the subtitles of the five \
+         sections and the eyebrow of the window (3307…3312). Two hundred and sixty-six since task T-120-21: «Копировать» of the window of «Подробности \
+         для автора» (3295). Two hundred and sixty-five since task T-120-20: the note of a refused \
+         write of the settings (3303) and the badge «новое» (3304). Two hundred and sixty-three since the texts of «Привет» (T-120-16): the line under its \
          body (3294). Two hundred and sixty-two since the header of the window in the corner \
          that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \
          the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \

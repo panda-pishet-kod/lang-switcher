@@ -70,6 +70,11 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
             .into_iter()
             .map(|(name, window)| (name, window.map(&|id| id as u16))),
     );
+    all.extend(
+        settings::details_states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&|id| id as u16))),
+    );
     // The menu of the icon (T-120-15) in its five states.
     all.extend(
         tray_menu::states(language)
