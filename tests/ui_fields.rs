@@ -11,14 +11,15 @@ use lang_switcher::ui::scene::{ButtonKind, Event, FieldKind, ListItem, Node, Win
 use lang_switcher::ui::tokens::{Color, Theme};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateCompatibleDC, DeleteDC, GetBkColor, GetObjectW, GetTextColor, HGDIOBJ,
     LOGFONTW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyboardState, SetKeyboardState, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_NEXT, VK_RETURN,
-    VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    GetKeyState, GetKeyboardState, SetKeyboardState, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_NEXT,
+    VK_RETURN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, ES_MULTILINE, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, IsWindow,
@@ -149,7 +150,14 @@ impl Content for Form {
 struct Open {
     hwnd: HWND,
     events: Rc<RefCell<Vec<Event<Id>>>>,
+    /// This test's turn: let go after the window is closed (`Drop` runs before the fields go).
+    _turn: MutexGuard<'static, ()>,
 }
+
+/// The windows of these tests open one at a time. A window that gains the foreground has the key
+/// state of its thread synced by Windows, and a Shift another test holds for its thread goes with
+/// it: the windows of one test binary must not take the foreground from each other.
+static ONE_WINDOW: Mutex<()> = Mutex::new(());
 
 impl Open {
     fn with(rows: usize, checks: bool, language: (&str, bool), theme: ThemeSetting) -> Self {
@@ -177,8 +185,13 @@ impl Open {
             language: (language.0.to_owned(), language.1),
             theme,
         };
+        let turn = ONE_WINDOW.lock().unwrap_or_else(PoisonError::into_inner);
         let hwnd = host::create(content, None).expect("the window of the shell");
-        let open = Self { hwnd, events };
+        let open = Self {
+            hwnd,
+            events,
+            _turn: turn,
+        };
         send(open.hwnd, WM_PAINT, 0, 0);
         open
     }
@@ -215,17 +228,22 @@ impl Open {
         send(target, WM_KEYDOWN, usize::from(key), 0);
     }
 
-    /// The same key with Shift held, for this thread only.
-    fn key_with_shift(&self, key: u16) {
+    /// The same key with Shift held (`shift`) or up, for this thread only; whether Shift was still
+    /// so once the key was taken. Windows syncs the key state of a thread whose window gains the
+    /// foreground with the keyboard of the machine — a window of another program closing is enough,
+    /// and a Shift pressed there comes in — so a step whose Shift changed is no trial of the window.
+    fn key_with_shift(&self, key: u16, shift: bool) -> bool {
         let mut state = [0_u8; 256];
         // SAFETY: the key state of this thread, into and out of a local of the size asked.
         unsafe {
             let _ = GetKeyboardState(&mut state);
             let saved = state;
-            state[usize::from(VK_SHIFT.0)] = 0x80;
+            state[usize::from(VK_SHIFT.0)] = if shift { 0x80 } else { 0 };
             let _ = SetKeyboardState(&state);
             self.key(key);
+            let held = GetKeyState(i32::from(VK_SHIFT.0)) < 0;
             let _ = SetKeyboardState(&saved);
+            held == shift
         }
     }
 
@@ -307,27 +325,35 @@ fn tab_from_a_field_goes_to_the_next_element() {
 /// way back, out of a field too.
 #[test]
 fn tab_walks_the_fields_the_list_and_the_buttons_both_ways() {
-    let open = Open::new();
     let order = ["Name", "Note", "Layouts", "Apply", "Close"];
+    // A step whose Shift Windows changed meanwhile is no trial: the walk is made again in a fresh
+    // window, three times at most.
+    for _ in 0..3 {
+        if walk(&Open::new(), &order) {
+            return;
+        }
+    }
+    panic!("Windows changed Shift in three walks: no trial of the window");
+}
 
-    for expected in order.iter().chain(order.first()) {
+/// Tab through `order` and round to its first, then Shift+Tab the whole way back; false when
+/// Windows changed the Shift of this thread in a step (no trial).
+fn walk(open: &Open, order: &[&str]) -> bool {
+    let forth = order.iter().chain(order.first()).map(|to| (to, false));
+    let back = order.iter().rev().map(|to| (to, true));
+    for (expected, shift) in forth.chain(back) {
         let from = open.focus();
-        open.key(VK_TAB.0);
+        if !open.key_with_shift(VK_TAB.0, shift) {
+            return false;
+        }
+        let keys = if shift { "Shift+Tab" } else { "Tab" };
         assert_eq!(
             open.focus().as_deref(),
             Some(*expected),
-            "Tab from {from:?} did not reach {expected}"
+            "{keys} from {from:?} did not reach {expected}"
         );
     }
-    for expected in order.iter().rev() {
-        let from = open.focus();
-        open.key_with_shift(VK_TAB.0);
-        assert_eq!(
-            open.focus().as_deref(),
-            Some(*expected),
-            "Shift+Tab from {from:?} did not reach {expected}"
-        );
-    }
+    true
 }
 
 /// The keys of the list select rows and give the event with the row; the end of a list of 20
@@ -443,6 +469,7 @@ fn a_field_tells_the_window_what_is_typed_and_passes_enter_and_esc() {
     assert_eq!(open.events(), [Event::Pressed(Id::Close)]);
     open.pump();
     assert!(!open.alive(), "Enter in the field did not press «Close»");
+    drop(open);
 
     let open = Open::new();
     open.key(VK_TAB.0);

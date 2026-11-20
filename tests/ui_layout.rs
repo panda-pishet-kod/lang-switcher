@@ -1389,6 +1389,50 @@ fn a_list_given_room_fills_it_with_its_frame() {
     );
 }
 
+/// **A field of many lines given room fills it** (T-120-19, the text of the appeal on the wizard's
+/// last step): its frame reaches down the room as a list's does, its label above it; a field of one
+/// line keeps its height.
+#[test]
+fn a_field_of_many_lines_given_room_fills_it() {
+    let in_fill = |node: Node<Id>| {
+        let window = bare(Node::Column(vec![
+            text(Role::Title, "Appeal"),
+            Node::Fill(Box::new(node)),
+        ]));
+        lay(&window, usual())
+    };
+    let field = |kind| Node::Field {
+        id: Id::Site,
+        label: "The text".to_owned(),
+        value: String::new(),
+        hint: String::new(),
+        kind,
+    };
+    let list = in_fill(Node::List {
+        id: Id::Language,
+        rows: Vec::new(),
+        selected: 0,
+        first: 0,
+    });
+    let room_end = rects_of(&list, |part| matches!(part, Part::List(_)))[0].bottom();
+    for kind in [FieldKind::Text, FieldKind::Code] {
+        let layout = in_fill(field(kind));
+        let input = rects_of(&layout, |part| matches!(part, Part::Input { .. }))[0];
+        assert!(
+            close(input.bottom(), room_end),
+            "{kind:?}: {input:?}, the room down to {room_end}"
+        );
+        let label = texts(&layout)[1];
+        assert!(input.y >= label.bottom(), "the label above: {label:?}");
+    }
+    let line = in_fill(field(FieldKind::Line));
+    let input = rects_of(&line, |part| matches!(part, Part::Input { .. }))[0];
+    assert!(
+        input.bottom() < room_end - input.h,
+        "a line keeps its height: {input:?}"
+    );
+}
+
 /// **A small window opens at the least size of the passport** (T-120-21 Б: the details for the
 /// author — five lines and two buttons): 620 × 500 while the work area holds it; a work area smaller
 /// still gives it all of itself, as to any window.
