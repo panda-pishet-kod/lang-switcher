@@ -2049,6 +2049,19 @@ impl Wizard {
         road[self.step.min(road.len() - 1)]
     }
 
+    /// **The words of the step on the screen** — [`step_words`], but the page of the idea of a
+    /// report about the translation is headed «Нашли ошибку в переводе?», the words of its button
+    /// in «Общие» (T-120-22, C3 of the controller): «Опишите идею» does not go with «Что написано
+    /// сейчас?» and «Как правильно?». The explanation under it stays.
+    pub fn words(&self) -> StepWords {
+        let step = self.current();
+        let mut words = step_words(step, self.post);
+        if step == Step::Idea && self.draft.reports_translation().is_some() {
+            words.title = settings::IDS_TRANSLATION_REPORT;
+        }
+        words
+    }
+
     /// Whether this is the last step — the one whose button says «Готово».
     pub fn is_last(&self) -> bool {
         self.step + 1 >= self.road().len()
@@ -2108,6 +2121,17 @@ impl Wizard {
         Self::with(draft, report::facts_now(), layouts)
     }
 
+    /// **The wizard of «Нашли ошибку в переводе?»** (T-120-22) — [`Wizard::now`] already on the page
+    /// of the idea, its appeal marked with `language`: the first line names the language and the
+    /// two fields ask what it says now and how it should say. The rest of the road is the idea's.
+    pub fn for_translation(language: Language) -> Self {
+        let mut wizard = Self::now();
+        wizard.draft.trouble = report::Trouble::Idea;
+        wizard.draft.translation = Some(language);
+        wizard.step = 1;
+        wizard
+    }
+
     /// A wizard of the given answers and facts on its first step — [`Wizard::now`], and the
     /// descriptions of the instrument of fitting and of the pictures (`ui::windows::wizard`).
     pub fn with(draft: report::Draft, facts: report::Facts, layouts: Vec<String>) -> Self {
@@ -2130,11 +2154,13 @@ impl Wizard {
     /// itself, not of the window (T-120-19, the C3 of the controller): the appeal is data for the
     /// author. The first line is the name of the program and its version, Latin in every language;
     /// the first letter after it is a label of the report in the language it was built in — the
-    /// English stand-ins until the wave included — or what the person wrote over it.
+    /// English stand-ins until the wave included — or what the person wrote over it. A report about
+    /// the translation (T-120-22) has one line more above the name: its mark, skipped with it.
     pub fn appeal_reads_right_to_left(&self) -> bool {
+        let heading = 1 + usize::from(self.draft.reports_translation().is_some());
         self.text
             .lines()
-            .skip(1)
+            .skip(heading)
             .flat_map(str::chars)
             .find(|letter| letter.is_alphabetic())
             .is_some_and(|letter| {
@@ -2444,6 +2470,7 @@ pub fn wizard_pages() -> Vec<(&'static str, Wizard)> {
         idea: "Флаг текущей раскладки в трее, как у Punto Switcher".to_owned(),
         helps: "Привычка: видно раскладку, не глядя на РУС/ENG".to_owned(),
         attach: Attach::default(),
+        translation: None,
     };
     let facts = Facts {
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -2488,6 +2515,12 @@ pub fn wizard_pages() -> Vec<(&'static str, Wizard)> {
             page(Trouble::WrongResult, 4, Post::Ready, false),
         ),
         ("wizard idea", page(Trouble::Idea, 1, Post::Ready, false)),
+        // T-120-22: the idea page of a report about the translation — its own two labels.
+        ("wizard translation", {
+            let mut wizard = page(Trouble::Idea, 1, Post::Ready, false);
+            wizard.draft.translation = Some(Language::De);
+            wizard
+        }),
         (
             "wizard sent",
             page(Trouble::WrongResult, 4, Post::Ready, true),
@@ -3699,8 +3732,9 @@ pub mod testing {
         hidden_while(|| super::open_author_view(owner, super::settings::ui_language(), view, false))
     }
 
-    /// Runs `f` with the windows of this module left hidden on this thread.
-    fn hidden_while<R>(f: impl FnOnce() -> R) -> R {
+    /// Runs `f` with the windows of this module left hidden on this thread — also for a test that
+    /// presses, in a window of another module, a button opening one of them (T-120-22).
+    pub fn hidden_while<R>(f: impl FnOnce() -> R) -> R {
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
@@ -4706,6 +4740,36 @@ pub mod report {
         pub helps: String,
         /// Which of the four boxes are ticked.
         pub attach: Attach,
+        /// The language of the interface whose translation the person reports — «Нашли ошибку в
+        /// переводе?» of «Общие» (T-120-22); `None` for every other appeal. Read through
+        /// [`Draft::reports_translation`].
+        pub translation: Option<Language>,
+    }
+
+    impl Draft {
+        /// **The language of a report about the translation** — [`Draft::translation`] on the idea
+        /// road only: a person who came for the translation and chose another card writes an
+        /// ordinary appeal, and coming back to the idea brings the mark back.
+        pub fn reports_translation(&self) -> Option<Language> {
+            self.translation.filter(|_| self.trouble.is_idea())
+        }
+
+        /// The labels of the two fields of the idea road: «Что предлагаете?» and «Чем это
+        /// поможет?», or for a report about the translation «Что написано сейчас?» and «Как
+        /// правильно?» (T-120-22). The page and the appeal read the same two.
+        pub fn idea_labels(&self) -> (u16, u16) {
+            if self.reports_translation().is_some() {
+                (
+                    settings::IDS_WIZARD_TRANSLATION_NOW,
+                    settings::IDS_WIZARD_TRANSLATION_RIGHT,
+                )
+            } else {
+                (
+                    settings::IDS_WIZARD_IDEA_WHAT,
+                    settings::IDS_WIZARD_IDEA_HELPS,
+                )
+            }
+        }
     }
 
     impl Default for Draft {
@@ -4723,6 +4787,7 @@ pub mod report {
                 idea: String::new(),
                 helps: String::new(),
                 attach: Attach::default(),
+                translation: None,
             }
         }
     }
@@ -4767,12 +4832,19 @@ pub mod report {
             IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_NOTHING,
             IDS_WIZARD_CARD_WRONG, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL,
             IDS_WIZARD_FIELD_PASSWORD, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
-            IDS_WIZARD_IDEA_HELPS, IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT,
-            IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES,
+            IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS,
+            IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_TRANSLATION_LINE,
             IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHERE_FIELD, text,
         };
 
         let mut out = String::with_capacity(1024);
+
+        // T-120-22: a report about the translation says so in its very first line, with the code
+        // of the language — «Ошибка в переводе: de»; the rest is the appeal of an idea.
+        if let Some(language) = draft.reports_translation() {
+            out.push_str(&text(IDS_WIZARD_TRANSLATION_LINE).replace("{0}", language.tag()));
+            out.push('\n');
+        }
 
         // The heading is the program's name and this build's version, and it is not
         // translated — it is what the author reads first and has to recognise at a glance.
@@ -4798,8 +4870,9 @@ pub mod report {
         );
 
         if draft.trouble.is_idea() {
-            line(&mut out, &text(IDS_WIZARD_IDEA_WHAT), &draft.idea);
-            line(&mut out, &text(IDS_WIZARD_IDEA_HELPS), &draft.helps);
+            let (what, helps) = draft.idea_labels();
+            line(&mut out, &text(what), &draft.idea);
+            line(&mut out, &text(helps), &draft.helps);
         } else {
             line(&mut out, &text(IDS_WIZARD_PROGRAM), &draft.program);
             line(
@@ -5246,10 +5319,23 @@ pub fn open_wizard(owner: HWND) {
     open_wizard_with(owner, settings::ui_language(), None, true);
 }
 
+/// **Opens the wizard for a report about the translation** — «Нашли ошибку в переводе?» of
+/// «Общие» (T-120-22): on the page of the idea, the appeal marked with `language`, the language of
+/// the window the person read. A wizard that is open already is raised as it is: what the person
+/// typed there is not thrown away for a second press.
+pub fn open_wizard_for_translation(owner: HWND, language: Language) {
+    open_wizard_with(
+        owner,
+        language,
+        Some(Wizard::for_translation(language)),
+        true,
+    );
+}
+
 /// The wizard on `owner` in `language` — a window of the shell since T-120-19
 /// (`ui::windows::wizard`); `held` — the answers of a wizard that closed for a change of the
-/// language ([`language_changed`]), else a fresh one ([`Wizard::now`]). The one that is open is
-/// raised instead.
+/// language ([`language_changed`]) or those of [`Wizard::for_translation`], else a fresh one
+/// ([`Wizard::now`]). The one that is open is raised instead.
 fn open_wizard_with(
     owner: HWND,
     language: Language,

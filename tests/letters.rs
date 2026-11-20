@@ -2226,6 +2226,150 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 }
 
+/// **T-120-22 Б — a report about the translation is the appeal of an idea under the mark of its
+/// language.** Its first line is the mark with the code of the language, «Ошибка в переводе: de»;
+/// under it, word for word, the appeal of the same idea, its two labels those of the translation —
+/// «Что написано сейчас», «Как правильно». The labels are the Russian table's, out of the built
+/// binary.
+///
+/// ⚠ Control: the idea without the mark begins with the name, as before; a trouble carrying the
+/// mark — the person came for the translation and chose another card — is written as without it.
+#[test]
+fn a_report_about_the_translation_is_the_idea_under_the_mark_of_its_language() {
+    use letters::report::{Draft, Facts, Trouble, build};
+    use settings::{
+        IDS_WIZARD_IDEA_HELPS, IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_TRANSLATION_LINE,
+        IDS_WIZARD_TRANSLATION_NOW, IDS_WIZARD_TRANSLATION_RIGHT,
+    };
+
+    let _guard = with_product_strings();
+    let ru = |id| settings::text_in(Language::Ru, id);
+    // A label as the appeal writes it: without its own colon or question mark, then «: ».
+    let label = |id| format!("{}: ", ru(id).trim_end_matches([':', '?']));
+    let idea = Draft {
+        trouble: Trouble::Idea,
+        idea: "Kopieren".to_owned(),
+        helps: "Копировать".to_owned(),
+        ..Draft::default()
+    };
+    let marked = Draft {
+        translation: Some(Language::De),
+        ..idea.clone()
+    };
+    let facts = Facts {
+        version: "1.8.0".to_owned(),
+        ..Facts::default()
+    };
+
+    let plain = build(&idea, &facts);
+    let built = build(&marked, &facts);
+    let (first, rest) = built
+        .split_once("\r\n")
+        .expect("the appeal has more than one line");
+    println!("{built}");
+
+    assert!(
+        ru(IDS_WIZARD_TRANSLATION_LINE).contains("{0}"),
+        "the mark has its place for the code"
+    );
+    assert_eq!(
+        first,
+        ru(IDS_WIZARD_TRANSLATION_LINE).replace("{0}", "de"),
+        "the first line is the mark and the code of the language"
+    );
+    assert_eq!(
+        rest,
+        plain
+            .replace(
+                &label(IDS_WIZARD_IDEA_WHAT),
+                &label(IDS_WIZARD_TRANSLATION_NOW)
+            )
+            .replace(
+                &label(IDS_WIZARD_IDEA_HELPS),
+                &label(IDS_WIZARD_TRANSLATION_RIGHT)
+            ),
+        "under the mark, the appeal of the idea with the labels of the translation"
+    );
+    assert!(
+        rest.contains(&format!("{}Kopieren", label(IDS_WIZARD_TRANSLATION_NOW)))
+            && rest.contains(&format!(
+                "{}Копировать",
+                label(IDS_WIZARD_TRANSLATION_RIGHT)
+            )),
+        "the control: the labels did change"
+    );
+    assert!(
+        plain.starts_with("Lang Switcher 1.8.0\r\n"),
+        "an idea without the mark begins with the name: {plain:?}"
+    );
+    let trouble = Draft {
+        trouble: Trouble::WrongResult,
+        ..marked.clone()
+    };
+    assert_eq!(
+        build(&trouble, &facts),
+        build(
+            &Draft {
+                translation: None,
+                ..trouble.clone()
+            },
+            &facts
+        ),
+        "a trouble is written without the mark"
+    );
+}
+
+/// **T-120-22 Б, C3 of the controller — the page of a report about the translation is headed with
+/// the words of its button, «Нашли ошибку в переводе?»;** the explanation under the heading stays the
+/// idea's, and the page of an ordinary idea keeps «Опишите идею». Out of the Russian table of the
+/// built binary, in the window the page is described for.
+#[test]
+fn the_page_of_a_report_about_the_translation_is_headed_with_the_words_of_its_button() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::wizard;
+    use settings::{IDS_TRANSLATION_REPORT, IDS_WIZARD_IDEA_NOTE, IDS_WIZARD_IDEA_TITLE};
+
+    let _guard = with_product_strings();
+    let ru = |id| format!("{:?}", settings::text_in(Language::Ru, id));
+    let header = |name: &str| {
+        let wizard = letters::wizard_pages()
+            .into_iter()
+            .find(|(page, _)| *page == name)
+            .map(|(_, wizard)| wizard)
+            .unwrap_or_else(|| panic!("the page {name}"));
+        let body = format!(
+            "{:?}",
+            wizard::Page {
+                wizard,
+                language: Language::Ru,
+                theme: lang_switcher::theme::ThemeSetting::Light,
+            }
+            .describe()
+            .body
+        );
+        let at = body.find("Header {").expect("the page has its header");
+        let end = body[at..].find("}").map_or(body.len(), |end| at + end);
+        body[at..end].to_owned()
+    };
+    let (idea, translation) = (header("wizard idea"), header("wizard translation"));
+    println!("idea: {idea}\ntranslation: {translation}");
+
+    assert!(
+        translation.contains(&format!("title: {}", ru(IDS_TRANSLATION_REPORT))),
+        "a report about the translation is headed «Нашли ошибку в переводе?»: {translation}"
+    );
+    assert!(
+        idea.contains(&format!("title: {}", ru(IDS_WIZARD_IDEA_TITLE))),
+        "an ordinary idea keeps «Опишите идею»: {idea}"
+    );
+    for header in [&idea, &translation] {
+        assert!(
+            header.contains(&ru(IDS_WIZARD_IDEA_NOTE)),
+            "the explanation stays: {header}"
+        );
+    }
+}
+
 /// **Stage E107, task T-107-3, решение 199.10 — the line of the contact follows the field.**
 /// «Для связи: …» after an empty line at the end of the text of the appeal, only when there is a
 /// contact, replaced as the contact is typed and taken away when it is erased; what the person
