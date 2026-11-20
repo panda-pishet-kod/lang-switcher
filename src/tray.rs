@@ -2892,7 +2892,16 @@ fn list_timer(timer: usize) {
         && let Some(layout) = give
     {
         // FR-50, the program's own switch — no sound: the person chose, the program completes.
-        let _ = crate::switch::to(layout);
+        let sent = crate::switch::to(layout);
+
+        // ⭐ Defect 3 of the stand (2026-11-20, cmd): a console reads blind (FR-52) and its flag comes
+        // from the name of РУС/ENG — which is hidden whenever the list of the program's own is open
+        // at all. The flag then stayed on the old layout; it shows the one the person chose, which
+        // this program has just given to that very window.
+        if crate::flags::flag_shows_the_given(session.own, reading.blind, &sent) {
+            with_tray(|tray| tray.show_flag_of(Some(layout)));
+            return;
+        }
     }
 
     refresh_flag();
