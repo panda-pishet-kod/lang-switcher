@@ -22,6 +22,7 @@
 use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
 use crate::ui::text::{Align, Measure, Style, Wrap};
+use crate::ui::tokens::shape::CHEVRON;
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
@@ -678,10 +679,7 @@ impl<I: Copy> Placer<'_, I> {
                 label,
                 options,
                 selected,
-            } => {
-                let value = options.get(*selected).map_or("", String::as_str);
-                self.choice(*id, label, value, x, y, w)
-            }
+            } => self.choice(*id, label, options, *selected, x, y, w),
             Node::Sections { id, items, current } => self.sections(*id, items, *current, x, y, w),
             Node::Field {
                 id,
@@ -1121,8 +1119,7 @@ impl<I: Copy> Placer<'_, I> {
             return above + track_h;
         }
 
-        let value = options.get(selected).cloned().unwrap_or_default();
-        self.choice(id, label, &value, x, y, w)
+        self.choice(id, label, options, selected, x, y, w)
     }
 
     /// A choice card: the card is pressed as a whole; the radio button before the title and its line.
@@ -1196,11 +1193,28 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
-    fn choice(&mut self, id: I, label: &str, value: &str, x: f32, y: f32, w: f32) -> f32 {
+    /// A label and a choice field as wide as its widest option and its corner mark: the field
+    /// does not change its width with the value (the live stand: «Eng…»).
+    #[allow(clippy::too_many_arguments)]
+    fn choice(
+        &mut self,
+        id: I,
+        label: &str,
+        options: &[String],
+        selected: usize,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
         let style = self.style(Role::Body);
+        let value = options.get(selected).map_or("", String::as_str);
         let (v, h) = (self.em(FIELD_PAD.v), self.em(FIELD_PAD.h));
+        let widest = options
+            .iter()
+            .map(|option| self.width_of(style, option))
+            .fold(0.0, f32::max);
         let (field_w, field_h) = (
-            self.width_of(style, value) + h * 2.0,
+            (widest + h * 2.0 + CHEVRON.at(self.b)).min(w),
             style.line_height() + v * 2.0,
         );
         let gap = self.em(CONTROL_GAP);

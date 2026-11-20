@@ -52,7 +52,9 @@ use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_siz
 use crate::ui::scene::{ButtonKind, Event, Window};
 use crate::ui::scene::{ListItem, Node, WindowKind};
 use crate::ui::text::{Direction, Style, Text};
+use crate::ui::text::{Measure, Wrap};
 use crate::ui::tokens::motion;
+use crate::ui::tokens::{CHECK, CONTROL_GAP, LIST_BAR};
 use crate::ui::tokens::{
     CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, LIST_PAD, LIST_ROW_PAD,
     LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, TYPE_AHEAD_MS, Theme, WINDOW_MAX, WINDOW_MIN,
@@ -190,8 +192,14 @@ enum Place {
     /// the caller measured it.
     Corner(Option<RECT>),
     /// Under a choice field (its rectangle on the screen), or over it where the work area ends: its
-    /// list, at the type size `b` of the window it opens from, `rows` options in all.
-    Under { field: RECT, b: f32, rows: usize },
+    /// list, at the type size `b` of the window it opens from, `rows` options in all, `width`
+    /// points wide.
+    Under {
+        field: RECT,
+        b: f32,
+        rows: usize,
+        width: f32,
+    },
 }
 
 /// What a popup keeps: where it stands and how it comes in.
@@ -864,15 +872,14 @@ impl<C: Content> Host<C> {
         // The list of a choice field: as wide as the field, as many rows as it shows, at the type
         // size of its window (half a point to spare: the rows are counted by flooring).
         if let Some(Popup {
-            place: Place::Under { field, b, rows },
+            place: Place::Under { b, rows, width, .. },
             ..
         }) = &self.popup
         {
             let style = Style::of(Role::Body, *b, WINDOW_MIN.h.0);
             let row = style.line_height() + LIST_ROW_PAD.v.at(*b) * 2.0;
             let shown = (*rows).clamp(1, DROPDOWN_ROWS.0 as usize) as f32;
-            let w = (field.right - field.left) as f32 / self.scale;
-            return (w, LIST_PAD.at(*b) * 2.0 + row * shown + 0.5);
+            return (*width, LIST_PAD.at(*b) * 2.0 + row * shown + 0.5);
         }
         let w = CORNER_WIDTH.0;
         let mut h = WINDOW_MIN.h.0;
@@ -1050,7 +1057,22 @@ impl<C: Content> Host<C> {
             right: ends[1].x,
             bottom: ends[1].y,
         };
+        // As wide as the field, and wider when an option needs it: no option is cut.
+        let widest = self.text.as_ref().map_or(0.0, |text| {
+            let style = Style::of(Role::Body, b, WINDOW_MIN.h.0);
+            options
+                .iter()
+                .map(|option| text.measure(option, style, Wrap::OneLine, f32::MAX).width)
+                .fold(0.0, f32::max)
+        });
         let rows = options.len();
+        let around = LIST_PAD.at(b) * 2.0
+            + LIST_ROW_PAD.h.at(b) * 2.0
+            + CHECK.at(b)
+            + CONTROL_GAP.at(b)
+            + LIST_BAR.0
+            + LIST_PAD.at(b);
+        let width = (widest + around).max((field.right - field.left) as f32 / scale);
         let mut state = DropState {
             options,
             current,
@@ -1071,7 +1093,12 @@ impl<C: Content> Host<C> {
             theme: self.content.theme(),
         };
         let popup = Popup {
-            place: Place::Under { field, b, rows },
+            place: Place::Under {
+                field,
+                b,
+                rows,
+                width,
+            },
             at: (0, 0),
             from_right: true,
             since: None,
