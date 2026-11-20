@@ -96,7 +96,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetDlgItemTextW, GetParent, GetWindowRect, IDOK, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
     SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SW_SHOWNORMAL,
     SendDlgItemMessageW, UISF_HIDEFOCUS, WM_APP, WM_ERASEBKGND, WM_GETFONT, WM_MOUSEMOVE,
-    WM_NCDESTROY, WM_PAINT, WM_QUERYUISTATE, WNDPROC, WS_EX_LAYOUTRTL,
+    WM_NCDESTROY, WM_PAINT, WM_QUERYUISTATE, WNDPROC,
 };
 use windows::core::{Error as WinError, PCWSTR, PWSTR, w};
 
@@ -5651,65 +5651,9 @@ impl Drop for CaptureSession {
     }
 }
 
-/// Resource identifier of the dialog template in `app.rc`.
-///
-/// ⚠ Kept equal to `IDD_SETTINGS` there by hand, because a `.rc` file and a Rust file have no
-/// shared header. A mismatch is not silent: `DialogBoxParamW` fails outright and the failure is
-/// reported, which is the reason the number is far away from the icon identifiers.
-pub const IDD_SETTINGS: u16 = 200;
-
 // =========================================================================================
 // The mirror — вопрос 97, task Т-30-2. Both windows of the program go through here.
 // =========================================================================================
-
-/// Byte offset of `exStyle` inside a `DLGTEMPLATEEX`: `dlgVer` (2) + `signature` (2) +
-/// `helpID` (4).
-///
-/// `rc.exe` compiles a `DIALOGEX` statement — which both templates of this program are — into
-/// the extended form, whose first two fields are the version and the signature `0xFFFF` that
-/// tell it apart from the old `DLGTEMPLATE`. Both are checked before this offset is used, so a
-/// template that is somehow the old form is left alone rather than patched at the wrong place.
-const DLGTEMPLATEEX_EXSTYLE_AT: usize = 8;
-
-/// Adds `WS_EX_LAYOUTRTL` to the `exStyle` of a compiled dialog template, in place — the pure
-/// half of [`show_modal_dialog`], task Т-30-2.
-///
-/// Answers what the extended style was and what it became, or `None` for a buffer that is not a
-/// `DLGTEMPLATEEX` — too short to hold the header, or carrying something other than the version
-/// and signature that mark the extended form. That refusal is the whole reason this is a
-/// function and not four lines at the call site: a `DLGTEMPLATE` of the **old** form keeps
-/// `style` where the extended one keeps `signature`, so patching at this offset without looking
-/// would quietly corrupt a window style instead of adding one.
-///
-/// Public so that a test can drive it over a template that is not this program's, which is the
-/// only way to check the refusal at all: both templates in `app.rc` are `DIALOGEX`.
-pub fn mirror_template(template: &mut [u8]) -> Option<(u32, u32)> {
-    let at = DLGTEMPLATEEX_EXSTYLE_AT;
-
-    // SEC-05: a length that came from somebody else is checked before it is indexed with.
-    if template.len() < at + 4 {
-        return None;
-    }
-
-    let version = u16::from_le_bytes([template[0], template[1]]);
-    let signature = u16::from_le_bytes([template[2], template[3]]);
-
-    if (version, signature) != (1, 0xFFFF) {
-        return None;
-    }
-
-    let before = u32::from_le_bytes([
-        template[at],
-        template[at + 1],
-        template[at + 2],
-        template[at + 3],
-    ]);
-    let after = before | WS_EX_LAYOUTRTL.0;
-
-    template[at..at + 4].copy_from_slice(&after.to_le_bytes());
-
-    Some((before, after))
-}
 
 // =========================================================================================
 // Шрифт по экрану — вопрос 143, этап Э83. The copy of the template the mirror patches carries
@@ -5933,12 +5877,6 @@ pub fn tallest_window_units_in(language: Language, face: i32) -> i32 {
         .unwrap_or_else(|| table.iter().copied().max().unwrap_or(0))
 }
 
-/// [`tallest_window_units_in`] the language of the interface in force — what the rule of the
-/// step counts with when a window opens ([`font_step_for`]).
-pub fn tallest_window_units(face: i32) -> i32 {
-    tallest_window_units_in(ui_language().in_force(), face)
-}
-
 /// **The rule of the step — решение 143.1**, the pure half of задача T-83-2: the step the six
 /// windows open at on a monitor whose work area is `work_area` pixels tall, whose DPI is `dpi`,
 /// and whose windows of this style cost `frame` pixels besides their client area.
@@ -6110,28 +6048,8 @@ pub fn screen_of(owner: HWND, template: &[u8]) -> Option<Screen> {
 const IDC_LANGUAGE: i32 = 1002;
 const IDC_THEME: i32 = 1003;
 
-const IDC_HOTKEY: i32 = 1010;
 const IDC_PAIR_SOURCE: i32 = 1022;
 const IDC_PAIR_TARGET: i32 = 1023;
-const IDC_CYCLE_LIST: i32 = 1024;
-const IDC_EXCLUSIONS: i32 = 1050;
-const IDC_EXCLUSION_NAME: i32 = 1051;
-
-// The static text of the dialog — group boxes and labels. They carried -1 until FR-94 needed
-// to replace their text, and a control identified by -1 is a control `GetDlgItem` cannot find.
-const IDC_GROUP_GENERAL: i32 = 1090;
-// ⚠ **1092 is retired, not free** — task Т-31-3, решение 99.4. It was `IDC_LANGUAGE_RESTART`,
-// the two-line static «вступит в силу после перезапуска», and it is gone from the template with
-// the sentence it carried. The place right of the language combo stays empty: решение 87
-// accepted these coordinates by eye and nothing else moves because a neighbour left.
-const IDC_GROUP_HOTKEY: i32 = 1093;
-const IDC_GROUP_LAYOUTS: i32 = 1095;
-// 1099..1103 — the five statics of «Замена» and «Выделение», retired by task Т-23-2 together
-// with the six controls above; see the note there.
-const IDC_GROUP_EXCLUSIONS: i32 = 1104;
-const IDC_GROUP_DIAGNOSTICS: i32 = 1106;
-const IDC_GROUP_STATE: i32 = 1108;
-
 /// The combo box index of one theme setting — FR-92а, task T-11-3.
 ///
 /// The appearance combo of the dialog is filled with the three strings [`IDS_THEME_SYSTEM`],
@@ -6523,54 +6441,6 @@ pub fn modifier_label(modifiers: u16) -> String {
         .join(HOTKEY_JOINER)
 }
 
-/// Shows the settings dialog of FR-92, modally, and returns when it closes.
-///
-/// `apply` is called with the configuration the user has assembled every time they press
-/// «Применить» or «ОК», and never otherwise — «Отмена» leaves the file and the running program
-/// exactly as they were. The caller decides what applying means: this module writes no file of
-/// somebody else's and publishes nothing to another thread, because section 6.3 gives the
-/// publication of the configuration to the owner of it, and section 6.2 gives the dialog to
-/// this module.
-///
-/// ⚠ **Modal.** `DialogBoxParamW` runs a message loop until the dialog ends, so the caller must
-/// hold no borrow of anything the window procedure of this thread can reach — the same rule the
-/// tray states for `TrackPopupMenuEx` and `MessageBoxW`.
-/// Why a settings window is being put on the screen — решение 99.1, task Т-31-2.
-///
-/// The ordinary opening and the one that follows a change of the direction of writing differ in
-/// two visible ways, and both are the решение: where the window goes, and where the focus is.
-// ⚠ No `Eq`: `RECT` of the crate derives `PartialEq` and not `Eq`, and a rectangle is what the
-// second variant carries. Nothing here needs the stronger one.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum Opening {
-    /// A person asked for the settings. `DS_CENTER` places the window and the dialog manager
-    /// chooses the focus, exactly as they always have.
-    #[default]
-    Fresh,
-    /// «Применить» changed the direction of writing, so the window is being built again.
-    ///
-    /// It sits down where the previous one stood, in its own size ([`reopened_window`]) — `Some`,
-    /// the rectangle of the previous one and the ordinary case —
-    /// and the focus goes on the language combo, where the hand that caused this left it. A
-    /// `None` rectangle is the degraded path of [`DialogState::reopen_at`]: the window is
-    /// still rebuilt, and `DS_CENTER` decides where.
-    Again(Option<RECT>),
-}
-
-/// How a showing of the settings window ended — решение 99.1, task Т-31-2.
-///
-/// A third answer beside «ОК» and «Отмена», and the only one the caller has to act on: the two
-/// ways of closing are both «the window is gone», and the loop of [`crate::tray::open_settings`]
-/// leaves on either.
-// ⚠ No `Eq`, for the reason [`Opening`] above has none.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DialogOutcome {
-    /// The window was closed — «ОК», «Отмена», `Esc` or the cross.
-    Closed,
-    /// The direction of writing changed under it: show it again, in this rectangle.
-    Reopen(Option<RECT>),
-}
-
 /// Whether a settings dialog of FR-92 is on the screen of **this** thread — task T-13-14.
 ///
 /// The published half of [`DIALOG_OPEN`], and the whole of what leaves this module about it:
@@ -6843,26 +6713,6 @@ pub fn button_color_roles(control: i32, hot: bool, pressed: bool, disabled: bool
 // Поэтому рамка стала **столбцом** таблицы [`button_color_roles`], а обёртки нет: четыре окна
 // больше не могут спрашивать не то, что спрашивает пятое. Единственная строка без рамки —
 // `IDC_ABOUT_NAME`, и она написана там же, в таблице.
-
-/// The six group panels of FR-92 — FR-92а, tasks T-11-5c and T-11-13.
-///
-/// The single place the six are listed. Since task T-11-13 they are not visible elements
-/// at all (`NOT WS_VISIBLE` in `app.rc`) and no `WM_DRAWITEM` can reach them: what reads
-/// this list now is [`background_figure`], which tells the dialog's own background drawing
-/// that the rectangle of one of these controls is a panel — and [`collect_panel_children`],
-/// which reads it to split the dialog's children into the panels and the controls that may
-/// lie on one.
-///
-/// Eight until task Т-23-2: «Замена» left the dialog whole and «Выделение» was dissolved
-/// into «Общие» (решения 81 и 82).
-const GROUP_BOXES: [i32; 6] = [
-    IDC_GROUP_GENERAL,
-    IDC_GROUP_HOTKEY,
-    IDC_GROUP_LAYOUTS,
-    IDC_GROUP_EXCLUSIONS,
-    IDC_GROUP_DIAGNOSTICS,
-    IDC_GROUP_STATE,
-];
 
 /// The identifiers of the controls whose rectangle lies on one of the panels — FR-92а,
 /// task T-11-5c, the pure half of the panel map.
@@ -7310,22 +7160,6 @@ pub const LIST_CHECK_TEXT_GAP: i32 = 7;
 /// mock-up length and putting it through [`scaled`] would claim a proportion nobody measured.
 pub const LVIEW_LABEL_INDENT: i32 = 4;
 
-/// What `SysListView32` adds to the height of the cell of its state image list to arrive at
-/// the height of a row, in screen pixels — measured on the live control, task T-12-7.
-///
-/// The same kind of number as [`LVIEW_LABEL_INDENT`] and named for the same reason: the row
-/// height of a report list view is the cell height and nothing a message can reach
-/// ([`install_check_images`]), but it is not *equal* to it. Measured on the stand at 96 DPI:
-/// the cell is 23 px tall (`ImageList_GetIconSize` — `dialog_units` of
-/// [`LAYOUT_ROW_HEIGHT_DLU`], `MulDiv(12, 15, 8)`), and `LVM_GETITEMRECT` with `LVIR_BOUNDS`
-/// answers `0,2,229,26` and `0,26,229,50` — rows **24** px tall, pitch 24. One pixel more than
-/// the cell, on every row, which is finding **F5**/**BLIND-6**: 24 px against the 22,5 px of
-/// the mock-ups.
-///
-/// So the cell is handed the row of the mock-ups **less this**, and the control's own pixel
-/// puts it back — [`install_check_images`] is the one place that arithmetic lives.
-pub const LVIEW_ROW_OVERHEAD: i32 = 1;
-
 /// Thickness of the pen of the tick of the layout list, in **tenths** of a mock-up pixel —
 /// the `[single]1.8` of the `'lview'` arm.
 pub const LIST_CHECK_PEN_TENTHS: i32 = 18;
@@ -7516,79 +7350,6 @@ pub const PANEL_CAPTION_TRACKING_TENTHS: i32 = 11;
 pub fn panel_caption(text: &str) -> String {
     text.to_uppercase()
 }
-
-/// What the dialog's own background draws under one control — FR-92а, task T-11-13, the
-/// pure half of the background drawing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BackgroundFigure {
-    /// A group panel: the rounded [`theme::Palette::panel_bg`] fill under a single-pixel
-    /// [`theme::Palette::panel_border`] frame, over the control's whole rectangle, with the
-    /// caption of the (invisible) control at its top edge.
-    Panel,
-    /// An input field or a list: the rounded [`theme::Palette::field_bg`] fill under a
-    /// single-pixel [`theme::Palette::field_border`] frame, drawn outside the control's
-    /// rectangle — so the corners the rounding cuts away are the field's own colour and not
-    /// the panel's. How far outside is [`field_frame_air`]'s answer for a field and
-    /// [`theme::LIST_FIRST_ROW_TOP`] above a list.
-    Field,
-}
-
-/// What the background draws under the control with this identifier — `None` for every
-/// control the background leaves alone.
-///
-/// The single place the two lists meet, and the reason the background drawing needs no
-/// geometry of its own: it walks the dialog's children, asks this function about each
-/// identifier, and paints what it answers inside that child's own rectangle.
-pub fn background_figure(control: i32) -> Option<BackgroundFigure> {
-    if GROUP_BOXES.contains(&control) {
-        return Some(BackgroundFigure::Panel);
-    }
-
-    if FRAMED_FIELDS.contains(&control) {
-        return Some(BackgroundFigure::Field);
-    }
-
-    None
-}
-
-/// The two input fields and two lists that lost `WS_BORDER` in task T-11-13 — п. 2.3.
-///
-/// The system border was a sunken rectangle in the system's colours; these four now carry
-/// the rounded [`theme::Palette::field_border`] frame the mock-ups show, drawn by the
-/// dialog's background one pixel outside each rectangle. The list is what
-/// [`background_figure`] answers `Field` for, and a test reads the same four identifiers
-/// out of the built binary to check that not one of them kept `WS_BORDER`.
-///
-/// Seven until task Т-23-2 took the three `ES_NUMBER` millisecond fields off the window.
-const FRAMED_FIELDS: [i32; 4] = [
-    IDC_HOTKEY,
-    IDC_EXCLUSION_NAME,
-    IDC_EXCLUSIONS,
-    IDC_CYCLE_LIST,
-];
-
-/// The height of the box the mock-ups draw around an input field, in vertical **dialog
-/// units** — the `h = 12` of every `'edit'` row of the generator.
-///
-/// Read straight off `scratchpad\ui.ps1`: the five fields of the pictures are
-/// `@{t='edit'; …; h=12}` (lines 108, 130, 135, 137 and 142), and the `'edit'` arm strokes
-/// its frame **inside** that rectangle. Twelve of these units are `MulDiv(12, 15, 8)` = 23
-/// pixels of the window at 96 DPI, and grow with the font at every other DPI because
-/// `MapDialogRect` is what maps them ([`dialog_units`]) — the number is never a pixel count
-/// written down by hand.
-///
-/// # Why the box is not simply the control's own rectangle
-///
-/// A single-line `EDIT` lays its text along the **top** of its client area and no documented
-/// message moves it down: `EM_SETMARGINS` ([`set_field_margins`]) moves the two sides only,
-/// and `EM_SETRECT` is documented for multiline controls. So a control as tall as the box
-/// leaves the whole surplus underneath the text — the 3 above and 11 below that task T-12-3
-/// was given to close. The lever this file holds is the same one task T-11-16 used for the
-/// two lists: **where the frame is drawn**. The template gives the control exactly one
-/// [`DIALOG_FONT_HEIGHT_DLU`] — one em box, nothing to spare — and the background draws this
-/// box around it, centred, so the air of the picture is above and below the text in equal
-/// halves.
-pub const FIELD_BOX_DLU: i32 = 12;
 
 // =========================================================================================
 // Стоимость фона: одна готовая картинка вместо восьми панелей на каждую перерисовку —
@@ -8992,39 +8753,6 @@ pub fn shortened_client_height(wanted_client: i32, frame: i32, work_area: i32) -
     Some((work_area - frame).max(1))
 }
 
-/// How wide the window has to be so that a scroll bar covers none of its controls — task
-/// T-42-12a, finding 124б.3.
-///
-/// `WS_VSCROLL` takes its width out of the **client** area, and every control of this window was
-/// laid out against the client width the template declared. So a window given a scroll bar
-/// without being widened loses that much of its right-hand side **under the bar** — which is
-/// exactly what the owner saw on `e61`: «прокрутка налезает на кнопки».
-///
-/// Pure, and public so the test calls the very function the window calls.
-pub fn widened_for_scroll_bar(window_width: i32, bar: i32) -> i32 {
-    window_width + bar.max(0)
-}
-
-/// **Where a window that has grown to its content stands** — решение 143.10 (а), задача T-83-3.
-///
-/// `DS_CENTER` centres a window in the work area **for the height of its template**, before
-/// `WM_INITDIALOG`, and the window that then grows to its content grows **downwards** whole
-/// (measured: «От автора» at 100 % stood 130 px from the top and 36 from the bottom). The rule of
-/// the step (решение 143.1) weighs the tallest window as if it stood in the middle, so a grown
-/// window that would not keep [`FONT_STEP_AIR`] above and below where it stands is put **in the
-/// middle of the work area** — never above its top. A window that keeps the air stays exactly where
-/// it stands: at 100 % on the owner's screen that is every window, and not a pixel moves.
-///
-/// Pure: all four numbers are pixels of the screen — the window's top and height, the work area's
-/// top and bottom.
-pub fn grown_window_top(top: i32, height: i32, work_top: i32, work_bottom: i32) -> i32 {
-    if top - work_top >= FONT_STEP_AIR && work_bottom - (top + height) >= FONT_STEP_AIR {
-        return top;
-    }
-
-    (work_top + (work_bottom - work_top - height) / 2).max(work_top)
-}
-
 /// How far one line of the scroll goes, in pixels — task T-42-12.
 ///
 /// A row of the layout list is twelve dialog units and the tallest thing in the window that a
@@ -9311,15 +9039,6 @@ pub(crate) fn get_text(hwnd: HWND, control: i32) -> String {
 // and the faces and pitches of the name and the body (`about_*_logfont`,
 // `about_body_line_pitch`) are still drawn with by «От автора» (`letters`), whose head is the
 // head the old window had; they go when that window moves to the shell (T-120-17).
-
-/// The size of the about window's logo in **mock-up pixels** — finding A-08, task T-12-4.
-///
-/// The generator's literal: `Draw-AppIcon $g ($aX + 28) ($aY + 76) 56` —
-/// `scratchpad-Э11\chrome.ps1:193`. Through [`scaled`] that is **40 px** at 96 DPI, which is
-/// the number the protocol measured the mock-up at and the number the window used to miss by
-/// eight: an `SS_ICON` static loads the 32 px frame of the `.ico` and ignores the units its
-/// statement declares, so the template could not ask for 40 however it was written.
-pub const ABOUT_LOGO_SIZE: i32 = 56;
 
 // =========================================================================================
 // The window kit `letters` builds its own windows out of — task Т-32-3, §6.2
