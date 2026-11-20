@@ -111,7 +111,7 @@ pub const EXCUSED: &[Excuse] = &[
         window: "author",
         class: Class::Narrow,
         languages: &[
-            "be", "cy", "hy", "ka", "km", "kn", "lb", "ml", "ta", "te", "uz-Cyrl",
+            "be", "hy", "ka", "km", "kn", "ml", "ta", "te", "uz-Cyrl",
         ],
         category: Some(Category::Wave),
         until: "T-120-24",
