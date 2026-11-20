@@ -7351,3 +7351,118 @@ fn the_details_button_opens_their_window_over_the_settings() {
     );
     assert_eq!(owner, opened, "owned by the window of the settings");
 }
+
+/// **T-120-22 Б — the red before.** With the interface in German, «Общие» of the window of the
+/// settings holds the quiet button «Нашли ошибку в переводе?», and its press opens the wizard on the
+/// page of the idea marked with the language: the two fields ask what it says now and how it should,
+/// and one «Далее» on, the appeal begins with the mark and the code `de`. The press goes through the
+/// product's own content and the wizard's own, as a person's clicks do.
+#[cfg(feature = "testing")]
+#[test]
+fn the_translation_button_of_the_general_section_opens_the_wizard_marked_with_the_language() {
+    use lang_switcher::letters;
+    use lang_switcher::ui::host::probe;
+    use lang_switcher::ui::windows::settings as window_of_settings;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_PAINT};
+
+    // A hidden window draws no frame and lays nothing out until it is asked: one frame before
+    // every reading, as `click_the_element` draws one before its press.
+    let painted_probe = |hwnd: HWND| {
+        // SAFETY: a message to a live window of this thread.
+        unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+        probe(hwnd)
+    };
+
+    let window = TestWindow::new();
+    let home = TestDir::new("settings-translation");
+    fs::write(
+        home.config(),
+        "schema_version = 1\n\n[general]\nlanguage = \"de\"\n",
+    )
+    .expect("the configuration file must be writable");
+    let _locale = product_strings(Language::De);
+    let _toggle = toggle_turn();
+    let _ui = attach_ui(&window, &home);
+
+    window_of_settings::testing::hidden_while(|| {
+        tray::dispatch_command(window.handle, tray::CMD_SETTINGS);
+    });
+    let opened = settings::open_window();
+    let button = opened
+        .and_then(painted_probe)
+        .and_then(|probe| {
+            probe
+                .items
+                .into_iter()
+                .find(|(_, id, _)| id.as_deref() == Some("Translation"))
+        })
+        .map(|(part, _, _)| part);
+    let pressed = opened.is_some_and(|hwnd| {
+        letters::testing::hidden_while(|| click_the_element(hwnd, "Translation"))
+    });
+    let wizard = letters::wizard_window();
+    let page: Vec<String> = wizard
+        .and_then(painted_probe)
+        .map(|probe| probe.items.into_iter().map(|(part, _, _)| part).collect())
+        .unwrap_or_default();
+    let moved = wizard
+        .is_some_and(|hwnd| letters::testing::hidden_while(|| click_the_element(hwnd, "Next")));
+    let appeal = wizard
+        .and_then(painted_probe)
+        .and_then(|probe| probe.fields.into_iter().find(|(id, _)| id == "Appeal"))
+        .map(|(_, field)| {
+            let mut buffer = [0u16; 4096];
+            // SAFETY: a field of a live window of this thread, read into a buffer of this frame.
+            let length = unsafe { GetWindowTextW(field, &mut buffer) };
+            String::from_utf16_lossy(&buffer[..usize::try_from(length).unwrap_or(0)])
+        });
+    for hwnd in wizard.iter().chain(opened.iter()) {
+        // SAFETY: windows of this thread; a gone one refuses.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+    let first_line = appeal
+        .as_deref()
+        .and_then(|text| text.lines().next())
+        .map(str::to_owned);
+    let de = |id| settings::text_in(Language::De, id);
+    let label = |id| format!("{:?}", de(id));
+    println!(
+        "settings {opened:?}; button {button:?}, pressed {pressed}; wizard {wizard:?}, moved {moved}; first line {first_line:?}"
+    );
+    settings::set_ui_language(Language::Ru);
+
+    assert!(opened.is_some(), "«Настройки…» opens the window");
+    assert!(
+        button.as_deref().is_some_and(|part| part.contains("Quiet")
+            && part.contains(&label(settings::IDS_TRANSLATION_REPORT))),
+        "«Общие» in German holds the quiet button «Нашли ошибку в переводе?»: {button:?}"
+    );
+    assert!(pressed && wizard.is_some(), "its press opens the wizard");
+    // ⚠ Контроль: the labels of the idea and of the translation differ in German, or the checks
+    // below prove nothing.
+    assert_ne!(
+        de(settings::IDS_WIZARD_IDEA_WHAT),
+        de(settings::IDS_WIZARD_TRANSLATION_NOW)
+    );
+    for (id, shown) in [
+        (settings::IDS_WIZARD_TRANSLATION_NOW, true),
+        (settings::IDS_WIZARD_TRANSLATION_RIGHT, true),
+        (settings::IDS_WIZARD_IDEA_WHAT, false),
+        (settings::IDS_WIZARD_IDEA_HELPS, false),
+    ] {
+        assert_eq!(
+            page.iter().any(|part| part.contains(&label(id))),
+            shown,
+            "the page the wizard opens on: {:?} {}",
+            de(id),
+            if shown { "is there" } else { "is not" }
+        );
+    }
+    assert!(moved, "«Далее» of the page is there to press");
+    assert_eq!(
+        first_line,
+        Some(de(settings::IDS_WIZARD_TRANSLATION_LINE).replace("{0}", "de")),
+        "the appeal begins with the mark and the code of the language"
+    );
+}

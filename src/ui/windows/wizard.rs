@@ -16,11 +16,10 @@ use crate::settings::{
     IDS_WIZARD_CARD_IDEA_SUB, IDS_WIZARD_CARD_NOTHING, IDS_WIZARD_CARD_NOTHING_SUB,
     IDS_WIZARD_CARD_WRONG, IDS_WIZARD_CARD_WRONG_SUB, IDS_WIZARD_CONTACT, IDS_WIZARD_COPY_ADDRESS,
     IDS_WIZARD_COPY_TEXT, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
-    IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT, IDS_WIZARD_IDEA_HELPS,
-    IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_RECEIVED,
-    IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE,
-    IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE, IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP,
-    IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
+    IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
+    IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_RECEIVED, IDS_WIZARD_REPEAT,
+    IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE,
+    IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP, IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
@@ -336,19 +335,12 @@ impl Page {
 
     fn idea(&self) -> Node<Id> {
         let draft = self.wizard.draft();
+        // «Что предлагаете?» and «Чем это поможет?», or for a report about the translation «Что
+        // написано сейчас?» and «Как правильно?» (T-120-22) — the two the appeal writes, too.
+        let (what, helps) = draft.idea_labels();
         Node::Rows(vec![
-            self.field(
-                Id::Proposal,
-                IDS_WIZARD_IDEA_WHAT,
-                &draft.idea,
-                FieldKind::Text,
-            ),
-            self.field(
-                Id::Helps,
-                IDS_WIZARD_IDEA_HELPS,
-                &draft.helps,
-                FieldKind::Text,
-            ),
+            self.field(Id::Proposal, what, &draft.idea, FieldKind::Text),
+            self.field(Id::Helps, helps, &draft.helps, FieldKind::Text),
         ])
     }
 
@@ -425,13 +417,13 @@ impl Page {
     }
 
     /// The row of the window: «Отмена», «Назад» from the second step, and the main button — the
-    /// words of the step (`letters::step_words`); on the thanks «Закрыть» alone.
+    /// words of the step (`letters::Wizard::words`); on the thanks «Закрыть» alone.
     fn buttons(&self) -> Vec<Node<Id>> {
         let step = self.wizard.current();
         if step == Step::Done {
             return vec![self.button(Id::Next, IDS_CLOSE, ButtonKind::Primary)];
         }
-        let words = letters::step_words(step, self.wizard.post());
+        let words = self.wizard.words();
         let mut row = vec![self.button(Id::Cancel, IDS_WIZARD_CANCEL, ButtonKind::Normal)];
         if self.wizard.number() > 0 && !self.failed() {
             row.push(self.button(Id::Back, IDS_WIZARD_BACK, ButtonKind::Normal));
@@ -446,7 +438,7 @@ impl Content for Page {
 
     fn describe(&self) -> Window<Id> {
         let step = self.wizard.current();
-        let words = letters::step_words(step, self.wizard.post());
+        let words = self.wizard.words();
         let failed = self.failed();
         let body = match step {
             Step::What => self.what(),
