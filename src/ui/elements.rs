@@ -24,7 +24,8 @@
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
 use crate::ui::scene::{ButtonKind, Surface};
-use crate::ui::text::{Align, Style, Text, Wrap};
+use crate::ui::text::{Align, Measure, Style, Text, Wrap};
+use crate::ui::tokens::BUTTON_PAD;
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
@@ -407,6 +408,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             multiline,
             value,
             hint,
+            ..
         } => {
             field(painter, look, rect, state);
             let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };
@@ -807,14 +809,34 @@ fn button(
     if let Some(frame) = frame {
         painter.stroke_rect(rect, radius, LINE.0, c(frame));
     }
+    // A label wider than its button (§3а, step 5: the layout made the button taller) goes on to a
+    // second line, inside the paddings.
+    let pad = BUTTON_PAD.h.at(look.b);
+    let mut style = Style::of(Role::Button, look.b, look.h);
+    if let Some(weight) = weight {
+        style = style.with_weight(weight);
+    }
+    let wide = look
+        .text
+        .measure(label, style, Wrap::OneLine, f32::MAX)
+        .width
+        > rect.w - pad * 2.0;
+    let (place, wrap) = if wide {
+        (
+            Rect::new(rect.x + pad, rect.y, (rect.w - pad * 2.0).max(0.0), rect.h),
+            Wrap::Words,
+        )
+    } else {
+        (rect, Wrap::OneLine)
+    };
     write(
         painter,
         look,
         Role::Button,
         weight,
         label,
-        rect,
-        Wrap::OneLine,
+        place,
+        wrap,
         Align::Centre,
         true,
         text,

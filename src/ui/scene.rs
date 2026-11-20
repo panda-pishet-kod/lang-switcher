@@ -153,12 +153,14 @@ pub enum Node<I> {
         words: String,
         buttons: Vec<Node<I>>,
     },
-    /// A line of settings with a switch at its end; the whole line is pressed.
+    /// A line of settings with a switch at its end; the whole line is pressed. `badge` — the
+    /// label «new» after its words (passport §6).
     Toggle {
         id: I,
         label: String,
         hint: Option<String>,
         on: bool,
+        badge: Option<String>,
     },
     /// A check box before its label; the whole line is pressed.
     Check { id: I, label: String, on: bool },
@@ -351,11 +353,13 @@ impl<I> Node<I> {
                 label,
                 hint,
                 on,
+                badge,
             } => Node::Toggle {
                 id: f(id),
                 label,
                 hint,
                 on,
+                badge,
             },
             Node::Check { id, label, on } => Node::Check {
                 id: f(id),
@@ -521,10 +525,15 @@ impl<I> Node<I> {
                 f(Role::Body, words);
                 buttons.iter_mut().for_each(|node| node.texts_mut(f));
             }
-            Node::Toggle { label, hint, .. } => {
+            Node::Toggle {
+                label, hint, badge, ..
+            } => {
                 f(Role::Body, label);
                 if let Some(hint) = hint {
                     f(Role::Small, hint);
+                }
+                if let Some(badge) = badge {
+                    f(Role::Label, badge);
                 }
             }
             Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
@@ -647,6 +656,12 @@ pub struct Taskbar {
 pub enum FieldKind {
     Line,
     Text,
+    /// A field of a key (T-120-20): it shows the key and is not typed in; `capturing` — it takes
+    /// every key now (`Event::KeyDown`, `Event::KeyUp`, `Event::FocusLost`). Out of the capture it
+    /// is no stop of Tab.
+    Key {
+        capturing: bool,
+    },
 }
 
 /// A row of a list.
@@ -676,6 +691,16 @@ pub enum Event<I> {
     Scrolled(I, usize),
     /// The tick the window asked for (`host::Content::tick`, T-120-25).
     Tick,
+    /// The timer of the content's own (`host::Content::timer`, T-120-20).
+    Timer,
+    /// A key went down in the field of a key `id` in its capture: its virtual code. Sent at once,
+    /// inside the key's own message — the keys held with it are read now as they were then.
+    KeyDown { id: I, vk: u16 },
+    /// A key went up there.
+    KeyUp { id: I, vk: u16 },
+    /// The field of a key `id` in its capture lost the keyboard: to the element `to`, or to none —
+    /// a press beside the elements, another window.
+    FocusLost { id: I, to: Option<I> },
 }
 
 impl<I: PartialEq> Node<I> {

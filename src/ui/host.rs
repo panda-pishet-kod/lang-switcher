@@ -146,6 +146,12 @@ pub trait Content {
     fn tick(&self) -> Option<u32> {
         None
     }
+    /// The period of a timer of the content's own, ms (T-120-20): while the window is open the
+    /// content gets `Event::Timer` this often, whatever Windows shows or moves — the pause of a
+    /// double Shift, a count of seconds. Read again after every event; None — no timer.
+    fn timer(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// What the content answers to an event.
@@ -372,6 +378,7 @@ struct OpenDrop<I> {
 const APPEAR_TIMER: usize = 1;
 const PICTURE_TIMER: usize = 2;
 const TICK_TIMER: usize = PICTURE_TIMER + 1;
+const CONTENT_TIMER: usize = TICK_TIMER + 1;
 
 /// The timers of ticks alive in the process (T-120-25): none once no window with a tick is open.
 static TICK_TIMERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -379,6 +386,14 @@ static TICK_TIMERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 /// How many windows of the shell tick now.
 pub fn live_tick_timers() -> usize {
     TICK_TIMERS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The timers of the contents' own alive in the process (T-120-20).
+static CONTENT_TIMERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many windows of the shell run a timer of their content now.
+pub fn live_content_timers() -> usize {
+    CONTENT_TIMERS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The period a window ticks at: what its content asks, while it is shown, not minimised, and
@@ -646,6 +661,8 @@ struct Host<C: Content> {
     animating: bool,
     /// The period the tick timer runs at, while it runs.
     ticking: Option<u32>,
+    /// The period the content's own timer runs at, while it runs.
+    timing: Option<u32>,
 }
 
 /// The class of the windows of the shell: the ordinary one, or the popup's, which carries the
@@ -997,6 +1014,7 @@ impl<C: Content> Host<C> {
             drop: None,
             animating: false,
             ticking: None,
+            timing: None,
         }
     }
 
@@ -1505,6 +1523,35 @@ impl<C: Content> Host<C> {
         self.ticking = wanted;
     }
 
+    /// The content's own timer runs at the period it asks, while the window is open.
+    fn keep_timing(&mut self, hwnd: HWND) {
+        let wanted = self.content.timer();
+        if wanted == self.timing {
+            return;
+        }
+        // SAFETY: the window's own timer.
+        unsafe {
+            match wanted {
+                Some(period) => {
+                    SetTimer(Some(hwnd), CONTENT_TIMER, period, None);
+                }
+                None => {
+                    let _ = KillTimer(Some(hwnd), CONTENT_TIMER);
+                }
+            }
+        }
+        match (self.timing.is_some(), wanted.is_some()) {
+            (false, true) => {
+                CONTENT_TIMERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            (true, false) => {
+                CONTENT_TIMERS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        self.timing = wanted;
+    }
+
     /// The timer of the frames runs while a picture that moves is in the window.
     fn keep_picture_moving(&mut self, hwnd: HWND) {
         let moving = self.layout.as_ref().is_some_and(|layout| {
@@ -1624,6 +1671,7 @@ impl<C: Content> Host<C> {
             .filter_map(|(index, item)| {
                 let Part::Input {
                     multiline,
+                    capture,
                     value,
                     hint,
                 } = &item.part
@@ -1648,6 +1696,7 @@ impl<C: Content> Host<C> {
                         bottom: px(rect.bottom() - pad_v),
                     },
                     multiline: *multiline,
+                    capture: *capture,
                     value,
                     hint,
                     disabled: state.disabled,
@@ -1759,8 +1808,10 @@ impl<C: Content> Host<C> {
         self.lay_out(hwnd);
         // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
         self.sync_fields(hwnd);
+        self.follow_capture(hwnd);
         self.keep_picture_moving(hwnd);
         self.keep_ticking(hwnd);
+        self.keep_timing(hwnd);
         if self.canvas.is_none() {
             let mut client = RECT::default();
             // SAFETY: the out parameter is a local.
@@ -1824,15 +1875,83 @@ impl<C: Content> Host<C> {
             })
     }
 
-    /// The identifiers Tab goes through: the description's order, the unavailable left out.
+    /// The identifiers Tab goes through: the description's order, the unavailable left out, and
+    /// a field of a key out of its capture (it only shows the key, T-120-20).
     fn order(&self) -> Vec<C::Id> {
+        let resting = self.resting_keys();
         self.layout.as_ref().map_or_else(Vec::new, |layout| {
             layout
                 .focus_order()
                 .into_iter()
-                .filter(|id| !self.window.disabled.contains(id))
+                .filter(|id| !self.window.disabled.contains(id) && !resting.contains(id))
                 .collect()
         })
+    }
+
+    /// The fields of a key out of their capture.
+    fn resting_keys(&self) -> Vec<C::Id> {
+        self.layout.as_ref().map_or_else(Vec::new, |layout| {
+            layout
+                .items
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item.part,
+                        Part::Input {
+                            capture: Some(false),
+                            ..
+                        }
+                    )
+                })
+                .filter_map(|item| item.id)
+                .collect()
+        })
+    }
+
+    /// The field of a key that captures now, if any.
+    fn capturing(&self) -> Option<C::Id> {
+        self.layout
+            .as_ref()?
+            .items
+            .iter()
+            .find_map(|item| match item.part {
+                Part::Input {
+                    capture: Some(true),
+                    ..
+                } => item.id,
+                _ => None,
+            })
+    }
+
+    /// The keyboard follows the capture of a field of a key (T-120-20): a field that captures holds
+    /// it; once the capture ends it goes to the element after the field in the order of Tab.
+    /// After `sync_fields`, so that a field whose capture has ended reports no loss.
+    fn follow_capture(&mut self, hwnd: HWND) {
+        if let Some(id) = self.capturing() {
+            if self.focus != Some(id) || !self.fields.has_keyboard() {
+                self.focus = Some(id);
+                self.fields.focus(id);
+            }
+            return;
+        }
+        let Some(focus) = self
+            .focus
+            .filter(|focus| self.resting_keys().contains(focus))
+        else {
+            return;
+        };
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let all = layout.focus_order();
+        let order = self.order();
+        let after = all.iter().position(|id| *id == focus).unwrap_or(0);
+        self.focus = all[after..]
+            .iter()
+            .chain(&all[..after])
+            .find(|id| order.contains(id))
+            .copied();
+        self.give_keyboard(hwnd);
     }
 
     /// The event pressing the element at `index` makes.
@@ -1916,6 +2035,7 @@ impl<C: Content> Host<C> {
             close_later(hwnd);
             return false;
         }
+        self.keep_timing(hwnd);
         self.rebuild();
         self.read_theme(hwnd);
         if self.popup.is_some() {
@@ -2124,6 +2244,10 @@ impl<C: Content> Handler for Host<C> {
                 self.deliver(hwnd, Event::Tick);
                 Some(LRESULT(0))
             }
+            WM_TIMER if wparam.0 == CONTENT_TIMER => {
+                self.deliver(hwnd, Event::Timer);
+                Some(LRESULT(0))
+            }
             WM_TIMER if wparam.0 == PICTURE_TIMER => {
                 self.rebuild();
                 invalidate(hwnd);
@@ -2274,12 +2398,19 @@ impl<C: Content> Handler for Host<C> {
                 self.lay_out(hwnd);
                 self.pressed = self.hit(x, y);
                 self.hover = self.pressed;
+                // A field of a key out of its capture only shows the key: a press on it is beside.
+                let resting = self.resting_keys();
                 if let Some(id) = self
                     .pressed
                     .and_then(|index| self.layout.as_ref()?.items[index].id)
+                    .filter(|id| !resting.contains(id))
                 {
                     self.focus = Some(id);
                     self.give_keyboard(hwnd);
+                } else if let Some(id) = self.capturing() {
+                    // A press beside the elements: the keyboard stays where it is, and a capture
+                    // hears of it as of a loss to none (the old window's «press beside»).
+                    self.deliver(hwnd, Event::FocusLost { id, to: None });
                 }
                 // SAFETY: a live window of this thread.
                 unsafe { SetCapture(hwnd) };
@@ -2348,6 +2479,31 @@ impl<C: Content> Handler for Host<C> {
                 }
                 Some(LRESULT(0))
             }
+            // A key of a field of a key in its capture: at once, to the content.
+            field::WM_FIELD_KEY => {
+                let id = self.fields.id_of(HWND(lparam.0 as *mut _))?;
+                let vk = wparam.0 as u16;
+                let event = if wparam.0 >> u16::BITS == 0 {
+                    Event::KeyDown { id, vk }
+                } else {
+                    Event::KeyUp { id, vk }
+                };
+                self.deliver(hwnd, event);
+                Some(LRESULT(0))
+            }
+            // The field lost the keyboard in its capture: to this window's element now in focus, to
+            // another field, or to none.
+            field::WM_FIELD_LEFT => {
+                let id = self.fields.id_of(HWND(lparam.0 as *mut _))?;
+                let taking = HWND(wparam.0 as *mut _);
+                let to = if taking == hwnd {
+                    self.focus.filter(|focus| *focus != id)
+                } else {
+                    self.fields.id_of(taking)
+                };
+                self.deliver(hwnd, Event::FocusLost { id, to });
+                Some(LRESULT(0))
+            }
             WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => self
                 .fields
                 .colours(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
@@ -2409,6 +2565,11 @@ impl<C: Content> Handler for Host<C> {
                     // SAFETY: the window's own timer.
                     let _ = unsafe { KillTimer(Some(hwnd), TICK_TIMER) };
                     TICK_TIMERS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                if self.timing.take().is_some() {
+                    // SAFETY: the window's own timer.
+                    let _ = unsafe { KillTimer(Some(hwnd), CONTENT_TIMER) };
+                    CONTENT_TIMERS.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 // The window the menu opened from is told it went (KB 135788).
                 if let Some(Popup {

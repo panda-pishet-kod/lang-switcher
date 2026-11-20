@@ -144,4 +144,97 @@ mod live {
             "a tick timer outlived its window"
         );
     }
+
+    /// The id of the content's own timer of the host.
+    const CONTENT_TIMER: usize = 4;
+
+    struct Countdown {
+        timers: Rc<Cell<u32>>,
+        wanted: Rc<Cell<Option<u32>>>,
+    }
+
+    impl Content for Countdown {
+        type Id = u8;
+
+        fn describe(&self) -> Window<u8> {
+            Window {
+                kind: WindowKind::Ordinary,
+                art: None,
+                brand: None,
+                body: Node::Text(Role::Body, format!("{} s", self.timers.get())),
+                buttons: Vec::new(),
+                disabled: Vec::new(),
+            }
+        }
+
+        fn event(&mut self, event: Event<u8>) -> Reply {
+            if event == Event::Timer {
+                self.timers.set(self.timers.get() + 1);
+                if self.timers.get() == 2 {
+                    self.wanted.set(None);
+                }
+            }
+            Reply::Stay
+        }
+
+        fn title(&self) -> String {
+            "Countdown".to_owned()
+        }
+
+        fn language(&self) -> (String, bool) {
+            ("en-US".to_owned(), false)
+        }
+
+        fn theme(&self) -> ThemeSetting {
+            ThemeSetting::Light
+        }
+
+        fn timer(&self) -> Option<u32> {
+            self.wanted.get()
+        }
+    }
+
+    /// **The content's own timer runs while it asks, whatever Windows shows** (T-120-20: the pause
+    /// of a double Shift, a count of seconds) — in a window never shown, with no seam of the tick;
+    /// it stops when the content stops asking and is gone with the window.
+    #[test]
+    fn the_content_s_timer_runs_while_asked_and_dies_with_the_window() {
+        let timers = Rc::new(Cell::new(0));
+        let wanted = Rc::new(Cell::new(Some(50)));
+        let hwnd = host::create(
+            Countdown {
+                timers: timers.clone(),
+                wanted: wanted.clone(),
+            },
+            None,
+        )
+        .expect("the window");
+        send(hwnd, WM_PAINT, 0);
+        assert_eq!(
+            host::live_content_timers(),
+            1,
+            "no timer for a window not shown"
+        );
+
+        send(hwnd, WM_TIMER, CONTENT_TIMER);
+        assert_eq!(timers.get(), 1, "the timer reached the content");
+        assert_eq!(host::live_content_timers(), 1);
+        send(hwnd, WM_TIMER, CONTENT_TIMER);
+        assert_eq!(timers.get(), 2);
+        assert_eq!(host::live_content_timers(), 0, "the content stopped asking");
+
+        // Asked again at the next event; then the window goes with it running.
+        wanted.set(Some(50));
+        send(hwnd, WM_TIMER, CONTENT_TIMER);
+        assert_eq!(host::live_content_timers(), 1);
+        send(hwnd, WM_CLOSE, 0);
+        pump();
+        // SAFETY: a handle by value.
+        assert!(!unsafe { IsWindow(Some(hwnd)) }.as_bool());
+        assert_eq!(
+            host::live_content_timers(),
+            0,
+            "a timer of the content outlived its window"
+        );
+    }
 }

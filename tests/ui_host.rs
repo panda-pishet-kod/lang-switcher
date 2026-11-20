@@ -61,6 +61,7 @@ impl Content for Probe {
                     label: "Autostart".to_owned(),
                     hint: None,
                     on: true,
+                    badge: None,
                 },
                 Node::Check {
                     id: Id::Sound,
