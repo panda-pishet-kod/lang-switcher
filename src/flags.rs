@@ -2312,13 +2312,19 @@ pub struct OwnRow {
     /// The name — the language in its own words, as the lists of the settings window give it
     /// (вопрос 92, the discriminator of решение 82.1 when two rows share it).
     pub name: String,
+    /// The second line — the name Windows gives the keyboard layout (`US`, `Russian`), as in the
+    /// list of Windows; empty when Windows names it nowhere (решение контролёра по вопросу 82,
+    /// 2026-11-20).
+    pub layout_name: String,
 }
 
-/// The rows of the list: every layout of the session in its order, with its code and name. Pure.
+/// The rows of the list: every layout of the session in its order, with its code, its language
+/// name and the name of its keyboard layout. Pure.
 pub fn own_rows(
     session: &[LayoutId],
     names: &[String],
     code_of: impl Fn(LayoutId) -> String,
+    layout_name_of: impl Fn(LayoutId) -> String,
 ) -> Vec<OwnRow> {
     session
         .iter()
@@ -2327,6 +2333,7 @@ pub fn own_rows(
             layout: *layout,
             code: code_of(*layout),
             name: name.clone(),
+            layout_name: layout_name_of(*layout),
         })
         .collect()
 }
@@ -2373,7 +2380,7 @@ pub struct OwnGeometry {
     pub padding: i32,
     /// The height of the title «Раскладка» with its own padding (25).
     pub title: i32,
-    /// The height of a row (40).
+    /// The height of a row — two lines, the language and the keyboard layout (52).
     pub row: i32,
     /// The width of the column of the code (44).
     pub code: i32,
@@ -2393,7 +2400,7 @@ pub fn own_geometry(rows: usize, dpi: i32) -> OwnGeometry {
 
     let padding = at(6);
     let title = at(25);
-    let row = at(40);
+    let row = at(52);
     let separator = at(9);
     let link = at(32);
 
@@ -2557,7 +2564,9 @@ pub fn show_own_list(icon: windows::Win32::Foundation::RECT, current: LayoutId) 
     }
 
     let names = crate::settings::layout_labels(&session, &session);
-    let rows = own_rows(&session, &names, language_code);
+    let rows = own_rows(&session, &names, language_code, |layout| {
+        crate::layouts::display_name(layout).unwrap_or_default()
+    });
     let marked = rows
         .iter()
         .position(|row| row.layout == current)
@@ -2712,12 +2721,17 @@ fn own_end(end: OwnListEnd) {
         return;
     };
 
-    // SAFETY: the live window of this thread, destroyed once (`ended`). Its `WM_ACTIVATE` of the
-    // destruction finds `ended` set and adds nothing.
+    // ⚠ The tray first — it gives the focus back to the person's window **while the list is still
+    // the foreground window of this process**. Destroyed first, the list handed the foreground to
+    // the taskbar and the program's `SetForegroundWindow` was refused (stand T-119-3, Windows 11,
+    // 2026-11-20: the focus and the layout stayed behind 4 times of 4 by the keys). The `WM_ACTIVATE`
+    // that follows finds `ended` set and adds nothing.
+    crate::tray::own_list_ended(end);
+
+    // SAFETY: the live window of this thread, destroyed once (`ended`).
     let _ = unsafe { DestroyWindow(hwnd) };
 
     OWN.with(|own| *own.borrow_mut() = None);
-    crate::tray::own_list_ended(end);
 }
 
 /// Which row (or the link, `Some(usize::MAX)`) a point of the client area falls on. Pure.
@@ -3038,18 +3052,45 @@ fn own_paint(hwnd: windows::Win32::Foundation::HWND) {
                 bold,
                 true,
             );
+            // Two lines as in the list of Windows: the language, and under it, muted, the name of
+            // the keyboard layout (one line, centred, when Windows names no layout).
+            let middle = top + geometry.row / 2;
+            let (first, second) = if row.layout_name.is_empty() {
+                ((top, area.bottom), None)
+            } else {
+                (
+                    (top + at(6), middle + at(1)),
+                    Some((middle + at(1), area.bottom - at(6))),
+                )
+            };
+
             text(
                 &row.name,
                 RECT {
                     left: left + geometry.code + at(8),
-                    top,
+                    top: first.0,
                     right: right - at(8),
-                    bottom: area.bottom,
+                    bottom: first.1,
                 },
                 colours.text,
                 normal,
                 false,
             );
+
+            if let Some((upper, lower)) = second {
+                text(
+                    &row.layout_name,
+                    RECT {
+                        left: left + geometry.code + at(8),
+                        top: upper,
+                        right: right - at(8),
+                        bottom: lower,
+                    },
+                    colours.muted,
+                    small,
+                    false,
+                );
+            }
 
             top += geometry.row;
         }

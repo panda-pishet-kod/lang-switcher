@@ -2573,6 +2573,61 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
 // A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164
 // ---------------------------------------------------------------------------------------
 
+/// The window the person was in when the flag was clicked — the first window of the Z-order that is
+/// visible, not cloaked by DWM, not a tool window, not a part of the shell and not this program's:
+/// the click put the taskbar in front, and the window under it is the one the person typed in.
+///
+/// ⚠ **Stand T-119-3, Windows 11, 2026-11-20:** the window remembered by the re-readings of the flag
+/// alone ([`Tray::last_person`]) was once Блокнот while Edge was in front — Edge came forward with no
+/// re-reading the program saw — and the focus went back to Блокнот. The Z-order is asked at the
+/// click; the remembered window is the fallback.
+fn person_window_in_front() -> Option<usize> {
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GW_HWNDNEXT, GWL_EXSTYLE, GetTopWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
+        GetWindowThreadProcessId, IsWindowVisible, WS_EX_TOOLWINDOW,
+    };
+
+    let me = std::process::id();
+
+    // SAFETY: `None` asks for the top of the desktop's Z-order; a null answer is checked.
+    let mut window = unsafe { GetTopWindow(None) }.ok()?;
+
+    for _ in 0..1024 {
+        // SAFETY: window handles by value and locals; every call answers a value or a failure.
+        let fit = unsafe {
+            let mut cloaked = 0u32;
+            let mut rect = RECT::default();
+            let mut process = 0u32;
+
+            let _ = DwmGetWindowAttribute(
+                window,
+                DWMWA_CLOAKED,
+                (&raw mut cloaked).cast(),
+                u32::try_from(size_of::<u32>()).unwrap_or(4),
+            );
+            let _ = GetWindowRect(window, &mut rect);
+            GetWindowThreadProcessId(window, Some(&mut process));
+
+            IsWindowVisible(window).as_bool()
+                && cloaked == 0
+                && GetWindowLongPtrW(window, GWL_EXSTYLE) & (WS_EX_TOOLWINDOW.0 as isize) == 0
+                && rect.right > rect.left
+                && rect.bottom > rect.top
+                && process != me
+        };
+
+        if fit && !is_shell_window(window.0 as usize) {
+            return Some(window.0 as usize);
+        }
+
+        // SAFETY: a window handle by value; the end of the Z-order answers a failure.
+        window = unsafe { GetWindow(window, GW_HWNDNEXT) }.ok()?;
+    }
+
+    None
+}
+
 /// Whether the window a handle names is a part of the shell — the class through
 /// [`crate::flags::is_shell_window_class`].
 fn is_shell_window(raw: usize) -> bool {
@@ -2616,7 +2671,7 @@ fn open_list() {
         }
 
         tray.list_session = Some(ListSession {
-            target: tray.last_person,
+            target: person_window_in_front().unwrap_or(tray.last_person),
             before: tray.flag_layout().unwrap_or_default(),
             chosen: LayoutId::default(),
             own: false,

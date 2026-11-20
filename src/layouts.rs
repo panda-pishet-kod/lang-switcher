@@ -1421,6 +1421,44 @@ pub fn read_grave_is_bound() -> bool {
     )
 }
 
+/// **The name Windows gives a keyboard layout** — `US`, `United States-International`, `Russian`,
+/// in the language of Windows' interface — what the list of layouts of Windows writes under the
+/// language. Task T-119-3, part Б: the second line of the flag's own list (решение контролёра по
+/// вопросу 82, 2026-11-20 — two layouts of one language share a flag and a language name, and only
+/// this tells them apart). `Layout Display Name` of the layout's [`klid_of`] key through
+/// `SHLoadIndirectString` (the localized resource of `input.dll`), else its plain `Layout Text`;
+/// `None` when Windows names it nowhere. Read-only.
+pub fn display_name(layout: LayoutId) -> Option<String> {
+    let klid = klid_of(layout)?;
+    let key = format!(r"{KEYBOARD_LAYOUTS}\{klid}");
+
+    if let Some(source) = machine_string(&key, "Layout Display Name") {
+        let wide: Vec<u16> = source.encode_utf16().chain(Some(0)).collect();
+        let mut out = [0u16; 256];
+
+        // SAFETY: a NUL-terminated source of this frame and a live buffer whose length the slice
+        // passes; the call writes at most that many units and NUL-terminates.
+        let loaded = unsafe {
+            windows::Win32::UI::Shell::SHLoadIndirectString(
+                windows::core::PCWSTR(wide.as_ptr()),
+                &mut out,
+                None,
+            )
+        };
+
+        if loaded.is_ok() {
+            let length = out.iter().position(|unit| *unit == 0).unwrap_or(out.len());
+            let name = String::from_utf16_lossy(&out[..length]);
+
+            if !name.trim().is_empty() {
+                return Some(name);
+            }
+        }
+    }
+
+    machine_string(&key, "Layout Text").filter(|name| !name.trim().is_empty())
+}
+
 /// **The `KLID` of a loaded layout** — the subkey of [`KEYBOARD_LAYOUTS`] its file is named
 /// under. Решение 195.1, stage Э105 (197.12).
 ///
