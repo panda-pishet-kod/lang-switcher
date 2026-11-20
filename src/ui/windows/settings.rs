@@ -340,7 +340,7 @@ impl Settings {
                 },
                 button(Id::HotkeySet, self.line(set)),
             ]),
-            Node::Line(Role::Small, line),
+            Node::Text(Role::Small, line),
         ]
     }
 
@@ -372,7 +372,7 @@ impl Settings {
         } else {
             let names: Vec<LayoutId> = self.rows.iter().map(|row| row.layout).collect();
             let row_labels = settings::layout_labels(&names, &self.session);
-            nodes.push(Node::Line(Role::Small, self.line(IDS_CYCLE_HINT)));
+            nodes.push(Node::Text(Role::Small, self.line(IDS_CYCLE_HINT)));
             nodes.push(Node::List {
                 id: Id::Cycle,
                 rows: self
@@ -419,9 +419,9 @@ impl Settings {
             // The two ways to add one, side by side as in the mock-up (`.form2`).
             Node::Pair(
                 Box::new(Node::Rows(vec![
-                    Node::Line(Role::Label, self.line(IDS_EXCLUSION_AUTO)),
+                    Node::Line(Role::FieldLabel, self.line(IDS_EXCLUSION_AUTO)),
                     Node::Buttons(vec![button(Id::Pick, self.pick_caption())]),
-                    Node::Line(
+                    Node::Text(
                         Role::Small,
                         self.pick_note
                             .clone()
@@ -457,13 +457,13 @@ impl Settings {
                 self.line(IDS_LOG_ENABLED),
                 self.config.diagnostics.log_enabled,
             ),
-            Node::Line(Role::Label, self.line(IDS_LOG_DIR_LABEL)),
+            Node::Line(Role::FieldLabel, self.line(IDS_LOG_DIR_LABEL)),
             Node::Line(Role::Code, folder),
             Node::Buttons(vec![
                 button(Id::OpenFolder, self.line(IDS_LOG_OPEN)),
                 button(Id::SaveJournal, self.line(save)),
+                button(Id::Write, self.line(IDS_WRITE_TO_AUTHOR)),
             ]),
-            Node::Buttons(vec![button(Id::Write, self.line(IDS_WRITE_TO_AUTHOR))]),
         ];
         if self.journal == Some(false) {
             nodes.insert(0, note(self.line(IDS_LOG_SAVE_FAILED)));
@@ -684,7 +684,7 @@ fn button(id: Id, label: String) -> Node<Id> {
 }
 
 fn note(sentence: String) -> Node<Id> {
-    Node::Surface(Surface::Note, Box::new(Node::Line(Role::Body, sentence)))
+    Node::Surface(Surface::Note, Box::new(Node::Text(Role::Body, sentence)))
 }
 
 impl Content for Settings {
@@ -1042,13 +1042,30 @@ pub mod testing {
 pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     let session = settings::layouts_for_fitting();
     let mut config = Config::default();
-    config.exclusions.processes = vec!["game.exe".to_owned(), "example.exe".to_owned()];
+    // More names than the list shows: the list stands at its full height, the worst case.
+    config.exclusions.processes = [
+        "game.exe",
+        "example.exe",
+        "setup.exe",
+        "telegram.exe",
+        "notepad.exe",
+        "photoshop.exe",
+        "obs64.exe",
+        "steam.exe",
+    ]
+    .map(str::to_owned)
+    .to_vec();
     let mut window = Settings::with_session(config, language, session, Box::new(|_| true));
     let mut all = Vec::new();
     for section in Section::ALL.iter().copied() {
         window.section = section;
         all.push((format!("settings {section:?}"), window.describe()));
     }
+    // The note of a refused write at the top of «Общие» (C6 of the sheet).
+    window.section = Section::General;
+    window.refused = true;
+    all.push(("settings General refused".to_owned(), window.describe()));
+    window.refused = false;
     window.section = Section::Layouts;
     window.config.layouts.mode = LayoutMode::Cycle;
     all.push(("settings Layouts cycle".to_owned(), window.describe()));

@@ -1767,7 +1767,8 @@ fn every_string_fits_its_element_at_every_scale_of_fr_92() {
     // «height of the label» and «width of the button» were measured in the two template windows
     // whose labels and buttons could not grow — the settings and «О программе»; both moved to the
     // shell (stage Э120), whose instrument of fitting reddens their overflows (T-120-11).
-    for kind in ["width beside the glyph"] {
+    {
+        let kind = "width beside the glyph";
         assert!(
             control.iter().any(|o| o.what == kind),
             "the positive control: English lengthened by 40 % must redden «{kind}» somewhere"

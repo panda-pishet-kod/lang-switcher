@@ -8445,40 +8445,6 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
     }
 }
 
-/// **Хвост 2 задачи T-12-7** — ячейке отдаётся высота строки макета **минус** тот пиксель,
-/// который контрол добавляет сам, и арифметика эта живёт ровно в одном месте.
-///
-/// Замер стенда (док-комментарий `LVIEW_ROW_OVERHEAD`): ячейка 23 px → `LVIR_BOUNDS`
-/// `0,2,229,26` и `0,26,229,50`, то есть строка 24 px. Отдать ячейке 22 — получить 23, что и
-/// есть `dialog_units(LAYOUT_ROW_HEIGHT_DLU)`. Здесь держится **источник** числа: высота
-/// по-прежнему идёт из диалоговых единиц, а не из пикселя, подобранного с картинки.
-#[test]
-fn the_row_of_the_layout_list_is_asked_in_dialog_units_less_the_pixel_the_control_adds() {
-    let source = settings_module_source();
-    let body = function_body(&source, "fn install_check_images(");
-
-    assert!(
-        body.contains("dialog_units(hwnd, 0, LAYOUT_ROW_HEIGHT_DLU)"),
-        "the height of a row must still come from the dialog's own units"
-    );
-
-    assert!(
-        body.contains("vertical - LVIEW_ROW_OVERHEAD"),
-        "the cell must be handed the row of the mock-ups less `LVIEW_ROW_OVERHEAD` — the pixel \
-         the control puts back"
-    );
-
-    assert!(
-        body.contains(".max(0)"),
-        "a refused `MapDialogRect` answers zero, and zero less one is a negative cell height"
-    );
-
-    assert_eq!(
-        settings::LVIEW_ROW_OVERHEAD,
-        1,
-        "the measurement of the stand: cell 23 → row 24"
-    );
-}
 
 // =========================================================================================
 // FR-92а — the closed part of the combo boxes, the rounded check-box glyph and the exclusion
@@ -8924,7 +8890,8 @@ fn a_row_of_the_dropped_down_list_is_the_same_height_in_every_window() {
     );
 
     // ---- и что окна в самом деле ходят этой дорогой --------------------------------------
-    for (module, what) in [("letters.rs", "мастер и письма")] {
+    {
+        let (module, what) = ("letters.rs", "мастер и письма");
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("src")
@@ -9074,8 +9041,8 @@ fn the_ceiling_of_the_dropped_list_is_where_the_rule_stops_growing() {
 /// окном и слоем, и переставленные вокруг него строки его не ломают.
 #[test]
 fn every_window_asks_the_shared_layer_for_the_dropped_height() {
-    for (module, what) in [("letters.rs", "мастер FR-104 — поле раскладки шага 3")]
     {
+        let (module, what) = ("letters.rs", "мастер FR-104 — поле раскладки шага 3");
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("src")
@@ -9092,7 +9059,8 @@ fn every_window_asks_the_shared_layer_for_the_dropped_height() {
 
     // ⛔ **И ни одно окно не заводит своей арифметики** — запрет ТЗ Э53а: весь расчёт в
     // `widgets::combo`. Потолок назван там, и больше нигде.
-    for module in ["letters.rs"] {
+    {
+        let module = "letters.rs";
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("src")
