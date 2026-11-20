@@ -50,7 +50,7 @@ use crate::ui::tokens::{
     ON_PICTURE_KEY, ON_PICTURE_KEY_GAP, ON_PICTURE_KEY_LABEL, ON_PICTURE_KEY_MIN,
     ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
-use crate::ui::tokens::{SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD, STATUS_DOT};
+use crate::ui::tokens::{ROW_FIELD_MIN, SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD, STATUS_DOT};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -841,7 +841,7 @@ impl<I: Copy> Placer<'_, I> {
     fn node(&mut self, node: &Node<I>, x: f32, y: f32, w: f32, slot: Option<f32>) -> f32 {
         match node {
             Node::Column(children) => self.column(children, x, y, w, slot, self.em(BLOCK_GAP)),
-            Node::Rows(children) => self.column(children, x, y, w, None, self.em(BLOCK_ROW_GAP)),
+            Node::Rows(children) => self.column(children, x, y, w, slot, self.em(BLOCK_ROW_GAP)),
             Node::Row(children) => self.row(children, x, y, w),
             Node::Pair(left, right) => self.columns(&[left, right], x, y, w, slot),
             Node::Triple(a, b, c) => self.columns(&[a, b, c], x, y, w, slot),
@@ -1665,6 +1665,45 @@ impl<I: Copy> Placer<'_, I> {
     /// Side by side at their own widths, wrapping like the words of a line.
     fn row(&mut self, children: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
         let (gap, line_gap) = (self.em(BUTTON_GAP), self.em(BLOCK_ROW_GAP));
+
+        // A field in a row takes what the others leave (the mock-up's `.inrow`: the field, then its
+        // button beside it), the row aligned at its bottom — while the field keeps its least width;
+        // narrower, the row wraps like words.
+        let fields = children
+            .iter()
+            .filter(|child| matches!(child, Node::Field { .. }))
+            .count();
+        if fields > 0 {
+            let fixed: f32 = children
+                .iter()
+                .filter(|child| !matches!(child, Node::Field { .. }))
+                .map(|child| self.natural_width(child).min(w))
+                .sum();
+            let gaps = gap * children.len().saturating_sub(1) as f32;
+            let rest = (w - fixed - gaps) / fields as f32;
+            if rest >= self.em(ROW_FIELD_MIN) {
+                let widths: Vec<f32> = children
+                    .iter()
+                    .map(|child| match child {
+                        Node::Field { .. } => rest,
+                        _ => self.natural_width(child).min(w),
+                    })
+                    .collect();
+                let heights: Vec<f32> = children
+                    .iter()
+                    .zip(&widths)
+                    .map(|(child, width)| self.height(child, *width, None))
+                    .collect();
+                let line = heights.iter().copied().fold(0.0, f32::max);
+                let mut left = x;
+                for ((child, width), h) in children.iter().zip(&widths).zip(&heights) {
+                    self.node(child, left, y + line - h, *width, None);
+                    left += width + gap;
+                }
+                return line;
+            }
+        }
+
         let (mut left, mut top, mut line) = (x, y, 0.0_f32);
 
         for child in children {
