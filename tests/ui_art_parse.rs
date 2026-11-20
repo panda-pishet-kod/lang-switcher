@@ -706,3 +706,68 @@ fn wizard_dots_and_news_arcs_arrive() {
         .count();
     assert_eq!(arcs, 2);
 }
+
+/// T-120-25: a rectangle named `anchor-…` is a named place, not a shape — kept in the coordinates
+/// of the drawing (through the groups' transforms) and never drawn.
+#[test]
+fn a_rectangle_named_anchor_is_a_named_place_and_not_a_shape() {
+    let read = drawing(
+        r##"<g transform="translate(10 20)"><rect id="anchor-screen" x="5" y="6" width="30" height="12" fill="none"/></g><rect width="4" height="4" fill="#000000"/>"##,
+    )
+    .expect("an anchor is in the subset");
+    assert_eq!(read.shapes.len(), 1, "the anchor was drawn");
+    assert_eq!(read.anchors.len(), 1);
+    let anchor = read.anchors[0];
+    assert_eq!(anchor.name, "screen");
+    assert_eq!(
+        (anchor.x, anchor.y, anchor.width, anchor.height),
+        (15.0, 26.0, 30.0, 12.0)
+    );
+}
+
+/// An `id` on anything else still stops the build, and so does an anchor that would be seen.
+#[test]
+fn an_id_elsewhere_and_a_drawn_anchor_stop_the_build() {
+    for (body, why) in [
+        (
+            r#"<rect id="screen" width="4" height="4" fill="none"/>"#,
+            "not in the subset",
+        ),
+        (r#"<circle id="anchor-dot" r="2" fill="none"/>"#, "id"),
+        (
+            r##"<rect id="anchor-key" width="4" height="4" fill="#000000"/>"##,
+            "is drawn",
+        ),
+        (
+            r##"<rect id="anchor-key" width="4" height="4" fill="none" stroke="#000000"/>"##,
+            "is drawn",
+        ),
+        (
+            r#"<rect id="anchor-" width="4" height="4" fill="none"/>"#,
+            "not in the subset",
+        ),
+    ] {
+        let error = drawing(body).expect_err(body);
+        assert!(
+            error.contains(why),
+            "{body}: «{error}» does not say «{why}»"
+        );
+    }
+}
+
+/// The two places of «Привет» in `res\art\hello.svg`: the screen of the laptop and the place of the
+/// key, as the mock-up has them (`HELLO_REAL` of letters.html).
+#[test]
+fn hello_has_the_screen_and_the_key() {
+    let hello = res_art("hello");
+    let place = |name: &str| {
+        hello
+            .anchors
+            .iter()
+            .find(|anchor| anchor.name == name)
+            .map(|anchor| (anchor.x, anchor.y, anchor.width, anchor.height))
+            .unwrap_or_else(|| panic!("no anchor-{name} in hello.svg"))
+    };
+    assert_eq!(place("screen"), (188.0, 154.0, 160.0, 94.0));
+    assert_eq!(place("key"), (184.0, 276.0, 168.0, 42.0));
+}
