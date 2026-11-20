@@ -471,15 +471,30 @@ pub fn quiet_tick(owner: HWND, sound: bool) {
 /// What the window «Обновлено» says — the block of the release in the language of the interface;
 /// `previous` — the version updated from («Было Y»).
 pub fn release_content(previous: &str) -> Content {
-    use crate::settings::{self, text};
+    release_content_in(crate::settings::ui_language(), previous)
+}
 
-    let language = settings::ui_language();
+/// A string of `language` with `{0}`, `{1}`… filled — `settings::format_text` in a language
+/// named (the instrument of fitting goes over all of them).
+fn filled(language: crate::settings::Language, id: u16, arguments: &[&str]) -> String {
+    let mut filled = crate::settings::text_in(language, id);
+    for (index, argument) in arguments.iter().enumerate() {
+        filled = filled.replace(&format!("{{{index}}}"), argument);
+    }
+    filled
+}
+
+/// [`release_content`] in `language`.
+pub fn release_content_in(language: crate::settings::Language, previous: &str) -> Content {
+    use crate::settings;
+
+    let text = |id| settings::text_in(language, id);
     let build = crate::letters::version_string();
 
     Content {
         about: text(settings::IDS_CORNER_UPDATE),
-        title: settings::format_text(settings::IDS_RELEASE_TITLE, &[&build]),
-        text: settings::format_text(settings::IDS_RELEASE_TEXT, &[previous]),
+        title: filled(language, settings::IDS_RELEASE_TITLE, &[&build]),
+        text: filled(language, settings::IDS_RELEASE_TEXT, &[previous]),
         link: Some((
             text(settings::IDS_RELEASE_CHANGES),
             crate::letters::links::changelog_url(language),
@@ -512,8 +527,14 @@ fn release_ended(end: End) {
 /// page of the taskbar, «Понятно» and ✕ close it. Not a word about dragging the icon — the drag did
 /// not move it (208.113 п. 7).
 pub fn hint_content() -> Content {
-    use crate::settings::{self, text};
+    hint_content_in(crate::settings::ui_language())
+}
 
+/// [`hint_content`] in `language`.
+pub fn hint_content_in(language: crate::settings::Language) -> Content {
+    use crate::settings;
+
+    let text = |id| settings::text_in(language, id);
     Content {
         about: text(settings::IDS_CORNER_FLAG),
         title: text(settings::IDS_HINT_TITLE),

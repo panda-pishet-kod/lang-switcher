@@ -17,5 +17,18 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
             .into_iter()
             .map(|(name, window)| (name, window.map(&|id| id as u16))),
     );
+    // The windows in the corner (T-120-14): the hint of the flag and «Обновлено» in the words of
+    // `corner.rs`; the notice of a letter is built in `letters.rs`.
+    let corners = [
+        ("corner hint", crate::corner::hint_content_in(language)),
+        (
+            "corner updated",
+            crate::corner::release_content_in(language, "1.6.1"),
+        ),
+    ];
+    for (name, content) in corners {
+        let window = corner::describe(&content, false, None);
+        all.push((name.to_owned(), window.map(&|id| id as u16)));
+    }
     all
 }

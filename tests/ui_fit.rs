@@ -16,9 +16,11 @@
 use lang_switcher::settings::{self, INTERFACE_STRINGS, Language};
 use lang_switcher::ui::fit::{self, K};
 use lang_switcher::ui::layout::{Class, Layout, Part, WindowSize, client_size, lay_out};
-use lang_switcher::ui::scene::{ButtonKind, Role, Window};
+use lang_switcher::ui::scene::{ButtonKind, Role, Window, WindowKind};
 use lang_switcher::ui::text::{Direction, MAIN_FACES, MONO_FACES, Measure, Style, Text, Wrap};
-use lang_switcher::ui::tokens::{BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, TYPE_FLOOR, window_b};
+use lang_switcher::ui::tokens::{
+    BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, CORNER_WIDTH, TYPE_FLOOR, window_b,
+};
 use lang_switcher::ui::windows::catalogue;
 use std::collections::BTreeMap;
 use std::os::windows::ffi::OsStrExt;
@@ -117,6 +119,14 @@ fn windows_of(language: Language) -> (Vec<(String, Window<u16>)>, usize) {
 
 /// What fails in `window` at `size`, `k` and direction: a scroll, a cut line, type under 12.
 fn faults(window: &Window<u16>, size: WindowSize, k: f32, rtl: bool, text: &Text) -> Vec<String> {
+    // The window in the corner has its own width and takes the height its content needs: only
+    // what is cut across counts (T-120-14).
+    let size = if window.kind == WindowKind::Corner {
+        let first = lay_out(window, client_size(CORNER_WIDTH.0, size.h), k, rtl, text);
+        client_size(CORNER_WIDTH.0, size.h + first.shortfall.h.max(0.0))
+    } else {
+        size
+    };
     let layout: Layout<u16> = lay_out(window, size, k, rtl, text);
     let mut found = Vec::new();
     if !layout.shortfall.fits() {
