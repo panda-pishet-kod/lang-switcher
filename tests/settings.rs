@@ -3491,11 +3491,12 @@ fn the_button_colour_roles_follow_the_closed_table_of_fr_92a() {
 /// eye in the same sitting.
 #[test]
 fn one_table_answers_every_button_and_the_frame_is_a_column_of_it() {
-    /// «Lang Switcher» — the one frameless control, `IDC_ABOUT_NAME`.
-    const NAME: i32 = 1121;
+    /// «Lang Switcher» — the one frameless control, `IDC_AUTHOR_NAME` of «От автора» (FR-92а:
+    /// «О программе», which carried it too, is a window of the shell now).
+    const NAME: i32 = 1261;
 
     // Every ordinary button of every window, «ОК» and «Отмена» included, in every state.
-    for control in [1, 2, 1012, 1080, 1136, 1265, 1266, 1271, 1278, 1279] {
+    for control in [1, 2, 1012, 1080, 1265, 1266, 1271, 1278, 1279] {
         for hot in [false, true] {
             for pressed in [false, true] {
                 for disabled in [false, true] {
@@ -4998,9 +4999,6 @@ const RT_STRING: PCWSTR = PCWSTR(std::ptr::without_provenance(6));
 /// Identifier `app.rc` gives the dialog of FR-92.
 const IDD_SETTINGS: u16 = 200;
 
-/// Identifier `app.rc` gives the about dialog of FR-92а — task T-11-11.
-const IDD_ABOUT: u16 = 201;
-
 /// The caption of the dialog, written out rather than imported — see the note above.
 const DIALOG_CAPTION: &str = "Lang Switcher — настройки";
 
@@ -5207,10 +5205,10 @@ fn both_windows_of_fr_92_ask_the_task_bar_for_a_button_of_their_own() {
 
     let product = ProductImage::open();
 
-    for (id, what) in [
-        (IDD_SETTINGS, "the settings window of FR-92"),
-        (IDD_ABOUT, "the «О программе» window of FR-92а"),
-    ] {
+    // «О программе» is a window of the shell since FR-92а moved it there: its button on the task
+    // bar is checked on the live window, in `tests\tray.rs`.
+    {
+        let (id, what) = (IDD_SETTINGS, "the settings window of FR-92");
         let template = DialogTemplate::parse(&product.resource(RT_DIALOG, id));
 
         println!("{what}: dwExtendedStyle = 0x{:08X}", template.ex_style);
@@ -5685,40 +5683,14 @@ const OWNER_DRAWN_LABELS: [(u32, &str); 18] = [
     ),
 ];
 
-/// Every `LTEXT` of the about template. The `ICON` is not one of them — see above; neither is
-/// the panel 1125, which is a `Button` exactly as the six panels of the settings dialog are.
-///
-/// Four until task Т-23-4 (решение 82.5) added the «Как пользоваться» block: five numerals and
-/// five rows.
-const OWNER_DRAWN_ABOUT_LABELS: [(u32, &str); 15] = [
-    (1122, "О программе: версия"),
-    (1123, "О программе: первая строка"),
-    (1124, "О программе: вторая строка"),
-    (1126, "Как пользоваться: номер 1"),
-    (1131, "Как пользоваться: строка 1"),
-    (1127, "Как пользоваться: номер 2"),
-    (1132, "Как пользоваться: строка 2"),
-    (1128, "Как пользоваться: номер 3"),
-    (1133, "Как пользоваться: строка 3"),
-    (1129, "Как пользоваться: номер 4"),
-    (1134, "Как пользоваться: строка 4"),
-    (1130, "Как пользоваться: номер 5"),
-    (1135, "Как пользоваться: строка 5"),
-    // Stage E114, task T-114-2, решение 208.5 (6а): the sixth row.
-    (1137, "Как пользоваться: номер 6"),
-    (1138, "Как пользоваться: строка 6"),
-];
-
 /// **Criterion 9 of T-11-18** — read out of the **built** `LangSwitcher.exe`, exactly as the
 /// buttons, the glyphs and the panels above are.
 #[test]
 fn every_label_of_both_templates_is_owner_drawn() {
     let product = ProductImage::open();
 
-    for (resource, labels) in [
-        (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice()),
-        (IDD_ABOUT, OWNER_DRAWN_ABOUT_LABELS.as_slice()),
-    ] {
+    {
+        let (resource, labels) = (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice());
         let template = DialogTemplate::parse(&product.resource(RT_DIALOG, resource));
 
         for (id, what) in labels {
@@ -5772,14 +5744,8 @@ fn no_static_of_either_template_was_left_on_the_system_drawing() {
     /// The ordinal of the predefined `Static` class in a dialog template.
     const STATIC_CLASS: u16 = 0x0082;
 
-    // The one static of either template that is *not* a label: the `ICON` statement of the
-    // about window, whose `SS_ICON` (0x03) type is what loads the 32 px frame of the `.ico`.
-    const ABOUT_ICON: u32 = 1120;
-
-    for (resource, labels) in [
-        (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice()),
-        (IDD_ABOUT, OWNER_DRAWN_ABOUT_LABELS.as_slice()),
-    ] {
+    {
+        let (resource, labels) = (IDD_SETTINGS, OWNER_DRAWN_LABELS.as_slice());
         let template = DialogTemplate::parse(&product.resource(RT_DIALOG, resource));
 
         let statics: Vec<u32> = template
@@ -5795,21 +5761,6 @@ fn no_static_of_either_template_was_left_on_the_system_drawing() {
         );
 
         for id in &statics {
-            if *id == ABOUT_ICON {
-                let icon = template.style_of(*id, "О программе: значок");
-
-                println!("  {id}: SS_ICON, style {icon:#010x}");
-
-                assert_eq!(
-                    icon & 0x0F,
-                    0x03,
-                    "the about icon must stay SS_ICON — it draws no text at all, and owner \
-                     drawing it would only lose the icon; the style is {icon:#010x}"
-                );
-
-                continue;
-            }
-
             assert!(
                 labels.iter().any(|(listed, _)| listed == id),
                 "template {resource} carries a static {id} that task T-11-18 does not name — \
@@ -5833,51 +5784,34 @@ fn no_static_of_either_template_was_left_on_the_system_drawing() {
 /// **Criterion 9 of T-11-18, the third side** — the gate the drawing stands on and the
 /// template agree, control for control.
 ///
-/// The two lists above are the test's own reading of `app.rc`; `settings::OWNER_DRAWN_LABELS`
-/// and `settings::OWNER_DRAWN_ABOUT_LABELS` are the gate `WM_DRAWITEM` refuses foreign
-/// identifiers with (SEC-05). A label carrying `SS_OWNERDRAW` but missing from the gate is
-/// the worst of the three failures this file can catch: the system stops drawing it, the
-/// program refuses to draw it, and the label goes **blank**.
+/// The list above is the test's own reading of `app.rc`; `settings::OWNER_DRAWN_LABELS` is the
+/// gate `WM_DRAWITEM` refuses foreign identifiers with (SEC-05). A label carrying
+/// `SS_OWNERDRAW` but missing from the gate is the worst of the three failures this file can
+/// catch: the system stops drawing it, the program refuses to draw it, and the label goes
+/// **blank**.
 #[test]
 fn the_drawing_gate_and_the_templates_name_the_same_labels() {
     let mut settings_gate = settings::OWNER_DRAWN_LABELS.to_vec();
-    let mut about_gate = settings::OWNER_DRAWN_ABOUT_LABELS.to_vec();
 
     let mut settings_template: Vec<i32> = OWNER_DRAWN_LABELS
-        .iter()
-        .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
-        .collect();
-    let mut about_template: Vec<i32> = OWNER_DRAWN_ABOUT_LABELS
         .iter()
         .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
         .collect();
 
     // Sorted before the comparison: the two orders are the template's and the source's, and
     // neither is the contract — the membership is.
-    for list in [
-        &mut settings_gate,
-        &mut about_gate,
-        &mut settings_template,
-        &mut about_template,
-    ] {
+    for list in [&mut settings_gate, &mut settings_template] {
         list.sort_unstable();
     }
 
     println!("settings gate:     {settings_gate:?}");
     println!("settings template: {settings_template:?}");
-    println!("about gate:        {about_gate:?}");
-    println!("about template:    {about_template:?}");
 
     assert_eq!(
         settings_gate, settings_template,
         "settings::OWNER_DRAWN_LABELS and the SS_OWNERDRAW statics of the settings template \
          have to name the same controls — a label in one and not the other is a label that \
          nobody draws"
-    );
-    assert_eq!(
-        about_gate, about_template,
-        "settings::OWNER_DRAWN_ABOUT_LABELS and the SS_OWNERDRAW statics of the about \
-         template have to name the same controls"
     );
 }
 
@@ -6398,161 +6332,6 @@ fn both_captions_of_the_save_journal_button_fit_it_in_all_fourteen_languages() {
     );
 }
 
-/// **Task T-71-1, finding Э70-Б-1 — the gate of the about window paints both of its buttons.**
-///
-/// «От автора…» came with task Т-32-4 as the one way into FR-103 from the screen, was subclassed
-/// and answered the cursor from that day — and was never painted: the button branch of
-/// `on_about_draw_item` let «ОК» through and nothing else, so the button stood blank on every
-/// machine. Found on the live 0.70.0 by listing the child windows of the dialog (решение 131а); no
-/// acceptance by eye saw it, and the fitting stands measure strings, not pixels.
-///
-/// The gate asks [`settings::about_button_is_painted`] now. Its colours need nothing new: the
-/// table answers the accent for «ОК» alone and the ordinary roles for every other number — asserted
-/// here state by state for the number of the button, against a button of the settings dialog.
-#[test]
-fn the_about_window_paints_both_of_its_buttons() {
-    // `OK_COMMAND` is the dialog manager's `IDOK`; `IDC_ABOUT_AUTHOR` is not exported, and 1136 is
-    // its number in `app.rc`.
-    const OK: i32 = 1;
-    const FROM_THE_AUTHOR: i32 = 1136;
-
-    assert!(
-        settings::about_button_is_painted(OK),
-        "«ОК» (1) must stay painted"
-    );
-    assert!(
-        settings::about_button_is_painted(FROM_THE_AUTHOR),
-        "Э70-Б-1: «От автора…» (1136) is not painted — the button stands blank"
-    );
-
-    for label in settings::OWNER_DRAWN_ABOUT_LABELS {
-        assert!(
-            !settings::about_button_is_painted(label),
-            "label {label} is not a button — the button gate must not take it"
-        );
-    }
-
-    assert!(
-        !settings::about_button_is_painted(1012),
-        "a button of the settings dialog (1012) is not a button of this window"
-    );
-
-    // The colours: the ordinary roles in every state, and not the accent of «ОК» — the control
-    // that the comparison can tell the two apart at all.
-    assert_ne!(
-        settings::button_color_roles(FROM_THE_AUTHOR, false, false, false),
-        settings::button_color_roles(OK, false, false, false),
-        "«От автора…» must not wear the accent of «ОК»"
-    );
-
-    for hot in [false, true] {
-        for pressed in [false, true] {
-            for disabled in [false, true] {
-                assert_eq!(
-                    settings::button_color_roles(FROM_THE_AUTHOR, hot, pressed, disabled),
-                    settings::button_color_roles(1012, hot, pressed, disabled),
-                    "«От автора…» wears the ordinary roles (hot = {hot}, pressed = {pressed}, \
-                     disabled = {disabled})"
-                );
-            }
-        }
-    }
-}
-
-/// **⭐⭐ The подложка of the name is the highlight of the ground it stands on** — task T-78-3,
-/// решение 139.2 п. 7, and the guard of the one thing the user caught with his eye.
-///
-/// The first mock-up painted it with `hover_bg`, the field every other button lights with, and
-/// the user answered: «в варианте А в тумане я подложки не увидел при наведении». He was right,
-/// and the numbers say why — `hover_bg` is measured against `button_bg`, the ground the other
-/// buttons rest on, and the name rests on `window_bg`:
-///
-/// | | `window_bg` | `hover_bg` | off the ground | `menu_hover_bg` | off the ground |
-/// |---|---|---|---|---|---|
-/// | «Туман» | 237,239,242 | 234,238,242 | **3 / 1 / 0** | 216,222,229 | **21 / 17 / 13** |
-/// | «Графит» | 32,35,41 | 52,58,67 | 20 / 23 / 26 | 52,58,67 | 20 / 23 / 26 |
-///
-/// ⚠ **Both halves are measured here and neither is looked at.** The roles are asserted, and
-/// then the numbers behind them — because in «Графит» the two fields hold the *same* number, so
-/// a test of the colours alone would pass with the wrong role in the palette that matters.
-#[test]
-fn the_name_of_the_about_window_lights_with_the_ground_it_stands_on() {
-    /// «Lang Switcher» — `IDC_ABOUT_NAME` is not exported, and 1121 is the number `app.rc` gives.
-    const NAME: i32 = 1121;
-
-    for (what, palette) in [("Туман", &FOG), ("Графит", &GRAPHITE)] {
-        let rest = settings::button_color_roles(NAME, false, false, false);
-        let hot = settings::button_color_roles(NAME, true, false, false);
-
-        assert_eq!(
-            rest.face,
-            ButtonFaceRole::WindowBg,
-            "{what}: at rest the name is the ground of its window, so the window looks as it \
-             did while the name was a label"
-        );
-        assert_eq!(
-            hot.face,
-            ButtonFaceRole::MenuHoverBg,
-            "{what}: under the pointer the name lights with the highlight of the ground — NOT \
-             hover_bg, which the user could not see in «Туман»"
-        );
-
-        // The ink does not move with the face: the name is the window's own text in both states.
-        assert_eq!(rest.text, ButtonTextRole::Text);
-        assert_eq!(hot.text, ButtonTextRole::Text);
-
-        // And no frame in either state — the button must read as the label it replaced.
-        assert_eq!(rest.border, ButtonBorderRole::FaceItself);
-        assert_eq!(hot.border, ButtonBorderRole::FaceItself);
-
-        // ⚠ The numbers, and not only the names. `distance` is the smallest of the three
-        // channel gaps, which is what «не увидел подложки» comes down to.
-        let ground = palette.window_bg;
-        let lit = palette.menu_hover_bg;
-        let unlit = palette.hover_bg;
-
-        let distance = |a: u32, b: u32| {
-            let channel = |value: u32, shift: u32| {
-                i32::try_from((value >> shift) & 0xFF).expect("a channel is a byte")
-            };
-            [0, 8, 16]
-                .into_iter()
-                .map(|shift| (channel(a, shift) - channel(b, shift)).abs())
-                .min()
-                .expect("three channels")
-        };
-
-        let lit_by = distance(lit.0, ground.0);
-        let unlit_by = distance(unlit.0, ground.0);
-
-        println!("{what}: menu_hover_bg off window_bg by {lit_by}, hover_bg by {unlit_by}");
-
-        assert!(
-            lit_by >= 13,
-            "{what}: the подложка must stand off the ground of the window — it stands off by \
-             {lit_by}"
-        );
-    }
-
-    // ⚠⚠ And the whole finding in one line: in «Туман» the field the mock-up first used is
-    // invisible on this ground. If this ever stops being true the decision above may be
-    // revisited — until then it is why the role is what it is.
-    let fog_unlit = [0u32, 8, 16]
-        .into_iter()
-        .map(|shift| {
-            let channel = |value: u32| i32::try_from((value >> shift) & 0xFF).expect("a byte");
-            (channel(FOG.hover_bg.0) - channel(FOG.window_bg.0)).abs()
-        })
-        .min()
-        .expect("three channels");
-
-    assert_eq!(
-        fog_unlit, 0,
-        "«Туман»: hover_bg on window_bg is the 3/1/0 the user could not see — the measurement \
-         this decision rests on"
-    );
-}
-
 /// **The разбор of every face role into a colour, closed by the full table** — task T-78-3.
 ///
 /// The role table above says *which* role the name wears; this says what each role **is**, and
@@ -6585,441 +6364,6 @@ fn every_button_face_role_resolves_to_the_palette_field_it_is_named_after() {
             );
         }
     }
-}
-
-/// **Task T-71-1 — every visible owner-drawn button of the about template is painted.**
-///
-/// The sentry of the next button. The built template is read by hand, every `Button` of it whose
-/// type is `BS_OWNERDRAW` and which is visible is taken, and the set has to be
-/// [`settings::ABOUT_BUTTONS`] with each of them answered by the predicate of the gate. A button
-/// put into `app.rc` without a painter is the blank of Э70-Б-1 again: the system stops drawing it,
-/// and nobody draws it instead.
-///
-/// ⚠ **Visible**, and the reason is in the template: the «Как пользоваться» panel (1125) is a
-/// `Button` with `BS_OWNERDRAW` too, carried `NOT WS_VISIBLE` — no `WM_DRAWITEM` reaches it, the
-/// background draws the panel out of its rectangle. The reading has to find it and leave it out,
-/// or the filter is one that cannot matter.
-#[test]
-fn every_visible_owner_drawn_button_of_the_about_template_is_painted() {
-    /// The ordinal of the predefined `Button` class in a dialog template.
-    const BUTTON_CLASS: u16 = 0x0080;
-    /// The type of a button is the low nibble of its style.
-    const BS_OWNERDRAW: u32 = 0x0B;
-    /// The «Как пользоваться» panel.
-    const HELP_PANEL: u32 = 1125;
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    let owner_drawn: Vec<(u32, u32)> = template
-        .classes
-        .iter()
-        .filter(|(_, class)| *class == Some(BUTTON_CLASS))
-        .map(|(id, _)| (*id, template.style_of(*id, "О программе: кнопка")))
-        .filter(|(_, style)| style & 0x0F == BS_OWNERDRAW)
-        .collect();
-
-    for (id, style) in &owner_drawn {
-        println!("IDD_ABOUT: Button {id}, BS_OWNERDRAW, style {style:#010x}");
-    }
-
-    assert!(
-        owner_drawn
-            .iter()
-            .any(|(id, style)| *id == HELP_PANEL && style & WS_VISIBLE == 0),
-        "the reading must find the hidden panel {HELP_PANEL} among the owner-drawn buttons — \
-         without it the visibility filter below proves nothing"
-    );
-
-    let mut in_template: Vec<i32> = owner_drawn
-        .iter()
-        .filter(|(_, style)| style & WS_VISIBLE != 0)
-        .map(|(id, _)| i32::try_from(*id).expect("a control identifier fits an i32"))
-        .collect();
-    let mut gate = settings::ABOUT_BUTTONS.to_vec();
-
-    in_template.sort_unstable();
-    gate.sort_unstable();
-
-    println!("about template: {in_template:?}");
-    println!("about buttons:  {gate:?}");
-
-    assert_eq!(
-        gate, in_template,
-        "settings::ABOUT_BUTTONS and the visible BS_OWNERDRAW buttons of the about template must \
-         name the same controls"
-    );
-
-    for id in in_template {
-        assert!(
-            settings::about_button_is_painted(id),
-            "Э70-Б-1: button {id} of the about template is BS_OWNERDRAW and nobody paints it — it \
-             goes blank"
-        );
-    }
-}
-
-/// **⛔⛔ Развилка C5 — the name «Lang Switcher» stands exactly where it stood** — task T-78-3.
-///
-/// The name became a `PUSHBUTTON` so that it could answer a click. Everything else about it had
-/// to stay: the user approved a name that is quiet until the pointer reaches it, and «quiet»
-/// means the window looks the way it looked. **Two things could have moved it and both are
-/// measured here rather than looked at** — which is the lesson of Э51, where a claim about the
-/// proportions of this very window was made from a picture and was wrong.
-///
-/// 1. **The rectangle.** `42, 12, 141, 11` in dialog units, as `LTEXT` gave it and `PUSHBUTTON`
-///    keeps it.
-/// 2. **The road the text is drawn by.** The two owner-drawn roads of this program do not lay
-///    text out the same way — `DT_LEFT | DT_TOP` for a label, `DT_CENTER | DT_VCENTER` for a
-///    button — so a name painted by [`paint_push_button`] would have been carried tens of pixels
-///    right inside a 141-unit box and a little down inside an 11-unit one, with the rectangle
-///    above still passing. The drawing therefore goes the **label** body, with the face and the
-///    ink read out of the very two tables the label road read them from.
-#[test]
-fn the_name_of_the_about_window_stands_exactly_where_it_stood() {
-    /// «Lang Switcher» — the number `app.rc` gives it. A literal, as everywhere in these
-    /// template tests: an imported number would agree with any renumbering.
-    const NAME: u32 = 1121;
-    /// The ordinal of the predefined `Button` class in a dialog template.
-    const BUTTON_CLASS: u16 = 0x0080;
-    /// The type of a button is the low nibble of its style.
-    const BS_OWNERDRAW: u32 = 0x0B;
-    /// `WS_TABSTOP`, which a `PUSHBUTTON` statement carries unless the template says otherwise.
-    const TABSTOP: u32 = 0x0001_0000;
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    // (1) The rectangle. ⚠⚠ It **moved** in task T-79-2, and that is not the drift развилка C5
-    // is about: the backing needed room to the left of the word and above it, and an owner-drawn
-    // control cannot paint outside its own rectangle. What C5 forbids is the **name** moving, and
-    // the whole point of these four numbers is that it does not — see the assertion below them.
-    //
-    // ⚠⚠ **145 → 206 задачей T-81-1** (решение 142.2 п. 2): окно стало 256 единиц и колонка
-    // текста идёт до правого поля 244, а этот прямоугольник занимает её целиком — 38 + 206 = 244.
-    // Ширина прямоугольника имени никогда и не была шириной слова: подложка лепится по слову
-    // (проверено ниже), а прямоугольник — это комната, в которой её можно нарисовать.
-    assert_eq!(
-        template.rect_of(NAME),
-        (38, 11, 38 + 206, 11 + 12),
-        "the name's rectangle is the one task T-79-2 measured, on the column task T-81-1 widened"
-    );
-
-    // ⭐ The near corner did not move at all — 38 and 11 are the numbers of `e79`, and the name
-    // itself is what stands on them. The far corner follows the text column: 244 is the right
-    // margin of решение 142.2 п. 3, where `e78` and `e79` had 183 in a window of 191.
-    let (left, top, right, bottom) = template.rect_of(NAME);
-    assert_eq!(
-        (left, top),
-        (38, 11),
-        "the near corner of the name is fixed — the backing is drawn from it"
-    );
-    assert_eq!(
-        (right, bottom),
-        (244, 23),
-        "and the far corner reaches the margin of the family"
-    );
-
-    // ⭐⭐ **The name itself has not moved, and this is the arithmetic of it.** The drawing puts
-    // the text at `rect.left + inset_x` and `rect.top + inset_y`, where the insets are the chip's
-    // paddings — measured at 96 DPI to be exactly 7 and 2 pixels. Four dialog units of this
-    // template's font are exactly 7 pixels and one is exactly 2, so the text lands at the 73 and
-    // 25 it stood at while the rectangle began at 42, 12 (решение 140.5,
-    // `scratchpad-E79\probe-metrics.log`).
-    assert_eq!(
-        (left + 4, top + 1),
-        (42, 12),
-        "the rectangle moved by exactly the insets the drawing puts the text back by"
-    );
-
-    // And nothing was taken from the neighbours: the icon ends at 12 + 23 = 35 and the version
-    // line begins at 24. The template's own «every rectangle disjoint from every other» is
-    // checked in full by `the_help_panel_holds_its_ten_labels_and_nothing_overlaps`.
-    assert!(
-        left >= 36,
-        "the name must not reach the icon, which ends at 35"
-    );
-    assert!(
-        bottom <= 24,
-        "the name must not reach the version line at 24"
-    );
-
-    // It is a button now, and an owner-drawn one, or nothing below is about it.
-    assert_eq!(
-        template
-            .classes
-            .iter()
-            .find(|(id, _)| *id == NAME)
-            .map(|(_, class)| *class),
-        Some(Some(BUTTON_CLASS)),
-        "the name is a Button since task T-78-3"
-    );
-
-    let style = template.style_of(NAME, "О программе: имя");
-    println!("«О программе: имя» ({NAME}): style {style:#010x}");
-
-    assert_eq!(
-        style & 0x0F,
-        BS_OWNERDRAW,
-        "and an owner-drawn one, or this program does not paint it at all"
-    );
-
-    // ⚠ And **not** a tab stop: it stands first in the template, so with one the dialog would
-    // open with the focus — and the dotted frame — on the name instead of «ОК».
-    assert_eq!(
-        style & TABSTOP,
-        0,
-        "the name must not take the focus: it is first in the template, and the window would \
-         open with a dotted rectangle round it"
-    );
-
-    // (2) The road. The label body, and the two tables the label road read.
-    //
-    // ⚠⚠ **The body split in two in task T-81-3** — решение 142.2 п. 6. The gathering stayed in
-    // `draw_about_name`, which is what reads this window's tables; the painting moved into
-    // `paint_program_name`, because «От авторе» carries the very same name now and a second copy
-    // of that arithmetic is the расхождение the decision exists to close. So the two halves are
-    // swept separately, and a third assertion holds that the first really calls the second.
-    let source = settings_module_source();
-    let gathering = function_body(&source, "unsafe fn draw_about_name(");
-    let painting = function_body(&source, "pub(crate) unsafe fn paint_program_name(");
-
-    for needle in [
-        "about_label_face(IDC_ABOUT_NAME",
-        "about_static_color_role(IDC_ABOUT_NAME",
-    ] {
-        assert!(
-            gathering.contains(needle),
-            "the name must be given the ink and the face of a label — «{needle}» is not in \
-             draw_about_name"
-        );
-    }
-
-    assert!(
-        gathering.contains("paint_program_name("),
-        "the gathering must hand its pieces to the one body that paints the name"
-    );
-
-    assert!(
-        painting.contains("paint_label_text("),
-        "the name must be drawn the way a label is — «paint_label_text(» is not in \
-         paint_program_name"
-    );
-
-    for (what, body) in [
-        ("draw_about_name", &gathering),
-        ("paint_program_name", &painting),
-    ] {
-        assert!(
-            !body.contains("paint_push_button"),
-            "⛔⛔ C5: the name must not go the button road — it centres the caption in both \
-             axes, and {what} takes it"
-        );
-    }
-
-    // ⭐⭐ **And the second window really goes this very road** — решение 142.2 п. 6. Without this
-    // line «одно тело на два окна» would be a sentence in a comment; with it, a copy of the
-    // arithmetic in `letters.rs` turns the test red.
-    let letters = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("letters.rs"),
-    )
-    .expect("src\\letters.rs must be readable")
-    .replace("\r\n", "\n");
-
-    assert!(
-        letters.contains("settings::paint_program_name("),
-        "«От авторе» must paint its name with the one body, not with a copy of it"
-    );
-    // ⚠ The needle is `name_backing_box`, not `chip_box`: `letters.rs` measures a chip of its own
-    // and always has — the figure round the key name in a letter's rows — and that is a different
-    // figure round a different word. What must not be copied is the box of the **name's** backing
-    // and the erase-and-round dance around it, which is what this one body is.
-    assert!(
-        !letters.contains("name_backing_box("),
-        "⛔ the arithmetic of the name's backing must live in one place — letters.rs measures it \
-         too"
-    );
-    // ⛔ **And there are exactly two callers of the body — one per window.** A third would be a
-    // third window drawing the name, and a second in either file would be the copy this decision
-    // forbids. ⚠ The count in `settings.rs` is two occurrences: the definition and the one call.
-    assert_eq!(
-        letters.matches("paint_program_name(").count(),
-        1,
-        "«От авторе» must call the one body exactly once"
-    );
-    assert_eq!(
-        source.matches("paint_program_name(").count(),
-        2,
-        "settings.rs must hold the body and its one caller — no more"
-    );
-
-    // ⭐⭐ **And `paint_label_text` must be the label road itself and not a twin of it** — task
-    // T-79-2 split it out of `paint_label_at_pitch` so that a backing could be drawn between the
-    // ground and the glyphs. The guarantee that the name is set exactly as every other label of
-    // this window is that the label road **calls** this body; the day somebody copies it instead,
-    // the two can drift apart and nothing else would notice.
-    let theme = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("theme.rs"),
-    )
-    .expect("src\\theme.rs must be readable")
-    .replace("\r\n", "\n");
-
-    let at = theme
-        .find("pub unsafe fn paint_label_at_pitch(")
-        .expect("the label road is `theme::paint_label_at_pitch`");
-    let road = &theme[at..];
-    let end = road
-        .find("\n}")
-        .expect("a function closes with a brace of its own");
-
-    assert!(
-        road[..end].contains("paint_label_text(dc, rect, caption, style)"),
-        "theme::paint_label_at_pitch must draw its glyphs BY paint_label_text — a second body \
-         would keep the name in step only until one of the two was edited"
-    );
-
-    // ⚠ Отрицательный контроль: the reading must refuse bodies that went the button road, or the
-    // assertions above prove nothing about what they are written against.
-    let of_the_button_road = painting.replace("paint_label_text(", "paint_push_button(");
-    let of_the_plain_face = gathering.replace("about_label_face(IDC_ABOUT_NAME", "fonts.text(");
-
-    assert!(
-        of_the_button_road.contains("paint_push_button")
-            && !of_the_button_road.contains("paint_label_text("),
-        "the control must differ from the painting in exactly the way the assertion looks at"
-    );
-    assert!(
-        !of_the_plain_face.contains("about_label_face(IDC_ABOUT_NAME"),
-        "the control must differ from the gathering in exactly the way the assertion looks at"
-    );
-
-    // (3) The backing is measured off the **word** — task T-79-2, решение 139а. A backing the
-    // width of the whole text column is what the user turned down on the live product.
-    assert!(
-        painting.contains("name_backing_box(") && painting.contains("chip.width"),
-        "the backing must be the box the caption asks for, not the rectangle of the control"
-    );
-    assert!(
-        painting.contains("chip.radius"),
-        "and it must be rounded — «по слову с закругленными краями подложки»"
-    );
-}
-
-/// **⛔⛔ The rectangle of the name moved by exactly what the drawing puts the text back by** —
-/// task T-79-2, решение 140.5, and the arithmetic half of развилка C5.
-///
-/// The backing needed room to the left of the word and above it, so `app.rc` moved the name four
-/// dialog units left and one up. The drawing then lays the text at the chip's own insets from the
-/// new corner. **The name stands still only if those two are the same number of pixels**, and
-/// this test does not take that on trust: it builds the very faces the window builds, measures
-/// them, and re-derives the claim every time it runs. A face that changed, a padding percentage
-/// that moved, or a rectangle nudged by one unit all come out here as a failure.
-#[test]
-fn the_name_moved_by_exactly_what_its_backing_gives_back() {
-    /// «Lang Switcher» — the number `app.rc` gives it.
-    const NAME: u32 = 1121;
-    /// What the name says. It is a proper noun and is not translated (решение 85).
-    const CAPTION: &str = "Lang Switcher";
-    /// The reference scale. Everything below is in its pixels.
-    const DPI: i32 = 96;
-
-    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().collect() };
-
-    // The dialog's own face, exactly as IDD_ABOUT declares it: FONT 10, "Segoe UI", 400.
-    let mut base = LOGFONTW {
-        lfHeight: -((10 * DPI + 36) / 72),
-        lfWeight: 400,
-        ..Default::default()
-    };
-    for (at, ch) in wide("Segoe UI").into_iter().enumerate() {
-        base.lfFaceName[at] = ch;
-    }
-
-    let name_face = settings::about_name_logfont(base, settings::Emphasis::Semibold);
-
-    // SAFETY: every handle made below is selected out and deleted on the one path out of this
-    // block; the DC is a memory DC of this process.
-    let (unit_x, unit_y, em, line, text_width) = unsafe {
-        let dc = CreateCompatibleDC(None);
-
-        let dialog = CreateFontIndirectW(&base);
-        let previous = SelectObject(dc, dialog.into());
-
-        // The dialog base units, the way the documented formula computes them: the average of
-        // the fifty-two letters for the horizontal, and the height of the cell for the vertical.
-        let mut metrics = TEXTMETRICW::default();
-        let _ = GetTextMetricsW(dc, &mut metrics);
-        let alphabet = wide("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
-        let mut size = Default::default();
-        let _ = GetTextExtentPoint32W(dc, &alphabet, &mut size);
-        let unit_x = (size.cx / 26 + 1) / 2;
-        let unit_y = metrics.tmHeight;
-
-        SelectObject(dc, previous);
-        let _ = DeleteObject(dialog.into());
-
-        let name = CreateFontIndirectW(&name_face);
-        let previous = SelectObject(dc, name.into());
-
-        let mut metrics = TEXTMETRICW::default();
-        let _ = GetTextMetricsW(dc, &mut metrics);
-        let mut size = Default::default();
-        let _ = GetTextExtentPoint32W(dc, &wide(CAPTION), &mut size);
-
-        SelectObject(dc, previous);
-        let _ = DeleteObject(name.into());
-        let _ = DeleteDC(dc);
-
-        (
-            unit_x,
-            unit_y,
-            name_face.lfHeight.abs(),
-            metrics.tmHeight,
-            size.cx,
-        )
-    };
-
-    // Thickness 0: the frame of this button is its own face, so there is no stroke to leave room
-    // for. This is the same call `name_backing_box` makes on the live DC.
-    let chip = theme::chip_box(text_width, em, line, 0);
-
-    println!(
-        "«{CAPTION}»: em {em}, cell {line}, width {text_width}; chip {}x{}, radius {}, insets \
-         {}/{}; dialog units {unit_x} per 4 x, {unit_y} per 8 y",
-        chip.width, chip.height, chip.radius, chip.inset_x, chip.inset_y
-    );
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-    let (left, top, ..) = template.rect_of(NAME);
-
-    // Where the name stood while it was a label, and while it was a button of `e78`: 42, 12.
-    let was = ((42 * unit_x) / 4, (12 * unit_y) / 8);
-    // Where the drawing puts it now: the new corner plus the chip's own insets.
-    let now = (
-        (left * unit_x) / 4 + chip.inset_x,
-        (top * unit_y) / 8 + chip.inset_y,
-    );
-
-    assert_eq!(
-        now, was,
-        "⛔⛔ C5: the name must land on the pixel it has always stood on — the rectangle moved \
-         to {left}, {top} and the drawing gives back {}, {}",
-        chip.inset_x, chip.inset_y
-    );
-
-    // And the backing really is narrower than the text column: that is the whole of what the
-    // user asked for. The column is 202 units wide since task T-81-1; the word plus its air is
-    // far less.
-    assert!(
-        chip.width < (202 * unit_x) / 4,
-        "the backing must hug the word, not fill the text column"
-    );
-    assert!(chip.radius > 0, "and its corners must be rounded");
 }
 
 /// `MulDiv` of Windows for the positive numbers a dialog is made of: the product over the
@@ -7117,8 +6461,9 @@ fn button_is_its_backing(rect: windows::Win32::Foundation::RECT, chip: &theme::C
 /// `e82`); a rectangle narrowed by one pixel too many or too few is caught too.
 #[test]
 fn the_button_of_the_name_is_exactly_its_backing() {
-    /// «Lang Switcher» — the number `app.rc` gives it in the two windows.
-    const NAMES: [(u16, u32); 2] = [(IDD_ABOUT, 1121), (letters::IDD_AUTHOR, 1261)];
+    /// «Lang Switcher» — the number `app.rc` gives it in «От автора» («О программе» carried it
+    /// too until it became a window of the shell, FR-92а).
+    const NAMES: [(u16, u32); 1] = [(letters::IDD_AUTHOR, 1261)];
     /// The width of the backing at 13 px, 10 pt at 96 DPI — решение 143.6 names it: **116**.
     const BACKING_AT_13: i32 = 116;
 
@@ -7194,16 +6539,17 @@ fn the_button_of_the_name_is_exactly_its_backing() {
     }
 }
 
-/// **Both windows narrow the name by the ONE body — задача T-83-1.**
+/// **«От автора» narrows the name by the ONE body — задача T-83-1.**
 ///
-/// `settings::fit_program_name` is the measuring and the moving; `«О программе»` calls it from
-/// its `WM_INITDIALOG`, `«От автора»` from its own. The count is the guard, the way
-/// `paint_program_name` is guarded: exactly one call in `letters.rs`, exactly two occurrences in
-/// `settings.rs` (the definition and the one call), and the body measures by the drawing's own
-/// `name_backing_box` and narrows by the pure `name_rect_of_backing`.
+/// `settings::fit_program_name` is the measuring and the moving; «От автора» calls it from its
+/// `WM_INITDIALOG`. The count is the guard, the way `paint_program_name` is guarded: exactly one
+/// call in `letters.rs`, exactly one occurrence in `settings.rs` (the definition — «О программе»,
+/// which called it too, is a window of the shell since FR-92а moved it there), and the body
+/// measures by the drawing's own `name_backing_box` and narrows by the pure
+/// `name_rect_of_backing`.
 ///
-/// ⚠ Controls: `letters.rs` with its call taken out — the mutant of the task, «не ужимать в одном
-/// из окон» — is caught, and so is `settings.rs` with its call taken out.
+/// ⚠ Control: `letters.rs` with its call taken out — the mutant of the task, «не ужимать» — is
+/// caught.
 #[test]
 fn both_windows_narrow_the_name_by_the_one_body() {
     let source = settings_module_source();
@@ -7236,12 +6582,8 @@ fn both_windows_narrow_the_name_by_the_one_body() {
     );
     assert_eq!(
         occurrences_in_settings(&source),
-        2,
-        "settings.rs must hold the body and the one call of «О программе» — no more"
-    );
-    assert!(
-        code_of(&source).contains("fit_program_name(hwnd, IDC_ABOUT_NAME, name_face)"),
-        "«О программе» must narrow its own name"
+        1,
+        "settings.rs must hold the body and no call of its own"
     );
 
     let body = function_body(&source, "pub(crate) unsafe fn fit_program_name(");
@@ -7253,32 +6595,19 @@ fn both_windows_narrow_the_name_by_the_one_body() {
         "the body must measure by the drawing's own box and move by the mirror-safe road"
     );
 
-    // ⚠ Контроли: the mutant of the task — one window left unnarrowed — in either file.
+    // ⚠ Контроль: the mutant of the task — the window left unnarrowed.
     let letters_without = letters.replace(
         "settings::fit_program_name(hwnd, IDC_AUTHOR_NAME, name_face)",
         "()",
-    );
-    let settings_without = source.replace(
-        "unsafe { fit_program_name(hwnd, IDC_ABOUT_NAME, name_face) };",
-        "",
     );
     assert_ne!(
         letters_without, letters,
         "the control must change letters.rs"
     );
-    assert_ne!(
-        settings_without, source,
-        "the control must change settings.rs"
-    );
     assert_eq!(
         calls_in_letters(&letters_without),
         0,
         "the letters control must be caught"
-    );
-    assert_eq!(
-        occurrences_in_settings(&settings_without),
-        1,
-        "the settings control must be caught"
     );
 }
 
@@ -9167,104 +8496,6 @@ fn cell_of(face: i32) -> i32 {
     }
 }
 
-/// The client height «О программе» comes out at on a dialog face of `face` pixels drawn at
-/// `drawing_dpi`, with `key` in its help — the template's own 276 units, plus what
-/// `fit_about_help` grows the window by when the five rows of the help need more than their slots
-/// (задача T-83-2). The arithmetic is the window's: the rows' rectangles as the dialog manager maps
-/// them, `theme::measure_chip_row` for each sentence, `settings::stacked_tops` for the stack, and
-/// growth only downwards.
-fn about_client_by_model(face: i32, drawing_dpi: i32, key: &str) -> i32 {
-    const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-    let product = ProductImage::shared();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-    let font = template
-        .font
-        .clone()
-        .expect("the about template declares DS_SETFONT");
-
-    let bounds = |id: u32| {
-        template
-            .bounds
-            .iter()
-            .find(|(candidate, ..)| *candidate == id)
-            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
-            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
-    };
-
-    let rows = [
-        (1131_u32, settings::IDS_ABOUT_HELP_1),
-        (1132, settings::IDS_ABOUT_HELP_2),
-        (1133, settings::IDS_ABOUT_HELP_3),
-        (1134, settings::IDS_ABOUT_HELP_4),
-        (1135, settings::IDS_ABOUT_HELP_5),
-        (1138, settings::IDS_ABOUT_HELP_6),
-    ];
-
-    let sheet = Sheet::new(64);
-    let manager = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
-    let base = LOGFONTW {
-        lfHeight: -face,
-        ..manager
-    };
-
-    let body = Face::new(settings::about_body_logfont(base));
-    let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
-    let chip = Face::new(chip_logical);
-
-    let metrics = theme::ChipRowMetrics {
-        body: Some(body.0),
-        chip_face: Some((chip.0, chip_logical.lfHeight)),
-        pitch: settings::about_body_line_pitch(settings::about_body_logfont(base).lfHeight.abs()),
-        dpi: drawing_dpi,
-    };
-
-    let unit_x = (extent_of(&sheet, &Face::new(base), ALPHABET).cx / 26 + 1) / 2;
-    let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
-    let px_x = |units: i32| mul_div(units, unit_x, 4);
-    let px_y = |units: i32| mul_div(units, unit_y, 8);
-
-    // The rows' live rectangles: `y` and `cy` mapped each on its own, as the manager does.
-    let tops_of_template: Vec<(i32, i32)> = rows
-        .iter()
-        .map(|(row, _)| {
-            let (_, y, _, cy) = bounds(*row);
-            (px_y(y), px_y(cy))
-        })
-        .collect();
-
-    let air = tops_of_template
-        .windows(2)
-        .map(|pair| pair[1].0 - (pair[0].0 + pair[0].1))
-        .min()
-        .expect("five rows");
-
-    let heights: Vec<i32> = rows
-        .iter()
-        .map(|(row, string)| {
-            let (_, _, cx, _) = bounds(*row);
-
-            // SAFETY: the sheet's DC is live and both faces outlive the call.
-            unsafe {
-                theme::measure_chip_row(
-                    sheet.dc,
-                    px_x(cx),
-                    theme::chip_row(&settings::text(*string), key),
-                    metrics,
-                )
-            }
-            .expect("the memory DC must answer the metrics of its own face")
-            .1
-        })
-        .collect();
-
-    let tops = settings::stacked_tops(tops_of_template[0].0, &heights, air);
-    let (last_top, last_height) = tops_of_template[rows.len() - 1];
-    let grow = tops[rows.len() - 1] + heights[rows.len() - 1] - (last_top + last_height);
-
-    mul_div(276, unit_y, 8) + grow.max(0)
-}
-
 /// **The model of «От автора» IS the live window — задача T-83-2, the known answer.**
 ///
 /// The model that counts the tallest window at every face has to be held against the window it
@@ -9476,16 +8707,15 @@ const RULE_FACES: std::ops::RangeInclusive<i32> = 11..=40;
 /// задача T-83-2, решения 143.1 и 143.11; with the feed live, задача T-98-2 (Э83-Б-1, решение
 /// 166.2).**
 ///
-/// For every face the rule may answer with: the six windows × fourteen languages, each in dialog
-/// units, **in every state the window is really in** —
+/// For every face the rule may answer with: the five windows of the old kind × fourteen
+/// languages, each in dialog units, **in every state the window is really in** («О программе» is a
+/// window of the shell since FR-92а moved it there, and the shell fits its own) —
 /// * «От автора» by the model held against the live window above: the first day (no feed), and a
 ///   machine whose feed is live — the quiet line about the file or the switch of FR-102 with its
 ///   sentence, «Последние письма» in the row, the line of the reading and the line of the version
 ///   each at the tallest sentence the program can put there ([`AuthorWords::fed`]);
 /// * «Последние письма» by the model held against the live window, at full capacity — the update
 ///   and three unread news items of the published feed ([`full_list`]);
-/// * «О программе» by the model of `fit_about_help` with the widest key the program can name and
-///   with «Pause»;
 /// * the three windows whose height the template decides: настройки 380; «Письмо» and the wizard
 ///   276, which their layouts never resize.
 ///
@@ -9501,18 +8731,6 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
     const FIXED: [(&str, i32); 3] = [("настройки", 380), ("«Письмо»", 276), ("мастер", 276)];
 
     let _guard = with_product_strings();
-
-    let sheet = Sheet::new(64);
-    let widest_key = {
-        let chip_face = Face::new(settings::about_chip_logfont(
-            dialog_face_at(13),
-            settings::Emphasis::Semibold,
-        ));
-        (1_u16..=254)
-            .filter_map(settings::key_name)
-            .max_by_key(|name| extent_of(&sheet, &chip_face, name).cx)
-            .expect("the program must name at least one key")
-    };
 
     // The words of every language, made once: `(language, «От автора» in its three states, the
     // full «Последние письма»)`.
@@ -9586,15 +8804,6 @@ fn the_tallest_window_by_face_is_the_table_the_rule_counts_with() {
                 format!("«Последние письма» {language:?}"),
                 &mut tallest,
             );
-
-            for key in [widest_key.as_str(), "Pause"] {
-                let about = units_of_client(about_client_by_model(face, drawing, key), cell);
-                note(
-                    about,
-                    format!("«О программе» {language:?} «{key}»"),
-                    &mut tallest,
-                );
-            }
 
             own.push(own_tallest);
         }
@@ -9872,16 +9081,10 @@ fn the_rule_keeps_its_floor_and_its_ceiling() {
     );
 }
 
-/// The six dialog templates of the program — `IDD_SETTINGS` … `IDD_WIZARD` — with the offset of
+/// The dialog templates of the program — `IDD_SETTINGS` … `IDD_WIZARD` — with the offset of
 /// their `pointsize`, measured by the probe of the stage (`scratchpad-E83\probe-premises-e83.log`).
-const SIX_TEMPLATES: [(u16, usize); 6] = [
-    (200, 82),
-    (201, 54),
-    (202, 64),
-    (203, 64),
-    (204, 50),
-    (205, 62),
-];
+/// Six then; `IDD_ABOUT` (201) went when «О программе» moved to the shell (FR-92а).
+const TEMPLATES: [(u16, usize); 5] = [(200, 82), (202, 64), (203, 64), (204, 50), (205, 62)];
 
 /// **The font block of the six templates is found where the dialog manager reads it — задача
 /// T-83-3.**
@@ -9898,7 +9101,7 @@ const SIX_TEMPLATES: [(u16, usize); 6] = [
 fn the_font_block_of_the_six_templates_is_found_where_the_manager_reads_it() {
     let product = ProductImage::open();
 
-    for (id, offset) in SIX_TEMPLATES {
+    for (id, offset) in TEMPLATES {
         let bytes = product.resource(RT_DIALOG, id);
         let at = settings::template_point_size_at(&bytes)
             .unwrap_or_else(|| panic!("template {id}: the font block must be found"));
@@ -9971,7 +9174,7 @@ fn the_font_block_of_the_six_templates_is_found_where_the_manager_reads_it() {
 fn at_the_template_step_the_copy_is_the_resource_byte_for_byte() {
     let product = ProductImage::open();
 
-    for (id, _) in SIX_TEMPLATES {
+    for (id, _) in TEMPLATES {
         let resource = product.resource(RT_DIALOG, id);
 
         let mut copy = resource.clone();
@@ -10135,7 +9338,7 @@ fn every_template_put_at_eight_points_opens_at_eleven_pixels() {
     let product = ProductImage::open();
     let owner = HiddenOwner::new();
 
-    for (id, _) in SIX_TEMPLATES {
+    for (id, _) in TEMPLATES {
         let resource = product.resource(RT_DIALOG, id);
         let mut eight = resource.clone();
         settings::put_font_step(&mut eight, 8);
@@ -10300,10 +9503,13 @@ fn all_our_drawing_goes_by_the_step() {
     //
     // Задача T-118-1: one place more — `settings::repaint_capture` asks the DPI of the drawing to
     // know the very box of the hotkey field the background drew, and repaints only that.
+    //
+    // FR-92а: four of the 28 were the drawing of the old «О программе», which went to the shell;
+    // 24 are left.
     assert_eq!(
         calls,
-        28 + 1 + 1 + 1,
-        "the 28 places of П4, the definition, the buffer's carry and the box of T-118-1"
+        24 + 1 + 1 + 1,
+        "the 24 places of П4 left, the definition, the buffer's carry and the box of T-118-1"
     );
 
     // ⚠ Контроль «текст e82»: every place put back — the 28 of П4 and the buffer's carry.
@@ -10335,9 +9541,9 @@ fn all_our_drawing_goes_by_the_step() {
         .sum();
     assert_eq!(
         caught,
-        28 + 1 + 1,
-        "the text of e82 must be caught at all 28 places, at the buffer's carry and at the box of \
-         T-118-1"
+        24 + 1 + 1,
+        "the text of e82 must be caught at all 24 places left, at the buffer's carry and at the \
+         box of T-118-1"
     );
 
     // ⚠ Контроль «мутант задачи»: one place of `letters.rs` put back.
@@ -11026,7 +10232,7 @@ fn the_monitor_is_measured_before_the_window_exists() {
     let product = ProductImage::open();
     let owner = HiddenOwner::new();
 
-    for (id, _) in SIX_TEMPLATES {
+    for (id, _) in TEMPLATES {
         let template = product.resource(RT_DIALOG, id);
         let screen = settings::screen_of(owner.0, &template)
             .unwrap_or_else(|| panic!("template {id}: the monitor must be measurable"));
@@ -11075,205 +10281,6 @@ fn the_monitor_is_measured_before_the_window_exists() {
             );
         }
     }
-}
-
-/// Whether the body of `on_about_draw_item` sends its buttons through the predicate — its code
-/// with the comment lines dropped and the whitespace squeezed, so that `cargo fmt` breaking the
-/// condition does not break the needle and a sentence of prose is not taken for the gate.
-fn about_gate_asks_the_predicate(body: &str) -> bool {
-    let code = body
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .flat_map(str::split_whitespace)
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    code.contains("if ctl_type != ODT_BUTTON || !about_button_is_painted(control) {")
-        && !code.contains("control != OK_COMMAND")
-}
-
-/// **Task T-71-1 — the button gate of `on_about_draw_item` asks the predicate.**
-///
-/// A predicate is only a promise until the drawing asks it: the body of the function is read, the
-/// `ODT_BUTTON` branch has to go through `about_button_is_painted`, and the comparison with
-/// `OK_COMMAND` that left «От автора…» blank has to be gone.
-///
-/// ⚠ Controls: the gate of `e70` — the same body with the comparison put back — is caught, and so
-/// is a gate that asks the predicate and keeps the comparison beside it.
-#[test]
-fn the_button_gate_of_the_about_window_asks_the_predicate() {
-    let source = settings_module_source();
-    let body = function_body(&source, "unsafe fn on_about_draw_item(");
-    let gate: Vec<&str> = body
-        .lines()
-        .filter(|line| line.contains("ODT_BUTTON"))
-        .collect();
-
-    assert!(
-        about_gate_asks_the_predicate(body),
-        "Э70-Б-1: the button gate of on_about_draw_item does not ask about_button_is_painted: \
-         {gate:?}"
-    );
-
-    let predicate = "!about_button_is_painted(control)";
-
-    let of_e70 = body.replace(predicate, "control != OK_COMMAND");
-    assert_ne!(
-        of_e70, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !about_gate_asks_the_predicate(&of_e70),
-        "the sweep does not see the gate of e70 — it cannot fail"
-    );
-
-    let both = body.replace(
-        predicate,
-        "!about_button_is_painted(control) || control != OK_COMMAND",
-    );
-    assert!(
-        !about_gate_asks_the_predicate(&both),
-        "the sweep does not see the comparison kept beside the predicate"
-    );
-}
-
-/// **Task T-71-1, premise П6 — the caption of «От автора…» fits its 86 units in all fourteen
-/// languages.**
-///
-/// The comment of the template above `IDC_ABOUT_AUTHOR` in `app.rc` says the longest of the
-/// fourteen captions was measured by the fitting stand with room to spare (task Т-32-4). No such
-/// measurement lives in the tree, and nobody has ever seen the button — so the claim is measured
-/// here with the instrument of «Сохранить журнал»: the about template's own face, at the horizontal
-/// base unit the dialog manager maps that template by. `paint_push_button` draws the caption on one
-/// line, centred in the whole rectangle of the button.
-///
-/// A clip here is not for a hand to repair: the width of the button and of the window is frozen by
-/// решение 101 п. 7, and the choice between the width and the caption is the owner's (развилка C3
-/// of stage Э71). So every language is measured before anything is asserted, and a clip names all
-/// the languages it happened in.
-///
-/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
-#[test]
-fn the_caption_of_the_about_author_button_fits_it_in_all_fourteen_languages() {
-    /// ⚠ **86 → 92 задачей T-81-1** (решение 142.2 п. 2 и п. 7). Окно стало 256 единиц, и ширина
-    /// этой кнопки посчитана тем же правилом, которым `letters::button_width` считает кнопки
-    /// четырёх других окон: самая широкая подпись из четырнадцати локалей плюс
-    /// `air::BUTTON_PAD` × 2 = 20 единиц. Греческое «Από τον δημιουργό…» — 125 px = 72 единицы,
-    /// плюс воздух = 92. ⛔ Число здесь — **литерал, как во всех тестах шаблона**: импортированное
-    /// согласилось бы с любой правкой. Оно же стоит в `app.rc`, и свип ширин их сводит.
-    const SLOT_UNITS: i32 = 92;
-    const SLOT_BEFORE_117B: i32 = 72;
-
-    let _guard = with_product_strings();
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    // ⭐ The literal above is held against the template it claims to measure. A stand whose slot
-    // and whose window have parted is a stand that measures nothing — and the two parted for real
-    // in task T-81-1, where the button grew and this number did not follow of itself.
-    let (left, _, right, _) = template.rect_of(1136);
-    assert_eq!(
-        right - left,
-        SLOT_UNITS,
-        "«От автора…» is {} units wide in app.rc and this stand measures {SLOT_UNITS}",
-        right - left
-    );
-
-    let font = template
-        .font
-        .clone()
-        .expect("the about template declares DS_SETFONT");
-    let sheet = Sheet::new(64);
-    let face = Face::new(manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY));
-
-    let letters = extent_of(
-        &sheet,
-        &face,
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    )
-    .cx;
-    let base = (letters / 26 + 1) / 2;
-    let slot = (SLOT_UNITS * base + 2) / 4;
-
-    println!(
-        "about template font: {:?} {} pt, weight {}; base unit {base}: slot {slot} px",
-        font.face, font.points, font.weight
-    );
-
-    // Контроль прибора, первый: находка 117б стенда Э34 обязана воспроизводиться — «Enregistrer le
-    // journal…» не влезала в 72 единицы. Прибор, который её не видит, мерит не то.
-    let old_slot = (SLOT_BEFORE_117B * base + 2) / 4;
-    let clipped = extent_of(&sheet, &face, "Enregistrer le journal…").cx;
-    assert!(
-        clipped > old_slot,
-        "the instrument does not see the clip of решение 117б: {clipped} px in {old_slot} px"
-    );
-
-    // Контроль прибора, второй: на этом самом слоте прибор обязан увидеть клип — подпись втрое
-    // длиннее не влезает.
-    let tripled = extent_of(&sheet, &face, &"От автора…".repeat(3)).cx;
-    println!(
-        "controls: «Enregistrer le journal…» {clipped} px in {old_slot} px; tripled caption \
-         {tripled} px in {slot} px"
-    );
-    assert!(
-        tripled > slot,
-        "the instrument cannot see a clip in this slot at all: {tripled} px in {slot} px"
-    );
-
-    // Задача T-83-4, развилка C3: at every face the rule may open the window at.
-    let mut clips = Vec::new();
-
-    for pixels in rule_faces() {
-        let face = Face::new(manager_face_at(&sheet, &font, pixels));
-        let letters = extent_of(
-            &sheet,
-            &face,
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-        )
-        .cx;
-        let base = (letters / 26 + 1) / 2;
-        let slot = (SLOT_UNITS * base + 2) / 4;
-        let mut widest = (0, String::new());
-
-        for language in Language::shipped() {
-            settings::set_ui_language(language);
-
-            let caption = settings::text(settings::IDS_ABOUT_AUTHOR);
-
-            assert!(
-                !caption.trim().is_empty(),
-                "{language:?}: the caption did not load — the instrument would measure nothing"
-            );
-
-            let width = extent_of(&sheet, &face, &caption).cx;
-
-            if width > widest.0 {
-                widest = (width, format!("{language:?} «{caption}»"));
-            }
-
-            if width > slot {
-                clips.push(format!(
-                    "{pixels} px, {language:?} «{caption}» {width} px of {slot} px ({SLOT_UNITS} \
-                     units at a base unit of {base})"
-                ));
-            }
-        }
-
-        println!(
-            "{pixels} px: the widest caption {} px of {slot} — {}",
-            widest.0, widest.1
-        );
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    assert!(
-        clips.is_empty(),
-        "развилка C3: the caption is clipped in {clips:#?} — the width or the caption is the \
-         owner's to choose"
-    );
 }
 
 /// **Task T-36-5, finding Н9** — every reason a capture can give fits the note under the field,
@@ -11639,430 +10646,6 @@ fn the_health_line_of_the_state_panel_fits_in_all_fourteen_languages() {
         clips.is_empty(),
         "развилка C3 — the line would be clipped: {clips:#?}"
     );
-}
-
-/// **Task T-42-2, finding С44, решение 124.4** — every sentence of the «Как пользоваться»
-/// panel fits the slot the template gives it, in all fourteen locales, at 100 %.
-///
-/// ⚠ **One named exception since решение 128.4** (task T-43-7): the Greek third row with the
-/// widest key name needs one line more than its slot and takes it from the live fit — the case
-/// is named in the loop and held to exactly that size.
-///
-/// The form is the one of the test above (T-39-11): the template's own font, the manager's own
-/// arithmetic for the dialog unit, and the measurement made by the very code that draws. What
-/// differs is the instrument — a help row is not a button caption: it wraps, and it carries a
-/// **chip** where `{0}` stands, so its height comes from [`theme::measure_chip_row`], the
-/// measuring twin of `theme::paint_chip_row`.
-///
-/// ⚠ **The red before.** On the tree this task started from the first row is 29 units tall and
-/// `ru`, `uk` and `es` need four lines in it — 76 px against 62 — so the last line of «Набрали
-/// слово не в той раскладке…» was cut off **at 100 %**, before any scaling. The audit's finding
-/// said «at 125 % and above»; the fitting stand of the контур, once its two lies were mended,
-/// said 100 %, and this test is that measurement without a window.
-///
-/// The runtime lays the panel out under the measured heights all the same
-/// (`settings::fit_about_help`), so a locale that needs more than the template allows is not
-/// clipped either way. This test holds the **template**: what the window opens as, before a
-/// single control is moved, so that the starting layout does not jump.
-#[test]
-fn every_help_sentence_fits_its_template_slot_in_all_fourteen_languages() {
-    let _guard = with_product_strings();
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    let font = template
-        .font
-        .clone()
-        .expect("the about template declares DS_SETFONT");
-
-    let sheet = Sheet::new(64);
-
-    let bounds = |id: u32| {
-        template
-            .bounds
-            .iter()
-            .find(|(candidate, ..)| *candidate == id)
-            .map(|(_, _, _, cx, cy)| (*cx, *cy))
-            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
-    };
-
-    // Задача T-83-4, развилка C3: at every face the rule may open the window at, with the DPI its
-    // drawing then goes at — the chip's air is scaled by that DPI, so here it is the pair.
-    let mut clips = Vec::new();
-
-    for (pixels, drawing) in rule_configurations() {
-        let base = manager_face_at(&sheet, &font, pixels);
-
-        // The body face and the chip face the window builds out of the manager's — the very two
-        // `DialogFonts` hands the drawing.
-        let body = Face::new(settings::about_body_logfont(base));
-        let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
-        let chip = Face::new(chip_logical);
-
-        let metrics = theme::ChipRowMetrics {
-            body: Some(body.0),
-            chip_face: Some((chip.0, chip_logical.lfHeight)),
-            pitch: settings::about_body_line_pitch(
-                settings::about_body_logfont(base).lfHeight.abs(),
-            ),
-            dpi: drawing,
-        };
-
-        // The base unit of this template, by the manager's own rule — see the test above.
-        let letters = extent_of(
-            &sheet,
-            &Face::new(base),
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-        )
-        .cx;
-        let unit_x = (letters / 26 + 1) / 2;
-        let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
-
-        // The name the chip is drawn with: the **widest** one the program can put there, so the
-        // row is measured at its worst (finding Н85 — the fitting stand used to measure one).
-        let widest_key = (1_u16..=254)
-            .filter_map(settings::key_name)
-            .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
-            .expect("the program must name at least one key");
-
-        // ⭐ Stage E114, task T-114-2: the long names a person can give the hotkey, through the one
-        // function every window shows it with — the double press («Shift, Shift», вопрос 159) and
-        // the longest combination, all three modifiers over the widest key (вопрос 157).
-        let double_press = settings::effective_hotkey_name(&settings::Hotkey {
-            key: settings::DOUBLE_TAP_KEY.to_owned(),
-            trigger: "double_tap".to_owned(),
-            ..settings::Hotkey::default()
-        });
-        let combination = settings::effective_hotkey_name(&settings::Hotkey {
-            key: widest_key.clone(),
-            modifiers: vec!["Ctrl".to_owned(), "Alt".to_owned(), "Shift".to_owned()],
-            ..settings::Hotkey::default()
-        });
-
-        assert!(
-            double_press.contains(settings::DOUBLE_TAP_JOINER)
-                && combination.contains(settings::HOTKEY_JOINER),
-            "the long names did not come out as long names: «{double_press}», «{combination}»"
-        );
-
-        let mut tightest = (i32::MAX, String::new());
-
-        for language in Language::shipped() {
-            settings::set_ui_language(language);
-
-            for (row, string) in [
-                (1131_u32, settings::IDS_ABOUT_HELP_1),
-                (1132, settings::IDS_ABOUT_HELP_2),
-                (1133, settings::IDS_ABOUT_HELP_3),
-                (1134, settings::IDS_ABOUT_HELP_4),
-                (1135, settings::IDS_ABOUT_HELP_5),
-                (1138, settings::IDS_ABOUT_HELP_6),
-            ] {
-                let sentence = settings::text(string);
-
-                assert!(
-                    !sentence.trim().is_empty(),
-                    "{language:?}: string {string} did not load — the instrument would measure \
-                     nothing"
-                );
-
-                let (units_w, units_h) = bounds(row);
-                let width = (units_w * unit_x + 2) / 4;
-                let height = (units_h * unit_y + 4) / 8;
-
-                // ⚠ The combination is held for the sixth row only. Measured by this very test at
-                // stage E114: rows 1132 and 1133 (and 1131 once) wrap past their template slots
-                // with «Ctrl + Alt + Shift + PrintScreen» in many locales — ever since combinations
-                // arrived (вопрос 157), the live fit (`settings::fit_about_help`) lays them out; to
-                // give them taller slots would change the look beyond the sixth row (развилка C4).
-                let keys = [
-                    widest_key.as_str(),
-                    "Pause",
-                    double_press.as_str(),
-                    combination.as_str(),
-                ];
-                let measured = if row == 1138 { &keys[..] } else { &keys[..3] };
-
-                for &key in measured {
-                    // SAFETY: the sheet's DC is live and both faces outlive the call; nothing is
-                    // drawn — this is the measuring half of the pair.
-                    let (lines, needed) = unsafe {
-                        theme::measure_chip_row(
-                            sheet.dc,
-                            width,
-                            theme::chip_row(&sentence, key),
-                            metrics,
-                        )
-                    }
-                    .expect("the memory DC must answer the metrics of its own face");
-
-                    // ⭐⭐ **The one named exception of решение 128.4 is GONE, and задача T-81-1 is
-                    // what took it away.** With its caveat the Greek third row and the widest key
-                    // name used to wrap into **four** lines in a column of 142 units — one more
-                    // than the slot had — and took the fourth from the live fit
-                    // (`settings::fit_about_help`). The column is **207** units since решение
-                    // 142.2 п. 2, and the same sentence wraps into **three**.
-                    //
-                    // ⚠ The case is still named, because «the exception went away» is a statement
-                    // and not a forgetting: it is held to fitting its slot outright. If a wording,
-                    // a face or a width ever puts it over again, this line goes red before the
-                    // general assertion below does, and it says which case came back.
-                    if language == Language::El
-                        && row == 1133
-                        && key == widest_key.as_str()
-                        && !(lines <= 3 && needed <= height)
-                    {
-                        clips.push(format!(
-                            "{pixels} px at {drawing} DPI: El row 1133 with «{key}» was the one \
-                             exception of решение 128.4 and task T-81-1 closed it by widening the \
-                             column; it wraps into {lines} lines and wants {needed} px of the \
-                             {units_h} units = {height} px it has — the exception has come back"
-                        ));
-                    }
-
-                    if height - needed < tightest.0 {
-                        tightest = (
-                            height - needed,
-                            format!("{language:?} row {row} key «{key}»: {lines} lines"),
-                        );
-                    }
-
-                    if needed > height {
-                        clips.push(format!(
-                            "{pixels} px at {drawing} DPI, {language:?}: row {row} wraps into \
-                             {lines} lines and wants {needed} px, the template gives it {units_h} \
-                             units = {height} px. Sentence: «{sentence}»"
-                        ));
-                    }
-                }
-            }
-        }
-
-        println!(
-            "{pixels} px at {drawing} DPI (units {unit_x}/4, {unit_y}/8, widest key «{widest_key}»): \
-             the tightest row {} px to spare — {}",
-            tightest.0, tightest.1
-        );
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    assert!(
-        clips.is_empty(),
-        "развилка C3 — the last line would be cut off by the clip of paint_chip_row: {clips:#?}"
-    );
-}
-
-/// **Task T-42-2, п. 3** — no row of the help panel ever overlaps its neighbour or its own
-/// numeral, at any of the fourteen locales and any of the five scales.
-///
-/// ⛔ **Why this is checked by arithmetic and not by eye.** Two owner-drawn statics that overlap
-/// do not merely look wrong: each fills its own rectangle with the panel's ground before it
-/// writes a word, so the upper one **erases** the top of the lower — defect Г-1, which this
-/// template has paid for once already. The layout is computed at run time now
-/// (`settings::fit_about_help`), so the question is no longer «do these five numbers overlap»
-/// but «can the arithmetic ever produce an overlap», and that is 14 × 5 × 2 positions.
-///
-/// The arithmetic itself is `settings::stacked_tops` — the very function the window lays the
-/// panel out by, called here with the very heights `theme::measure_chip_row` answers.
-#[test]
-fn the_help_rows_never_overlap_at_any_scale_or_locale() {
-    let _guard = with_product_strings();
-
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    let font = template
-        .font
-        .clone()
-        .expect("the about template declares DS_SETFONT");
-
-    let bounds = |id: u32| {
-        template
-            .bounds
-            .iter()
-            .find(|(candidate, ..)| *candidate == id)
-            .map(|(_, x, y, cx, cy)| (*x, *y, *cx, *cy))
-            .unwrap_or_else(|| panic!("the about template must carry the control {id}"))
-    };
-
-    let rows = [
-        (1131_u32, 1126_u32, settings::IDS_ABOUT_HELP_1),
-        (1132, 1127, settings::IDS_ABOUT_HELP_2),
-        (1133, 1128, settings::IDS_ABOUT_HELP_3),
-        (1134, 1129, settings::IDS_ABOUT_HELP_4),
-        (1135, 1130, settings::IDS_ABOUT_HELP_5),
-        (1138, 1137, settings::IDS_ABOUT_HELP_6),
-    ];
-
-    let panel = bounds(1125);
-    let mut worst = (i32::MAX, String::new());
-    let mut tallest = (0, String::new());
-
-    for dpi in [96, 120, 144, 168, 192] {
-        let sheet = Sheet::new(64);
-        let manager = manager_logfont(sheet.dc, &font, CLEARTYPE_QUALITY);
-        let base = LOGFONTW {
-            lfHeight: -((i32::from(font.points) * dpi + 36) / 72),
-            ..manager
-        };
-
-        let body = Face::new(settings::about_body_logfont(base));
-        let chip_logical = settings::about_chip_logfont(base, settings::Emphasis::Semibold);
-        let chip = Face::new(chip_logical);
-
-        let metrics = theme::ChipRowMetrics {
-            body: Some(body.0),
-            chip_face: Some((chip.0, chip_logical.lfHeight)),
-            pitch: settings::about_body_line_pitch(
-                settings::about_body_logfont(base).lfHeight.abs(),
-            ),
-            dpi,
-        };
-
-        let letters = extent_of(
-            &sheet,
-            &Face::new(base),
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-        )
-        .cx;
-        let unit_x = (letters / 26 + 1) / 2;
-        let unit_y = extent_of(&sheet, &Face::new(base), "A").cy;
-
-        let px_x = |units: i32| (units * unit_x + 2) / 4;
-        let px_y = |units: i32| (units * unit_y + 4) / 8;
-
-        // The air the template itself declares between two rows — read off it, never written
-        // down again, exactly as `fit_about_help` reads it off the live window.
-        let air =
-            px_y(bounds(rows[1].0).1) - (px_y(bounds(rows[0].0).1) + px_y(bounds(rows[0].0).3));
-
-        let widest_key = (1_u16..=254)
-            .filter_map(settings::key_name)
-            .max_by_key(|name| extent_of(&sheet, &chip, name).cx)
-            .expect("the program must name at least one key");
-
-        for language in Language::shipped() {
-            settings::set_ui_language(language);
-
-            for key in [widest_key.as_str(), "Pause"] {
-                // The heights the window would lay the panel out by: the measured height, never
-                // less than the template's own — `fit_about_help` grows downwards only.
-                let heights: Vec<i32> = rows
-                    .iter()
-                    .map(|(row, _, string)| {
-                        let sentence = settings::text(*string);
-                        let (_, cx, _, cy) = bounds(*row);
-                        let width = px_x(cx);
-
-                        // SAFETY: the sheet's DC is live and both faces outlive the call.
-                        let (_, needed) = unsafe {
-                            theme::measure_chip_row(
-                                sheet.dc,
-                                width,
-                                theme::chip_row(&sentence, key),
-                                metrics,
-                            )
-                        }
-                        .expect("the memory DC must answer the metrics of its own face");
-
-                        needed.max(px_y(cy))
-                    })
-                    .collect();
-
-                let first = px_y(bounds(rows[0].0).1);
-                let tops = settings::stacked_tops(first, &heights, air);
-
-                // 1. No row reaches into the next one's top.
-                for index in 1..rows.len() {
-                    let bottom = tops[index - 1] + heights[index - 1];
-
-                    if tops[index] - bottom < worst.0 {
-                        worst = (
-                            tops[index] - bottom,
-                            format!(
-                                "{}% {language:?} key «{key}»: rows {} and {}",
-                                dpi * 100 / 96,
-                                index,
-                                index + 1
-                            ),
-                        );
-                    }
-
-                    assert!(
-                        bottom <= tops[index],
-                        "{language:?} at {}% with «{key}»: row {} ends at {bottom} px and row {} \
-                         starts at {} px — two owner-drawn statics that overlap erase each other \
-                         (defect Г-1)",
-                        dpi * 100 / 96,
-                        index,
-                        index + 1,
-                        tops[index]
-                    );
-                }
-
-                // 2. Every numeral stands inside its own row's band: the window moves it by the
-                //    offset it had in the template, so it must not reach the row below.
-                for (index, (row, numeral, _)) in rows.iter().enumerate() {
-                    let offset = px_y(bounds(*numeral).1) - px_y(bounds(*row).1);
-                    let numeral_top = tops[index] + offset;
-                    let numeral_bottom = numeral_top + px_y(bounds(*numeral).3);
-
-                    assert!(
-                        numeral_top >= tops[index]
-                            && numeral_bottom <= tops[index] + heights[index],
-                        "{language:?} at {}%: numeral {} stands {numeral_top}..{numeral_bottom} \
-                         and its row stands {}..{} — the numeral must live inside its own row",
-                        dpi * 100 / 96,
-                        index + 1,
-                        tops[index],
-                        tops[index] + heights[index]
-                    );
-                }
-
-                // 3. The panel grows under the rows, and the window under the panel — both by
-                //    the same number, which is what `fit_about_help` moves everything by.
-                let grow = tops[rows.len() - 1] + heights[rows.len() - 1]
-                    - (px_y(bounds(rows[4].0).1) + px_y(bounds(rows[4].0).3));
-
-                assert!(
-                    tops[rows.len() - 1] + heights[rows.len() - 1]
-                        <= px_y(panel.1) + px_y(panel.3) + grow.max(0),
-                    "{language:?} at {}%: the last row must end inside the panel once the panel \
-                     has grown with it",
-                    dpi * 100 / 96
-                );
-
-                if grow > tallest.0 {
-                    tallest = (grow, format!("{}% {language:?} «{key}»", dpi * 100 / 96));
-                }
-            }
-        }
-
-        // ⚠ **How much the window really grows, scale by scale.** The fitting stand of the
-        // контур cannot answer this: it raises the window at the machine's own DPI — where
-        // `fit_about_help` has already laid the panel out for **that** DPI — and then scales the
-        // geometry arithmetically, so above 100 % it sees rows that the run-time would have made
-        // taller. The numbers below are what the window does at each real scale, and they are
-        // what the acceptance by eye at 125 % is held against (П3: a real 125 % needs the
-        // owner's hand on the display setting).
-        println!(
-            "{}%: the window grows by at most {} px — {}",
-            dpi * 100 / 96,
-            tallest.0.max(0),
-            tallest.1
-        );
-
-        tallest = (0, String::new());
-    }
-
-    println!(
-        "the tightest gap between two rows: {} px — {}",
-        worst.0, worst.1
-    );
-
-    settings::set_ui_language(Language::Ru);
 }
 
 /// **Task T-42-3, findings С45 and С36, решение 124.1** — the language row holds its own: the
@@ -15150,9 +13733,10 @@ fn every_dialog_of_the_program_asks_for_the_same_font() {
 
     assert_eq!(
         fonts.len(),
-        6,
-        "шесть окон — настройки, «О программе», письмо, «Последние письма», «От автора», \
-         мастер; если шаблонов стало больше, этот сторож обязан узнать об этом первым"
+        5,
+        "пять окон — настройки, письмо, «Последние письма», «От автора», мастер («О программе» \
+         ушло на оболочку, FR-92а); если шаблонов стало больше, этот сторож обязан узнать об \
+         этом первым"
     );
 
     let first = fonts[0];
@@ -15526,432 +14110,6 @@ fn the_closed_part_of_a_combo_box_is_the_same_height_in_every_window() {
 // -----------------------------------------------------------------------------------------
 
 #[test]
-fn the_about_dialog_template_carries_its_elements() {
-    // Criterion 9 of T-11-11, by the instrument of T-08-1: the template of the window that
-    // replaced `MessageBoxW`, read out of the built `LangSwitcher.exe` and compared against
-    // literals written out here.
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    println!("caption: {}", template.caption);
-    for text in &template.text {
-        println!("  {text}");
-    }
-
-    // Task T-12-4, решение В-2: «О программе» and not «О программе Lang Switcher» — the name of
-    // the product stands in the window itself, on the row beside the logo, and the caption of
-    // the mock-up carries the two words alone (`chrome.ps1:186`).
-    assert_eq!(
-        template.caption, "О программе",
-        "the caption came out of rc.exe wrong — check #pragma code_page(65001)"
-    );
-
-    // Every element the task names: the icon, the name row, the version row, the two
-    // description lines, the «Как пользоваться» block of task Т-23-4 and the one button. One
-    // row per element, so a lost control is a failing test and not a smaller window.
-    const ABOUT_CONTROLS: [(u32, &str); 20] = [
-        (1120, "иконка программы"),
-        (1121, "имя программы"),
-        (1122, "строка версии"),
-        (1123, "первая строка описания"),
-        (1124, "вторая строка описания"),
-        (1125, "Как пользоваться: панель"),
-        (1126, "Как пользоваться: номер 1"),
-        (1127, "Как пользоваться: номер 2"),
-        (1128, "Как пользоваться: номер 3"),
-        (1129, "Как пользоваться: номер 4"),
-        (1130, "Как пользоваться: номер 5"),
-        (1131, "Как пользоваться: строка 1"),
-        (1132, "Как пользоваться: строка 2"),
-        (1133, "Как пользоваться: строка 3"),
-        (1134, "Как пользоваться: строка 4"),
-        (1135, "Как пользоваться: строка 5"),
-        // Task Т-32-4, FR-103: the one control this window gained — the way into «От автора».
-        (1136, "кнопка «От автора…»"),
-        // Stage E114, task T-114-2, решение 208.5 (6а): the sixth row of the help, numeral and text.
-        (1137, "Как пользоваться: номер 6"),
-        (1138, "Как пользоваться: строка 6"),
-        (1, "кнопка «ОК»"),
-    ];
-
-    for (id, what) in ABOUT_CONTROLS {
-        assert!(
-            template.controls.contains(&id),
-            "the about dialog has no control {id} — {what}"
-        );
-    }
-
-    assert_eq!(
-        template.controls.len(),
-        ABOUT_CONTROLS.len(),
-        "the about dialog carries exactly its twenty controls and nothing else"
-    );
-
-    // The visible literals, in template order. The version row is empty on purpose — it is
-    // composed at run time from the version resource — the five help rows are empty for the
-    // same reason (the key name is substituted into them), and the icon control carries an
-    // ordinal, not a text, so none of them appears here. The five numerals do: a digit is a
-    // template literal with no string row, exactly as «Lang Switcher» is.
-    assert_eq!(
-        template.text,
-        [
-            "Lang Switcher",
-            "Исправляет текст, набранный не в той раскладке.",
-            "Исправление — по нажатию одной клавиши.",
-            "Как пользоваться",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            // Stage E114, task T-114-2: the numeral of the sixth row.
-            "6",
-            // Task Т-32-4: the button that leads to «От автора». Its caption is a template
-            // literal like every other, and FR-94 replaces it on the live window.
-            "От автора…",
-            "Закрыть",
-        ],
-        "the visible strings of the about dialog came out of rc.exe wrong"
-    );
-}
-
-/// **Т-23-4, решение 82.5** — the «Как пользоваться» panel, in the numbers of the built
-/// template.
-///
-/// The block is drawn from the rectangle of a hidden control, the way the six panels of the
-/// settings dialog are, so «is this label on the panel» is arithmetic on the template and
-/// needs no window. Three facts: the window grew to the height the rows really need, the
-/// panel is not a visible element, and every one of the ten statics lies inside it.
-#[test]
-fn the_about_window_carries_the_help_panel_of_the_accepted_mock_up() {
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    println!("IDD_ABOUT: {:?} dialog units", template.size);
-
-    // ⚠ 233 and not the «≈175» of the mock-up: the estimate assumed one line per row, and the
-    // rows measured on the raised window need ten lines between them, not five. The width is
-    // the 191 it has always been — решение 82.5 says the window grows downwards only.
-    //
-    // ⚠ **233 → 256 by решение 87** (task Т-26-2): the body of this window is set one step
-    // above the dialog font since that decision, and its lines stand 1,4 of the face apart
-    // instead of the 1,33 `DrawTextW` gives — every row of text takes more room, and the room
-    // is taken downwards. The number moves by a decision of the user and never by a hand that
-    // found it inconvenient (правило [[canon]]); the width is untouched, as both decisions say.
-    //
-    // ⚠⚠ **256 → 263 by решение 124.1** (task T-42-2, finding С44). The first row of the help
-    // panel was 29 units tall and `ru`, `uk` and `es` wrap it into four lines — 76 px against
-    // 62 — so the last line was cut off **at 100 %**. The row was given the height the
-    // measurement asks for (36 units) and the window grew by the same seven, by the rule this
-    // comment states: the number moved by a decision of the user, who named влезание текста as
-    // the one thing allowed to move a frozen look. The width is still the 191 it has always
-    // been.
-    //
-    // ⚠⚠ **263 → 271 by решение 128.4** (task T-43-7, finding Н83). The third row took the
-    // caveat of решение 128.1 — «(если это включено и работает Ctrl+C)» — and wraps into three
-    // lines in 27 of the 28 cases the fit test measures (fourteen languages × two keys): 57 px
-    // against the 40 of its 19 units, and no honest wording fits two. The question went to the
-    // user, as 128.1 required, and the answer was «one line taller»: the row is 27 units and
-    // the window grew by the same eight. The width is untouched.
-    // ⚠⚠ **191 × 271 → 256 × 237 by решение 142.2** (task T-81-1). The width moved for the first
-    // time in the life of this window, and it moved by the owner's own word: «типизировал по
-    // ширине все окна кроме главного окна настроек, приведем их к 256». The height followed the
-    // width rather than a hand — in a column of 207 units instead of 142 the five help rows need
-    // 3 / 2 / 3 / 2 / 1 lines where they needed 4 / 2 / 4 / 2 / 2, and the two description lines
-    // need one line each where they needed two. ⚠ 237 is the **natural** height of this window
-    // after the widening; the typical height of the three windows of решение 142.2 п. 8 is set in
-    // task T-81-4, and the panel takes what it adds.
-    // ⚠ 237 → **242** задачей T-81-2: под нижним рядом стало поле 12 вместо 7 (решение 142.2
-    // п. 7), а воздух между панелью справки и рядом остался прежним.
-    // ⚠ 242 → **276** задачей T-81-4: это число — **типовая высота трёх окон** (решение 142.2
-    // п. 8), а по содержимому этому окну хватило бы 242. Лишние 34 единицы забрал **блок
-    // справки**, а не пустота под ним, — сам приём назван в решении. Почему именно 276 и чем это
-    // измерено, написано у теста `three_windows_share_one_height_and_two_keep_their_own`.
-    assert_eq!(
-        template.size,
-        (256, 276),
-        "the about window of решения 82.5, 87, 124.1, 128.4 и 142.2 is 256 × 276 dialog units"
-    );
-
-    // The panel is a hidden control: `NOT WS_VISIBLE` in the template, `BS_OWNERDRAW` as its
-    // button type. The same two facts the six panels of the settings dialog are held to, and
-    // for the same reason — an invisible window takes no click and paints nothing.
-    let panel_style = template.style_of(1125, "Как пользоваться: панель");
-
-    println!("панель (1125): style {panel_style:#010x}");
-
-    assert_eq!(
-        panel_style & 0x0F,
-        0x0B,
-        "the panel must carry BS_OWNERDRAW as its button type; the style is {panel_style:#010x}"
-    );
-    assert_eq!(
-        panel_style & WS_VISIBLE,
-        0,
-        "the panel must not be a visible element; the style is {panel_style:#010x}"
-    );
-    assert_eq!(
-        panel_style & 0x0001_0000,
-        0,
-        "a panel takes no focus and must not gain WS_TABSTOP; the style is {panel_style:#010x}"
-    );
-
-    let (pl, pt, pr, pb) = template.rect_of(1125);
-
-    println!("панель (1125): {pl},{pt}..{pr},{pb}");
-
-    // The ten statics of the block, every one inside the panel — and the panel itself inside
-    // the window, which is what makes «inside» mean anything.
-    assert!(
-        pl >= 0 && pt >= 0 && pr <= template.size.0 && pb <= template.size.1,
-        "the panel must lie inside the window"
-    );
-
-    // ⚠ `skip(3)` and not the `skip(4)` of every wave before T-78-3: the four labels above the
-    // panel became three when the name left this list for `ABOUT_BUTTONS`. The number of panel
-    // labels the two `skip`s leave is held to `ABOUT_LABELS_ON_THE_PANEL` a few lines down, so
-    // a stale skip is caught rather than silently checking nine of the ten.
-    for (id, what) in OWNER_DRAWN_ABOUT_LABELS.iter().skip(3) {
-        let (left, top, right, bottom) = template.rect_of(*id);
-
-        println!("«{what}» ({id}): {left},{top}..{right},{bottom}");
-
-        assert!(
-            left >= pl && top >= pt && right <= pr && bottom <= pb,
-            "«{what}» ({id}) sticks out of the panel it is drawn on"
-        );
-    }
-
-    // And the list the drawing reads is the list the template declares: a label on the panel
-    // is filled with the panel's colour, and one left out of `ABOUT_LABELS_ON_THE_PANEL` would
-    // cut a window-coloured hole in the block.
-    let mut declared: Vec<i32> = OWNER_DRAWN_ABOUT_LABELS
-        .iter()
-        .skip(3)
-        .map(|(id, _)| *id as i32)
-        .collect();
-    let mut listed = settings::ABOUT_LABELS_ON_THE_PANEL.to_vec();
-    declared.sort_unstable();
-    listed.sort_unstable();
-
-    assert_eq!(
-        listed, declared,
-        "the module's list of labels on the panel and the template's have parted"
-    );
-
-    // Every rectangle of this template is disjoint from every other, and it is load-bearing:
-    // an SS_OWNERDRAW static fills its whole rectangle before it writes a word, so two
-    // overlapping ones erase each other on every repaint. The panel is excluded — it *is* the
-    // ground the ten stand on, and its own drawing runs before theirs.
-    for (first, x1, y1, cx1, cy1) in &template.bounds {
-        for (second, x2, y2, cx2, cy2) in &template.bounds {
-            if first >= second || *first == 1125 || *second == 1125 {
-                continue;
-            }
-
-            let apart = x1 + cx1 <= *x2 || x2 + cx2 <= *x1 || y1 + cy1 <= *y2 || y2 + cy2 <= *y1;
-
-            assert!(
-                apart,
-                "controls {first} and {second} overlap — one of them erases the other on \
-                 every repaint"
-            );
-        }
-    }
-}
-
-// The same ⚠ as for the nine buttons of the settings dialog: `BS_OWNERDRAW` (0x0B) is a
-// button *type* in the low nibble, so the check is equality of the nibble and not a bit
-// test.
-#[test]
-fn the_about_ok_button_is_owner_drawn_and_keeps_its_tab_stop() {
-    let product = ProductImage::open();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    let style = template
-        .styles
-        .iter()
-        .find(|(control, _)| *control == 1)
-        .map(|(_, style)| *style)
-        .unwrap_or_else(|| panic!("the about dialog has no control 1 — «ОК»"));
-
-    println!("«ОК» (1): style {style:#010x}");
-
-    assert_eq!(
-        style & 0x0F,
-        0x0B,
-        "«ОК» (1) must carry BS_OWNERDRAW as its button type — FR-92а; \
-         the style is {style:#010x}"
-    );
-
-    assert_ne!(
-        style & 0x0001_0000,
-        0,
-        "«ОК» (1) must keep WS_TABSTOP; the style is {style:#010x}"
-    );
-}
-
-#[test]
-fn the_about_template_says_what_the_russian_table_says() {
-    // Two independent witnesses, exactly as for the settings dialog: the template literals
-    // keep the window readable if a string fails to load, the table is what the program
-    // actually shows, and a code page accident would have to corrupt both identically.
-    let product = ProductImage::shared();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    assert_eq!(
-        template.caption,
-        product.string(settings::Language::Ru, settings::IDS_ABOUT_CAPTION),
-        "the caption of the about template and of the Russian table have parted"
-    );
-
-    for (text, id) in [
-        (
-            "Исправляет текст, набранный не в той раскладке.",
-            settings::IDS_ABOUT_LINE_1,
-        ),
-        (
-            "Исправление — по нажатию одной клавиши.",
-            settings::IDS_ABOUT_LINE_2,
-        ),
-        ("Закрыть", settings::IDS_ABOUT_OK),
-        // Task Т-23-4: the caption of the «Как пользоваться» panel is a template literal like
-        // the rest — the window stays readable if a string fails to load — and FR-94 replaces
-        // it on the very control the block is drawn from. The five rows below it are **not**
-        // here: they are empty in the template, because the key name is substituted into them.
-        ("Как пользоваться", settings::IDS_ABOUT_HELP),
-    ] {
-        assert_eq!(
-            product.string(settings::Language::Ru, id),
-            text,
-            "row {id} of the Russian table and the about template have parted"
-        );
-        assert!(
-            template.text.iter().any(|title| title == text),
-            "the about template does not show «{text}»"
-        );
-    }
-}
-
-/// **Task T-106-2, решение 198.11 — the about window speaks the language of the interface on
-/// every control, «От автора…» included.**
-///
-/// The button stood out of `fill_about` from task Т-32-4 on, and its Russian template literal
-/// showed in every other language — the English window of 1.0.0 on the stand `Test_VM`,
-/// 2026-10-27. Read without raising the window: [`settings::about_texts`] is the one list the
-/// window fills itself from, and the template is read out of the built binary. Every control
-/// that carries a Russian literal there must be overwritten from the table of the language in
-/// force, and «От автора…» must get that language's own row — decoded by this file, not by the
-/// crate.
-///
-/// ⚠ Замок `with_product_strings` обязателен: язык интерфейса — величина процесса.
-#[test]
-fn every_russian_literal_of_the_about_template_is_replaced_in_all_fourteen_languages() {
-    let _guard = with_product_strings();
-
-    let product = ProductImage::shared();
-    let template = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
-
-    let russian: Vec<(u32, String)> = template
-        .captions
-        .iter()
-        .filter(|(_, caption)| {
-            caption
-                .chars()
-                .any(|letter| ('\u{0400}'..='\u{04FF}').contains(&letter))
-        })
-        .cloned()
-        .collect();
-
-    println!("Russian literals of the about template: {russian:?}");
-
-    // Контроль прибора: the defect of 198.11 stands on a Russian literal, and a filter that saw
-    // none would pass every window.
-    assert!(
-        russian.iter().any(|(id, _)| *id == 1136),
-        "the instrument does not see the literal «От автора…» on 1136"
-    );
-    assert!(
-        Language::shipped().count() >= 14,
-        "the sweep names at least the fourteen languages of 1.0.0"
-    );
-
-    let mut wrong = Vec::new();
-
-    for language in Language::shipped() {
-        settings::set_ui_language(language);
-
-        let texts = settings::about_texts(None);
-
-        for (id, literal) in &russian {
-            match texts
-                .iter()
-                .find(|(control, _)| u32::try_from(*control).ok() == Some(*id))
-            {
-                None => wrong.push(format!("{language:?}: control {id} keeps «{literal}»")),
-                Some((_, shown)) if shown.trim().is_empty() => {
-                    wrong.push(format!("{language:?}: control {id} gets an empty text"));
-                }
-                Some(_) => {}
-            }
-        }
-
-        let author = texts
-            .iter()
-            .find(|(control, _)| *control == 1136)
-            .map(|(_, shown)| shown.clone());
-        let row = product.string(language, settings::IDS_ABOUT_AUTHOR);
-
-        println!("{language:?}: 1136 shows {author:?}, the row of the language is «{row}»");
-
-        if author.as_deref() != Some(row.as_str()) {
-            wrong.push(format!(
-                "{language:?}: 1136 shows {author:?}, the row of the language is «{row}»"
-            ));
-        }
-
-        // ⚠ Stage E108: Bulgarian writes the same three words — «От автора…» is its own row, not the
-        // Russian literal of the template; the check above (1136 shows the row) holds it as it
-        // holds every language.
-        if !matches!(language, Language::Ru | Language::Bg) && row == "От автора…" {
-            wrong.push(format!(
-                "{language:?}: the row itself is the Russian literal"
-            ));
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    assert!(
-        wrong.is_empty(),
-        "решение 198.11 — a Russian literal of the about template shows in another language: \
-         {wrong:#?}"
-    );
-}
-
-/// **Task T-106-2 — the table the sweep above reads is the one the window is filled from.**
-///
-/// The sweep reads [`settings::about_texts`] and not the window, so it holds only while
-/// `fill_about` puts every row of that table on its control and sets no text of its own beside
-/// it. Read off `src\settings.rs` — the shape of the function, not its output.
-#[test]
-fn the_about_window_takes_every_text_out_of_the_one_table() {
-    let source = settings_module_source();
-    let fill = function_body(&source, "fn fill_about(");
-
-    assert!(
-        fill.contains("in about_texts(version)") && fill.contains("set_text(hwnd, control,"),
-        "fill_about must put every row of about_texts on its control — the sweep of решение \
-         198.11 reads that table"
-    );
-    assert_eq!(
-        fill.matches("set_text(").count(),
-        1,
-        "a text set beside the table is a text the sweep does not see"
-    );
-}
-
-#[test]
 fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
     // Criterion 10 of T-11-11, the numbering half: the five identifiers continue the row
     // at 3061 contiguously — written as literals, so a renumbering in the crate cannot
@@ -15980,42 +14138,6 @@ fn the_about_strings_continue_the_row_of_fr_94_without_holes() {
         settings::IDS_MENU_SUSPEND,
         3072,
         "the menu block starts at 3072 and the help must stop in front of it"
-    );
-}
-
-/// **Т-23-4** — the panel of the about window is drawn where a block is drawn, and its caption
-/// comes off its own control.
-///
-/// The same road the six panels of the settings dialog take, and the same reason for taking
-/// it: a block is the *background* of what stands on it, so it is laid by the window's erase
-/// and never by a `WM_DRAWITEM` that could arrive after its children have painted. Read off
-/// `src\settings.rs` — the shape of the two functions, not their output.
-#[test]
-fn the_help_panel_is_drawn_by_the_windows_own_erase_and_reads_its_caption_off_its_control() {
-    let source = settings_module_source();
-    let erase = function_body(&source, "unsafe fn on_about_erase_background(");
-
-    assert!(
-        erase.contains("IDC_ABOUT_HELP"),
-        "the about window's erase must draw the panel of решение 82.5"
-    );
-    assert!(
-        erase.contains("paint_rounded("),
-        "the panel is the same rounded figure the six panels of the settings dialog are"
-    );
-    assert!(
-        erase.contains("draw_panel_caption(hwnd, IDC_ABOUT_HELP"),
-        "the caption must be read off the panel's own control, so FR-94 reaches it by the \
-         one road it reaches every other piece of text"
-    );
-
-    // And no second road: a `WM_DRAWITEM` that painted the block would paint it over the
-    // labels standing on it, which is the very defect task T-11-13 closed in the other window.
-    let draw = function_body(&source, "unsafe fn on_about_draw_item(");
-
-    assert!(
-        !draw.contains("IDC_ABOUT_HELP,"),
-        "the panel must not be drawn from a WM_DRAWITEM — see task T-11-13"
     );
 }
 
@@ -16743,84 +14865,55 @@ fn the_help_rows_substitute_the_key_name_where_the_mock_up_names_a_key() {
     settings::set_ui_language(settings::Language::Ru);
 }
 
+/// **FR-92а** — the line over the title of «О программе» is the name of the program and its
+/// version: the only window that shows the number (passport §2), the same in every language. The
+/// number is the one the file that ships declares in `VERSIONINFO`, in three parts; the title and
+/// the line under it are the two lines of the description.
 #[test]
-fn the_about_version_line_substitutes_the_number_the_resource_gave() {
-    // Criterion 12 of T-11-11: the version is *substituted* into the string of the locale
-    // in force — the number itself came out of the `VERSIONINFO` resource by
-    // `tray::file_version`, and no version literal exists in the source.
+fn the_line_over_the_title_of_about_is_the_name_and_the_version_of_the_file() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Node;
+    use lang_switcher::ui::windows::about::About;
+    use windows::Win32::UI::WindowsAndMessaging::RT_VERSION;
+
     let _guard = with_product_strings();
+    let product = ProductImage::open();
+    let (major, minor, build, _) =
+        lang_switcher::tray::parse_fixed_file_version(&product.resource(RT_VERSION, 1))
+            .expect("the product declares its version");
+    let wanted = format!("Lang Switcher {major}.{minor}.{build}");
 
-    settings::set_ui_language(settings::Language::Ru);
-    let russian = settings::about_version_line(Some((0, 1, 0, 0)));
-    let russian_missing = settings::about_version_line(None);
-    // The fourth part is deliberately not zero here: a revision of 7 must change nothing in
-    // the line — see the ⚠ below.
-    let russian_revised = settings::about_version_line(Some((0, 1, 0, 7)));
+    for language in [Language::Ru, Language::En, Language::He] {
+        let about = About {
+            language,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        };
+        let window = about.describe();
+        let Node::Column(nodes) = &window.body else {
+            panic!("the body of «О программе» is a column");
+        };
+        let Some(Node::Header {
+            eyebrow,
+            title,
+            subtitle,
+        }) = nodes.first()
+        else {
+            panic!("the column opens with the head of the window");
+        };
 
-    settings::set_ui_language(settings::Language::En);
-    let english = settings::about_version_line(Some((0, 1, 0, 0)));
+        println!("{language:?}: «{eyebrow:?}» / «{title}» / «{subtitle:?}»");
 
-    println!("ru: {russian} / {russian_missing} / {russian_revised}");
-    println!("en: {english}");
-
-    // ⚠ **Three parts and a lower-case letter since task T-12-4** — finding A-12 and решение
-    // В-2: the mock-up's line is «версия 0.1.0» (`chrome.ps1:195`), and the fourth part is what
-    // made the live line longer than the model's at the same point size. The revision is still
-    // *read* — the caller hands over whatever the resource holds — and only the sentence a
-    // person reads leaves it out.
-    assert_eq!(russian, "версия 0.1.0");
-    assert_eq!(
-        russian_revised, "версия 0.1.0",
-        "the revision is dropped from the line, whatever it is"
-    );
-    // A binary without the resource shows a dash rather than failing — the reading the old
-    // box gave the same case.
-    assert_eq!(russian_missing, "версия —");
-    assert_eq!(english, "version 0.1.0");
-
-    settings::set_ui_language(settings::Language::Ru);
-}
-
-#[test]
-fn the_about_static_colour_roles_follow_their_table() {
-    // The role function the about dialog's `WM_CTLCOLORSTATIC` answers with — the closed
-    // vocabulary of the settings dialog, reused: the version line **and the two description
-    // lines** are muted, the icon and the name are ordinary captions, and nothing in that
-    // window is a field.
-    //
-    // ⚠ The two description lines moved from `Label` to `Muted` in task T-12-4 — finding A-06:
-    // the mock-up paints the paragraph under the name with the muted brush (`chrome.ps1:196`
-    // draws it with `$brMu`, while line 194 draws the name with `$brFg`), and решение В-2 says
-    // in as many words that the description stays «в колонке имени и приглушённым цветом».
-    //
-    // ⚠ Task Т-23-4 added the ten statics of «Как пользоваться», and they split: the numeral
-    // of a row is the mock-up's `.key` — muted — and the sentence beside it is the row text,
-    // which the mock-up leaves in the full-strength ink.
-    let cases = [
-        (1120, theme::StaticColorRole::Label, "иконка"),
-        (1121, theme::StaticColorRole::Label, "имя"),
-        (1122, theme::StaticColorRole::Muted, "строка версии"),
-        (1123, theme::StaticColorRole::Muted, "описание, строка 1"),
-        (1124, theme::StaticColorRole::Muted, "описание, строка 2"),
-        (1126, theme::StaticColorRole::Muted, "справка: номер 1"),
-        (1127, theme::StaticColorRole::Muted, "справка: номер 2"),
-        (1128, theme::StaticColorRole::Muted, "справка: номер 3"),
-        (1129, theme::StaticColorRole::Muted, "справка: номер 4"),
-        (1130, theme::StaticColorRole::Muted, "справка: номер 5"),
-        (1131, theme::StaticColorRole::Label, "справка: строка 1"),
-        (1132, theme::StaticColorRole::Label, "справка: строка 2"),
-        (1133, theme::StaticColorRole::Label, "справка: строка 3"),
-        (1134, theme::StaticColorRole::Label, "справка: строка 4"),
-        (1135, theme::StaticColorRole::Label, "справка: строка 5"),
-        (1137, theme::StaticColorRole::Muted, "справка: номер 6"),
-        (1138, theme::StaticColorRole::Label, "справка: строка 6"),
-    ];
-
-    for (control, expected, what) in cases {
+        assert_eq!(eyebrow.as_deref(), Some(wanted.as_str()), "{language:?}");
         assert_eq!(
-            settings::about_static_color_role(control),
-            expected,
-            "{what} ({control})"
+            title,
+            &settings::text_in(language, settings::IDS_ABOUT_LINE_1),
+            "{language:?}: the title is the first line of the description"
+        );
+        assert_eq!(
+            subtitle.as_deref(),
+            Some(settings::text_in(language, settings::IDS_ABOUT_LINE_2).as_str()),
+            "{language:?}: the line under it is the second"
         );
     }
 }
@@ -18181,9 +16274,6 @@ struct DialogTemplate {
     size: (i32, i32),
     /// Every non-empty control caption, in template order.
     text: Vec<String>,
-    /// The same captions paired with the identifier of their control — task T-106-2, which has
-    /// to say *which* control a Russian literal stands on.
-    captions: Vec<(u32, String)>,
     /// The identifier of every control.
     controls: Vec<u32>,
     /// The style of every control, paired with its identifier, in template order — task
@@ -18288,7 +16378,6 @@ impl DialogTemplate {
         });
 
         let mut text = Vec::new();
-        let mut captions = Vec::new();
         let mut controls = Vec::new();
         let mut styles = Vec::new();
         let mut bounds = Vec::new();
@@ -18324,7 +16413,6 @@ impl DialogTemplate {
             if let Some(title) = title
                 && !title.is_empty()
             {
-                captions.push((id, title.clone()));
                 text.push(title);
             }
         }
@@ -18333,7 +16421,6 @@ impl DialogTemplate {
             caption,
             size,
             text,
-            captions,
             controls,
             styles,
             bounds,
@@ -22676,25 +20763,21 @@ fn the_system_theme_message_is_wm_app_plus_14_and_collides_with_nothing_public()
 }
 
 // ---------------------------------------------------------------------------------------
-// FR-92а — the system theme changing under the open «О программе» window. Task T-13-17.
+// FR-92а — the record of the open «О программе» window.
 // ---------------------------------------------------------------------------------------
 //
-// The finding of the audit of 2026-08-24: FR-92а names this window among «всё видимое
-// глазом» and asks for a system theme change to reach open windows without a restart, and
-// this one resolved its palette once and was told nothing afterwards. What is measurable
-// without a live window is the record and the shape — who writes it down, who clears it, and
-// whether the reaction to the message is a reading of the system rather than of the message.
-// The look on the screen is the controller's, on the real window: the стенд, not a test.
+// «О программе» is a window of the shell (`ui::windows::about`). The record of it locks the
+// menu and keeps a second copy out; what is measurable without a live window is the record and
+// the shape — who writes it down, who clears it, and that the road of the system theme does not
+// reach it. The window itself is opened, hidden, by `tests\tray.rs`.
 
 use lang_switcher::settings::AboutSession;
 use windows::Win32::Foundation::HWND;
 
 /// A handle that names no window, for the record tests below.
 ///
-/// Deliberately not a live window. What is under test is the *record* — an integer this
-/// module writes down and clears — and a test that opened a real window would be testing the
-/// dialog manager instead. Nothing is ever sent to this number: the tests below assert that
-/// the record is gone before anything could be.
+/// Deliberately not a live window: what is under test is the *record* — an integer this module
+/// writes down and clears. Nothing is ever sent to this number.
 fn a_handle_that_names_no_window() -> HWND {
     HWND(0x1357 as *mut std::ffi::c_void)
 }
@@ -22702,10 +20785,10 @@ fn a_handle_that_names_no_window() -> HWND {
 /// **Criterion 6 of task T-13-17, and ловушка 1 of it.** The window of «О программе» is
 /// registered while it lives and unregistered on the way out — whatever the way out is.
 ///
-/// The ordinary road and the panic are both walked here, because the guard exists precisely
-/// so that they are one road: the window is closed by «ОК», by `Esc`, by the cross of the
-/// caption and — in Debug — by a failed `debug_assert`, and a record cleared in a handler
-/// would be cleared on some of those and not on others.
+/// The ordinary road and the panic are both walked here, because the guard exists precisely so
+/// that they are one road: the window is closed by a button, by `Esc`, by the cross of the
+/// caption, by the end of the program, and the host drops its content — the guard with it — on
+/// every one of them.
 #[test]
 fn the_about_window_record_is_cleared_on_every_exit_path() {
     assert!(
@@ -22718,7 +20801,7 @@ fn the_about_window_record_is_cleared_on_every_exit_path() {
 
         assert!(
             !settings::about_is_open(),
-            "the guard alone names no window — there is none until `WM_INITDIALOG`"
+            "the guard alone names no window — there is none until the host has made it"
         );
 
         AboutSession::record(a_handle_that_names_no_window());
@@ -22731,12 +20814,12 @@ fn the_about_window_record_is_cleared_on_every_exit_path() {
 
     assert!(
         !settings::about_is_open(),
-        "the record must not outlive the frame that owns the window"
+        "the record must not outlive the content that owns the guard"
     );
 
     // The other road. The program stays up after a panic (FR-98, FR-99), and a record left
-    // behind would keep `on_system_theme_message` posting to a number Windows is free to
-    // have given to somebody else's window by then.
+    // behind would lock the menu for ever and name a number Windows is free to give to
+    // somebody else's window.
     let unwound = std::panic::catch_unwind(|| {
         let _open = AboutSession::open();
         AboutSession::record(a_handle_that_names_no_window());
@@ -22751,64 +20834,32 @@ fn the_about_window_record_is_cleared_on_every_exit_path() {
     );
 }
 
-/// **Criterion 6 of task T-13-17, second half.** A theme message that arrives after the
-/// window is gone is delivered to nobody and does nothing.
-///
-/// The handle recorded and released here names no window at all. Were the record to survive
-/// its guard, this call would take that number out again and post `WM_APP_SYSTEM_THEME` to
-/// whatever Windows has since made of it; it returns having touched nothing, because an
-/// empty record is the first exit of the function — before `with_about_state`, before any
-/// reading of the system switch and before any `PostMessageW`.
+/// **FR-92а — one delivery road, one recipient.** The nudge of the system theme goes to the
+/// settings dialog alone, through the one posting site. The record of «О программе» is not on
+/// the road: it names a window of the shell, which follows the system theme on its own, and that
+/// window keeps the host of the shell where the dialogs keep their state — a road that read the
+/// one as the other would read a foreign pointer.
 #[test]
-fn a_theme_message_after_the_about_window_closed_reaches_nobody() {
-    {
-        let _open = AboutSession::open();
-        AboutSession::record(a_handle_that_names_no_window());
-        assert!(settings::about_is_open());
-    }
-
-    assert!(
-        !settings::about_is_open(),
-        "the window is closed, so there is nobody to tell"
-    );
-
-    // All three shapes the tray can hand in: the exact word, a foreign word, and the null
-    // `lParam` of SEC-05 read as `None`.
-    settings::on_system_theme_message(Some(settings::IMMERSIVE_COLOR_SET));
-    settings::on_system_theme_message(Some("WindowsThemeElement"));
-    settings::on_system_theme_message(None);
-
-    assert!(
-        !settings::about_is_open(),
-        "and nothing about the call resurrected the record"
-    );
-}
-
-/// **Criterion 2 of task T-13-17 — ловушка 2.** One delivery road, two recipients.
-///
-/// `on_system_theme_message` already decided who to tell; after this task it tells two, out
-/// of the two records, through the one posting site. A second mechanism — the about window
-/// listening for `WM_SETTINGCHANGE` on its own, or a second `PostMessageW` of this message
-/// somewhere else — would be a second answer to «пора ли перекраситься».
-#[test]
-fn the_theme_nudge_has_one_delivery_road_and_two_recipients() {
+fn the_theme_nudge_has_one_delivery_road_and_one_recipient() {
     let source = settings_module_source();
     let body = function_body(
         &source,
         "pub fn on_system_theme_message(setting_string: Option<&str>) {",
     );
 
-    for record in ["DIALOG_WINDOW", "ABOUT_WINDOW"] {
-        assert!(
-            body.contains(&format!("live_window(&{record})")),
-            "`on_system_theme_message` must reach {record}"
-        );
-    }
+    assert!(
+        body.contains("live_window(&DIALOG_WINDOW)"),
+        "`on_system_theme_message` must reach the settings dialog"
+    );
+    assert!(
+        !body.contains("ABOUT_WINDOW"),
+        "and must not reach the record of «О программе», a window of the shell"
+    );
 
     assert_eq!(
         body.matches("post_system_theme(hwnd);").count(),
-        2,
-        "both recipients are posted to, and both through the shared site"
+        1,
+        "the one recipient is posted to through the shared site"
     );
 
     let posts = product_lines_with("PostMessageW(Some(hwnd), WM_APP_SYSTEM_THEME");
@@ -22818,70 +20869,11 @@ fn the_theme_nudge_has_one_delivery_road_and_two_recipients() {
         1,
         "the message is posted from one place in the module and no other"
     );
-
-    // And the about window does not listen for the broadcast itself: the tray's hidden
-    // window is the one window of this program that reads `WM_SETTINGCHANGE` (§6.2).
-    let about = function_body(&source, "unsafe extern \"system\" fn about_proc(");
-    assert!(
-        !about.contains("WM_SETTINGCHANGE") && !about.contains("WM_THEMECHANGED"),
-        "the about window is told by the one road and does not open a second one"
-    );
 }
 
-/// **Criteria 3 and 4 of task T-13-17.** The about window answers the nudge by asking the
-/// system, and its caption goes the road the dialog's caption goes.
-///
-/// SEC-05 in one test: the message carries nothing, and the palette that comes out of the
-/// handler is `theme::resolve` over this program's own setting and this program's own
-/// reading of `AppsUseLightTheme`. A forged message cannot impose a palette, because there
-/// is no place in the message for one to be named.
-#[test]
-fn the_about_window_answers_the_nudge_by_re_reading_the_system() {
-    let source = settings_module_source();
-
-    let about = function_body(&source, "unsafe extern \"system\" fn about_proc(");
-    assert!(
-        about.contains("WM_APP_SYSTEM_THEME => {"),
-        "the about procedure must handle the nudge at all — it did not before this task"
-    );
-    assert!(
-        about.contains("with_about_state(hwnd, |state| refresh_about_palette(hwnd, state))"),
-        "and answer it out of its own state"
-    );
-
-    let refresh = function_body(
-        &source,
-        "fn refresh_about_palette(hwnd: HWND, state: &mut AboutState) {",
-    );
-
-    for line in [
-        // The reaction is a reading of the system's switch under the window's own setting.
-        "let fresh = theme::resolve(state.setting, theme::system_is_light());",
-        // The identity test — the correctness check and the debounce of the batch in one.
-        "if !std::ptr::eq(fresh, state.palette)",
-        // The caption of the window: the one shared road (п. 3), not a second DWM path.
-        "apply_title_bar_theme(hwnd, fresh);",
-        // And the visible half. ⚠ Имя сменилось задачей Т-45-2 — общий слой, то же тело.
-        "widgets::repaint::whole(hwnd);",
-    ] {
-        assert!(
-            refresh.contains(line),
-            "`refresh_about_palette` must carry the line `{line}`"
-        );
-    }
-
-    // No second road to DWM: every caption of this module goes through the one function.
-    let dwm = product_lines_with("DwmSetWindowAttribute(");
-    println!("DwmSetWindowAttribute call sites: {dwm:?}");
-    assert_eq!(
-        dwm.len(),
-        2,
-        "the two calls of `apply_title_bar_theme` and `set_caption_colour`, and no third"
-    );
-}
-
-/// **Criterion 1 of task T-13-17.** The record has exactly two writers — the one that names
-/// the window and the one that forgets it — and the guard is taken before the modal call.
+/// **Criterion 1 of task T-13-17.** The record has exactly two writers — the one that names the
+/// window and the one that forgets it — and `about::open` records the window only once the host
+/// has made it, with the guard already in the content the host owns.
 #[test]
 fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
     let source = settings_module_source();
@@ -22910,49 +20902,45 @@ fn the_about_record_is_written_by_the_pair_and_by_nobody_else() {
         "the clearing belongs to the guard's `Drop` and to nothing else"
     );
 
-    let show = function_body(&source, "pub fn show_about_dialog(");
-    let guard = show
-        .find("let _open = AboutSession::open();")
-        .expect("`show_about_dialog` must take the guard");
-    // ⚠ Task Т-30-2 renamed what stands here: the modal call is now `show_modal_dialog`, which
-    // is `DialogBoxIndirectParamW` on a copy of the template for a right-to-left locale and
-    // `DialogBoxParamW` for the other twelve. The sweep names the new call, because what it is
-    // really about is the **order** — the guard before the modal call — and that is unchanged.
-    let modal = show
-        .find("show_modal_dialog(")
-        .expect("`show_about_dialog` must still go through the modal call");
+    let about = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("ui")
+            .join("windows")
+            .join("about.rs"),
+    )
+    .expect("src\\ui\\windows\\about.rs must be readable")
+    .replace("\r\n", "\n");
+    let open = function_body(&about, "pub fn open(");
+    let guard = open
+        .find("_session: AboutSession::open(),")
+        .expect("`about::open` must put the guard into the content");
+    let made = open
+        .find("host::open(product, Some(owner))")
+        .expect("`about::open` must make the window by the host");
+    let recorded = open
+        .find("AboutSession::record(window);")
+        .expect("`about::open` must record the window it made");
 
     assert!(
-        guard < modal,
-        "the guard is taken before the modal call, so the `-1` return is covered too"
+        guard < made && made < recorded,
+        "the guard goes into the content before the window is made, and the window is recorded \
+         once it is"
     );
 }
 
-/// **Task T-43-4, finding С21 — the gate at the top of `show_about_dialog`.**
+/// **Task T-43-4, finding С21 — the door at the top of `about::open`.** While «О программе» or
+/// the settings dialog is up, a second «О программе» turns round at the door: nothing is made,
+/// and the record is left as it was. The menu greys and refuses the entry for the same reason
+/// (`tray::dialog_locks_command`); this is the half behind it.
 ///
-/// The window had no latch against a second copy of itself. The menu of FR-91 comes up under
-/// any modal loop of this thread, so «О программе» opened over the settings dialog and over
-/// itself. The tray now greys and refuses the entry (`tray::dialog_locks_command`); this is the
-/// entry half of the same lock — the one the settings dialog has always had at the top of
-/// `settings::show_dialog`.
-///
-/// ⚠ **Measured without a window, on purpose.** The call is made with the module of
-/// `kernel32.dll`, which carries no template of ours, and with an owner that names no window:
-/// a call that walks past the gate reaches the dialog manager and comes back `Err` without
-/// putting anything on the screen — so the red of the unrepaired tree is a failed assertion
-/// and not a modal window blocking the test. The positive control, with neither window up,
-/// shows that the very same call does get that far.
+/// The positive control — with neither window up the very same road makes the window — is
+/// `tests\tray.rs`, which opens it, hidden, by the command of the menu.
 #[test]
 fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
     use lang_switcher::theme::ThemeSetting;
-    use windows::Win32::Foundation::HINSTANCE;
-    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::core::w;
+    use lang_switcher::ui::windows::about;
 
-    // SAFETY: a module every process has loaded; the handle is borrowed and never freed.
-    let module = unsafe { GetModuleHandleW(w!("kernel32.dll")) }
-        .expect("kernel32.dll is loaded in every process");
-    let instance = HINSTANCE(module.0);
     let owner = a_handle_that_names_no_window();
 
     assert!(
@@ -22960,33 +20948,23 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
         "this thread has neither window"
     );
 
-    // The positive control: nothing is up, the gate lets the call through, and the call goes on
-    // to the dialog manager — which has no template and no owner to give it, and says so.
-    let reached =
-        settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
-
-    println!("with neither window up: {reached:?}");
-
-    assert!(
-        reached.is_err(),
-        "with neither window up the call must reach the dialog manager, and a module with no \
-         template must make it refuse: {reached:?}"
-    );
-
     // An «О программе» window is up.
     {
         let _open = AboutSession::open();
         AboutSession::record(a_handle_that_names_no_window());
 
-        let second =
-            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
+        let second = about::open(owner, ThemeSetting::Dark, &bare("Pause"));
 
         println!("over an about window: {second:?}");
 
-        assert!(
-            matches!(second, Ok(false)),
-            "a second «О программе» over the first must turn round at the door — not reach the \
-             dialog manager, and not ask for the window of FR-103 either: {second:?}"
+        assert_eq!(
+            second, None,
+            "a second «О программе» over the first must turn round at the door"
+        );
+        assert_eq!(
+            settings::open_window(),
+            Some(a_handle_that_names_no_window()),
+            "and the record still names the first"
         );
     }
 
@@ -22994,15 +20972,15 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
     {
         let _dialog = settings::DialogSession::open();
 
-        let over =
-            settings::show_about_dialog(owner, instance, ThemeSetting::Dark, None, &bare("Pause"));
+        let over = about::open(owner, ThemeSetting::Dark, &bare("Pause"));
 
         println!("over the settings dialog: {over:?}");
 
-        assert!(
-            matches!(over, Ok(false)),
-            "«О программе» over the settings dialog must turn round at the door as well: {over:?}"
+        assert_eq!(
+            over, None,
+            "«О программе» over the settings dialog must turn round at the door as well"
         );
+        assert!(!settings::about_is_open(), "and nothing was recorded");
     }
 
     assert!(
@@ -23020,17 +20998,16 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
 /// of Windows: `FindResourceW` and `LoadResource`. Those two are journaled now; the other two are a
 /// reading of bytes, with no code to report (NFR-13 does not reach them).
 ///
-/// The refusal of `FindResourceW` is ordered without a window: the about box is asked for with the
-/// module of `kernel32.dll`, which carries no template of ours, and an owner that names no window —
-/// the call walks through `show_modal_dialog` to the dialog manager and back with `Err`, and on its
-/// way the copy of the template is refused. The journal is read back by name among the entries
-/// recorded after the mark, with the code Windows gave. ⚠ The name needs a row of its own in the
-/// vocabulary of `src\diag.rs`: until this task the table had `FindResourceExW` and not
-/// `FindResourceW`, and a report under a name that is not a row reaches the ring unnamed.
+/// The refusal of `FindResourceW` is ordered without a window: the settings dialog is asked for
+/// with the module of `kernel32.dll`, which carries no template of ours, and an owner that names
+/// no window — the call walks through `show_modal_dialog` to the dialog manager and back with
+/// `Err`, and on its way the copy of the template is refused. The journal is read back by name
+/// among the entries recorded after the mark, with the code Windows gave. ⚠ The name needs a row of
+/// its own in the vocabulary of `src\diag.rs`: until this task the table had `FindResourceExW` and
+/// not `FindResourceW`, and a report under a name that is not a row reaches the ring unnamed.
 #[test]
 fn a_template_the_mirror_could_not_find_is_journaled_under_its_own_name() {
     use lang_switcher::diag;
-    use lang_switcher::theme::ThemeSetting;
     use windows::Win32::Foundation::HINSTANCE;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::core::w;
@@ -23046,12 +21023,12 @@ fn a_template_the_mirror_could_not_find_is_journaled_under_its_own_name() {
     );
 
     let mark = diag::recorded();
-    let answered = settings::show_about_dialog(
+    let answered = settings::show_dialog(
         a_handle_that_names_no_window(),
         instance,
-        ThemeSetting::Dark,
-        None,
-        &bare("Pause"),
+        &Config::default(),
+        &mut |_: &Config| {},
+        settings::Opening::Fresh,
     );
 
     let entries: Vec<_> = diag::snapshot()
@@ -23060,7 +21037,8 @@ fn a_template_the_mirror_could_not_find_is_journaled_under_its_own_name() {
         .collect();
 
     println!(
-        "the call answered {answered:?}; journal since the mark: {:?}",
+        "the call answered {}; journal since the mark: {:?}",
+        if answered.is_err() { "Err" } else { "Ok" },
         entries
             .iter()
             .map(|event| format!("{} {:#010X}", event.operation.name(), event.code.raw()))
@@ -23387,73 +21365,6 @@ fn the_body_line_pitch_is_a_share_of_the_face_and_larger_than_its_natural_line()
         settings::about_body_line_pitch(-13),
         settings::about_body_line_pitch(13),
         "the sign of lfHeight is not the sign of a distance"
-    );
-}
-
-/// **Task T-43-5, finding Н69 — the help panel of a window whose faces were refused.**
-///
-/// The pitch of a help sentence came out of the window's faces, and a window whose faces could
-/// not be made handed the pen a pitch of **zero**: every wrapped line of a sentence landed on
-/// the same row. The fallback asked for is the one every other label of these windows already
-/// takes when it is given no pitch — `theme::LABEL_LINE_PITCH` through `theme::scaled`, see
-/// `theme::paint_label_at_pitch` — so the expectation is computed from that constant and not
-/// written down as a number of its own.
-///
-/// The refusal cannot be ordered on a live window (`CreateFontIndirectW` does not fail on
-/// demand), so the choice is asked of the pure function the pen calls, with the `None` the pen
-/// would be handed; a sweep holds that the pen does call it.
-#[test]
-fn a_help_sentence_of_a_window_without_faces_keeps_the_pitch_of_a_label() {
-    for dpi in [96, 120, 144, 168, 192] {
-        let degraded = settings::about_help_row_pitch(None, dpi);
-        let label = theme::scaled(theme::LABEL_LINE_PITCH, dpi);
-
-        println!("dpi {dpi}: pitch without faces {degraded} px, a settings label {label} px");
-
-        assert_eq!(
-            degraded, label,
-            "dpi {dpi}: a window with no faces must draw its help sentences at the pitch of a \
-             label — a pitch of {degraded} puts the lines on top of one another"
-        );
-        assert!(degraded > 0, "and a pitch is never zero");
-    }
-
-    // The ordinary road is untouched: with the faces there, the body's own pitch wins.
-    let body = settings::about_body_line_pitch(13);
-
-    assert_eq!(settings::about_help_row_pitch(Some(body), 96), body);
-
-    // And the pen asks this function rather than a `map_or` of its own.
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("settings.rs"),
-    )
-    .expect("src\\settings.rs must be readable")
-    .replace("\r\n", "\n");
-    let pen = function_body(&source, "unsafe fn draw_about_help_row(");
-
-    // ⚠ `drawing_dpi` and not `dc_dpi` since задача T-83-4: this pen is one of the 28 places of our
-    // drawing that go by the step of the window's font (решение 143.4). What this test holds — the
-    // pitch comes out of `about_help_row_pitch` — is unchanged; the needle names the DPI the pen
-    // hands it now.
-    // ⚠ And it is read **without whitespace and without the trailing comma**: `cargo fmt` broke the
-    // call over four lines the moment the longer name went in, and a needle written as one line of
-    // a call stops matching after `fmt` (the lesson of Э32).
-    let squeezed = |text: &str| -> String {
-        text.chars()
-            .filter(|character| !character.is_whitespace())
-            .collect::<String>()
-            .replace(",)", ")")
-    };
-    assert!(
-        squeezed(pen)
-            .contains("about_help_row_pitch(fonts.map(DialogFonts::body_pitch),drawing_dpi(dc))"),
-        "draw_about_help_row must take its pitch from about_help_row_pitch"
-    );
-    assert!(
-        !source.contains("fonts.map_or(0, DialogFonts::body_pitch)"),
-        "and the pitch of zero is gone from the module"
     );
 }
 
@@ -25477,8 +23388,9 @@ fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     );
 
     // …and the size of the set is the length of the array the loop walks, which is where the
-    // number «six faces» is really written down. Read off the source, so a seventh face added
-    // without a `Drop` for it cannot slip past.
+    // number of faces is really written down. Read off the source, so a third face added without
+    // a `Drop` for it cannot slip past. Six until FR-92а: the name, the body, the numeral and the
+    // chip were the faces of the old «О программе», which went to the shell.
     let source = settings_module_source();
     let wanted = function_body(
         &source,
@@ -25490,21 +23402,14 @@ fn the_fields_are_handed_the_face_the_window_already_owned_and_not_a_new_one() {
     println!("лиц в наборе: {faces}");
 
     assert_eq!(
-        faces, 6,
-        "the set of решение 87 is six faces: text, caption, name, body, number, chip"
+        faces, 2,
+        "the set of the settings dialog is two faces: text and caption"
     );
 
     // Every one of them is freed, and the list `Drop` walks is the list the constructor filled.
     let dropped = function_body(&source, "impl Drop for DialogFonts {");
 
-    for face in [
-        "self.text",
-        "self.caption",
-        "self.name",
-        "self.body",
-        "self.number",
-        "self.chip",
-    ] {
+    for face in ["self.text", "self.caption"] {
         assert!(
             dropped.contains(face),
             "`{face}` is made and never freed — `Drop` must walk the whole set: {dropped}"
@@ -29880,18 +27785,13 @@ fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
     );
 }
 
-/// The five windows that became one family in stage Э81 — решение 142.2 п. 2 и п. 3.
+/// The windows of the old kind that became one family in stage Э81 — решение 142.2 п. 2 и п. 3.
+/// Five then; «О программе» has left the templates for the shell (FR-92а).
 ///
 /// The settings dialog is deliberately absent: it is 430 units wide by the owner's word and its
 /// controls keep their own columns. Its width is held below all the same, so that «the four came
 /// to 256» cannot quietly become «all six did».
-const FAMILY_OF_E81: [&str; 5] = [
-    "IDD_ABOUT",
-    "IDD_LETTER",
-    "IDD_LETTERS_LIST",
-    "IDD_AUTHOR",
-    "IDD_WIZARD",
-];
+const FAMILY_OF_E81: [&str; 4] = ["IDD_LETTER", "IDD_LETTERS_LIST", "IDD_AUTHOR", "IDD_WIZARD"];
 
 /// One `DIALOGEX` of `app.rc`: its name, its `(cx, cy)`, and every control statement inside it
 /// as `(statement, x, y, cx, cy)`.
@@ -30032,9 +27932,10 @@ fn what_breaks_the_family_of_e81(text: &str) -> Vec<String> {
     let dialogs = dialogs_of_the_resource(text);
     let mut broken = Vec::new();
 
-    if dialogs.len() != 6 {
+    // Six in stage Э81; five since «О программе» moved to the shell (FR-92а).
+    if dialogs.len() != 5 {
         broken.push(format!(
-            "app.rc declares {} dialogs, not six",
+            "app.rc declares {} dialogs, not five",
             dialogs.len()
         ));
     }
@@ -30135,16 +28036,12 @@ fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
     );
 
     // Контроль прибора, первый — **отрицательный**: the resource as `e80` had it. Three windows
-    // were 191 units wide and one 246; a sweep that passes this text is measuring nothing.
-    let of_e80 = text
-        .replace(
-            "IDD_ABOUT DIALOGEX 0, 0, 256,",
-            "IDD_ABOUT DIALOGEX 0, 0, 191,",
-        )
-        .replace(
-            "IDD_AUTHOR DIALOGEX 0, 0, 256,",
-            "IDD_AUTHOR DIALOGEX 0, 0, 246,",
-        );
+    // were 191 units wide and one 246 — «От автора» stands for them here, the about template
+    // being gone; a sweep that passes this text is measuring nothing.
+    let of_e80 = text.replace(
+        "IDD_AUTHOR DIALOGEX 0, 0, 256,",
+        "IDD_AUTHOR DIALOGEX 0, 0, 246,",
+    );
 
     assert_ne!(
         of_e80, text,
@@ -30304,9 +28201,10 @@ fn every_window_of_the_program_carries_the_same_bottom_row() {
 
     let mut broken = Vec::new();
 
+    // «О программе» has left the templates for the shell (FR-92а), whose row of buttons is the
+    // passport's.
     for name in [
         "IDD_SETTINGS",
-        "IDD_ABOUT",
         "IDD_LETTER",
         "IDD_LETTERS_LIST",
         "IDD_AUTHOR",
@@ -30459,13 +28357,13 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
     let button_min = 40;
 
     let product = ProductImage::open();
-    let about = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
     let settings = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_SETTINGS));
 
-    let font = about
+    // Every template of the program declares the one face, FONT 10 «Segoe UI».
+    let font = settings
         .font
         .clone()
-        .expect("the about template declares DS_SETFONT");
+        .expect("the settings template declares DS_SETFONT");
 
     let sheet = Sheet::new(64);
 
@@ -30490,13 +28388,7 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
 
     // The rows whose widths `app.rc` freezes: the slot is read off the template, so a slot and
     // a stand cannot part.
-    let frozen: [(&str, &DialogTemplate, u32, u16); 4] = [
-        (
-            "«Закрыть» of «О программе»",
-            &about,
-            1,
-            settings::IDS_ABOUT_OK,
-        ),
+    let frozen: [(&str, &DialogTemplate, u32, u16); 3] = [
         ("«ОК» of настройки", &settings, 1, settings::IDS_OK),
         ("«Отмена» of настройки", &settings, 2, settings::IDS_CANCEL),
         ("«Применить»", &settings, 1080, settings::IDS_APPLY),
@@ -30631,25 +28523,14 @@ fn every_bottom_row_fits_its_window_in_all_fourteen_languages() {
     );
 }
 
-/// **Task T-81-3, решение 142.2 п. 4** — the head of «От авторе» is the head of «О программе»,
-/// rectangle for rectangle.
+/// **Task T-81-3, решение 142.2 п. 4** — the head of «От автора» is its template's.
 ///
-/// ⚠ «Точь-в-точь» is the kind of claim an eye cannot keep: two heads laid out by two hands drift
-/// apart a unit at a time, and Э78 is the proof — it gave the name of one head a link and left
-/// the other a label for four waves. So the two templates are read out of the **built product**
-/// and compared control by control, and the version line is in that comparison because it was
-/// one unit lower in «От авторе» than in «О программе», for no reason anybody could name.
+/// The head was the head of the old «О программе», rectangle for rectangle, and this test held
+/// the two templates equal; that template went with FR-92а, when «О программе» moved to the
+/// shell. What stays is the name — a button that takes no focus — and the layout that leaves the
+/// head where the template puts it.
 #[test]
 fn the_head_of_both_windows_is_the_same_head() {
-    /// The controls of the head, paired: «О программе» and «От авторе».
-    const HEAD: [(&str, u32, u32); 5] = [
-        ("значок", 1120, 1260),
-        ("имя", 1121, 1261),
-        ("строка версии", 1122, 1262),
-        ("описание, строка 1", 1123, 1280),
-        ("описание, строка 2", 1124, 1281),
-    ];
-
     /// The ordinal of the predefined `Button` class in a dialog template.
     const BUTTON_CLASS: u16 = 0x0080;
     /// The type of a button is the low nibble of its style.
@@ -30658,24 +28539,9 @@ fn the_head_of_both_windows_is_the_same_head() {
     const TABSTOP: u32 = 0x0001_0000;
 
     let product = ProductImage::open();
-    let about = DialogTemplate::parse(&product.resource(RT_DIALOG, IDD_ABOUT));
     let author = DialogTemplate::parse(&product.resource(RT_DIALOG, 204));
 
-    for (what, here, there) in HEAD {
-        let one = about.rect_of(here);
-        let two = author.rect_of(there);
-
-        println!("«{what}»: «О программе» {one:?}, «От авторе» {two:?}");
-
-        assert_eq!(
-            one, two,
-            "«{what}» stands at {one:?} in «О программе» and at {two:?} in «От авторе» — the head \
-             of решение 142.2 п. 4 is one head, not two alike"
-        );
-    }
-
-    // And the name of «От авторе» is a button of the same type as its twin, and takes the focus
-    // no more than its twin does — решение 142.2 п. 6.
+    // The name of «От автора» is a button, and takes no focus — решение 142.2 п. 6.
     let class = author
         .classes
         .iter()
@@ -30701,7 +28567,7 @@ fn the_head_of_both_windows_is_the_same_head() {
     assert_eq!(
         style & TABSTOP,
         0,
-        "and not a tab stop: it stands first in the template, as it does in «О программе»"
+        "and not a tab stop: it stands first in the template"
     );
 
     // ⛔⛔⛔ **И «От авторе» обязано этот шаблон УВАЖАТЬ — находка 142б.1, задача T-81-6.**
@@ -30749,7 +28615,7 @@ fn the_head_of_both_windows_is_the_same_head() {
         assert!(
             !places(&squeezed, control),
             "«От автора» must leave {control} where the template put it — the head of решение \
-             142.2 п. 4 is the template's, and the template's is the about window's"
+             142.2 п. 4 is the template's"
         );
     }
 
@@ -30777,50 +28643,45 @@ fn the_head_of_both_windows_is_the_same_head() {
     );
 }
 
-/// **Task T-81-3, решение 142.2 п. 6** — one colour rule for the name, asked by two numbers.
+/// **Task T-81-3, решение 142.2 п. 6** — one colour rule for the name of the program.
 ///
-/// ⛔ The failure this guards against is the one Э78 actually made: a rule written twice, and the
-/// two copies drifting. So the two numbers are put to [`settings::button_color_roles`] in both
-/// states and the answers have to be **equal**, not merely both plausible — and the negative
-/// control shows that this table answers different things to different controls at all.
+/// The name «Lang Switcher» is drawn without a frame, and the table answers that for the one
+/// window of the old kind that still carries it, «От автора». «О программе» carried it too until
+/// FR-92а moved that window to the shell: its old number must not be a name any more, or a
+/// control of some later template that took it would come out frameless. The negative control
+/// shows that this table answers different things to different controls at all.
 #[test]
 fn both_names_of_the_program_get_one_and_the_same_pair_of_colours() {
-    /// «Lang Switcher» in «О программе» — the number `app.rc` gives it.
-    const ABOUT_NAME: i32 = 1121;
+    /// The number the old «О программе» gave its name in `app.rc`.
+    const OLD_ABOUT_NAME: i32 = 1121;
 
     for hot in [false, true] {
-        let one = settings::button_color_roles(ABOUT_NAME, hot, false, false);
-        let two = settings::button_color_roles(letters::IDC_AUTHOR_NAME, hot, false, false);
+        let name = settings::button_color_roles(letters::IDC_AUTHOR_NAME, hot, false, false);
 
-        println!("hot={hot}: «О программе» {one:?}, «От авторе» {two:?}");
+        println!("hot={hot}: «От автора» {name:?}");
 
         assert_eq!(
-            one, two,
-            "the two names of the program must be given one and the same pair of colours"
-        );
-        assert_eq!(
-            one.border,
+            name.border,
             theme::ButtonBorderRole::FaceItself,
-            "and both must be the frameless row of the table — a name that opens a page is not \
-             a button that looks like one"
+            "the name is the frameless row of the table — a name that opens a page is not a \
+             button that looks like one"
         );
     }
 
-    // And the predicate that joins them really answers for both, and for nothing else.
-    assert!(settings::is_the_program_name(ABOUT_NAME));
+    // And the predicate answers for the name of «От автора», and for nothing else.
     assert!(settings::is_the_program_name(letters::IDC_AUTHOR_NAME));
+    assert!(!settings::is_the_program_name(OLD_ABOUT_NAME));
     assert!(!settings::is_the_program_name(1));
-    assert!(!settings::is_the_program_name(1136));
 
     // Контроль прибора: an ordinary button must **not** come out of that table the same way, or
-    // the equality above would hold of everything and mean nothing.
-    let ordinary = settings::button_color_roles(1136, false, false, false);
+    // the answer above would hold of everything and mean nothing.
+    let ordinary = settings::button_color_roles(1, false, false, false);
 
     assert_ne!(
         ordinary,
-        settings::button_color_roles(ABOUT_NAME, false, false, false),
-        "«От автора…» and the name must not be given the same colours — the table would be \
-         answering one thing to everybody"
+        settings::button_color_roles(letters::IDC_AUTHOR_NAME, false, false, false),
+        "«ОК» and the name must not be given the same colours — the table would be answering \
+         one thing to everybody"
     );
     assert_eq!(
         ordinary.border,
@@ -30931,7 +28792,8 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
             .1
     };
 
-    for name in ["IDD_ABOUT", "IDD_LETTER", "IDD_WIZARD"] {
+    // «О программе» shared it until FR-92а moved it to the shell.
+    for name in ["IDD_LETTER", "IDD_WIZARD"] {
         println!("{name}: {} units tall", height(name));
 
         assert_eq!(
@@ -31020,79 +28882,6 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
     assert_ne!(
         moved.size.1, TYPICAL,
         "the reading does not see a height one unit off the typical — it cannot fail"
-    );
-}
-
-/// **Task T-81-6, находка 142б.2** — a help row takes the height it needs **now**, not the one
-/// the template kept for the worst key name.
-///
-/// ⛔ **The template is sized for «PrintScreen», the widest key name the program can show, and it
-/// has to be** — it must hold any of them, and the fitting stand above proves it does. But the
-/// key a person actually has is their own, and on «Pause» the Russian rows want 18 / 9 / 18 / 9 / 9
-/// units where the template keeps 29 / 19 / 29 / 19 / 10: **43 units of air inside the block**
-/// (`scratchpad-E81\probe-widths.log`). While the column was 142 units the difference was small;
-/// task T-81-1 widened it to 207, every row needed fewer lines, and the worst-case sizing showed
-/// on the screen. The owner saw it on the live 0.81.0: «текст в окне о программе получился
-/// сильно разряженным по высоте».
-///
-/// So `fit_about_help` lays every row at its **measured** height and re-stacks them — it used to
-/// do that only when the rows wanted **more** than their slots, and leave them alone otherwise.
-/// ⚠ The window is not shortened by this: the typical height of three windows is решение 142.2
-/// п. 8, and the free height stays with the help panel, which is what the accepted mock-up shows.
-#[test]
-fn a_help_row_takes_the_height_it_needs_and_not_the_slot_of_the_worst_key() {
-    let source = settings_module_source();
-    let body = function_body(&source, "unsafe fn fit_about_help(");
-
-    // ⚠ The comment lines are dropped before the whitespace is squeezed, and that is not
-    // tidiness: the prose beside this very code **names** `needed.max(height)` to say why it is
-    // gone, and a sweep reading prose for code would have called the repair undone. The same
-    // reason `about_gate_asks_the_predicate` drops them.
-    let squeezed: String = body
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .flat_map(|line| line.chars())
-        .filter(|c| !c.is_whitespace())
-        .collect();
-
-    // (1) The measured height, and not the larger of the two.
-    assert!(
-        squeezed.contains("rows.push((row,numeral,text_rect,numeral_rect,needed))"),
-        "a row must be given the height it needs; `needed.max(height)` is the slot of the worst \
-         key name and keeps the air of task T-81-1 in the block"
-    );
-    assert!(
-        !squeezed.contains("needed.max(height)"),
-        "⛔ the slot must not win over the measurement — that is the defect 142б.2 itself"
-    );
-
-    // (2) The rows are moved on **every** path. Until task T-81-6 the body returned early when
-    // nothing had to grow, and «nothing to grow» is now the ordinary case.
-    let move_rows = squeezed
-        .find("move_child(hwnd,*row,tops[index]")
-        .expect("the body must move its rows");
-    let early_return = squeezed
-        .find("ifgrow<=0{return;}")
-        .expect("the body must still leave the growth alone when there is none");
-
-    assert!(
-        move_rows < early_return,
-        "the rows have to be re-stacked BEFORE the body gives up on growing — otherwise the \
-         ordinary case (the rows fit with room to spare) leaves them in the worst key's slots"
-    );
-
-    // ⚠ Отрицательный контроль: тело `e81`, в котором ранний выход стоял перед перестановкой и
-    // строка брала больший из двух размеров. Без него оба утверждения — ни о чём.
-    let of_e81 = squeezed
-        .replace(
-            "rows.push((row,numeral,text_rect,numeral_rect,needed))",
-            "rows.push((row,numeral,text_rect,numeral_rect,needed.max(height)))",
-        )
-        .replace("ifgrow<=0{return;}", "");
-
-    assert!(
-        of_e81.contains("needed.max(height)") && !of_e81.contains("ifgrow<=0{return;}"),
-        "the control must differ from the body in exactly the two ways the assertions look at"
     );
 }
 
