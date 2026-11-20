@@ -974,3 +974,83 @@ fn the_label_new_stands_after_the_words_of_its_switch() {
         "under the words: {badge:?}, they end at {bottom}"
     );
 }
+
+/// **The sections of the settings stand in the panel, under its picture** (T-120-20, the mock-up's
+/// `.panel.setp`): in a wide window the picture at the top of the panel, the column of sections
+/// under it inside the panel, taking no room in the flow; in a narrow one — the row of tabs in the
+/// flow, and no circle.
+#[test]
+fn the_sections_of_the_settings_stand_in_the_panel_under_the_picture() {
+    let sections = Node::Sections {
+        id: Id::Sections,
+        items: ["General", "Hotkey", "Layouts", "Exceptions", "Diagnostics"]
+            .map(str::to_owned)
+            .to_vec(),
+        current: 1,
+    };
+    let header = Node::Header {
+        eyebrow: Some("Settings".to_owned()),
+        title: "Hotkey".to_owned(),
+        subtitle: None,
+    };
+    let settings = |with_sections: bool| {
+        let mut column = vec![header.clone()];
+        if with_sections {
+            column.push(sections.clone());
+        }
+        column.push(text(Role::Body, "The key that switches the layout"));
+        Window {
+            kind: WindowKind::Settings,
+            art: Some(Art::About),
+            ..bare(Node::Column(column))
+        }
+    };
+    let section_rects =
+        |layout: &Layout<Id>| rects_of(layout, |p| matches!(p, Part::Section { .. }));
+
+    let wide = lay(&settings(true), usual());
+    let panel = rects_of(&wide, |p| matches!(p, Part::Panel))[0];
+    let picture = rects_of(&wide, |p| matches!(p, Part::Art(_)))[0];
+    let rows = section_rects(&wide);
+    assert_eq!(rows.len(), 5);
+    assert!(
+        picture.y < panel.h / 2.0 - picture.h / 2.0,
+        "the picture at the top: {picture:?}"
+    );
+    assert!(
+        rows.iter().all(|row| row.x >= panel.x
+            && row.right() <= panel.right()
+            && row.y >= picture.bottom()),
+        "the sections inside the panel under the picture: {rows:?}, the panel {panel:?}"
+    );
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[1].y > pair[0].y && close(pair[1].x, pair[0].x)),
+        "a column: {rows:?}"
+    );
+    assert_eq!(
+        texts(&wide),
+        texts(&lay(&settings(false), usual())),
+        "the sections took room in the flow"
+    );
+
+    let narrow = WindowSize {
+        w: 640.0,
+        h: 500.0,
+        class: Class::Narrow,
+        scrolls: false,
+    };
+    let layout = lay(&settings(true), narrow);
+    let tabs = section_rects(&layout);
+    assert!(rects_of(&layout, |p| matches!(p, Part::Panel)).is_empty());
+    assert!(
+        rects_of(&layout, |p| matches!(p, Part::Art(_))).is_empty(),
+        "no circle"
+    );
+    assert!(close(tabs[1].y, tabs[0].y), "a row of tabs: {tabs:?}");
+    let title = texts(&layout)[1];
+    assert!(
+        tabs[0].y >= title.bottom(),
+        "the tabs in the flow under the header"
+    );
+}

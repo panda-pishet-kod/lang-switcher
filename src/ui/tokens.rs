@@ -640,6 +640,10 @@ pub const PANEL_DOT_STEP: Pt = Pt(18.0);
 pub const PANEL_ART: Circle = Circle::new(0.29, 0.64, Pt(520.0));
 /// Рисунок в окне настроек — диаметр круга.
 pub const SETTINGS_ART: Circle = Circle::new(0.17, 0.30, Pt(240.0));
+/// ◆ Окно настроек, панель — поля сверху и по бокам (макет `authors.html`, `.panel.setp`).
+pub const SETTINGS_PANEL_PAD: Pad = Pad::em(1.8, 1.4);
+/// ◆ Окно настроек, панель — от рисунка до столбца разделов.
+pub const SETTINGS_PANEL_GAP: Em = Em(1.2);
 /// Рисунок — кольцо цвета `bg`.
 pub const ART_RING: Pt = Pt(6.0);
 /// Подпись под рисунком — от края.

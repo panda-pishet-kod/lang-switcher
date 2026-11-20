@@ -50,6 +50,7 @@ use crate::ui::tokens::{
     ON_PICTURE_KEY, ON_PICTURE_KEY_GAP, ON_PICTURE_KEY_LABEL, ON_PICTURE_KEY_MIN,
     ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
+use crate::ui::tokens::{SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,6 +441,7 @@ pub fn lay_out<I: Copy>(
         kind: window.kind,
         art: window.art,
         picture: None,
+        sections_at: None,
         tight: false,
         measure,
         out: Vec::new(),
@@ -482,6 +484,7 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         kind: window.kind,
         art: None,
         picture: None,
+        sections_at: None,
         tight: false,
         measure,
         out: Vec::new(),
@@ -541,6 +544,9 @@ struct Placer<'m, I> {
     /// The circle the picture of the panel is drawn in, once it is placed: what lies over the
     /// picture is placed by it.
     picture: Option<Rect>,
+    /// The column under the picture of the panel of the settings — left, top, width: where their
+    /// sections stand in a wide window.
+    sections_at: Option<(f32, f32, f32)>,
     tight: bool,
     measure: &'m dyn Measure,
     out: Vec<Placed<I>>,
@@ -607,7 +613,20 @@ impl<I: Copy> Placer<'_, I> {
                 _ => PANEL_ART,
             };
             let d = circle.at(size.w, size.h);
-            let at = Rect::new((panel - d) / 2.0, (size.h - d) / 2.0, d, d);
+            // The settings: the picture at the top of the panel and their sections under it (the
+            // mock-up's `.panel.setp`); any other window: the picture in the middle of the panel.
+            let at = if window.kind == WindowKind::Settings {
+                let (pad_v, pad_h) = (self.em(SETTINGS_PANEL_PAD.v), self.em(SETTINGS_PANEL_PAD.h));
+                let at = Rect::new((panel - d) / 2.0, pad_v, d, d);
+                self.sections_at = Some((
+                    pad_h,
+                    at.bottom() + self.em(SETTINGS_PANEL_GAP),
+                    panel - pad_h * 2.0,
+                ));
+                at
+            } else {
+                Rect::new((panel - d) / 2.0, (size.h - d) / 2.0, d, d)
+            };
             self.push(Part::Art(art), at, None);
             self.picture = Some(at);
 
@@ -821,7 +840,14 @@ impl<I: Copy> Placer<'_, I> {
                 options,
                 selected,
             } => self.choice(*id, label, options, *selected, x, y, w),
-            Node::Sections { id, items, current } => self.sections(*id, items, *current, x, y, w),
+            // In the panel of a wide window of the settings they take no room in the flow.
+            Node::Sections { id, items, current } => match self.sections_at {
+                Some((left, top, width)) => {
+                    self.sections(*id, items, *current, left, top, width);
+                    0.0
+                }
+                None => self.sections(*id, items, *current, x, y, w),
+            },
             Node::Field {
                 id,
                 label,
@@ -1302,9 +1328,14 @@ impl<I: Copy> Placer<'_, I> {
         row
     }
 
-    /// Whether `node` lies over the picture of the panel rather than in the flow.
-    fn lies_over_picture(&self, node: &Node<I>) -> bool {
-        matches!(node, Node::OverPicture { .. }) && self.art.is_some() && self.picture.is_some()
+    /// Whether `node` stands out of the flow: over the picture of the panel, or the sections of the
+    /// settings in their panel.
+    fn out_of_flow(&self, node: &Node<I>) -> bool {
+        match node {
+            Node::OverPicture { .. } => self.art.is_some() && self.picture.is_some(),
+            Node::Sections { .. } => self.sections_at.is_some(),
+            _ => false,
+        }
     }
 
     /// `element` in the named place `anchor` of the picture `art` drawn in `circle` (T-120-25): the
@@ -1478,7 +1509,7 @@ impl<I: Copy> Placer<'_, I> {
                     .sum();
                 let flowing = children
                     .iter()
-                    .filter(|child| !self.lies_over_picture(child))
+                    .filter(|child| !self.out_of_flow(child))
                     .count();
                 let gaps = gap * flowing.saturating_sub(1) as f32;
                 Some(((total - fixed - gaps) / fills as f32).max(0.0))
@@ -1486,11 +1517,12 @@ impl<I: Copy> Placer<'_, I> {
             _ => None,
         };
 
-        // What lies over the picture takes no room in the flow, and no gap either.
+        // What stands out of the flow (over the picture; the sections in the panel of the settings)
+        // takes no room in it, and no gap either.
         let mut top = y;
         let mut first = true;
         for child in children {
-            if self.lies_over_picture(child) {
+            if self.out_of_flow(child) {
                 self.node(child, x, top, w, None);
                 continue;
             }
@@ -2239,6 +2271,7 @@ pub fn place_node<I: Copy>(
         kind: WindowKind::Ordinary,
         art: None,
         picture: None,
+        sections_at: None,
         tight: false,
         measure,
         out: Vec::new(),
