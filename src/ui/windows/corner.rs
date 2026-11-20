@@ -60,6 +60,7 @@ pub fn describe(content: &Content, checked: bool, picture: Option<Taskbar>) -> W
             id: Id::Check,
             label: label.clone(),
             on: checked,
+            hint: None,
         });
     }
     Window {

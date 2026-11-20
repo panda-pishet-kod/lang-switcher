@@ -164,6 +164,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
                 id: 1,
                 label: word("IDS_SOUND"),
                 on,
+                hint: None,
             },
         );
     }

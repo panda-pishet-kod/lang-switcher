@@ -50,7 +50,9 @@ use crate::ui::elements::{self, Look, State, hit_area, input_fill};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
 use crate::ui::layout::menu_width;
-use crate::ui::layout::{Layout, ListView, Part, client_size, lay_out, window_size};
+use crate::ui::layout::{
+    Layout, ListView, Part, client_size, lay_out, least_window_size, window_size,
+};
 use crate::ui::scene::{ButtonKind, Event, Window};
 use crate::ui::scene::{ListItem, Node, WindowKind};
 use crate::ui::text::{Direction, Style, Text};
@@ -97,12 +99,12 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     SPI_GETCLIENTAREAANIMATION, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE,
     SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursor, SetTimer, SetWindowLongPtrW,
     SetWindowPos, ShowWindow, SystemParametersInfoW, WHEEL_DELTA, WM_CLOSE, WM_COMMAND,
-    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE,
-    WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN, WS_EX_APPWINDOW,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
-    WS_THICKFRAME,
+    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS,
+    WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
+    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP,
+    WS_SYSMENU, WS_THICKFRAME,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS,
@@ -152,6 +154,12 @@ pub trait Content {
     fn timer(&self) -> Option<u32> {
         None
     }
+    /// The window opens at the least size of the passport (620 × 500) rather than at two thirds of
+    /// the work area — a small window of a few lines (T-120-21 Б: the details for the author). The
+    /// person may still make it larger.
+    fn least(&self) -> bool {
+        false
+    }
 }
 
 /// What the content answers to an event.
@@ -179,6 +187,12 @@ pub struct Probe {
     pub items: Vec<(String, Option<String>, Rect)>,
     /// The list of a choice field open under the window.
     pub dropdown: Option<HWND>,
+    /// How many times the pictures of the window were drawn afresh.
+    #[cfg(feature = "testing")]
+    pub pictures_drawn: usize,
+    /// How many fonts the fields of the window hold.
+    #[cfg(feature = "testing")]
+    pub field_fonts: usize,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -890,8 +904,9 @@ fn frame_of(hwnd: HWND) -> (i32, i32) {
     )
 }
 
-/// Sizes the window by its monitor's work area and centres it there.
-fn place(hwnd: HWND) {
+/// Sizes the window by its monitor's work area — at its least size when the content asks — and
+/// centres it there.
+fn place(hwnd: HWND, least: bool) {
     let mut cursor = POINT::default();
     // SAFETY: the out parameter is a local.
     let _ = unsafe { GetCursorPos(&mut cursor) };
@@ -913,7 +928,11 @@ fn place(hwnd: HWND) {
         (work.right - work.left) as f32 / scale,
         (work.bottom - work.top) as f32 / scale,
     );
-    let size = window_size(area.0, area.1);
+    let size = if least {
+        least_window_size(area.0, area.1)
+    } else {
+        window_size(area.0, area.1)
+    };
     let (frame_w, frame_h) = frame_of(hwnd);
     let (w, h) = (
         (size.w * scale).round() as i32 + frame_w,
@@ -1664,10 +1683,14 @@ impl<C: Content> Host<C> {
         let scale = self.scale;
         let px = |points: f32| (points * scale).round() as i32;
         let style = Style::of(Role::Body, layout.b, layout.size.h);
+        let code_style = Style::of(Role::Code, layout.b, layout.size.h);
         let look = field::Look {
             face: text.main_face().to_owned(),
             px: px(style.size),
             weight: style.weight,
+            code_face: text.mono_face().to_owned(),
+            code_px: px(code_style.size),
+            code_weight: code_style.weight,
             hint: Color::Ink3.get(self.theme),
             rtl: self.rtl,
         };
@@ -1678,6 +1701,7 @@ impl<C: Content> Host<C> {
             .filter_map(|(index, item)| {
                 let Part::Input {
                     multiline,
+                    code,
                     capture,
                     value,
                     hint,
@@ -1703,6 +1727,7 @@ impl<C: Content> Host<C> {
                         bottom: px(rect.bottom() - pad_v),
                     },
                     multiline: *multiline,
+                    code: *code,
                     capture: *capture,
                     value,
                     hint,
@@ -2278,6 +2303,21 @@ impl<C: Content> Handler for Host<C> {
                 let _ = unsafe { EndPaint(hwnd, &paint) };
                 Some(LRESULT(0))
             }
+            // The frame is dragged: the pictures stretch what they have (art::Art::hold); let go — they
+            // are drawn afresh at the size, once.
+            WM_ENTERSIZEMOVE => {
+                if let Some(pictures) = self.pictures.as_deref_mut() {
+                    pictures.hold(true);
+                }
+                None
+            }
+            WM_EXITSIZEMOVE => {
+                if let Some(pictures) = self.pictures.as_deref_mut() {
+                    pictures.hold(false);
+                }
+                invalidate(hwnd);
+                None
+            }
             WM_SIZE => {
                 self.close_drop(hwnd, false);
                 // Minimised or brought back: the tick stops or goes on.
@@ -2608,7 +2648,7 @@ impl<C: Content> Handler for Host<C> {
         if self.popup.is_some() {
             self.place_popup(hwnd);
         } else {
-            place(hwnd);
+            place(hwnd, self.content.least());
         }
     }
 
@@ -2650,6 +2690,13 @@ impl<C: Content> Handler for Host<C> {
                 .map(|(id, hwnd)| (format!("{id:?}"), hwnd))
                 .collect(),
             dropdown: self.drop.as_ref().map(|drop| drop.hwnd),
+            #[cfg(feature = "testing")]
+            pictures_drawn: self
+                .pictures
+                .as_deref()
+                .map_or(0, |pictures| pictures.drawn_afresh()),
+            #[cfg(feature = "testing")]
+            field_fonts: self.fields.fonts(),
             items: self
                 .layout
                 .iter()

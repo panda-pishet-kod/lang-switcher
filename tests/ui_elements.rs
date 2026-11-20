@@ -136,6 +136,7 @@ fn the_controls_answer_on_their_whole_line_and_a_card_on_the_whole_card() {
             id: 1,
             label: label.clone(),
             on: true,
+            hint: None,
         },
         Node::Radio {
             id: 1,

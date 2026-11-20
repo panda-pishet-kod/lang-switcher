@@ -67,6 +67,7 @@ impl Content for Probe {
                     id: Id::Sound,
                     label: "Sound".to_owned(),
                     on: false,
+                    hint: None,
                 },
                 Node::Segments {
                     id: Id::Theme,
@@ -342,4 +343,120 @@ fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
             "the largest at {dpi} DPI"
         );
     }
+}
+
+/// **A content that asks for it opens at the least size** (`Content::least`, T-120-21 Б): the client
+/// area is 620 × 500 points at the scale of the screen, not two thirds of the work area.
+#[test]
+fn a_small_window_opens_at_620_by_500_points() {
+    struct Small;
+
+    impl Content for Small {
+        type Id = u8;
+
+        fn describe(&self) -> Window<u8> {
+            Window {
+                kind: WindowKind::Ordinary,
+                art: None,
+                brand: None,
+                body: Node::Text(Role::Body, "Five lines for the author".to_owned()),
+                buttons: Vec::new(),
+                disabled: Vec::new(),
+            }
+        }
+
+        fn event(&mut self, _: Event<u8>) -> Reply {
+            Reply::Stay
+        }
+
+        fn title(&self) -> String {
+            "Small".to_owned()
+        }
+
+        fn language(&self) -> (String, bool) {
+            ("en-US".to_owned(), false)
+        }
+
+        fn theme(&self) -> ThemeSetting {
+            ThemeSetting::Light
+        }
+
+        fn least(&self) -> bool {
+            true
+        }
+    }
+
+    let hwnd = host::create(Small, None).expect("the window of the shell");
+    // SAFETY: a window of this thread; the message goes straight to its procedure.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let scale = host::probe(hwnd).expect("alive").scale;
+    let mut client = windows::Win32::Foundation::RECT::default();
+    // SAFETY: the out parameter is a local.
+    unsafe { GetClientRect(hwnd, &mut client) }.expect("the client rectangle");
+    // SAFETY: as above.
+    unsafe { SendMessageW(hwnd, WM_CLOSE, None, None) };
+
+    let points = (client.right as f32 / scale, client.bottom as f32 / scale);
+    assert!(
+        (points.0 - 620.0).abs() <= 1.0 && (points.1 - 500.0).abs() <= 1.0,
+        "the least window: {points:?} points at {scale}"
+    );
+}
+
+/// ⭐ **The host holds the pictures while the frame is dragged** (the memory of 2026-11-20): three new
+/// sizes between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE draw the picture of the panel afresh not once;
+/// let go, it is drawn afresh once at its size.
+#[cfg(feature = "testing")]
+#[test]
+fn the_host_holds_the_pictures_while_the_frame_is_dragged() {
+    use lang_switcher::settings::Language;
+    use lang_switcher::ui::windows::about::About;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    };
+
+    let hwnd = host::create(
+        About {
+            language: Language::Ru,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        },
+        None,
+    )
+    .expect("the window of the shell");
+    let send = |message: u32| {
+        // SAFETY: a window of this thread; the message goes straight to its procedure.
+        unsafe { SendMessageW(hwnd, message, None, None) };
+    };
+    let size = |w: i32, h: i32| {
+        // SAFETY: a window of this thread; plain values.
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                w,
+                h,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+        send(WM_PAINT);
+    };
+    let drawn = || host::probe(hwnd).expect("alive").pictures_drawn;
+
+    size(1100, 700);
+    let first = drawn();
+    assert!(first >= 1, "the picture of the panel is drawn");
+
+    send(WM_ENTERSIZEMOVE);
+    for (w, h) in [(1150, 720), (1200, 740), (1250, 760)] {
+        size(w, h);
+    }
+    assert_eq!(drawn(), first, "held while the frame is dragged");
+
+    send(WM_EXITSIZEMOVE);
+    send(WM_PAINT);
+    assert_eq!(drawn(), first + 1, "let go: drawn afresh once");
+    send(WM_CLOSE);
 }

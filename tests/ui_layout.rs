@@ -9,7 +9,9 @@ use lang_switcher::ui::fit;
 use lang_switcher::ui::layout::{
     Class, Concession, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
 };
-use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
+use lang_switcher::ui::scene::{
+    Art, Brand, ButtonKind, FieldKind, Node, Surface, Window, WindowKind,
+};
 use lang_switcher::ui::text::{FixedAdvance, Measure, Style, Wrap};
 use lang_switcher::ui::tokens::{
     BADGE_GAP, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role,
@@ -538,6 +540,7 @@ fn a_switch_stands_at_the_end_of_its_line_and_a_check_box_before_its_label() {
             id: Id::Sound,
             label: "Sound".to_owned(),
             on: false,
+            hint: None,
         },
     ]);
     let layout = lay(&bare(body), usual());
@@ -782,6 +785,7 @@ fn every_window() -> Vec<Window<Id>> {
                             id: Id::Sound,
                             label: "Sound".to_owned(),
                             on: true,
+                            hint: None,
                         },
                     ])),
                 )),
@@ -1382,5 +1386,188 @@ fn a_list_given_room_fills_it_with_its_frame() {
     assert!(
         rows[0].y < frame.y + last.h,
         "the rows from the top of the frame: {rows:?}"
+    );
+}
+
+/// **A small window opens at the least size of the passport** (T-120-21 Б: the details for the
+/// author — five lines and two buttons): 620 × 500 while the work area holds it; a work area smaller
+/// still gives it all of itself, as to any window.
+#[test]
+fn a_small_window_opens_at_the_least_size() {
+    use lang_switcher::ui::layout::least_window_size;
+
+    let small = least_window_size(1920.0, 1040.0);
+    assert_eq!(
+        (small.w, small.h, small.class, small.scrolls),
+        (620.0, 500.0, Class::Narrow, false)
+    );
+    assert_eq!(
+        least_window_size(600.0, 400.0),
+        window_size(600.0, 400.0),
+        "a tiny work area"
+    );
+}
+
+/// **The wizard** (T-120-19, passport §6): its progress — bars of 0,3 B with 0,35 B between them
+/// across the width, the passed ones and the current `accent`; its row of buttons — «Отмена» at the
+/// left edge, «Назад» and the main one at the right; a check box with a line under its label.
+#[test]
+fn the_wizard_has_its_progress_its_row_and_its_check_boxes_with_a_line() {
+    use lang_switcher::ui::tokens::{WIZARD_STEP, WIZARD_STEP_GAP};
+
+    let window = Window {
+        kind: WindowKind::Wizard,
+        buttons: vec![
+            button(Id::Cancel, "Cancel", ButtonKind::Quiet),
+            button(Id::Back, "Back", ButtonKind::Normal),
+            button(Id::Next, "Next", ButtonKind::Primary),
+        ],
+        ..bare(Node::Column(vec![
+            Node::Progress {
+                total: 4,
+                current: 1,
+            },
+            Node::Check {
+                id: Id::Sound,
+                label: "The journal".to_owned(),
+                on: true,
+                hint: Some("The last 500 lines".to_owned()),
+            },
+        ]))
+    };
+    let layout = lay(&window, usual());
+    let b = layout.b;
+
+    let bars: Vec<(bool, Rect)> = layout
+        .items
+        .iter()
+        .filter_map(|item| match item.part {
+            Part::Progress { done } => Some((done, item.rect)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bars.iter().map(|(done, _)| *done).collect::<Vec<_>>(),
+        vec![true, true, false, false],
+        "passed and current — accent"
+    );
+    assert!(
+        bars.iter()
+            .all(|(_, rect)| close(rect.h, WIZARD_STEP.at(b)))
+    );
+    assert!(close(
+        bars[1].1.x - bars[0].1.right(),
+        WIZARD_STEP_GAP.at(b)
+    ));
+    assert!(close(bars[0].1.w, bars[3].1.w), "equal bars");
+
+    let at = |id: Id| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.id == Some(id) && matches!(item.part, Part::Button { .. }))
+            .expect("the button")
+            .rect
+    };
+    let (cancel, back, next) = (at(Id::Cancel), at(Id::Back), at(Id::Next));
+    let content_x = bars[0].1.x;
+    assert!(
+        close(cancel.x, content_x),
+        "«Отмена» at the left edge: {cancel:?}"
+    );
+    assert!(
+        next.x > back.x && back.x > cancel.right() + BUTTON_GAP.at(b),
+        "the others at the right"
+    );
+    assert!(
+        close(next.right(), bars[3].1.right()),
+        "the main one the rightmost"
+    );
+
+    let texts = texts(&layout);
+    assert_eq!(texts.len(), 2, "the label and its line");
+    assert!(
+        texts[1].y >= texts[0].bottom(),
+        "the line under the label: {texts:?}"
+    );
+
+    // Mirrored with the window: «Отмена» at the right edge, the first bar the rightmost.
+    let mirrored = lay_out(&window, usual(), 1.0, true, &MEASURE);
+    let cancel_m = mirrored
+        .items
+        .iter()
+        .find(|item| item.id == Some(Id::Cancel))
+        .expect("the button")
+        .rect;
+    assert!(
+        close(cancel_m.x, usual().w - cancel.right()),
+        "mirrored: {cancel_m:?}"
+    );
+
+    // The line is a text of the window too: the instrument of fitting lengthens it.
+    let mut window = window;
+    let mut small = Vec::new();
+    window.texts_mut(&mut |role, s| {
+        if matches!(role, Role::Small) {
+            small.push(s.clone());
+        }
+    });
+    assert_eq!(small, vec!["The last 500 lines".to_owned()]);
+}
+
+/// **A field of code** (T-120-19): `FIELD_TEXT_LINES` lines of the role `code` — the monospace
+/// face — in the paddings of a field of text; a field of text keeps the lines of `body`.
+#[test]
+fn a_field_of_code_is_lines_of_the_role_code() {
+    use lang_switcher::ui::tokens::{FIELD_TEXT_LINES, MULTILINE_PAD};
+
+    let field = |kind| Node::Field {
+        id: Id::Site,
+        label: String::new(),
+        value: "a = 1".to_owned(),
+        hint: String::new(),
+        kind,
+    };
+    let window = bare(Node::Column(vec![
+        field(FieldKind::Code),
+        field(FieldKind::Text),
+    ]));
+    let layout = lay(&window, usual());
+    let inputs: Vec<(bool, bool, Rect)> = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.part {
+            Part::Input {
+                multiline, code, ..
+            } => Some((*multiline, *code, item.rect)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        inputs
+            .iter()
+            .map(|(many, code, _)| (*many, *code))
+            .collect::<Vec<_>>(),
+        vec![(true, true), (true, false)],
+        "both of many lines, the first of code"
+    );
+    let high = |role| {
+        Style::of(role, layout.b, layout.size.h).line_height() * FIELD_TEXT_LINES.0
+            + MULTILINE_PAD.v.at(layout.b) * 2.0
+    };
+    assert!(close(inputs[0].2.h, high(Role::Code)), "{:?}", inputs[0].2);
+    assert!(close(inputs[1].2.h, high(Role::Body)), "{:?}", inputs[1].2);
+
+    // Its value and its hint are texts of the role `code` for the instrument of fitting.
+    let mut window = window;
+    let mut roles = Vec::new();
+    window.texts_mut(&mut |role, s| roles.push((role, s.clone())));
+    assert!(
+        roles.contains(&(Role::Code, "a = 1".to_owned())),
+        "{roles:?}"
+    );
+    assert!(
+        roles.contains(&(Role::Body, "a = 1".to_owned())),
+        "{roles:?}"
     );
 }

@@ -51,6 +51,7 @@ use crate::ui::tokens::{
     ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
 use crate::ui::tokens::{ROW_FIELD_MIN, SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD, STATUS_DOT};
+use crate::ui::tokens::{WIZARD_STEP, WIZARD_STEP_GAP};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +94,21 @@ pub fn client_size(w: f32, h: f32) -> WindowSize {
         h,
         class: class_of(w, h),
         scrolls: w < WINDOW_MIN.w.0 || h < WINDOW_MIN.h.0,
+    }
+}
+
+/// The least window of the passport, 620 × 500, while the work area holds it — a small window of a
+/// few lines (`host::Content::least`); a work area smaller still gives the window all of it, as
+/// [`window_size`] does.
+pub fn least_window_size(area_w: f32, area_h: f32) -> WindowSize {
+    if area_w < WINDOW_MIN.w.0 || area_h < WINDOW_MIN.h.0 {
+        return window_size(area_w, area_h);
+    }
+    WindowSize {
+        w: WINDOW_MIN.w.0,
+        h: WINDOW_MIN.h.0,
+        class: class_of(WINDOW_MIN.w.0, WINDOW_MIN.h.0),
+        scrolls: false,
     }
 }
 
@@ -198,6 +214,8 @@ pub enum Part {
     /// and for the pictures made in memory.
     Input {
         multiline: bool,
+        /// A field of code: the role `code`, the monospace face (`FieldKind::Code`).
+        code: bool,
         /// A field of a key: whether it captures now (`FieldKind::Key`).
         capture: Option<bool>,
         value: String,
@@ -834,7 +852,7 @@ impl<I: Copy> Placer<'_, I> {
 
         if let Some((rule, buttons)) = row {
             self.push(Part::ButtonRule, Rect::new(x, rule, column, LINE.0), None);
-            self.buttons(&window.buttons, x, buttons, column);
+            self.window_buttons(window, x, buttons, column);
         }
         self.out.extend(brand_line);
 
@@ -910,12 +928,32 @@ impl<I: Copy> Placer<'_, I> {
                     w,
                 )
             }
-            Node::Check { id, label, on } => {
+            Node::Progress { total, current } => {
+                let (h, gap) = (self.em(WIZARD_STEP), self.em(WIZARD_STEP_GAP));
+                let count = (*total).max(1);
+                let each = ((w - gap * (count - 1) as f32) / count as f32).max(0.0);
+                for index in 0..count {
+                    self.push(
+                        Part::Progress {
+                            done: index <= *current,
+                        },
+                        Rect::new(x + (each + gap) * index as f32, y, each, h),
+                        None,
+                    );
+                }
+                h
+            }
+            Node::Check {
+                id,
+                label,
+                on,
+                hint,
+            } => {
                 let side = CHECK.at(self.b);
                 self.control(
                     *id,
                     (label, None),
-                    None,
+                    hint.as_deref(),
                     Part::Check { on: *on },
                     (side, side),
                     true,
@@ -1959,6 +1997,31 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
+    /// The row of buttons of a window. In the wizard the first of them («Отмена») stands at the
+    /// left edge and the others to the right as in any window (passport §6), while the row fits on
+    /// one line; else as in any window (§3а).
+    fn window_buttons(&mut self, window: &Window<I>, x: f32, y: f32, w: f32) -> f32 {
+        if window.kind == WindowKind::Wizard
+            && let Some((first, rest)) = window.buttons.split_first()
+            && !rest.is_empty()
+        {
+            let gap = self.em(BUTTON_GAP);
+            let rest: Vec<&Node<I>> = rest.iter().collect();
+            let (first_w, first_h) = self.button_size(first);
+            if first_w + gap + self.row_width(&rest) <= w {
+                self.button(first, Rect::new(x, y, first_w, first_h));
+                let h = self.buttons(
+                    &window.buttons[1..],
+                    x + first_w + gap,
+                    y,
+                    w - first_w - gap,
+                );
+                return h.max(first_h);
+            }
+        }
+        self.buttons(&window.buttons, x, y, w)
+    }
+
     /// A row of buttons pressed to the right, the main one the rightmost. When it does not fit —
     /// §3а, step 1 — two rows, the main one in the lower at its edge; then one under another across
     /// the width, the main one on top, a label wider than the width on two lines (step 5).
@@ -2351,16 +2414,19 @@ impl<I: Copy> Placer<'_, I> {
         };
         let (pad, lines) = match kind {
             FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
-            FieldKind::Text => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
+            FieldKind::Text | FieldKind::Code => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
         };
         let capture = match kind {
             FieldKind::Key { capturing } => Some(capturing),
-            FieldKind::Line | FieldKind::Text => None,
+            FieldKind::Line | FieldKind::Text | FieldKind::Code => None,
         };
-        let h = self.style(Role::Body).line_height() * lines + self.em(pad.v) * 2.0;
+        let code = kind == FieldKind::Code;
+        let role = if code { Role::Code } else { Role::Body };
+        let h = self.style(role).line_height() * lines + self.em(pad.v) * 2.0;
         self.push(
             Part::Input {
-                multiline: kind == FieldKind::Text,
+                multiline: matches!(kind, FieldKind::Text | FieldKind::Code),
+                code,
                 capture,
                 value: value.to_owned(),
                 hint: hint.to_owned(),
