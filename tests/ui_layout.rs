@@ -1415,7 +1415,7 @@ fn a_field_of_many_lines_given_room_fills_it() {
         first: 0,
     });
     let room_end = rects_of(&list, |part| matches!(part, Part::List(_)))[0].bottom();
-    for kind in [FieldKind::Text, FieldKind::Code] {
+    for kind in [FieldKind::Text, FieldKind::Code { rtl: false }] {
         let layout = in_fill(field(kind));
         let input = rects_of(&layout, |part| matches!(part, Part::Input { .. }))[0];
         assert!(
@@ -1573,7 +1573,7 @@ fn a_field_of_code_is_lines_of_the_role_code() {
         kind,
     };
     let window = bare(Node::Column(vec![
-        field(FieldKind::Code),
+        field(FieldKind::Code { rtl: false }),
         field(FieldKind::Text),
     ]));
     let layout = lay(&window, usual());

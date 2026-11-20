@@ -216,6 +216,8 @@ pub enum Part {
         multiline: bool,
         /// A field of code: the role `code`, the monospace face (`FieldKind::Code`).
         code: bool,
+        /// The direction of its text where it has its own (a field of code); else the window's.
+        rtl: Option<bool>,
         /// A field of a key: whether it captures now (`FieldKind::Key`).
         capture: Option<bool>,
         value: String,
@@ -2417,25 +2419,29 @@ impl<I: Copy> Placer<'_, I> {
         };
         let (pad, lines) = match kind {
             FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
-            FieldKind::Text | FieldKind::Code => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
+            FieldKind::Text | FieldKind::Code { .. } => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
         };
         let capture = match kind {
             FieldKind::Key { capturing } => Some(capturing),
-            FieldKind::Line | FieldKind::Text | FieldKind::Code => None,
+            FieldKind::Line | FieldKind::Text | FieldKind::Code { .. } => None,
         };
-        let code = kind == FieldKind::Code;
+        let (code, rtl) = match kind {
+            FieldKind::Code { rtl } => (true, Some(rtl)),
+            _ => (false, None),
+        };
         let role = if code { Role::Code } else { Role::Body };
         let h = self.style(role).line_height() * lines + self.em(pad.v) * 2.0;
         let h = match slot {
-            Some(slot) if matches!(kind, FieldKind::Text | FieldKind::Code) => {
+            Some(slot) if matches!(kind, FieldKind::Text | FieldKind::Code { .. }) => {
                 (slot - above).max(h)
             }
             _ => h,
         };
         self.push(
             Part::Input {
-                multiline: matches!(kind, FieldKind::Text | FieldKind::Code),
+                multiline: matches!(kind, FieldKind::Text | FieldKind::Code { .. }),
                 code,
+                rtl,
                 capture,
                 value: value.to_owned(),
                 hint: hint.to_owned(),

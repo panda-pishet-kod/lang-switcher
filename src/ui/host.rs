@@ -1692,7 +1692,6 @@ impl<C: Content> Host<C> {
             code_px: px(code_style.size),
             code_weight: code_style.weight,
             hint: Color::Ink3.get(self.theme),
-            rtl: self.rtl,
         };
         let specs: Vec<Spec<'_, C::Id>> = layout
             .items
@@ -1702,6 +1701,7 @@ impl<C: Content> Host<C> {
                 let Part::Input {
                     multiline,
                     code,
+                    rtl,
                     capture,
                     value,
                     hint,
@@ -1728,6 +1728,7 @@ impl<C: Content> Host<C> {
                     },
                     multiline: *multiline,
                     code: *code,
+                    rtl: rtl.unwrap_or(self.rtl),
                     capture: *capture,
                     value,
                     hint,

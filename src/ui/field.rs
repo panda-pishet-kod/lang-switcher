@@ -72,6 +72,8 @@ pub struct Spec<'a, I> {
     pub multiline: bool,
     /// A field of code (T-120-19): the monospace face of [`Look`].
     pub code: bool,
+    /// The direction of its text: the window's, or its own (a field of code).
+    pub rtl: bool,
     /// A field of a key (T-120-20): none — a field to type in; whether it captures a key now.
     pub capture: Option<bool>,
     pub value: &'a str,
@@ -95,7 +97,6 @@ pub struct Look {
     pub code_px: i32,
     pub code_weight: u16,
     pub hint: Rgb,
-    pub rtl: bool,
 }
 
 /// What the field's own procedure reads: kept by [`Fields`] until the procedure is removed.
@@ -198,12 +199,12 @@ impl<I: Copy + PartialEq> Fields<I> {
             (None, self.code_font.take().map(|(_, font)| font))
         };
         let (keep, gone): (Vec<_>, Vec<_>) = self.items.drain(..).partition(|item| {
-            item.rtl == look.rtl
-                && specs.iter().any(|spec| {
-                    spec.id == item.id
-                        && spec.multiline == item.multiline
-                        && spec.capture.is_some() == item.key
-                })
+            specs.iter().any(|spec| {
+                spec.id == item.id
+                    && spec.rtl == item.rtl
+                    && spec.multiline == item.multiline
+                    && spec.capture.is_some() == item.key
+            })
         });
         self.items = keep;
         gone.into_iter().for_each(destroy);
@@ -467,7 +468,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         style |= ES_READONLY as u32;
     }
     let mut extended = WINDOW_EX_STYLE::default();
-    if look.rtl {
+    if spec.rtl {
         style |= ES_RIGHT as u32;
         extended |= WS_EX_RTLREADING;
     }
@@ -496,7 +497,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         hint: RefCell::new(spec.hint.encode_utf16().collect()),
         colour: Cell::new(colorref(look.hint)),
         multiline: spec.multiline,
-        rtl: look.rtl,
+        rtl: spec.rtl,
         capture: Cell::new(spec.capture),
     });
     // SAFETY: the procedure below and the box kept in the item until `destroy` removes the
@@ -508,7 +509,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         hwnd,
         multiline: spec.multiline,
         key: spec.capture.is_some(),
-        rtl: look.rtl,
+        rtl: spec.rtl,
         ink: spec.ink,
         fill: spec.fill,
         font: HFONT::default(),
