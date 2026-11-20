@@ -164,7 +164,7 @@ BEGIN
     IDS_NEWS_LETTERS        "சமீபத்திய கடிதங்கள்"
     IDS_NEWS_FILE_ONLY      "அமைப்புகள் கோப்பில் அணைக்கலாம்: [letters] feed = false."
     IDS_FEEDBACK_PANEL      "கருத்துகள்"
-    IDS_FEEDBACK_TEXT       "பிழையா, யோசனையா?"
+    IDS_FEEDBACK_TEXT       "பிழையா, யோசனையா? “அனுப்பு” அழுத்தினால் மட்டுமே உருவாக்குநருக்கு அனுப்பும்."
     IDS_WRITE_TO_AUTHOR     "கருத்து அனுப்பு…"
     IDS_LETTERS_CAPTION     "சமீபத்திய கடிதங்கள்"
     IDS_LETTERS_FOOT        "கடைசி மூன்று செய்திகள் சேமிக்கப்படும். நான்காவது வரும்போது, படித்ததோ படிக்காததோ, மிகப் பழையது நீக்கப்படும்."
