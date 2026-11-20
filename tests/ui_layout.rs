@@ -109,7 +109,11 @@ fn the_size_of_a_window_is_two_thirds_of_the_work_area_within_its_limits() {
             Class::Large,
             false,
         ),
-        ((700.0, 560.0), (700.0, 540.0), Class::Narrow, false),
+        // 208.198: a work area under 900 × 540 is a small screen — the window takes all of it and
+        // its body scrolls; 900 × 540 is the least frame.
+        ((700.0, 560.0), (700.0, 560.0), Class::Narrow, true),
+        ((899.0, 600.0), (899.0, 600.0), Class::Narrow, true),
+        ((900.0, 540.0), (900.0, 540.0), Class::Ordinary, false),
         ((2560.0, 1400.0), (1280.0, 720.0), Class::Large, false),
         ((3840.0, 2120.0), (1280.0, 720.0), Class::Large, false),
         ((640.0, 360.0), (640.0, 360.0), Class::Narrow, true),

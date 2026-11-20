@@ -28,11 +28,11 @@ use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
-    FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP, LINE,
-    LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART, NARROW_PAD,
-    NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP, SECTION_PAD,
-    SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN,
-    WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
+    FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
+    LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
+    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP,
+    SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX,
+    WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{ART_RING, BADGE_GAP, TYPE_FLOOR};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
@@ -93,7 +93,8 @@ pub fn client_size(w: f32, h: f32) -> WindowSize {
         w,
         h,
         class: class_of(w, h),
-        scrolls: w < WINDOW_MIN.w.0 || h < WINDOW_MIN.h.0,
+        // 208.198: under the least frame only on a small screen.
+        scrolls: w < FRAME_MIN.w.0 || h < FRAME_MIN.h.0,
     }
 }
 
@@ -114,7 +115,9 @@ pub fn least_window_size(area_w: f32, area_h: f32) -> WindowSize {
 
 /// The window for a work area of `area_w` × `area_h` points (passport §3).
 pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
-    if area_w < WINDOW_MIN.w.0 || area_h < WINDOW_MIN.h.0 {
+    // 208.198: a work area under the least frame, 900 × 540, is a small screen — the window takes all
+    // of it, and only there its body scrolls.
+    if area_w < FRAME_MIN.w.0 || area_h < FRAME_MIN.h.0 {
         return WindowSize {
             w: area_w,
             h: area_h,
@@ -130,8 +133,8 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
             .max(open.min(area))
             .clamp(least, most)
     };
-    let w = side(area_w, WINDOW_OPEN_MIN.w.0, WINDOW_MIN.w.0, WINDOW_MAX.w.0);
-    let h = side(area_h, WINDOW_OPEN_MIN.h.0, WINDOW_MIN.h.0, WINDOW_MAX.h.0);
+    let w = side(area_w, WINDOW_OPEN_MIN.w.0, FRAME_MIN.w.0, WINDOW_MAX.w.0);
+    let h = side(area_h, WINDOW_OPEN_MIN.h.0, FRAME_MIN.h.0, WINDOW_MAX.h.0);
 
     WindowSize {
         w,

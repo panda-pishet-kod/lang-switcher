@@ -61,7 +61,7 @@ use crate::ui::tokens::MENU_MIN_WIDTH;
 use crate::ui::tokens::motion;
 use crate::ui::tokens::{CHECK, CONTROL_GAP, LIST_BAR};
 use crate::ui::tokens::{
-    CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, LIST_PAD, LIST_ROW_PAD,
+    CORNER_WIDTH, Color, DROPDOWN_GAP, DROPDOWN_ROWS, FIELD_PAD, FRAME_MIN, LIST_PAD, LIST_ROW_PAD,
     LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, TYPE_AHEAD_MS, Theme, WINDOW_MAX, WINDOW_MIN,
     window_b,
 };
@@ -2337,9 +2337,16 @@ impl<C: Content> Handler for Host<C> {
                 let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
                 let (frame_w, frame_h) = frame_of(hwnd);
                 let px = |points: f32| (points * self.scale).round() as i32;
+                // 208.198: a window of the shell is not dragged under the reference it opens in,
+                // 900 × 540; a small window (`Content::least`) keeps its own least, 620 × 500.
+                let least = if self.content.least() {
+                    WINDOW_MIN
+                } else {
+                    FRAME_MIN
+                };
                 info.ptMinTrackSize = POINT {
-                    x: px(WINDOW_MIN.w.0) + frame_w,
-                    y: px(WINDOW_MIN.h.0) + frame_h,
+                    x: px(least.w.0) + frame_w,
+                    y: px(least.h.0) + frame_h,
                 };
                 info.ptMaxTrackSize = POINT {
                     x: px(WINDOW_MAX.w.0) + frame_w,

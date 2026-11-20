@@ -303,7 +303,9 @@ fn a_change_of_theme_draws_the_new_background_in_the_same_window() {
     assert!(after.frames > before.frames);
 }
 
-/// The frame is dragged between 620 × 500 and 1280 × 720 points: at 100 % and twice that at 200 %.
+/// The frame is dragged between 900 × 540 and 1280 × 720 points: at 100 % and twice that at 200 %.
+/// 900 × 540 is the least frame of a window of the shell since 208.198 — the reference it opens in;
+/// until then it was 620 × 500.
 #[test]
 fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
     let open = Open::new();
@@ -334,7 +336,7 @@ fn the_limits_of_the_frame_are_the_passports_at_the_scale_of_the_screen() {
 
         assert_eq!(
             client(limits.ptMinTrackSize),
-            (620 * scale, 500 * scale),
+            (900 * scale, 540 * scale),
             "the least at {dpi} DPI"
         );
         assert_eq!(
