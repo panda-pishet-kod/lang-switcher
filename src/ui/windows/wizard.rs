@@ -443,7 +443,7 @@ impl Content for Page {
             Step::Attach => self.attach(),
             Step::Idea => self.idea(),
             Step::Preview if failed => self.not_sent(),
-            Step::Preview => self.preview(),
+            Step::Preview => Node::Fill(Box::new(self.preview())),
             Step::Done => self.sent(),
         };
         let art = if step == Step::Done {

@@ -4421,7 +4421,7 @@ fn print_the_letters() {
     use lang_switcher::ui::layout::{client_size, lay_out};
     use lang_switcher::ui::text::{Direction, Text};
     use lang_switcher::ui::tokens::{Color, Theme};
-    use lang_switcher::ui::windows::{author, letter, letters_list};
+    use lang_switcher::ui::windows::{author, letter, letters_list, wizard};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
     let Some(folder) = std::env::var_os("LANGSW_LETTERS_DIR") else {
@@ -4455,6 +4455,11 @@ fn print_the_letters() {
                     author::states(language)
                         .into_iter()
                         .map(|(name, window)| (name, window.map(&author::Id::number))),
+                )
+                .chain(
+                    wizard::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&wizard::Id::number))),
                 )
                 .collect();
         for (name, window) in &windows {
