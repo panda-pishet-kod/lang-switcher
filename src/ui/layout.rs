@@ -814,6 +814,14 @@ impl<I: Copy> Placer<'_, I> {
         let natural = self.height(&window.body, column, None);
         // The height of the room reaches a column, for its fills; nothing else stretches to it.
         let fills = matches!(&window.body, Node::Column(children) if children.iter().any(|child| matches!(child, Node::Fill(_))));
+        // What does not fit is measured with the fills at their least (T-120-20): a list that takes
+        // the room left shows as many rows as there is room for, at least one — its natural six rows
+        // are no need of the window.
+        let least = if fills {
+            self.height(&window.body, column, Some(0.0))
+        } else {
+            natural
+        };
         let slot = matches!(window.body, Node::Column(_)).then_some(room);
         // ◆ Content that does not fill the room stands in the middle of it, as the mock-ups centre
         // their content (`align-content: center`); a window with a fill takes the room from the top.
@@ -832,7 +840,7 @@ impl<I: Copy> Placer<'_, I> {
 
         Shortfall {
             w: self.over,
-            h: natural - room,
+            h: least - room,
         }
     }
 
