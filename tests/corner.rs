@@ -234,3 +234,65 @@ fn the_two_windows_say_what_they_are_for() {
     assert_eq!(corner::QUIET_SECONDS, 5, "five seconds without a key");
     assert_ne!(corner::QUIET_TIMER, corner::HINT_TIMER);
 }
+
+/// ⭐ **A second start before the first tick of the letters owes no second window** — the stand of
+/// 2026-11-20 (Windows 11, `lab-f77b50d`): the program was started on a configuration that last saw
+/// 1.6.1, showed «Обновлено», was stopped and started again 32 s later — before the first tick of the
+/// letters (90 s), which until then was what moved the version seen — and showed it again. The start
+/// that owes the window moves the version seen itself.
+#[test]
+fn a_second_start_before_the_first_tick_owes_no_second_window() {
+    let build = env!("CARGO_PKG_VERSION");
+    let mut state = lang_switcher::settings::Letters {
+        last_seen_version: "1.6.1".to_owned(),
+        ..lang_switcher::settings::Letters::default()
+    };
+
+    assert!(
+        state.release_window,
+        "the window of updates is on by default"
+    );
+    assert!(
+        corner::owe_release_window(&mut state, build),
+        "the first start after the update from 1.6.1 owes the window"
+    );
+    assert_eq!(
+        state.release_due, "1.6.1",
+        "written as due, with the version updated from"
+    );
+
+    // The window was shown in its quiet moment: no longer due (`quiet_tick`).
+    state.release_due.clear();
+
+    // The program is stopped and started again before the first tick of the letters.
+    assert!(
+        !corner::owe_release_window(&mut state, build),
+        "a second start owes no second window"
+    );
+    assert!(state.release_due.is_empty(), "and writes none");
+    assert_eq!(
+        state.last_seen_version, build,
+        "because the first start moved the version seen to this build at once"
+    );
+
+    // The control: a window owed and not yet shown (stopped before its quiet moment) stays owed.
+    let mut stopped = lang_switcher::settings::Letters {
+        last_seen_version: build.to_owned(),
+        release_due: "1.6.1".to_owned(),
+        ..lang_switcher::settings::Letters::default()
+    };
+
+    assert!(
+        corner::owe_release_window(&mut stopped, build),
+        "a window not shown yet is still owed"
+    );
+
+    // And «Больше не показывать окна обновлений» owes nothing.
+    let mut off = lang_switcher::settings::Letters {
+        last_seen_version: "1.6.1".to_owned(),
+        release_window: false,
+        ..lang_switcher::settings::Letters::default()
+    };
+
+    assert!(!corner::owe_release_window(&mut off, build));
+}
