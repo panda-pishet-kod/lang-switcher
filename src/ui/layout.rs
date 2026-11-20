@@ -198,6 +198,8 @@ pub enum Part {
     /// and for the pictures made in memory.
     Input {
         multiline: bool,
+        /// A field of a key: whether it captures now (`FieldKind::Key`).
+        capture: Option<bool>,
         value: String,
         hint: String,
     },
@@ -2091,13 +2093,18 @@ impl<I: Copy> Placer<'_, I> {
             self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
         };
         let (pad, lines) = match kind {
-            FieldKind::Line => (FIELD_PAD, 1.0),
+            FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
             FieldKind::Text => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
+        };
+        let capture = match kind {
+            FieldKind::Key { capturing } => Some(capturing),
+            FieldKind::Line | FieldKind::Text => None,
         };
         let h = self.style(Role::Body).line_height() * lines + self.em(pad.v) * 2.0;
         self.push(
             Part::Input {
                 multiline: kind == FieldKind::Text,
+                capture,
                 value: value.to_owned(),
                 hint: hint.to_owned(),
             },

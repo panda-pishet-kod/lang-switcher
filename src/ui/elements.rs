@@ -407,6 +407,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             multiline,
             value,
             hint,
+            ..
         } => {
             field(painter, look, rect, state);
             let pad = if *multiline { MULTILINE_PAD } else { FIELD_PAD };

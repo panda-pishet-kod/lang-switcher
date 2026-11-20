@@ -656,6 +656,12 @@ pub struct Taskbar {
 pub enum FieldKind {
     Line,
     Text,
+    /// A field of a key (T-120-20): it shows the key and is not typed in; `capturing` — it takes
+    /// every key now (`Event::KeyDown`, `Event::KeyUp`, `Event::FocusLost`). Out of the capture it
+    /// is no stop of Tab.
+    Key {
+        capturing: bool,
+    },
 }
 
 /// A row of a list.
@@ -687,6 +693,14 @@ pub enum Event<I> {
     Tick,
     /// The timer of the content's own (`host::Content::timer`, T-120-20).
     Timer,
+    /// A key went down in the field of a key `id` in its capture: its virtual code. Sent at once,
+    /// inside the key's own message — the keys held with it are read now as they were then.
+    KeyDown { id: I, vk: u16 },
+    /// A key went up there.
+    KeyUp { id: I, vk: u16 },
+    /// The field of a key `id` in its capture lost the keyboard: to the element `to`, or to none —
+    /// a press beside the elements, another window.
+    FocusLost { id: I, to: Option<I> },
 }
 
 impl<I: PartialEq> Node<I> {

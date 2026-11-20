@@ -1671,6 +1671,7 @@ impl<C: Content> Host<C> {
             .filter_map(|(index, item)| {
                 let Part::Input {
                     multiline,
+                    capture,
                     value,
                     hint,
                 } = &item.part
@@ -1695,6 +1696,7 @@ impl<C: Content> Host<C> {
                         bottom: px(rect.bottom() - pad_v),
                     },
                     multiline: *multiline,
+                    capture: *capture,
                     value,
                     hint,
                     disabled: state.disabled,
@@ -1806,6 +1808,7 @@ impl<C: Content> Host<C> {
         self.lay_out(hwnd);
         // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
         self.sync_fields(hwnd);
+        self.follow_capture(hwnd);
         self.keep_picture_moving(hwnd);
         self.keep_ticking(hwnd);
         self.keep_timing(hwnd);
@@ -1872,15 +1875,83 @@ impl<C: Content> Host<C> {
             })
     }
 
-    /// The identifiers Tab goes through: the description's order, the unavailable left out.
+    /// The identifiers Tab goes through: the description's order, the unavailable left out, and
+    /// a field of a key out of its capture (it only shows the key, T-120-20).
     fn order(&self) -> Vec<C::Id> {
+        let resting = self.resting_keys();
         self.layout.as_ref().map_or_else(Vec::new, |layout| {
             layout
                 .focus_order()
                 .into_iter()
-                .filter(|id| !self.window.disabled.contains(id))
+                .filter(|id| !self.window.disabled.contains(id) && !resting.contains(id))
                 .collect()
         })
+    }
+
+    /// The fields of a key out of their capture.
+    fn resting_keys(&self) -> Vec<C::Id> {
+        self.layout.as_ref().map_or_else(Vec::new, |layout| {
+            layout
+                .items
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item.part,
+                        Part::Input {
+                            capture: Some(false),
+                            ..
+                        }
+                    )
+                })
+                .filter_map(|item| item.id)
+                .collect()
+        })
+    }
+
+    /// The field of a key that captures now, if any.
+    fn capturing(&self) -> Option<C::Id> {
+        self.layout
+            .as_ref()?
+            .items
+            .iter()
+            .find_map(|item| match item.part {
+                Part::Input {
+                    capture: Some(true),
+                    ..
+                } => item.id,
+                _ => None,
+            })
+    }
+
+    /// The keyboard follows the capture of a field of a key (T-120-20): a field that captures holds
+    /// it; once the capture ends it goes to the element after the field in the order of Tab.
+    /// After `sync_fields`, so that a field whose capture has ended reports no loss.
+    fn follow_capture(&mut self, hwnd: HWND) {
+        if let Some(id) = self.capturing() {
+            if self.focus != Some(id) || !self.fields.has_keyboard() {
+                self.focus = Some(id);
+                self.fields.focus(id);
+            }
+            return;
+        }
+        let Some(focus) = self
+            .focus
+            .filter(|focus| self.resting_keys().contains(focus))
+        else {
+            return;
+        };
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let all = layout.focus_order();
+        let order = self.order();
+        let after = all.iter().position(|id| *id == focus).unwrap_or(0);
+        self.focus = all[after..]
+            .iter()
+            .chain(&all[..after])
+            .find(|id| order.contains(id))
+            .copied();
+        self.give_keyboard(hwnd);
     }
 
     /// The event pressing the element at `index` makes.
@@ -2327,12 +2398,19 @@ impl<C: Content> Handler for Host<C> {
                 self.lay_out(hwnd);
                 self.pressed = self.hit(x, y);
                 self.hover = self.pressed;
+                // A field of a key out of its capture only shows the key: a press on it is beside.
+                let resting = self.resting_keys();
                 if let Some(id) = self
                     .pressed
                     .and_then(|index| self.layout.as_ref()?.items[index].id)
+                    .filter(|id| !resting.contains(id))
                 {
                     self.focus = Some(id);
                     self.give_keyboard(hwnd);
+                } else if let Some(id) = self.capturing() {
+                    // A press beside the elements: the keyboard stays where it is, and a capture
+                    // hears of it as of a loss to none (the old window's «press beside»).
+                    self.deliver(hwnd, Event::FocusLost { id, to: None });
                 }
                 // SAFETY: a live window of this thread.
                 unsafe { SetCapture(hwnd) };
@@ -2399,6 +2477,31 @@ impl<C: Content> Handler for Host<C> {
                     EN_KILLFOCUS => invalidate(hwnd),
                     _ => {}
                 }
+                Some(LRESULT(0))
+            }
+            // A key of a field of a key in its capture: at once, to the content.
+            field::WM_FIELD_KEY => {
+                let id = self.fields.id_of(HWND(lparam.0 as *mut _))?;
+                let vk = wparam.0 as u16;
+                let event = if wparam.0 >> u16::BITS == 0 {
+                    Event::KeyDown { id, vk }
+                } else {
+                    Event::KeyUp { id, vk }
+                };
+                self.deliver(hwnd, event);
+                Some(LRESULT(0))
+            }
+            // The field lost the keyboard in its capture: to this window's element now in focus, to
+            // another field, or to none.
+            field::WM_FIELD_LEFT => {
+                let id = self.fields.id_of(HWND(lparam.0 as *mut _))?;
+                let taking = HWND(wparam.0 as *mut _);
+                let to = if taking == hwnd {
+                    self.focus.filter(|focus| *focus != id)
+                } else {
+                    self.fields.id_of(taking)
+                };
+                self.deliver(hwnd, Event::FocusLost { id, to });
                 Some(LRESULT(0))
             }
             WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => self

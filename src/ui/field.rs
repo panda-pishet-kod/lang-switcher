@@ -39,8 +39,22 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WM_CHAR, WM_CLEAR, WM_CUT, WM_GETFONT, WM_KEYDOWN, WM_NCDESTROY, WM_PAINT, WM_PASTE,
     WM_SETFONT, WM_SETTEXT, WM_UNDO, WNDPROC, WS_CHILD, WS_EX_RTLREADING, WS_VISIBLE, WS_VSCROLL,
 };
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    ES_READONLY, PostMessageW, WM_APP, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS,
+    WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
 use ::windows::core::{HSTRING, w};
 use std::cell::{Cell, RefCell};
+
+/// A key of a field of a key in its capture, to the window it stands in (T-120-20), sent at once:
+/// `wparam` — the virtual code, and 1 above its 16 bits when the key went up; `lparam` — the field.
+pub const WM_FIELD_KEY: u32 = WM_APP + 2;
+
+/// A field of a key in its capture lost the keyboard (T-120-20), posted — the window that took it
+/// may be in the middle of its own message: `wparam` — the window that took the keyboard, `lparam`
+/// — the field.
+pub const WM_FIELD_LEFT: u32 = WM_APP + 3;
 
 /// The number the shell's procedure is kept under in each field.
 const SUBCLASS: usize = 1;
@@ -55,6 +69,8 @@ pub struct Spec<'a, I> {
     /// The wrapper less its paddings.
     pub inner: RECT,
     pub multiline: bool,
+    /// A field of a key (T-120-20): none — a field to type in; whether it captures a key now.
+    pub capture: Option<bool>,
     pub value: &'a str,
     pub hint: &'a str,
     pub disabled: bool,
@@ -81,12 +97,15 @@ struct Data {
     colour: Cell<COLORREF>,
     multiline: bool,
     rtl: bool,
+    /// A field of a key: whether it captures now.
+    capture: Cell<Option<bool>>,
 }
 
 struct Item<I> {
     id: I,
     hwnd: HWND,
     multiline: bool,
+    key: bool,
     rtl: bool,
     ink: Rgb,
     fill: Rgb,
@@ -163,9 +182,11 @@ impl<I: Copy + PartialEq> Fields<I> {
         let (font, old) = self.font_for(look);
         let (keep, gone): (Vec<_>, Vec<_>) = self.items.drain(..).partition(|item| {
             item.rtl == look.rtl
-                && specs
-                    .iter()
-                    .any(|spec| spec.id == item.id && spec.multiline == item.multiline)
+                && specs.iter().any(|spec| {
+                    spec.id == item.id
+                        && spec.multiline == item.multiline
+                        && spec.capture.is_some() == item.key
+                })
         });
         self.items = keep;
         gone.into_iter().for_each(destroy);
@@ -183,6 +204,8 @@ impl<I: Copy + PartialEq> Fields<I> {
             };
             let line = self.line;
             let item = &mut self.items[at];
+            // Told before anything moves the keyboard: a capture that has ended reports no loss.
+            item.data.capture.set(spec.capture);
 
             if item.font != font {
                 item.font = font;
@@ -392,6 +415,10 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
     } else {
         ES_AUTOHSCROLL as u32
     };
+    // A field of a key shows the key; it is captured, never typed (104.3).
+    if spec.capture.is_some() {
+        style |= ES_READONLY as u32;
+    }
     let mut extended = WINDOW_EX_STYLE::default();
     if look.rtl {
         style |= ES_RIGHT as u32;
@@ -423,6 +450,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         colour: Cell::new(colorref(look.hint)),
         multiline: spec.multiline,
         rtl: look.rtl,
+        capture: Cell::new(spec.capture),
     });
     // SAFETY: the procedure below and the box kept in the item until `destroy` removes the
     // procedure first.
@@ -432,6 +460,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         id: spec.id,
         hwnd,
         multiline: spec.multiline,
+        key: spec.capture.is_some(),
         rtl: look.rtl,
         ink: spec.ink,
         fill: spec.fill,
@@ -462,6 +491,38 @@ fn forward(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) {
     let procedure = unsafe { std::mem::transmute::<isize, WNDPROC>(raw) };
     // SAFETY: the parent's own procedure, called on its thread with a key message.
     unsafe { CallWindowProcW(procedure, parent, message, wparam, lparam) };
+}
+
+/// What a field of a key answers itself (T-120-20, as the field of the old window: FR-94, 82.6,
+/// 104.3). Out of its capture it only shows the key: the mouse does not reach it and the keyboard
+/// does not settle in it — no caret, no selection. In its capture every key goes to the window as
+/// [`WM_FIELD_KEY`] — Tab, Esc, Enter, F10 and the keys with Alt too — none is typed, and the loss
+/// of the keyboard is posted as [`WM_FIELD_LEFT`]. **SEC-01:** the virtual code and nothing else.
+fn key_field(hwnd: HWND, message: u32, wparam: WPARAM, capturing: bool) -> Option<LRESULT> {
+    match message {
+        WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP
+        | WM_RBUTTONDBLCLK | WM_MBUTTONDOWN => Some(LRESULT(0)),
+        // The field's own handler makes the caret and selects the text: neither belongs here.
+        WM_SETFOCUS => Some(LRESULT(0)),
+        WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP if capturing => {
+            let up = usize::from(matches!(message, WM_KEYUP | WM_SYSKEYUP)) << u16::BITS;
+            let key = (wparam.0 & usize::from(u16::MAX)) | up;
+            forward(hwnd, WM_FIELD_KEY, WPARAM(key), LPARAM(hwnd.0 as isize));
+            Some(LRESULT(0))
+        }
+        WM_CHAR | WM_SYSCHAR if capturing => Some(LRESULT(0)),
+        WM_KILLFOCUS if capturing => {
+            // SAFETY: a window of this thread.
+            if let Ok(parent) = unsafe { GetParent(hwnd) } {
+                // SAFETY: a message to the window the field stands in, of this thread.
+                let _ = unsafe {
+                    PostMessageW(Some(parent), WM_FIELD_LEFT, wparam, LPARAM(hwnd.0 as isize))
+                };
+            }
+            Some(LRESULT(0))
+        }
+        _ => None,
+    }
 }
 
 /// The hint of an empty field, in its colour, where Windows would put the text.
@@ -510,6 +571,12 @@ unsafe extern "system" fn procedure(
 ) -> LRESULT {
     // SAFETY: the box `make` passed, kept until `destroy` removes this procedure.
     let data = unsafe { &*(data as *const Data) };
+
+    if let Some(capturing) = data.capture.get()
+        && let Some(answer) = key_field(hwnd, message, wparam, capturing)
+    {
+        return answer;
+    }
 
     match message {
         WM_KEYDOWN => {
