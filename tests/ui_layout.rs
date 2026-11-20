@@ -1345,3 +1345,42 @@ fn a_list_that_takes_the_room_left_is_no_shortfall_of_its_own() {
     let tall = lay(&window(40), usual());
     assert!(!tall.shortfall.fits(), "{:?}", tall.shortfall);
 }
+
+/// **A list given room fills it with its frame** (T-120-20, the mock-up's `.grow`): three layouts of
+/// the cycle in a fill draw a frame down to the end of the room, the rows from its top — not a frame
+/// of three rows with emptiness under it.
+#[test]
+fn a_list_given_room_fills_it_with_its_frame() {
+    use lang_switcher::ui::scene::ListItem;
+
+    let rows: Vec<ListItem> = ["English", "Русский", "Deutsch"]
+        .iter()
+        .map(|label| ListItem {
+            label: (*label).to_owned(),
+            check: Some(true),
+            mark: false,
+        })
+        .collect();
+    let window = bare(Node::Column(vec![
+        text(Role::Title, "Layouts"),
+        Node::Fill(Box::new(Node::List {
+            id: Id::Language,
+            rows,
+            selected: 0,
+            first: 0,
+        })),
+    ]));
+    let layout = lay(&window, usual());
+    let frame = rects_of(&layout, |part| matches!(part, Part::List(_)))[0];
+    let rows = rects_of(&layout, |part| matches!(part, Part::ListRow { .. }));
+    let last = rows.last().expect("rows");
+    assert_eq!(rows.len(), 3);
+    assert!(
+        frame.bottom() > last.bottom() + last.h,
+        "the frame reaches down the room, not three rows: {frame:?}, the last row {last:?}"
+    );
+    assert!(
+        rows[0].y < frame.y + last.h,
+        "the rows from the top of the frame: {rows:?}"
+    );
+}

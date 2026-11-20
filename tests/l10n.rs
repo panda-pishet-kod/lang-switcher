@@ -685,7 +685,7 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        263,
+        265,
         "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
@@ -696,7 +696,8 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
          -6, -7, -10: thirteen of the window in the corner, the menu and «От автора», and task \
          T-119-9: four that left with the balloon and the old words of «Обновление», six of its \
          honest letter, and task T-120-16: the header of the window in the corner of a letter \
-         and the line under «Привет»"
+         and the line under «Привет», and task T-120-20: the note of a refused write of the \
+         settings and the badge «новое»"
     );
 
     let mut refused = Vec::new();
@@ -1527,9 +1528,9 @@ struct Overflow {
     room: i32,
     what: &'static str,
 }
-
-/// The windows laid out from the template, where a label cannot grow.
-const FIXED_WINDOWS: [&str; 2] = ["IDD_SETTINGS", "IDD_ABOUT"];
+/// The windows laid out from the template, where a label cannot grow — none since stage Э120: the
+/// settings and «О программе» moved to the shell, whose own instrument fits them (T-120-11).
+const FIXED_WINDOWS: [&str; 0] = [];
 
 /// The width of the wizard's content in dialog units: the window of 256 less its margins of 12
 /// (the family of windows, решение 142.1) — the width of `IDC_WZ_TITLE` in the template.
@@ -1763,11 +1764,11 @@ fn every_string_fits_its_element_at_every_scale_of_fr_92() {
         std::fs::write(&out, all.join("\n") + "\n").expect("the table must be writable");
     }
 
-    for kind in [
-        "height of the label",
-        "width of the button",
-        "width beside the glyph",
-    ] {
+    // «height of the label» and «width of the button» were measured in the two template windows
+    // whose labels and buttons could not grow — the settings and «О программе»; both moved to the
+    // shell (stage Э120), whose instrument of fitting reddens their overflows (T-120-11).
+    {
+        let kind = "width beside the glyph";
         assert!(
             control.iter().any(|o| o.what == kind),
             "the positive control: English lengthened by 40 % must redden «{kind}» somewhere"
@@ -1830,12 +1831,6 @@ fn body_of(file: &str, name: &str) -> String {
 fn the_glued_pieces_come_out_of_the_tables_and_not_out_of_literals() {
     for (file, function, string, literal) in [
         ("src/tray.rs", "icon_tip", "IDS_TIP_FORMAT", "{APP_NAME} — "),
-        (
-            "src/settings.rs",
-            "show_layout_note",
-            "IDS_LIST_SEPARATOR",
-            "join(\", \")",
-        ),
         (
             "src/settings.rs",
             "acting_line",
