@@ -72,15 +72,6 @@ pub const EXCUSED: &[Excuse] = &[
         why: "«Обновление»: временные образцы строк ×1,3 и длинный перевод — укоротить в волне",
     },
     Excuse {
-        window: "letter update",
-        class: Class::Ordinary,
-        languages: &["ml"],
-        category: Some(Category::Wave),
-        until: "T-120-24",
-        decision: None,
-        why: "«Обновление»: временные образцы строк ×1,3 и длинный перевод — укоротить в волне",
-    },
-    Excuse {
         window: "author",
         class: Class::Narrow,
         languages: &["ml", "ta"],
