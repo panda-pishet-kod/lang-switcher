@@ -172,12 +172,13 @@ impl Content for Author {
                 link: Id::Site,
             }),
             body: Node::Column(vec![
-                // The head of «О программе» (task T-81-3): «От автора» over it, and no number — the
-                // only window with a version over its title is «О программе».
+                // The title of the head of «О программе» (task T-81-3) with «От автора» over it, no
+                // number — the only window with a version over its title is «О программе» — and no
+                // subtitle: C6 of T-120-17, variants 1 + 3 (the mock-up of the window has none).
                 Node::Header {
                     eyebrow: Some(self.line(IDS_AUTHOR_CAPTION)),
                     title: view.line_1.clone(),
-                    subtitle: Some(view.line_2.clone()),
+                    subtitle: None,
                 },
                 Node::Pair(Box::new(support), Box::new(feedback)),
                 self.news(),
