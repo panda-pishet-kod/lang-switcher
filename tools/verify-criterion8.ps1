@@ -151,6 +151,12 @@ $Strings = @(
     @{ Name = 'probe switch --ui-probe-fields';    Value = '--ui-probe-fields';                 Source = 'src\main.rs';              Control = 'testing' },
     @{ Name = 'probe switch --ui-probe-popup';     Value = '--ui-probe-popup';                  Source = 'src\main.rs';              Control = 'testing' },
     @{ Name = 'probe switch --ui-probe-corner';    Value = '--ui-probe-corner';                 Source = 'src\main.rs';              Control = 'testing' },
+    # T-120-16: the stand of the letters.
+    @{ Name = 'probe switch --ui-probe-letters';   Value = '--ui-probe-letters';                Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LETTER';    Value = 'LANGSW_TESTING_UI_PROBE_LETTER';    Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LANG';      Value = 'LANGSW_TESTING_UI_PROBE_LANG';      Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_THEME';     Value = 'LANGSW_TESTING_UI_PROBE_THEME';     Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_BY_ITSELF'; Value = 'LANGSW_TESTING_UI_PROBE_BY_ITSELF'; Source = 'src\letters.rs, mod testing'; Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_UI_TICK_HIDDEN';     Value = 'LANGSW_TESTING_UI_TICK_HIDDEN';     Source = 'src\ui\host.rs';           Control = 'testing' }
 )
 

@@ -3,6 +3,8 @@
 
 pub mod about;
 pub mod corner;
+pub mod letter;
+pub mod letters_list;
 pub mod tray_menu;
 
 use crate::settings::Language;
@@ -18,15 +20,36 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
             .into_iter()
             .map(|(name, window)| (name, window.map(&|id| id as u16))),
     );
+    all.extend(
+        letter::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&letter::Id::number))),
+    );
+    all.extend(
+        letters_list::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+    );
     // The windows in the corner (T-120-14): the hint of the flag and «Обновлено» in the words of
-    // `corner.rs`; the notice of a letter is built in `letters.rs`.
-    let corners = [
+    // `corner.rs`; the knock of a letter in the words of `letters.rs`.
+    let mut corners = vec![
         ("corner hint", crate::corner::hint_content_in(language)),
         (
             "corner updated",
             crate::corner::release_content_in(language, "1.6.1"),
         ),
     ];
+    for (name, letter) in [
+        ("corner letter thanks", crate::letters::Letter::Thanks),
+        (
+            "corner letter news",
+            crate::letters::Letter::News(crate::letters::sample_entry().id),
+        ),
+    ] {
+        if let Some(content) = crate::letters::notice_content_in(language, letter) {
+            corners.push((name, content));
+        }
+    }
     // The menu of the icon (T-120-15) in its five states.
     all.extend(
         tray_menu::states(language)
