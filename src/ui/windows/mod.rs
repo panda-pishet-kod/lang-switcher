@@ -2,6 +2,7 @@
 //! coordinates.
 
 pub mod about;
+pub mod corner;
 
 use crate::settings::Language;
 use crate::ui::scene::Window;

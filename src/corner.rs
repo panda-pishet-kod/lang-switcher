@@ -216,6 +216,14 @@ pub struct Content {
     pub check: Option<String>,
 }
 
+impl Content {
+    /// The text of the window — for the description of the shell, which names no `text` (the
+    /// guard of the window descriptions, rule 2).
+    pub fn words(&self) -> &str {
+        &self.text
+    }
+}
+
 /// How the window ended — what its caller is told.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct End {

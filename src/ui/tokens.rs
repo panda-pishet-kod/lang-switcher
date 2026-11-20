@@ -288,6 +288,14 @@ pub enum Role {
     Code,
     /// подпись под рисунком
     Brand,
+    /// окно в углу — шапка: о чём окно (постоянный кегль, §2)
+    CornerHeader,
+    /// окно в углу — заголовок
+    CornerTitle,
+    /// окно в углу — текст
+    CornerText,
+    /// окно в углу — подпись флажка
+    CornerCheck,
 }
 
 /// How one role sets its text. `size` is a share of B; `line` is the line height as a multiple of
@@ -365,6 +373,10 @@ impl Role {
             Role::Label => "label",
             Role::Code => "code",
             Role::Brand => "brand",
+            Role::CornerHeader => "corner_header",
+            Role::CornerTitle => "corner_title",
+            Role::CornerText => "corner_text",
+            Role::CornerCheck => "corner_check",
         }
     }
 
@@ -384,6 +396,10 @@ impl Role {
             Role::Label => RoleStyle::mono(0.72, 1.5, 600, Some(Color::Ink2)).caps(0.08),
             Role::Code => RoleStyle::mono(0.86, 1.45, 400, Some(Color::Ink)),
             Role::Brand => RoleStyle::mono(0.0, 1.5, 400, Some(Color::Ink2)),
+            Role::CornerHeader => RoleStyle::mono(0.0, 1.0, 600, Some(Color::Accent)).caps(0.08),
+            Role::CornerTitle => RoleStyle::main(0.0, 1.3, 600, Some(Color::Ink)),
+            Role::CornerText => RoleStyle::main(0.0, 1.45, 400, Some(Color::Ink2)),
+            Role::CornerCheck => RoleStyle::main(0.0, 1.45, 400, Some(Color::Ink)),
         }
     }
 }
@@ -403,6 +419,11 @@ pub const BRAND_NAME_COLOR: Color = Color::Ink;
 pub fn role_size(role: Role, b: f32, h: f32) -> f32 {
     let size = match role {
         Role::Brand => (BRAND_BY_HEIGHT * h).clamp(BRAND_MIN.0, BRAND_MAX.0),
+        // The window in the corner keeps its sizes whatever the screen (§2).
+        Role::CornerHeader => CORNER_HEADER.0,
+        Role::CornerTitle => CORNER_TITLE.0,
+        Role::CornerText => CORNER_TEXT.0,
+        Role::CornerCheck => CORNER_CHECK_LABEL.0,
         _ => role.style().size.at(b),
     };
 
@@ -681,6 +702,22 @@ pub const CORNER_PAD: Sides = Sides::pt(10.0, 12.0, 16.0, 16.0);
 pub const CORNER_GAP: Pt = Pt(12.0);
 /// Окно в углу — кружок с пандой.
 pub const CORNER_ART: Pt = Pt(44.0);
+/// ◆ Окно в углу — высота строки шапки (макет: 28).
+pub const CORNER_HEADER_ROW: Pt = Pt(28.0);
+/// ◆ Окно в углу — значок программы в шапке.
+pub const CORNER_ICON: Pt = Pt(16.0);
+/// ◆ Окно в углу — между значком, названием и крестиком.
+pub const CORNER_ICON_GAP: Pt = Pt(8.0);
+/// ◆ Окно в углу — между заголовком и текстом.
+pub const CORNER_TITLE_GAP: Pt = Pt(3.0);
+/// ◆ Окно в углу — между кнопками.
+pub const CORNER_BUTTON_GAP: Pt = Pt(8.0);
+/// ◆ Окно в углу — доля второй кнопки ряда (слева).
+pub const CORNER_SECOND_SHARE: Share = Share(1.0);
+/// ◆ Окно в углу — доля главной кнопки ряда (справа).
+pub const CORNER_MAIN_SHARE: Share = Share(2.0);
+/// ◆ Окно в углу — знак крестика (макет: 13 пт шрифта, знак около 10).
+pub const CORNER_CROSS: Pt = Pt(10.0);
 /// Окно в углу — кнопка не ниже.
 pub const CORNER_BUTTON_MIN_HEIGHT: Pt = Pt(40.0);
 /// Меню значка — ширина от.

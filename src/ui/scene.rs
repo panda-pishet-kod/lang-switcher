@@ -45,6 +45,8 @@ pub enum Surface {
 pub enum Art {
     /// The panda of «О программе».
     About,
+    /// The panda of the windows in the corner and of the letters.
+    Avatar,
 }
 
 impl Art {
@@ -52,6 +54,7 @@ impl Art {
     pub const fn name(self) -> &'static str {
         match self {
             Art::About => "about",
+            Art::Avatar => "avatar",
         }
     }
 }
@@ -66,6 +69,8 @@ pub enum WindowKind {
     Wizard,
     /// One element filling the window, no paddings and no buttons: the list of a choice field.
     Bare,
+    /// The window in the corner (passport §2–§3): its own sizes, the buttons in shares 1 : 2.
+    Corner,
 }
 
 /// A part of a window description.
@@ -172,6 +177,16 @@ pub enum Node<I> {
         rows: Vec<ListItem>,
         selected: usize,
         first: usize,
+    },
+    /// The header of the window in the corner: the program's icon, «LANG SWITCHER · `about`» and
+    /// the ✕ that closes it.
+    CornerHeader { about: String, close: I },
+    /// The message of the window in the corner: the picture of the window beside a title, a text
+    /// and a link.
+    Message {
+        title: String,
+        words: String,
+        link: Option<(I, String)>,
     },
     /// A link to the site.
     Link { id: I, text: String },
@@ -332,6 +347,15 @@ impl<I> Node<I> {
                 selected,
                 first,
             },
+            Node::CornerHeader { about, close } => Node::CornerHeader {
+                about,
+                close: f(close),
+            },
+            Node::Message { title, words, link } => Node::Message {
+                title,
+                words,
+                link: link.map(|(id, text)| (f(id), text)),
+            },
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -414,6 +438,14 @@ impl<I> Node<I> {
             Node::List { rows, .. } => rows
                 .iter_mut()
                 .for_each(|row| f(Role::Body, &mut row.label)),
+            Node::CornerHeader { about, .. } => f(Role::CornerHeader, about),
+            Node::Message { title, words, link } => {
+                f(Role::CornerTitle, title);
+                f(Role::CornerText, words);
+                if let Some((_, link)) = link {
+                    f(Role::Link, link);
+                }
+            }
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }

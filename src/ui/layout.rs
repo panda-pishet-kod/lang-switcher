@@ -34,6 +34,11 @@ use crate::ui::tokens::{
     WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
+use crate::ui::tokens::{
+    CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
+    CORNER_HEADER_ROW, CORNER_ICON, CORNER_ICON_GAP, CORNER_MAIN_SHARE, CORNER_PAD,
+    CORNER_SECOND_SHARE, CORNER_TITLE_GAP,
+};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,6 +197,10 @@ pub enum Part {
     },
     /// The tick of the row that is the value now, in the list of a choice field.
     Tick,
+    /// The program's icon, in the header of the window in the corner.
+    AppIcon,
+    /// The ✕ that closes the window in the corner.
+    Cross,
     /// The thin scroll bar of a list that has more rows than it shows.
     Scroll {
         first: usize,
@@ -279,6 +288,8 @@ impl Part {
             Part::List(_) => "list",
             Part::Scroll { .. } => "list scroll bar",
             Part::Tick => "tick",
+            Part::AppIcon => "program icon",
+            Part::Cross => "close cross",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -348,7 +359,12 @@ pub fn lay_out<I: Copy>(
     rtl: bool,
     measure: &dyn Measure,
 ) -> Layout<I> {
-    let b = tokens::window_b(size.w, size.h, k);
+    // The window in the corner keeps its sizes (§2): its buttons' role at their 13,5 points.
+    let b = if window.kind == WindowKind::Corner {
+        CORNER_BUTTON.0 / Role::Button.style().size.0
+    } else {
+        tokens::window_b(size.w, size.h, k)
+    };
     let mut place = Placer {
         b,
         h: size.h,
@@ -452,6 +468,9 @@ impl<I: Copy> Placer<'_, I> {
 
     /// The whole window; answers what does not fit.
     fn window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
+        if window.kind == WindowKind::Corner {
+            return self.corner_window(window, size);
+        }
         // One element filling the window: the list of a choice field in its popup.
         if window.kind == WindowKind::Bare {
             let h = self.node(&window.body, 0.0, 0.0, size.w, Some(size.h));
@@ -694,6 +713,10 @@ impl<I: Copy> Placer<'_, I> {
                 selected,
                 first,
             } => self.list(*id, rows, *selected, *first, x, y, w, slot),
+            Node::CornerHeader { about, close } => self.corner_header(about, *close, x, y, w),
+            Node::Message { title, words, link } => {
+                self.message(title, words, link.as_ref(), x, y, w)
+            }
             Node::Link { id, text } => {
                 let style = self.style(Role::Link);
                 let width = self.width_of(style, text).min(w);
@@ -710,6 +733,160 @@ impl<I: Copy> Placer<'_, I> {
                 self.push(Part::Divider, Rect::new(x, y, w, LINE.0), None);
                 LINE.0
             }
+        }
+    }
+
+    /// The window in the corner (passport §3): its paddings, its parts one under another
+    /// `CORNER_GAP` apart; answers how much higher it must be (the popup takes its height from it).
+    fn corner_window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
+        let pad = CORNER_PAD;
+        let (x, w) = (pad.left.0, size.w - pad.left.0 - pad.right.0);
+        let mut y = pad.top.0;
+        let parts: Vec<&Node<I>> = match &window.body {
+            Node::Column(children) => children.iter().collect(),
+            other => vec![other],
+        };
+        for (index, part) in parts.into_iter().enumerate() {
+            if index > 0 {
+                y += CORNER_GAP.0;
+            }
+            y += self.node(part, x, y, w, None);
+        }
+        Shortfall {
+            w: self.over,
+            h: y + pad.bottom.0 - size.h,
+        }
+    }
+
+    /// The header of the window in the corner: the icon, the words, the ✕ at the end.
+    fn corner_header(&mut self, about: &str, close: I, x: f32, y: f32, w: f32) -> f32 {
+        let row = CORNER_HEADER_ROW.0;
+        let icon = CORNER_ICON.0;
+        let gap = CORNER_ICON_GAP.0;
+        self.push(
+            Part::AppIcon,
+            Rect::new(x, y + (row - icon) / 2.0, icon, icon),
+            None,
+        );
+        let style = self.style(Role::CornerHeader);
+        let words_x = x + icon + gap;
+        let words_w = (w - icon - gap * 2.0 - row).max(0.0);
+        self.push(
+            Part::Text {
+                role: Role::CornerHeader,
+                text: about.to_owned(),
+                wrap: Wrap::OneLine,
+                align: Align::Start,
+            },
+            Rect::new(
+                words_x,
+                y + (row - style.line_height()) / 2.0,
+                words_w,
+                style.line_height(),
+            ),
+            None,
+        );
+        self.push(
+            Part::Cross,
+            Rect::new(x + w - row, y, row, row),
+            Some(close),
+        );
+        row
+    }
+
+    /// The message of the window in the corner: its picture in a circle at the start, the title,
+    /// the text and the link beside it.
+    fn message(
+        &mut self,
+        title: &str,
+        text: &str,
+        link: Option<&(I, String)>,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let circle = CORNER_ART.0;
+        let (mut column_x, mut column_w) = (x, w);
+        if let Some(art) = self.art {
+            self.push(Part::Art(art), Rect::new(x, y, circle, circle), None);
+            column_x += circle + CORNER_GAP.0;
+            column_w -= circle + CORNER_GAP.0;
+        }
+        let mut h = self.text(Role::CornerTitle, title, column_x, y, column_w, Wrap::Words);
+        h += CORNER_TITLE_GAP.0;
+        h += self.text(
+            Role::CornerText,
+            text,
+            column_x,
+            y + h,
+            column_w,
+            Wrap::Words,
+        );
+        if let Some((id, label)) = link {
+            let style = self.style(Role::Link);
+            let line = style.line_height();
+            let width = self.width_of(style, label).min(column_w);
+            self.push(
+                Part::Link {
+                    text: label.clone(),
+                },
+                Rect::new(column_x, y + h, width, line),
+                Some(*id),
+            );
+            h += line;
+        }
+        h.max(circle)
+    }
+
+    /// The buttons of the window in the corner: the second one share at the start, the main two
+    /// at the end; one under another, the main first, when a label does not fit its share.
+    fn corner_buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
+        let main = buttons.iter().find(|node| {
+            matches!(
+                node,
+                Node::Button {
+                    kind: ButtonKind::Primary,
+                    ..
+                }
+            )
+        });
+        let second = buttons.iter().find(|node| {
+            matches!(
+                node,
+                Node::Button {
+                    kind: ButtonKind::Normal,
+                    ..
+                }
+            )
+        });
+        let height =
+            |this: &Self, node: &Node<I>| this.button_size(node).1.max(CORNER_BUTTON_MIN_HEIGHT.0);
+        let gap = CORNER_BUTTON_GAP.0;
+        let (one, two) = (CORNER_SECOND_SHARE.0, CORNER_MAIN_SHARE.0);
+        match (second, main) {
+            (Some(second), Some(main)) => {
+                let unit = (w - gap) / (one + two);
+                let (second_w, main_w) = (unit * one, unit * two);
+                let fits =
+                    self.button_size(second).0 <= second_w && self.button_size(main).0 <= main_w;
+                let h = height(self, main).max(height(self, second));
+                if fits {
+                    self.button(second, Rect::new(x, y, second_w, h));
+                    self.button(main, Rect::new(x + second_w + gap, y, main_w, h));
+                    h
+                } else {
+                    let (main_h, second_h) = (height(self, main), height(self, second));
+                    self.button(main, Rect::new(x, y, w, main_h));
+                    self.button(second, Rect::new(x, y + main_h + gap, w, second_h));
+                    main_h + gap + second_h
+                }
+            }
+            (None, Some(only)) | (Some(only), None) => {
+                let h = height(self, only);
+                self.button(only, Rect::new(x, y, w, h));
+                h
+            }
+            (None, None) => 0.0,
         }
     }
 
@@ -944,6 +1121,9 @@ impl<I: Copy> Placer<'_, I> {
     /// A row of buttons pressed to the right, the main one the rightmost; when they do not fit —
     /// one under another across the width, the main one on top.
     fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
+        if self.kind == WindowKind::Corner {
+            return self.corner_buttons(buttons, x, y, w);
+        }
         let is_primary = |node: &&Node<I>| {
             matches!(
                 node,
@@ -1045,7 +1225,13 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
     ) -> f32 {
         let gap = self.em(CONTROL_GAP);
-        let first = self.style(Role::Body).line_height();
+        // The check box of the window in the corner has its own size (§2).
+        let role = if self.kind == WindowKind::Corner {
+            Role::CornerCheck
+        } else {
+            Role::Body
+        };
+        let first = self.style(role).line_height();
         let line = first.max(ch);
         let (tx, cx) = if before {
             (x + cw + gap, x)
@@ -1056,7 +1242,7 @@ impl<I: Copy> Placer<'_, I> {
 
         let hit = self.push(Part::Hit, Rect::new(x, y, w, 0.0), Some(id));
         let lift = (line - first) / 2.0;
-        let mut text = self.text(Role::Body, label, tx, y + lift, tw, Wrap::Words);
+        let mut text = self.text(role, label, tx, y + lift, tw, Wrap::Words);
         if let Some(hint) = hint {
             text += self.text(Role::Small, hint, tx, y + lift + text, tw, Wrap::Words);
         }
