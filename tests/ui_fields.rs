@@ -13,16 +13,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateCompatibleDC, DeleteDC, GetBkColor, GetTextColor,
+    ClientToScreen, CreateCompatibleDC, DeleteDC, GetBkColor, GetObjectW, GetTextColor, HGDIOBJ,
+    LOGFONTW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyboardState, SetKeyboardState, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_NEXT, VK_RETURN,
     VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, IsWindow, MSG,
-    PM_REMOVE, PeekMessageW, SendMessageW, SetWindowTextW, WM_CLOSE, WM_CTLCOLOREDIT, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT, WS_EX_RTLREADING,
+    DispatchMessageW, ES_MULTILINE, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, IsWindow,
+    MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetWindowTextW, WM_CLOSE, WM_CTLCOLOREDIT,
+    WM_GETFONT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT,
+    WS_EX_RTLREADING,
 };
 use windows::core::HSTRING;
 
@@ -40,6 +42,7 @@ struct Form {
     events: Rc<RefCell<Vec<Event<Id>>>>,
     name: String,
     note: String,
+    note_kind: FieldKind,
     rows: usize,
     checks: Option<Vec<bool>>,
     selected: usize,
@@ -81,7 +84,7 @@ impl Content for Form {
                     label: "Note".to_owned(),
                     value: self.note.clone(),
                     hint: "What happened".to_owned(),
-                    kind: FieldKind::Text,
+                    kind: self.note_kind,
                 },
                 Node::List {
                     id: Id::Layouts,
@@ -121,6 +124,10 @@ impl Content for Form {
                 }
             }
             Event::Pressed(Id::Close) => return Reply::Close,
+            // A window opened with a field of code: «Apply» makes it a field of text.
+            Event::Pressed(Id::Apply) if self.note_kind == FieldKind::Code => {
+                self.note_kind = FieldKind::Text;
+            }
             _ => {}
         }
         Reply::Stay
@@ -146,11 +153,23 @@ struct Open {
 
 impl Open {
     fn with(rows: usize, checks: bool, language: (&str, bool), theme: ThemeSetting) -> Self {
+        Self::with_note(rows, checks, language, theme, FieldKind::Text)
+    }
+
+    /// The window with its field «Note» of `note_kind`.
+    fn with_note(
+        rows: usize,
+        checks: bool,
+        language: (&str, bool),
+        theme: ThemeSetting,
+        note_kind: FieldKind,
+    ) -> Self {
         let events = Rc::new(RefCell::new(Vec::new()));
         let content = Form {
             events: events.clone(),
             name: String::new(),
             note: String::new(),
+            note_kind,
             rows,
             checks: checks.then(|| (0..rows).map(|row| row % 2 == 0).collect()),
             selected: 0,
@@ -473,5 +492,87 @@ fn the_field_takes_the_colours_of_the_theme_and_the_direction_of_the_language() 
         extended & WS_EX_RTLREADING.0 as isize,
         0,
         "a field in Hebrew does not read right to left"
+    );
+}
+
+/// The face of the font a field of Windows is set in.
+fn face_of(field: HWND) -> String {
+    let font = send(field, WM_GETFONT, 0, 0);
+    let mut logfont = LOGFONTW::default();
+    // SAFETY: a font the shell made, alive while its field is; a local of the size given.
+    let size = unsafe {
+        GetObjectW(
+            HGDIOBJ(font as *mut _),
+            i32::try_from(std::mem::size_of::<LOGFONTW>()).expect("a small struct"),
+            Some((&raw mut logfont).cast()),
+        )
+    };
+    assert!(size > 0, "the font of the field");
+    let name = &logfont.lfFaceName;
+    let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    String::from_utf16_lossy(&name[..len])
+}
+
+/// **A field of code** (T-120-19, the wizard's report): many lines, typed in as a field of text,
+/// set in the monospace face of the role `code`; the other fields keep the face of `body`.
+#[test]
+fn a_field_of_code_is_set_in_the_monospace_face() {
+    let mono = ["Cascadia Mono", "Consolas"];
+    let open = Open::with_note(
+        20,
+        false,
+        ("en-US", false),
+        ThemeSetting::Light,
+        FieldKind::Code,
+    );
+    let (note, name) = (open.field(Id::Note), open.field(Id::Name));
+    let (note_face, name_face) = (face_of(note), face_of(name));
+    assert!(
+        mono.contains(&note_face.as_str()),
+        "the field of code: {note_face}"
+    );
+    assert!(!mono.contains(&name_face.as_str()), "a line: {name_face}");
+    // SAFETY: a window of this thread.
+    let style = unsafe { GetWindowLongPtrW(note, GWL_STYLE) };
+    assert_ne!(style & ES_MULTILINE as isize, 0, "many lines");
+    drop(open);
+
+    let open = Open::new();
+    assert_eq!(
+        face_of(open.field(Id::Note)),
+        face_of(open.field(Id::Name)),
+        "a field of text: the face of body"
+    );
+}
+
+/// **The monospace font is let go** once no field of the window is of code. Counted as the fonts
+/// the fields hold: GDI defers deleting a font still selected into a cached DC of an edit control,
+/// so `GetObjectW` may answer for a font already deleted (measured: `DeleteObject` gave TRUE).
+#[cfg(feature = "testing")]
+#[test]
+fn the_monospace_font_is_held_while_a_field_of_code_is_there() {
+    let code = || {
+        Open::with_note(
+            20,
+            false,
+            ("en-US", false),
+            ThemeSetting::Light,
+            FieldKind::Code,
+        )
+    };
+    let open = code();
+    assert_eq!(open.probe().field_fonts, 2, "body and monospace");
+    open.click("\"Apply\"");
+    send(open.hwnd, WM_PAINT, 0, 0);
+    let name_face = face_of(open.field(Id::Name));
+    assert_eq!(
+        face_of(open.field(Id::Note)),
+        name_face,
+        "a field of text now"
+    );
+    assert_eq!(
+        open.probe().field_fonts,
+        1,
+        "the monospace font let go with the last field of code"
     );
 }

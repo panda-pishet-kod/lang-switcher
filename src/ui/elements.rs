@@ -406,6 +406,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
         }
         Part::Input {
             multiline,
+            code,
             value,
             hint,
             ..
@@ -435,7 +436,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             write(
                 painter,
                 look,
-                Role::Body,
+                if *code { Role::Code } else { Role::Body },
                 None,
                 text,
                 inner,

@@ -7,7 +7,8 @@
 //!   centred on the wrapper's height, a text field filling it, its scroll bar the system's (in the
 //!   dark theme it stays light — the accepted price, T-120-18 п. 6).
 //! * **Colours from the table** through `WM_CTLCOLOREDIT` (the window answers it with
-//!   [`Fields::colours`]); the font is the role `body`'s face and size, made for the scale now.
+//!   [`Fields::colours`]); the font is the role `body`'s face and size, made for the scale now; a field of code is set in the
+//!   monospace face of the role `code` (T-120-19).
 //! * **The hint** of an empty field is drawn in `ink3` by the field's own procedure after Windows
 //!   paints it: the cue banner of Windows (`EM_SETCUEBANNER`) takes no colour (◆).
 //! * **Right to left:** the reading order and the alignment of the language.
@@ -69,6 +70,8 @@ pub struct Spec<'a, I> {
     /// The wrapper less its paddings.
     pub inner: RECT,
     pub multiline: bool,
+    /// A field of code (T-120-19): the monospace face of [`Look`].
+    pub code: bool,
     /// A field of a key (T-120-20): none — a field to type in; whether it captures a key now.
     pub capture: Option<bool>,
     pub value: &'a str,
@@ -87,6 +90,10 @@ pub struct Look {
     /// The type size in pixels.
     pub px: i32,
     pub weight: u16,
+    /// The monospace face of the fields of code: the role `code` at the scale now.
+    pub code_face: String,
+    pub code_px: i32,
+    pub code_weight: u16,
     pub hint: Rgb,
     pub rtl: bool,
 }
@@ -116,7 +123,9 @@ struct Item<I> {
 /// The fields of one window.
 pub struct Fields<I> {
     items: Vec<Item<I>>,
-    font: Option<(Look, HFONT)>,
+    font: Option<(FontKey, HFONT)>,
+    /// The monospace font, while the window has a field of code.
+    code_font: Option<(FontKey, HFONT)>,
     /// The height of a line of the font, in pixels.
     line: i32,
     brushes: Vec<(Rgb, HBRUSH)>,
@@ -127,6 +136,7 @@ impl<I> Default for Fields<I> {
         Self {
             items: Vec::new(),
             font: None,
+            code_font: None,
             line: 0,
             brushes: Vec::new(),
         }
@@ -180,6 +190,13 @@ impl<I: Copy + PartialEq> Fields<I> {
     /// described are destroyed.
     pub fn sync(&mut self, parent: HWND, specs: &[Spec<'_, I>], look: &Look) {
         let (font, old) = self.font_for(look);
+        let (code_font, old_code) = if specs.iter().any(|spec| spec.code) {
+            let key = (look.code_face.clone(), look.code_px, look.code_weight);
+            let (code_font, old_code) = made(&mut self.code_font, key);
+            (Some(code_font), old_code)
+        } else {
+            (None, self.code_font.take().map(|(_, font)| font))
+        };
         let (keep, gone): (Vec<_>, Vec<_>) = self.items.drain(..).partition(|item| {
             item.rtl == look.rtl
                 && specs.iter().any(|spec| {
@@ -203,6 +220,10 @@ impl<I: Copy + PartialEq> Fields<I> {
                 },
             };
             let line = self.line;
+            let font = match code_font {
+                Some(code_font) if spec.code => code_font,
+                _ => font,
+            };
             let item = &mut self.items[at];
             // Told before anything moves the keyboard: a capture that has ended reports no loss.
             item.data.capture.set(spec.capture);
@@ -260,42 +281,20 @@ impl<I: Copy + PartialEq> Fields<I> {
             // SAFETY: as above.
             let _ = unsafe { EnableWindow(item.hwnd, !spec.disabled) };
         }
-        if let Some(old) = old {
+        for old in [old, old_code].into_iter().flatten() {
             // SAFETY: a font this object made, which no field holds any more.
             let _ = unsafe { DeleteObject(HGDIOBJ(old.0)) };
         }
     }
 
-    /// The font of `look`, made when it changed, and the font it replaces — deleted by the caller
-    /// once no field holds it.
+    /// The font of the body of `look`, made when it changed, and the font it replaces — deleted by
+    /// the caller once no field holds it.
     fn font_for(&mut self, look: &Look) -> (HFONT, Option<HFONT>) {
-        if let Some((made, font)) = &self.font
-            && made == look
-        {
-            return (*font, None);
+        let before = self.font.as_ref().map(|(_, font)| *font);
+        let (font, old) = made(&mut self.font, (look.face.clone(), look.px, look.weight));
+        if before != Some(font) {
+            self.line = line_of(font);
         }
-        let face = HSTRING::from(look.face.as_str());
-        // SAFETY: plain values and a string that lives across the call.
-        let font = unsafe {
-            CreateFontW(
-                -look.px,
-                0,
-                0,
-                0,
-                i32::from(look.weight),
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY,
-                0,
-                &face,
-            )
-        };
-        self.line = line_of(font);
-        let old = self.font.replace((look.clone(), font)).map(|(_, old)| old);
         (font, old)
     }
 
@@ -316,6 +315,13 @@ impl<I: Copy + PartialEq> Fields<I> {
     }
 
     /// The fields, as the tests read them.
+    /// How many fonts the fields hold now: the font of `body`, and the monospace one while a field
+    /// of code is there (the testing build; the probe of the host).
+    #[cfg(feature = "testing")]
+    pub fn fonts(&self) -> usize {
+        usize::from(self.font.is_some()) + usize::from(self.code_font.is_some())
+    }
+
     pub fn all(&self) -> Vec<(I, HWND)> {
         self.items.iter().map(|item| (item.id, item.hwnd)).collect()
     }
@@ -368,7 +374,10 @@ impl<I: Copy + PartialEq> Fields<I> {
     /// before its children go.
     pub fn release(&mut self) {
         self.items.drain(..).for_each(destroy);
-        if let Some((_, font)) = self.font.take() {
+        for (_, font) in [self.font.take(), self.code_font.take()]
+            .into_iter()
+            .flatten()
+        {
             // SAFETY: a font this object made, which no field holds any more.
             let _ = unsafe { DeleteObject(HGDIOBJ(font.0)) };
         }
@@ -382,7 +391,10 @@ impl<I: Copy + PartialEq> Fields<I> {
 impl<I> Drop for Fields<I> {
     fn drop(&mut self) {
         self.items.drain(..).for_each(destroy);
-        if let Some((_, font)) = self.font.take() {
+        for (_, font) in [self.font.take(), self.code_font.take()]
+            .into_iter()
+            .flatten()
+        {
             // SAFETY: as in `release`.
             let _ = unsafe { DeleteObject(HGDIOBJ(font.0)) };
         }
@@ -391,6 +403,41 @@ impl<I> Drop for Fields<I> {
             let _ = unsafe { DeleteObject(HGDIOBJ(brush.0)) };
         }
     }
+}
+
+/// The face, the size in pixels and the weight of a font of the fields.
+type FontKey = (String, i32, u16);
+
+/// The font of `key` in `slot`, made when it changed, and the font it replaces — deleted by the
+/// caller once no field holds it.
+fn made(slot: &mut Option<(FontKey, HFONT)>, key: FontKey) -> (HFONT, Option<HFONT>) {
+    if let Some((made, font)) = slot
+        && *made == key
+    {
+        return (*font, None);
+    }
+    let face = HSTRING::from(key.0.as_str());
+    // SAFETY: plain values and a string that lives across the call.
+    let font = unsafe {
+        CreateFontW(
+            -key.1,
+            0,
+            0,
+            0,
+            i32::from(key.2),
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            &face,
+        )
+    };
+    let old = slot.replace((key, font)).map(|(_, old)| old);
+    (font, old)
 }
 
 /// The height of a line of `font`, in pixels.

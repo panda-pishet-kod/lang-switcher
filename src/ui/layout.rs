@@ -214,6 +214,8 @@ pub enum Part {
     /// and for the pictures made in memory.
     Input {
         multiline: bool,
+        /// A field of code: the role `code`, the monospace face (`FieldKind::Code`).
+        code: bool,
         /// A field of a key: whether it captures now (`FieldKind::Key`).
         capture: Option<bool>,
         value: String,
@@ -2412,16 +2414,19 @@ impl<I: Copy> Placer<'_, I> {
         };
         let (pad, lines) = match kind {
             FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
-            FieldKind::Text => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
+            FieldKind::Text | FieldKind::Code => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
         };
         let capture = match kind {
             FieldKind::Key { capturing } => Some(capturing),
-            FieldKind::Line | FieldKind::Text => None,
+            FieldKind::Line | FieldKind::Text | FieldKind::Code => None,
         };
-        let h = self.style(Role::Body).line_height() * lines + self.em(pad.v) * 2.0;
+        let code = kind == FieldKind::Code;
+        let role = if code { Role::Code } else { Role::Body };
+        let h = self.style(role).line_height() * lines + self.em(pad.v) * 2.0;
         self.push(
             Part::Input {
-                multiline: kind == FieldKind::Text,
+                multiline: matches!(kind, FieldKind::Text | FieldKind::Code),
+                code,
                 capture,
                 value: value.to_owned(),
                 hint: hint.to_owned(),

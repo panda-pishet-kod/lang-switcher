@@ -580,11 +580,20 @@ impl<I> Node<I> {
                 items.iter_mut().for_each(|item| f(Role::Body, item));
             }
             Node::Field {
-                label, value, hint, ..
+                label,
+                value,
+                hint,
+                kind,
+                ..
             } => {
+                let role = if *kind == FieldKind::Code {
+                    Role::Code
+                } else {
+                    Role::Body
+                };
                 f(Role::FieldLabel, label);
-                f(Role::Body, value);
-                f(Role::Body, hint);
+                f(role, value);
+                f(role, hint);
             }
             Node::List { rows, .. } => rows
                 .iter_mut()
@@ -684,6 +693,9 @@ pub struct Taskbar {
 pub enum FieldKind {
     Line,
     Text,
+    /// A field of code (T-120-19, the wizard's report): `FIELD_TEXT_LINES` lines in the role `code`
+    /// — the monospace face; typed in as `Text`.
+    Code,
     /// A field of a key (T-120-20): it shows the key and is not typed in; `capturing` — it takes
     /// every key now (`Event::KeyDown`, `Event::KeyUp`, `Event::FocusLost`). Out of the capture it
     /// is no stop of Tab.

@@ -9,7 +9,9 @@ use lang_switcher::ui::fit;
 use lang_switcher::ui::layout::{
     Class, Concession, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
 };
-use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
+use lang_switcher::ui::scene::{
+    Art, Brand, ButtonKind, FieldKind, Node, Surface, Window, WindowKind,
+};
 use lang_switcher::ui::text::{FixedAdvance, Measure, Style, Wrap};
 use lang_switcher::ui::tokens::{
     BADGE_GAP, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role,
@@ -1511,4 +1513,61 @@ fn the_wizard_has_its_progress_its_row_and_its_check_boxes_with_a_line() {
         }
     });
     assert_eq!(small, vec!["The last 500 lines".to_owned()]);
+}
+
+/// **A field of code** (T-120-19): `FIELD_TEXT_LINES` lines of the role `code` — the monospace
+/// face — in the paddings of a field of text; a field of text keeps the lines of `body`.
+#[test]
+fn a_field_of_code_is_lines_of_the_role_code() {
+    use lang_switcher::ui::tokens::{FIELD_TEXT_LINES, MULTILINE_PAD};
+
+    let field = |kind| Node::Field {
+        id: Id::Site,
+        label: String::new(),
+        value: "a = 1".to_owned(),
+        hint: String::new(),
+        kind,
+    };
+    let window = bare(Node::Column(vec![
+        field(FieldKind::Code),
+        field(FieldKind::Text),
+    ]));
+    let layout = lay(&window, usual());
+    let inputs: Vec<(bool, bool, Rect)> = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.part {
+            Part::Input {
+                multiline, code, ..
+            } => Some((*multiline, *code, item.rect)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        inputs
+            .iter()
+            .map(|(many, code, _)| (*many, *code))
+            .collect::<Vec<_>>(),
+        vec![(true, true), (true, false)],
+        "both of many lines, the first of code"
+    );
+    let high = |role| {
+        Style::of(role, layout.b, layout.size.h).line_height() * FIELD_TEXT_LINES.0
+            + MULTILINE_PAD.v.at(layout.b) * 2.0
+    };
+    assert!(close(inputs[0].2.h, high(Role::Code)), "{:?}", inputs[0].2);
+    assert!(close(inputs[1].2.h, high(Role::Body)), "{:?}", inputs[1].2);
+
+    // Its value and its hint are texts of the role `code` for the instrument of fitting.
+    let mut window = window;
+    let mut roles = Vec::new();
+    window.texts_mut(&mut |role, s| roles.push((role, s.clone())));
+    assert!(
+        roles.contains(&(Role::Code, "a = 1".to_owned())),
+        "{roles:?}"
+    );
+    assert!(
+        roles.contains(&(Role::Body, "a = 1".to_owned())),
+        "{roles:?}"
+    );
 }

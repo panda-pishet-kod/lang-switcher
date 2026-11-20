@@ -190,6 +190,9 @@ pub struct Probe {
     /// How many times the pictures of the window were drawn afresh.
     #[cfg(feature = "testing")]
     pub pictures_drawn: usize,
+    /// How many fonts the fields of the window hold.
+    #[cfg(feature = "testing")]
+    pub field_fonts: usize,
 }
 
 /// The type-free face of a host, kept in the window.
@@ -1680,10 +1683,14 @@ impl<C: Content> Host<C> {
         let scale = self.scale;
         let px = |points: f32| (points * scale).round() as i32;
         let style = Style::of(Role::Body, layout.b, layout.size.h);
+        let code_style = Style::of(Role::Code, layout.b, layout.size.h);
         let look = field::Look {
             face: text.main_face().to_owned(),
             px: px(style.size),
             weight: style.weight,
+            code_face: text.mono_face().to_owned(),
+            code_px: px(code_style.size),
+            code_weight: code_style.weight,
             hint: Color::Ink3.get(self.theme),
             rtl: self.rtl,
         };
@@ -1694,6 +1701,7 @@ impl<C: Content> Host<C> {
             .filter_map(|(index, item)| {
                 let Part::Input {
                     multiline,
+                    code,
                     capture,
                     value,
                     hint,
@@ -1719,6 +1727,7 @@ impl<C: Content> Host<C> {
                         bottom: px(rect.bottom() - pad_v),
                     },
                     multiline: *multiline,
+                    code: *code,
                     capture: *capture,
                     value,
                     hint,
@@ -2686,6 +2695,8 @@ impl<C: Content> Handler for Host<C> {
                 .pictures
                 .as_deref()
                 .map_or(0, |pictures| pictures.drawn_afresh()),
+            #[cfg(feature = "testing")]
+            field_fonts: self.fields.fonts(),
             items: self
                 .layout
                 .iter()
