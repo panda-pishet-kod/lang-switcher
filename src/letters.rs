@@ -6898,17 +6898,21 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
 }
 
 /// What the window in the corner says about a letter that has come, in `language` — the knock of
-/// FR-101 on the shell (T-120-14, T-120-16): «LANG SWITCHER · ПИСЬМО ОТ АВТОРА», the heading of
-/// the letter, the words of [`toast_strings`], and one button, «Открыть письмо». `None` for the
+/// FR-101 on the shell (T-120-14, T-120-16): «LANG SWITCHER · ПИСЬМО», the heading of the letter,
+/// the words of [`toast_strings`], and one button, «Открыть письмо». `None` for the
 /// letters that do not knock.
 ///
 /// One button and the ✕, not two: the ✕ does what an unnoticed knock always did — nothing, and
 /// the letter opens by itself at the next quiet moment (FR-101). A second button «позже» would
 /// promise a delay the schedule does not give.
 pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
-    use crate::settings::{IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_TITLE};
+    use crate::settings::{
+        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_TITLE,
+    };
 
-    let (about, words) = toast_strings(letter)?;
+    // The words of the old balloon; its title is not shown — the header of the window in the corner
+    // is one short word, as the hint's and «Обновлено»'s are (C6 of T-120-16).
+    let (_, words) = toast_strings(letter)?;
     let title = match letter {
         Letter::Thanks => IDS_THANKS_TITLE,
         _ => IDS_NEWS_LETTER_TITLE,
@@ -6916,7 +6920,7 @@ pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::co
     let text = |id| settings::text_in(language, id);
 
     Some(crate::corner::Content {
-        about: text(about),
+        about: text(IDS_CORNER_LETTER),
         title: text(title),
         text: text(words),
         link: None,

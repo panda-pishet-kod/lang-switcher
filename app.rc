@@ -1231,6 +1231,9 @@ END
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291
 #define IDS_WIZARD_TRANSLATION_LINE 3292
+// Stage E120, task T-120-16: the header of the window in the corner that knocks with a letter — the word
+// after «LANG SWITCHER · », as IDS_CORNER_UPDATE and IDS_CORNER_FLAG are.
+#define IDS_CORNER_LETTER       3293
 
 // ---------------------------------------------------------------------------------------
 // FR-101, FR-102 and FR-103 — the letters from the author. Task Т-32-2, вопрос 101.

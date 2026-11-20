@@ -3889,6 +3889,9 @@ pub const IDS_CORNER_OK: u16 = 3272;
 pub const IDS_RELEASE_NEVER: u16 = 3273;
 /// «флаг раскладки» — what the hint of the flag is about (its header), T-119-5.
 pub const IDS_CORNER_FLAG: u16 = 3274;
+/// «письмо» — what the window in the corner that knocks with a letter is about (its header), T-120-16.
+/// Block 3293…3295 of stage E120.
+pub const IDS_CORNER_LETTER: u16 = 3293;
 /// «Флаг раскладки включён» — the title of the hint, T-119-5.
 pub const IDS_HINT_TITLE: u16 = 3275;
 /// «Чтобы флаг всегда был виден на панели задач, …» — the text of the hint, T-119-5.
@@ -4480,7 +4483,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and sixty since tasks T-119-5, T-119-6, T-119-7 and T-119-10** — the window in
 /// the corner (the hint of the flag, «Обновлено»), the entry «Что нового в X…» and the switch of «От
 /// автора»: thirteen, 3267…3279, the rest of the block. 247 + 13.
-pub const INTERFACE_STRINGS: [u16; 261] = [
+///
+/// ⚠ **Two hundred and sixty-two since task T-120-16** — the header of the window in the corner that
+/// knocks with a letter, [`IDS_CORNER_LETTER`] (3293). 261 + 1.
+pub const INTERFACE_STRINGS: [u16; 262] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -4741,6 +4747,7 @@ pub const INTERFACE_STRINGS: [u16; 261] = [
     IDS_CORNER_OK,
     IDS_RELEASE_NEVER,
     IDS_CORNER_FLAG,
+    IDS_CORNER_LETTER,
     IDS_HINT_TITLE,
     IDS_HINT_TEXT,
     IDS_HINT_OPEN,

@@ -264,6 +264,7 @@ BEGIN
     IDS_CORNER_OK           "Понятно"
     IDS_RELEASE_NEVER       "Больше не показывать окна обновлений"
     IDS_CORNER_FLAG         "флаг раскладки"
+    IDS_CORNER_LETTER       "письмо"
     IDS_HINT_TITLE          "Флаг раскладки включён"
     IDS_HINT_TEXT           "Чтобы флаг всегда был виден на панели задач, включите Lang Switcher в Параметрах: Панель задач → Другие значки на панели задач. Пока он под стрелкой ^."
     IDS_HINT_OPEN           "Открыть Параметры Windows"

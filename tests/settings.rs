@@ -16493,7 +16493,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 261] = [
+const FR_94_STRINGS: [(u16, &str, &str); 262] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -17591,6 +17591,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 261] = [
         "Do not show update windows again",
     ),
     (settings::IDS_CORNER_FLAG, "флаг раскладки", "layout flag"),
+    // Task T-120-16: the header of the window in the corner that knocks with a letter.
+    (settings::IDS_CORNER_LETTER, "письмо", "letter"),
     (
         settings::IDS_HINT_TITLE,
         "Флаг раскладки включён",
@@ -25074,8 +25076,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        261,
-        "two hundred and SIXTY-ONE identifiers in use since task T-119-9 (решения 208.95–208.99): \
+        262,
+        "two hundred and SIXTY-TWO since task T-120-16: the header of the window in the corner \r
+         that knocks with a letter (3293). Two hundred and sixty-one since task T-119-9 (решения 208.95–208.99): \
          the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \
          changed (3140, 3143); the honest letter came with six (3297…3302). Two hundred and \
          fifty-nine since task T-119-10 (решение 208.119): the \

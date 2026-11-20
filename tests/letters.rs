@@ -4354,8 +4354,8 @@ fn thanks_keeps_its_pair_side_by_side_in_the_narrowest_window() {
 }
 
 /// **T-120-16: the knock of a letter is the window in the corner** (T-120-14): «Спасибо» and
-/// «Новость» knock with «LANG SWITCHER · ПИСЬМО ОТ АВТОРА», their heading, the words of the old
-/// balloon and one button, «Открыть письмо»; «Привет» and «Обновление» do not knock. The balloon of
+/// «Новость» knock with «LANG SWITCHER · ПИСЬМО», their heading, the words of the old balloon and
+/// one button, «Открыть письмо»; «Привет» and «Обновление» do not knock. The balloon of
 /// the icon is no longer asked by `letters.rs`.
 #[test]
 fn the_knock_of_a_letter_is_the_window_in_the_corner() {
@@ -4367,11 +4367,11 @@ fn the_knock_of_a_letter_is_the_window_in_the_corner() {
     ] {
         let content = letters::notice_content_in(Language::Ru, letter)
             .unwrap_or_else(|| panic!("{letter:?} knocks"));
-        let (about, words) = letters::toast_strings(letter).expect("its two strings");
+        let (_, words) = letters::toast_strings(letter).expect("its two strings");
         assert_eq!(
             content.about,
-            settings::text(about),
-            "{letter:?}: whose window"
+            settings::text(settings::IDS_CORNER_LETTER),
+            "{letter:?}: whose window — one short word, as the hint's and «Обновлено»'s"
         );
         assert_eq!(
             content.title,
@@ -4587,7 +4587,11 @@ fn print_the_letters() {
                         language.tag(),
                         w as u32,
                         h as u32,
-                        if theme == Theme::Dark { "dark" } else { "light" },
+                        if theme == Theme::Dark {
+                            "dark"
+                        } else {
+                            "light"
+                        },
                     ));
                     canvas.save_png(&file).expect("the picture is written");
                 }
