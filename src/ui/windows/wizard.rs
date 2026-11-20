@@ -373,7 +373,9 @@ impl Page {
                 label: String::new(),
                 value: self.wizard.appeal().to_owned(),
                 hint: String::new(),
-                kind: FieldKind::Code,
+                kind: FieldKind::Code {
+                    rtl: self.language.is_rtl(),
+                },
             })),
             self.field(
                 Id::Contact,

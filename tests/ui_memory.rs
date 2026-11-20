@@ -2,8 +2,11 @@
 //! (2026-11-20, the stand of T-120-13: «О программе» in the tray program held +8,8…11,4 MB after
 //! closing, growing by 0,1 MB a time). It opens and closes the window again and again and writes the
 //! private memory of the process after each: a line that keeps rising is something held, a line that
-//! levels off is a cache. Run on purpose: `--ignored --nocapture`; `LANGSW_UI_MEMORY` — a file for the
-//! series.
+//! levels off is a cache. The instruments run on purpose: `--ignored --nocapture`;
+//! `LANGSW_UI_MEMORY` — a file for the series.
+//!
+//! One test runs in the battery: the gate of 208.183,
+//! [`the_memory_does_not_grow_with_every_opening`] — alone in this binary, so alone in its process.
 
 #![cfg(feature = "testing")]
 
@@ -697,4 +700,126 @@ fn the_heaps_while_the_about_window_is_resized() {
     unsafe { SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0))) };
     pump();
     show("closed");
+}
+
+/// The product's strings, from the product binary mapped as data (as `tests\ui_fit.rs` does): the
+/// letter is planned from them.
+fn with_product_strings() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::System::LibraryLoader::{LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW};
+    use windows::core::PCWSTR;
+
+    static PRODUCT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let raw = *PRODUCT.get_or_init(|| {
+        let exe = std::env::current_exe()
+            .expect("the test executable has a path")
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("the test executable lives in <target>\\debug\\deps")
+            .join("LangSwitcher.exe");
+        let path: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: a NUL-terminated path owned by this frame; mapped for its resources only.
+        let module =
+            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+                .expect("the product binary opens as a data file");
+        module.0 as usize
+    });
+    lang_switcher::settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
+}
+
+/// The private memory after each of `rounds` openings and closings of the window `open` makes, MB.
+/// The numbers go into a buffer made before the series: the series itself leaves nothing in the
+/// heap (a line of a journal kept per round was the one block alive per opening that the measures
+/// of 208.183 found — the instrument's own).
+fn series(rounds: usize, mut open: impl FnMut() -> windows::Win32::Foundation::HWND) -> Vec<f64> {
+    let mut after = Vec::with_capacity(rounds);
+    for _ in 0..rounds {
+        let hwnd = open();
+        // SAFETY: a window of this thread; the messages go straight to its procedure.
+        unsafe {
+            SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+        after.push(memory().0);
+    }
+    after
+}
+
+/// **The memory does not grow with every opening** — the gate of 208.183 (the word of the owner;
+/// T-120-24, a gate of the release). In a fresh process, the memory after closing:
+///
+/// * (а) 300 openings of «О программе»: the 300th no more than the 20th + 1,5 MB. The warming of a
+///   fresh process gives +0,68…0,87 MB here; without the free memory given back after the last
+///   window (`canvas::give_back_free_memory`) +4,8…7,0.
+/// * (б) right after it, 300 openings of the letter with the panda: the 300th no more than the
+///   20th + 0,5 MB — no growth with every opening, the process warm (+0,08…0,26 measured).
+///
+/// The only test of this binary run without `--ignored`: alone in its process, as the gate needs.
+#[test]
+fn the_memory_does_not_grow_with_every_opening() {
+    use lang_switcher::letters::{self, Letter};
+    use lang_switcher::ui::windows::letter::LetterView;
+
+    const ROUNDS: usize = 300;
+    const WARMING_MB: f64 = 1.5;
+    const GROWTH_MB: f64 = 0.5;
+
+    with_product_strings();
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    let about = series(ROUNDS, || {
+        host::create(
+            About {
+                language: Language::Ru,
+                key: "Pause".to_owned(),
+                theme: ThemeSetting::Light,
+            },
+            None,
+        )
+        .expect("the window of the shell")
+    });
+    let letter = series(ROUNDS, || {
+        host::create(
+            LetterView {
+                letter: Letter::Welcome,
+                plan: letters::plan_in(Language::Ru, Letter::Welcome, &context),
+                key: "Pause".to_owned(),
+                tick: 0,
+                language: Language::Ru,
+                theme: ThemeSetting::Light,
+            },
+            None,
+        )
+        .expect("the window of the shell")
+    });
+    let line = |name: &str, after: &[f64]| {
+        format!(
+            "{name}: 1st {:.2}, 20th {:.2}, 100th {:.2}, 300th {:.2} MB — {:+.2} from the 20th",
+            after[0],
+            after[19],
+            after[99],
+            after[ROUNDS - 1],
+            after[ROUNDS - 1] - after[19]
+        )
+    };
+    let report = format!(
+        "{}; {}",
+        line("«О программе»", &about),
+        line("the letter", &letter)
+    );
+    println!("{report}");
+    assert!(
+        about[ROUNDS - 1] <= about[19] + WARMING_MB,
+        "(а) «О программе» grows past the warming of a fresh process: {report}"
+    );
+    assert!(
+        letter[ROUNDS - 1] <= letter[19] + GROWTH_MB,
+        "(б) the letter grows with every opening: {report}"
+    );
 }

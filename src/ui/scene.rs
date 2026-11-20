@@ -586,7 +586,7 @@ impl<I> Node<I> {
                 kind,
                 ..
             } => {
-                let role = if *kind == FieldKind::Code {
+                let role = if matches!(kind, FieldKind::Code { .. }) {
                     Role::Code
                 } else {
                     Role::Body
@@ -694,8 +694,12 @@ pub enum FieldKind {
     Line,
     Text,
     /// A field of code (T-120-19, the wizard's report): `FIELD_TEXT_LINES` lines in the role `code`
-    /// — the monospace face; typed in as `Text`.
-    Code,
+    /// — the monospace face; typed in as `Text`. `rtl` — the direction of its text, not of the
+    /// window: a report gathered in Russian stays left to right in a window in Hebrew (the decision
+    /// of the controller in C3 of T-120-19); the place of its frame is mirrored with the window.
+    Code {
+        rtl: bool,
+    },
     /// A field of a key (T-120-20): it shows the key and is not typed in; `capturing` — it takes
     /// every key now (`Event::KeyDown`, `Event::KeyUp`, `Event::FocusLost`). Out of the capture it
     /// is no stop of Tab.
