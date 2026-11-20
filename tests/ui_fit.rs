@@ -918,3 +918,31 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
         "the label of the button is named: {named}"
     );
 }
+
+/// **The entry of the feed is the one a person sees** (word of the controller on the C6 of ml and ta,
+/// 208.193): the instrument measures «Обновление» and «Новость» with the update of the last real
+/// feed in the language of the window — its own entry, else English, else Russian, as the product's
+/// `feed::parse_body` picks; the feed is read in the language of the program, not in Russian.
+#[test]
+fn the_sample_of_the_feed_is_in_the_language_of_the_window() {
+    use lang_switcher::letters;
+
+    with_product_strings();
+    let in_script = |s: &str, from: char, to: char| s.chars().any(|c| (from..=to).contains(&c));
+    let ml = letters::sample_entry_in(Language::Ml);
+    let ta = letters::sample_entry_in(Language::Ta);
+    let ru = letters::sample_entry_in(Language::Ru);
+    let en = letters::sample_entry_in(Language::En);
+    assert!(
+        in_script(&ml.title, '\u{0D00}', '\u{0D7F}'),
+        "Malayalam: {}",
+        ml.title
+    );
+    assert!(
+        in_script(&ta.title, '\u{0B80}', '\u{0BFF}'),
+        "Tamil: {}",
+        ta.title
+    );
+    assert!(in_script(&ru.title, 'А', 'я'), "Russian: {}", ru.title);
+    assert!(en.title.is_ascii(), "English: {}", en.title);
+}

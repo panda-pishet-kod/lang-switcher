@@ -4005,11 +4005,10 @@ pub fn list_entries_now() -> Vec<Entry> {
     with_feed(|feed| list_entries(&stored, today(), &version, feed))
 }
 
-/// The entry of the feed the instrument of fitting (`ui::windows::catalogue`) puts into
-/// «Новость» and «Обновление»: near the longest the order of the feed allows — the first line of
-/// the text 145 characters of the 150 (`sign-news.ps1`), and the line «Подробности…» under it.
-/// In the words of the feed, which come in the language of the site whatever the language of the
-/// program.
+/// The entry of a feed in Russian, near the longest the order of the feed allows — the first line
+/// of the text 145 characters of the 150 (`sign-news.ps1`), and the line «Подробности…» under it.
+/// The instrument of fitting reads the words of [`sample_entry_in`] instead: the feed comes in the
+/// language of the program (`settings::ui_language`, `start_feed_read`), not in Russian.
 pub fn sample_entry() -> FeedItem {
     FeedItem {
         id: 7,
@@ -4022,6 +4021,34 @@ pub fn sample_entry() -> FeedItem {
         ),
         link: links::PROGRAM_URL.to_owned(),
         version: Some("1.7.1".to_owned()),
+    }
+}
+
+/// The entry the instrument of fitting (`ui::windows::catalogue`) puts into «Новость» and
+/// «Обновление», with the words a person reading the program in `language` sees: the update of the
+/// last real feed (`tests\fixtures\news-before-1.6.1.toml`, the feed of 16.11.2026) in `language`,
+/// else `en`, else `ru` — the choice of the product itself (`feed::parse_body`). Its number, date,
+/// address and version stay those of [`sample_entry`]. The feed is in the build only with the
+/// feature `testing`; without it the words are those of [`sample_entry`].
+pub fn sample_entry_in(language: Language) -> FeedItem {
+    #[cfg(feature = "testing")]
+    {
+        const FEED: &str = include_str!("../tests/fixtures/news-before-1.6.1.toml");
+        let mut item = sample_entry();
+        // The first line is the signature; the body under it is what `parse_body` reads.
+        let body = FEED.split_once('\n').map_or(FEED, |(_, body)| body);
+        if let Ok(feed) = feed::parse_body(body, language.tag())
+            && let Some(update) = feed.update
+        {
+            item.title = update.title;
+            item.text = update.text;
+        }
+        item
+    }
+    #[cfg(not(feature = "testing"))]
+    {
+        let _ = language;
+        sample_entry()
     }
 }
 
