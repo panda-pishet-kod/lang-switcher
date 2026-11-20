@@ -4536,6 +4536,10 @@ pub fn author_view_in(
     let switch = Some(state.release_window);
     let update = update_is_pending(version, feed);
 
+    // Строки версии под именем больше нет (T-120-17): до задачи T-81-3 она несла
+    // «версия {0} · Панда, он же Panda_Pishet_Kod» (снята решением 142.2 п. 5), потом —
+    // `IDS_ABOUT_VERSION`; у окна оболочки нет имени, под которым ей стоять, и номер версии
+    // стоит в строке состояния (`IDS_NEWS_LATEST`, `IDS_NEWS_AVAILABLE`).
     AuthorView {
         // Две строки описания общей шапки — те же слова, что в «О программе», из тех же строк.
         line_1: text(IDS_ABOUT_LINE_1),
