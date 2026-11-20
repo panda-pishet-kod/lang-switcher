@@ -8766,10 +8766,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
     ),
     (
         settings::IDS_WIZARD_WHERE_NOTE,
-        "Поведение зависит от окна: консоль, браузер и редактор получают текст по-разному. \
-         Переключитесь в то окно, и мастер запишет имя программы сам.",
-        "The behavior depends on the window: a console, a browser and an editor take text in \
-         different ways. Switch to that window and the wizard writes the program's name itself.",
+        "Переключитесь в нужное окно — мастер запишет программу сам",
+        "Switch to the window you need — the wizard writes the program down itself",
     ),
     (settings::IDS_WIZARD_PROGRAM, "Программа:", "Program:"),
     (
@@ -8779,10 +8777,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
     ),
     (
         settings::IDS_WIZARD_CAPTURE_NOTE,
-        "Берётся имя процесса и класс окна. Заголовок окна не берётся: в нём бывает имя \
-         документа.",
-        "The process name and the window class are taken. The window title is not: it often \
-         holds the name of a document.",
+        "Берутся имя процесса и класс окна — не заголовок с именем документа.",
+        "The process name and the window class are taken — not the title with the name of a document.",
     ),
     (
         settings::IDS_WIZARD_CAPTURE_COUNT,
@@ -8937,12 +8933,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
     ),
     (
         settings::IDS_WIZARD_PREVIEW_NOTE,
-        // Stage E107, task T-107-4 (решение 199.5): the appeal goes when the person presses
-        // «Отправить», and not by the clipboard and a page any more.
-        "Это весь текст обращения. Правьте что угодно. Он уйдёт автору, только когда вы нажмёте \
-         «Отправить».",
-        "This is the whole text of the appeal. Edit anything you like. It goes to the author \
-         only when you press “Send”.",
+        "Правьте что угодно — текст уйдёт, только когда вы нажмёте «Отправить»",
+        "Edit anything — the text goes only when you press “Send”",
     ),
     // ⛔ IDS_WIZARD_COPY, IDS_WIZARD_COPIED_ONLY and IDS_WIZARD_COPIED left with the group and the
     // issues (stage E107, task T-107-3, решение 199.3).

@@ -366,7 +366,10 @@ impl Page {
     }
 
     fn preview(&self) -> Node<Id> {
-        // The text of the appeal in the role `code` (passport §2), taking what the page leaves.
+        // The text of the appeal in the role `code` (passport §2), taking what the page leaves, and
+        // in the direction of the language it was built in — data for the author, not words of
+        // the window (the C3 of the controller: a Russian or English appeal reads left to right in
+        // a mirrored window too).
         let mut rows = vec![
             Node::Fill(Box::new(Node::Field {
                 id: Id::Appeal,
@@ -374,7 +377,7 @@ impl Page {
                 value: self.wizard.appeal().to_owned(),
                 hint: String::new(),
                 kind: FieldKind::Code {
-                    rtl: self.language.is_rtl(),
+                    rtl: self.wizard.appeal_reads_right_to_left(),
                 },
             })),
             self.field(
