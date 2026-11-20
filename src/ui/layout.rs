@@ -21,6 +21,7 @@
 
 use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
+use crate::ui::scene::{MenuState, Trailing};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::shape::CHEVRON;
 use crate::ui::tokens::{
@@ -38,6 +39,10 @@ use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
     CORNER_HEADER_ROW, CORNER_ICON, CORNER_ICON_GAP, CORNER_MAIN_SHARE, CORNER_PAD, CORNER_PICTURE,
     CORNER_SECOND_SHARE, CORNER_TITLE_GAP,
+};
+use crate::ui::tokens::{
+    MENU_B, MENU_DOT, MENU_HEAD_PAD, MENU_ICON, MENU_ICON_COLUMN, MENU_ITEM_GAP, MENU_ITEM_PAD,
+    MENU_PAD, MENU_ROW_MIN_HEIGHT, MENU_RULE_PAD, MENU_STATE_DOT, MENU_STATE_GAP,
 };
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
@@ -203,6 +208,11 @@ pub enum Part {
     AppIcon,
     /// The ✕ that closes the window in the corner.
     Cross,
+    /// An icon of the menu (`resrticons`), `accent` when the item is emphasised.
+    MenuIcon {
+        name: String,
+        emphasis: bool,
+    },
     /// The picture of the taskbar in «Обновлено», at one moment.
     Taskbar(crate::ui::scene::Taskbar),
     /// The thin scroll bar of a list that has more rows than it shows.
@@ -295,6 +305,7 @@ impl Part {
             Part::AppIcon => "program icon",
             Part::Cross => "close cross",
             Part::Taskbar(_) => "taskbar picture",
+            Part::MenuIcon { .. } => "menu icon",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -367,6 +378,8 @@ pub fn lay_out<I: Copy>(
     // The window in the corner keeps its sizes (§2): its buttons' role at their 13,5 points.
     let b = if window.kind == WindowKind::Corner {
         CORNER_BUTTON.0 / Role::Button.style().size.0
+    } else if window.kind == WindowKind::Menu {
+        MENU_B.0
     } else {
         tokens::window_b(size.w, size.h, k)
     };
@@ -405,6 +418,40 @@ pub fn lay_out<I: Copy>(
         items,
         shortfall,
     }
+}
+
+/// The width the menu `window` needs (T-120-15): its widest item or head on one line, and its
+/// paddings; the window keeps it between `MENU_MIN_WIDTH` and half the work area (the host's).
+pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
+    let place: Placer<'_, I> = Placer {
+        b: MENU_B.0,
+        h: WINDOW_MIN.h.0,
+        one_column: true,
+        kind: window.kind,
+        art: None,
+        tight: false,
+        measure,
+        out: Vec::new(),
+        over: 0.0,
+    };
+    let parts: Vec<&Node<I>> = match &window.body {
+        Node::Column(children) => children.iter().collect(),
+        other => vec![other],
+    };
+    let widest = parts
+        .into_iter()
+        .map(|part| match part {
+            Node::MenuItem {
+                label,
+                trailing,
+                emphasis,
+                ..
+            } => place.menu_item_width(label, trailing, *emphasis),
+            Node::MenuHead { words, .. } => place.menu_head_width(words),
+            _ => 0.0,
+        })
+        .fold(0.0, f32::max);
+    widest + MENU_PAD.0 * 2.0
 }
 
 /// The rule of the pair (passport §3): `count` equal columns stand side by side in `width` points at
@@ -475,6 +522,9 @@ impl<I: Copy> Placer<'_, I> {
     fn window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
         if window.kind == WindowKind::Corner {
             return self.corner_window(window, size);
+        }
+        if window.kind == WindowKind::Menu {
+            return self.menu_window(window, size);
         }
         // One element filling the window: the list of a choice field in its popup.
         if window.kind == WindowKind::Bare {
@@ -724,6 +774,23 @@ impl<I: Copy> Placer<'_, I> {
                 first,
             } => self.list(*id, rows, *selected, *first, x, y, w, slot),
             Node::CornerHeader { about, close } => self.corner_header(about, *close, x, y, w),
+            Node::MenuHead { state, words } => self.menu_head(*state, words, x, y, w),
+            Node::MenuItem {
+                id,
+                icon,
+                label,
+                trailing,
+                emphasis,
+            } => self.menu_item(*id, icon, label, trailing, *emphasis, x, y, w),
+            Node::MenuRule => {
+                let (pad_h, pad_v) = (MENU_RULE_PAD.w.0, MENU_RULE_PAD.h.0);
+                self.push(
+                    Part::Divider,
+                    Rect::new(x + pad_h, y + pad_v, w - pad_h * 2.0, LINE.0),
+                    None,
+                );
+                pad_v * 2.0 + LINE.0
+            }
             Node::Taskbar(picture) => {
                 let h = CORNER_PICTURE.0;
                 self.push(Part::Taskbar(picture.clone()), Rect::new(x, y, w, h), None);
@@ -907,6 +974,212 @@ impl<I: Copy> Placer<'_, I> {
             }
             (None, None) => 0.0,
         }
+    }
+
+    /// The menu of the icon (passport §3, T-120-15): its paddings, its head, items and lines one
+    /// under another; answers how much higher it must be (the popup takes its height from it).
+    fn menu_window(&mut self, window: &Window<I>, size: WindowSize) -> Shortfall {
+        let pad = MENU_PAD.0;
+        let (x, w) = (pad, size.w - pad * 2.0);
+        let mut y = pad;
+        let parts: Vec<&Node<I>> = match &window.body {
+            Node::Column(children) => children.iter().collect(),
+            other => vec![other],
+        };
+        for part in parts {
+            y += self.node(part, x, y, w, None);
+        }
+        Shortfall {
+            w: self.over,
+            h: y + pad - size.h,
+        }
+    }
+
+    /// The head of the menu: the icon and «LANG SWITCHER» at the start, the state at the end.
+    fn menu_head(&mut self, state: MenuState, words: &str, x: f32, y: f32, w: f32) -> f32 {
+        let (pad_h, pad_v) = (MENU_HEAD_PAD.w.0, MENU_HEAD_PAD.h.0);
+        let name = self.style(Role::CornerHeader);
+        let small = self.style(Role::Small);
+        let icon = CORNER_ICON.0;
+        let row = icon.max(name.line_height()).max(small.line_height());
+        let middle = |h: f32| y + pad_v + (row - h) / 2.0;
+        self.push(
+            Part::AppIcon,
+            Rect::new(x + pad_h, middle(icon), icon, icon),
+            None,
+        );
+        let words_w = self.width_of(small, words);
+        let words_x = x + w - pad_h - words_w;
+        let dot = MENU_STATE_DOT.0;
+        let dot_x = words_x - MENU_STATE_GAP.0 - dot;
+        let name_x = x + pad_h + icon + CORNER_ICON_GAP.0;
+        self.push(
+            Part::Text {
+                role: Role::CornerHeader,
+                text: crate::APP_NAME.to_owned(),
+                wrap: Wrap::OneLine,
+                align: Align::Start,
+            },
+            Rect::new(
+                name_x,
+                middle(name.line_height()),
+                (dot_x - CORNER_ICON_GAP.0 - name_x).max(0.0),
+                name.line_height(),
+            ),
+            None,
+        );
+        let status = match state {
+            MenuState::Working => Status::Working,
+            MenuState::Paused => Status::Idle,
+            MenuState::Restart => Status::Restart,
+        };
+        self.push(
+            Part::Dot(status),
+            Rect::new(dot_x, middle(dot), dot, dot),
+            None,
+        );
+        self.push(
+            Part::Text {
+                role: Role::Small,
+                text: words.to_owned(),
+                wrap: Wrap::OneLine,
+                align: Align::Start,
+            },
+            Rect::new(
+                words_x,
+                middle(small.line_height()),
+                words_w,
+                small.line_height(),
+            ),
+            None,
+        );
+        row + pad_v * 2.0
+    }
+
+    /// The width the head of the menu needs on one line.
+    fn menu_head_width(&self, words: &str) -> f32 {
+        let name = self.width_of(self.style(Role::CornerHeader), crate::APP_NAME);
+        let words = self.width_of(self.style(Role::Small), words);
+        MENU_HEAD_PAD.w.0 * 2.0
+            + CORNER_ICON.0
+            + CORNER_ICON_GAP.0 * 2.0
+            + name
+            + MENU_STATE_DOT.0
+            + MENU_STATE_GAP.0
+            + words
+    }
+
+    /// The width an item of the menu needs on one line: paddings, icon, label, its end.
+    fn menu_item_width(&self, label: &str, trailing: &Trailing, emphasis: bool) -> f32 {
+        let role = if emphasis {
+            Role::MenuEmphasis
+        } else {
+            Role::Body
+        };
+        let label = self.width_of(self.style(role), label);
+        let end = match trailing {
+            Trailing::None => 0.0,
+            Trailing::Key(key) => MENU_ITEM_GAP.0 + self.width_of(self.style(Role::Small), key),
+            Trailing::Dot => MENU_ITEM_GAP.0 + MENU_DOT.0,
+            Trailing::Switch(_) => MENU_ITEM_GAP.0 + self.em(TOGGLE.w).max(TOGGLE_MIN.w.0),
+        };
+        MENU_ITEM_PAD.0 * 2.0 + MENU_ICON_COLUMN.0 + MENU_ITEM_GAP.0 + label + end
+    }
+
+    /// An item of the menu: the row that is pressed, the icon, the label, the end.
+    #[allow(clippy::too_many_arguments)]
+    fn menu_item(
+        &mut self,
+        id: I,
+        icon: &str,
+        label: &str,
+        trailing: &Trailing,
+        emphasis: bool,
+        x: f32,
+        y: f32,
+        w: f32,
+    ) -> f32 {
+        let role = if emphasis {
+            Role::MenuEmphasis
+        } else {
+            Role::Body
+        };
+        let style = self.style(role);
+        let row = MENU_ROW_MIN_HEIGHT.0.max(style.line_height());
+        let middle = |h: f32| y + (row - h) / 2.0;
+        self.push(Part::MenuRow, Rect::new(x, y, w, row), Some(id));
+        let side = MENU_ICON.0;
+        let column_x = x + MENU_ITEM_PAD.0;
+        self.push(
+            Part::MenuIcon {
+                name: icon.to_owned(),
+                emphasis,
+            },
+            Rect::new(
+                column_x + (MENU_ICON_COLUMN.0 - side) / 2.0,
+                middle(side),
+                side,
+                side,
+            ),
+            Some(id),
+        );
+        let end_x = x + w - MENU_ITEM_PAD.0;
+        let (end_w, end_h) = match trailing {
+            Trailing::None => (0.0, 0.0),
+            Trailing::Key(key) => {
+                let small = self.style(Role::Small);
+                (self.width_of(small, key), small.line_height())
+            }
+            Trailing::Dot => (MENU_DOT.0, MENU_DOT.0),
+            Trailing::Switch(_) => (
+                self.em(TOGGLE.w).max(TOGGLE_MIN.w.0),
+                self.em(TOGGLE.h).max(TOGGLE_MIN.h.0),
+            ),
+        };
+        let end = Rect::new(end_x - end_w, middle(end_h), end_w, end_h);
+        match trailing {
+            Trailing::None => {}
+            Trailing::Key(key) => {
+                self.push(
+                    Part::Text {
+                        role: Role::Small,
+                        text: key.clone(),
+                        wrap: Wrap::OneLine,
+                        align: Align::Start,
+                    },
+                    end,
+                    Some(id),
+                );
+            }
+            Trailing::Dot => {
+                self.push(Part::Dot(Status::Working), end, Some(id));
+            }
+            Trailing::Switch(on) => {
+                self.push(Part::Toggle { on: *on }, end, Some(id));
+            }
+        }
+        let label_x = column_x + MENU_ICON_COLUMN.0 + MENU_ITEM_GAP.0;
+        let room = if end_w > 0.0 {
+            end.x - MENU_ITEM_GAP.0 - label_x
+        } else {
+            end_x - label_x
+        };
+        self.push(
+            Part::Text {
+                role,
+                text: label.to_owned(),
+                wrap: Wrap::OneLine,
+                align: Align::Start,
+            },
+            Rect::new(
+                label_x,
+                middle(style.line_height()),
+                room.max(0.0),
+                style.line_height(),
+            ),
+            Some(id),
+        );
+        row
     }
 
     fn column(

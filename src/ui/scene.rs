@@ -71,6 +71,28 @@ pub enum WindowKind {
     Bare,
     /// The window in the corner (passport §2–§3): its own sizes, the buttons in shares 1 : 2.
     Corner,
+    /// The menu of the icon (passport §3, T-120-15): rows of items, its own sizes.
+    Menu,
+}
+
+/// The state the head of the menu reports: a dot `accent`, `ink3` or `warn` and its words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuState {
+    Working,
+    Paused,
+    Restart,
+}
+
+/// What an item of the menu shows at its end.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Trailing {
+    None,
+    /// The key of the action, in its frame.
+    Key(String),
+    /// A dot `accent`: something new behind the item.
+    Dot,
+    /// A switch: the item turns it, and the menu stays.
+    Switch(bool),
 }
 
 /// A part of a window description.
@@ -191,6 +213,19 @@ pub enum Node<I> {
     /// The picture of «Обновлено»: the strip of the taskbar with the person's flag, at one moment
     /// of its animation.
     Taskbar(Taskbar),
+    /// The head of the menu: the program's icon, «LANG SWITCHER», and the state at the end.
+    MenuHead { state: MenuState, words: String },
+    /// An item of the menu: an icon of `resrticons`, its label, what it shows at its end;
+    /// `emphasis` — the label bold and the icon and label `accent` (an unread letter).
+    MenuItem {
+        id: I,
+        icon: String,
+        label: String,
+        trailing: Trailing,
+        emphasis: bool,
+    },
+    /// The line between the groups of the menu.
+    MenuRule,
     /// A link to the site.
     Link { id: I, text: String },
     /// A line across.
@@ -363,6 +398,21 @@ impl<I> Node<I> {
                 link: link.map(|(id, text)| (f(id), text)),
             },
             Node::Taskbar(picture) => Node::Taskbar(picture),
+            Node::MenuHead { state, words } => Node::MenuHead { state, words },
+            Node::MenuItem {
+                id,
+                icon,
+                label,
+                trailing,
+                emphasis,
+            } => Node::MenuItem {
+                id: f(id),
+                icon,
+                label,
+                trailing,
+                emphasis,
+            },
+            Node::MenuRule => Node::MenuRule,
             Node::Link { id, text } => Node::Link { id: f(id), text },
             Node::Divider => Node::Divider,
         }
@@ -454,6 +504,16 @@ impl<I> Node<I> {
                 }
             }
             Node::Taskbar(_) => {}
+            Node::MenuHead { words, .. } => f(Role::Small, words),
+            Node::MenuItem {
+                label, trailing, ..
+            } => {
+                f(Role::Body, label);
+                if let Trailing::Key(key) = trailing {
+                    f(Role::Small, key);
+                }
+            }
+            Node::MenuRule => {}
             Node::Link { text, .. } => f(Role::Link, text),
             Node::Divider => {}
         }

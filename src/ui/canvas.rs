@@ -1024,6 +1024,14 @@ impl Painter<'_, '_> {
             }
         }
     }
+    /// The menu icon `name` (`res\art\icons`) in `value` into `rect` — a few lines drawn afresh
+    /// by `art`. The plain look draws none.
+    pub fn menu_icon(&mut self, name: &str, rect: Rect, value: Rgb) {
+        if let Kind::Direct2D { target, .. } = self.kind {
+            let _ = crate::ui::art::draw_icon(target, name, value, (rect.x, rect.y), rect.w);
+        }
+    }
+
     /// A closed polygon of `points`, filled. The plain look draws none (the cursor of a picture).
     pub fn fill_polygon(&mut self, points: &[(f32, f32)], value: Rgb) {
         let Kind::Direct2D {
