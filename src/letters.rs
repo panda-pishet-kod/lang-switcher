@@ -6039,7 +6039,7 @@ fn fresh_state(owner: HWND, kind: Kind) -> WindowState {
 /// The setting «Оформление» and the hotkey as it acts, out of the configuration — what every
 /// window of this module starts with.
 fn look() -> (ThemeSetting, String) {
-    crate::tray::with_tray(|tray| {
+    let (setting, key) = crate::tray::with_tray(|tray| {
         (
             tray.config().general.theme,
             settings::effective_hotkey_name(&tray.config().hotkey),
@@ -6050,7 +6050,11 @@ fn look() -> (ThemeSetting, String) {
             ThemeSetting::System,
             settings::effective_hotkey_name(&settings::Hotkey::default()),
         )
-    })
+    });
+    // The stand of the letters names the theme itself: it has no tray (`testing::run_probe`).
+    #[cfg(feature = "testing")]
+    let setting = testing::theme().unwrap_or(setting);
+    (setting, key)
 }
 
 /// One open window of the shell this module made — a letter or «Последние письма».
@@ -6438,6 +6442,166 @@ pub mod testing {
                 )
             })
         }
+    }
+
+    thread_local! {
+        /// The setting «Оформление» the windows of this module take instead of the configuration's
+        /// — the stand has no tray to read it from ([`run_probe`]).
+        static THEME: Cell<Option<ThemeSetting>> = const { Cell::new(None) };
+    }
+
+    /// The theme the stand asked for, if it asked.
+    pub(super) fn theme() -> Option<ThemeSetting> {
+        THEME.with(Cell::get)
+    }
+
+    /// **The entry of the stand of the letters — `--ui-probe-letters` (T-120-16)**: the testing
+    /// build opens one window of this module alone, by the product's own road, and pumps its
+    /// messages until it is gone. What it opens:
+    ///
+    /// * `LANGSW_TESTING_UI_PROBE_LETTER` — `hello` (the default), `thanks`, `news`, `update` (the
+    ///   letters out of the feed about the sample entry), `list` (full), `knock-thanks`,
+    ///   `knock-news` (the window in the corner);
+    /// * `LANGSW_TESTING_UI_PROBE_LANG` — the tag of the language of the interface;
+    /// * `LANGSW_TESTING_UI_PROBE_THEME` — `light` or `dark`; else the theme of the system;
+    /// * `LANGSW_TESTING_UI_PROBE_BY_ITSELF` — the letter opens as one that came by itself, without
+    ///   the activation (FR-101); else as one the person asked for.
+    ///
+    /// The marks go to the file `LANGSW_TESTING_UI_PROBE` names, and the window closes itself after
+    /// `LANGSW_TESTING_UI_PROBE_CLOSE_MS` — the conventions of the probes of the shell.
+    pub fn run_probe() -> std::process::ExitCode {
+        use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DispatchMessageW, FindWindowW, GetForegroundWindow, GetMessageW,
+            GetWindowRect, IsWindow, MSG, PostMessageW, TranslateMessage, WM_CLOSE,
+            WS_EX_TOOLWINDOW, WS_POPUP,
+        };
+        use windows::core::{PCWSTR, w};
+
+        let report = std::env::var_os("LANGSW_TESTING_UI_PROBE");
+        let mut lines = String::new();
+        let mut mark = |line: String| {
+            lines.push_str(&line);
+            lines.push_str("\r\n");
+            if let Some(path) = &report {
+                let _ = std::fs::write(path, &lines);
+            }
+        };
+        let var = |name: &str| std::env::var(name).unwrap_or_default();
+
+        let language = super::Language::ALL
+            .into_iter()
+            .find(|language| language.tag() == var("LANGSW_TESTING_UI_PROBE_LANG"))
+            .unwrap_or_else(super::settings::ui_language);
+        super::settings::set_ui_language(language);
+        let theme = match var("LANGSW_TESTING_UI_PROBE_THEME").as_str() {
+            "light" => Some(ThemeSetting::Light),
+            "dark" => Some(ThemeSetting::Dark),
+            _ => None,
+        };
+        THEME.with(|cell| cell.set(theme));
+        let what = var("LANGSW_TESTING_UI_PROBE_LETTER");
+        let by_itself = std::env::var_os("LANGSW_TESTING_UI_PROBE_BY_ITSELF").is_some();
+        mark(format!(
+            "letter={what} language={} theme={theme:?} by_itself={by_itself}",
+            language.tag()
+        ));
+
+        // SAFETY: a system class, no parent, no pointer of ours; the owner of the window, alive to
+        // the end of the process.
+        let Ok(owner) = (unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }) else {
+            return std::process::ExitCode::FAILURE;
+        };
+        // SAFETY: reads the foreground window.
+        let before = unsafe { GetForegroundWindow() };
+
+        let item = super::sample_entry();
+        let window = match what.as_str() {
+            "list" => super::open_list_with(owner, super::sample_entries(language), !by_itself),
+            "knock-thanks" | "knock-news" => {
+                let letter = if what == "knock-thanks" {
+                    Letter::Thanks
+                } else {
+                    Letter::News(item.id)
+                };
+                let shown = super::notice_content_in(language, letter)
+                    .is_some_and(|content| crate::corner::show(content, false, |_| {}));
+                mark(format!("shown={shown}"));
+                // SAFETY: the class of the popups of the shell, a static name.
+                unsafe { FindWindowW(w!("LangSwitcher.Shell.Popup"), None) }.ok()
+            }
+            other => {
+                let letter = match other {
+                    "thanks" => Letter::Thanks,
+                    "news" => Letter::News(item.id),
+                    "update" => Letter::Update,
+                    _ => Letter::Welcome,
+                };
+                show_letter(owner, letter, Some(&item), !by_itself)
+                    .then(|| window_of(Kind::Letter))
+                    .flatten()
+            }
+        };
+        let Some(window) = window else {
+            mark("window=none".to_owned());
+            return std::process::ExitCode::FAILURE;
+        };
+
+        let mut rect = RECT::default();
+        // SAFETY: a live window of this thread; the out parameter is a local.
+        let after = unsafe {
+            let _ = GetWindowRect(window, &mut rect);
+            GetForegroundWindow()
+        };
+        mark(format!("window={}", window.0 as usize));
+        mark(format!(
+            "rect={},{},{},{}",
+            rect.left, rect.top, rect.right, rect.bottom
+        ));
+        mark(format!("foreground_is_window={}", after == window));
+        mark(format!("foreground_kept={}", after == before));
+
+        if let Some(close) = std::env::var("LANGSW_TESTING_UI_PROBE_CLOSE_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            let raw = window.0 as usize;
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(close));
+                // SAFETY: a posted message to the probe's window; a window already gone ignores it.
+                let _ = unsafe {
+                    PostMessageW(Some(HWND(raw as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0))
+                };
+            });
+        }
+        let mut message = MSG::default();
+        // SAFETY: the message loop of this thread; it ends when the window is gone.
+        while unsafe { IsWindow(Some(window)) }.as_bool()
+            && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
+        {
+            // SAFETY: a message just taken from the queue.
+            unsafe {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        mark("closed=true".to_owned());
+        std::process::ExitCode::SUCCESS
     }
 }
 
