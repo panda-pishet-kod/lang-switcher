@@ -165,8 +165,10 @@ pub enum Part {
         current: bool,
         label: String,
     },
+    /// A link: its words in `role` — `link`, or `brand` for the address under the picture.
     Link {
         text: String,
+        role: Role,
     },
     Divider,
     /// Where a press counts for the element: the whole line of a switch or a check box.
@@ -485,6 +487,7 @@ impl<I: Copy> Placer<'_, I> {
         // One column under the width of two (208.168: 880), whatever the class of type sizes.
         let narrow = size.w < TWO_COLUMNS_FROM.0;
         let (mut area_x, mut area_w) = (0.0, size.w);
+        let mut brand_line: Vec<Placed<I>> = Vec::new();
 
         if let (Some(art), false) = (window.art, narrow) {
             let panel = size.w * PANEL_SHARE.0;
@@ -515,28 +518,31 @@ impl<I: Copy> Placer<'_, I> {
                 };
                 let name_w = self.width_of(name_style, &brand.name).min(at.w);
                 let gap = BRAND_GAP.0 * style.size;
-                self.push(
-                    Part::BrandName {
-                        text: brand.name.clone(),
+                let room = (at.w - name_w - gap).max(0.0);
+                // Placed after the content and the buttons: the link of the address is the last
+                // stop of Tab, the order of reading (passport §7).
+                brand_line = vec![
+                    Placed {
+                        part: Part::BrandName {
+                            text: brand.name.clone(),
+                        },
+                        rect: Rect::new(at.x, at.y, name_w, line),
+                        id: None,
                     },
-                    Rect::new(at.x, at.y, name_w, line),
-                    None,
-                );
-                self.push(
-                    Part::Text {
-                        role: Role::Brand,
-                        text: brand.address.clone(),
-                        wrap: Wrap::OneLine,
-                        align: Align::Start,
+                    Placed {
+                        part: Part::Link {
+                            text: brand.address.clone(),
+                            role: Role::Brand,
+                        },
+                        rect: Rect::new(
+                            at.x + name_w + gap,
+                            at.y,
+                            self.width_of(style, &brand.address).min(room),
+                            line,
+                        ),
+                        id: Some(brand.link),
                     },
-                    Rect::new(
-                        at.x + name_w + gap,
-                        at.y,
-                        (at.w - name_w - gap).max(0.0),
-                        line,
-                    ),
-                    None,
-                );
+                ];
             }
             (area_x, area_w) = (panel, size.w - panel);
         }
@@ -584,6 +590,7 @@ impl<I: Copy> Placer<'_, I> {
             self.push(Part::ButtonRule, Rect::new(x, rule, column, LINE.0), None);
             self.buttons(&window.buttons, x, buttons, column);
         }
+        self.out.extend(brand_line);
 
         Shortfall {
             w: self.over,
@@ -730,7 +737,10 @@ impl<I: Copy> Placer<'_, I> {
                 let width = self.width_of(style, text).min(w);
                 let h = style.line_height();
                 self.push(
-                    Part::Link { text: text.clone() },
+                    Part::Link {
+                        text: text.clone(),
+                        role: Role::Link,
+                    },
                     Rect::new(x, y, width, h),
                     Some(*id),
                 );
@@ -837,6 +847,7 @@ impl<I: Copy> Placer<'_, I> {
             self.push(
                 Part::Link {
                     text: label.clone(),
+                    role: Role::Link,
                 },
                 Rect::new(column_x, y + h, width, line),
                 Some(*id),

@@ -204,7 +204,7 @@ pub struct Window<I> {
     pub kind: WindowKind,
     pub art: Option<Art>,
     /// The line under the picture: a name and an address (passport §2, `brand`).
-    pub brand: Option<Brand>,
+    pub brand: Option<Brand<I>>,
     pub body: Node<I>,
     pub buttons: Vec<Node<I>>,
     /// The elements unavailable now: drawn in the look of §5, answering no press, skipped by Tab.
@@ -214,9 +214,12 @@ pub struct Window<I> {
 /// The line under the picture of the panel: the name in the main face, the address beside it in
 /// the monospace one.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Brand {
+pub struct Brand<I> {
     pub name: String,
     pub address: String,
+    /// The address is a link to the page of the program (decision of the controller on C3 of
+    /// T-120-13, as the name of the old «О программе», 139.2 п. 4): pressed, it is this element.
+    pub link: I,
 }
 
 impl<I> Node<I> {
@@ -463,7 +466,11 @@ impl<I> Window<I> {
         Window {
             kind: self.kind,
             art: self.art,
-            brand: self.brand,
+            brand: self.brand.map(|brand| Brand {
+                name: brand.name,
+                address: brand.address,
+                link: f(brand.link),
+            }),
             body: self.body.map(f),
             buttons: self.buttons.into_iter().map(|node| node.map(f)).collect(),
             disabled: self.disabled.into_iter().map(f).collect(),

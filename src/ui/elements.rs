@@ -467,7 +467,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 c(colour),
             );
         }
-        Part::Link { text } => {
+        Part::Link { text, role } => {
             if let Some(fill) = stepped(None, state) {
                 painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
             }
@@ -479,7 +479,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             let laid = write(
                 painter,
                 look,
-                Role::Link,
+                *role,
                 None,
                 text,
                 rect,

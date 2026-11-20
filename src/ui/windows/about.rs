@@ -21,6 +21,8 @@ use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Window, Window
 pub enum Id {
     Author,
     Close,
+    /// The address under the panda: the page of the program.
+    Site,
 }
 
 /// «О программе» in a language, with the name of the key the help speaks of.
@@ -61,6 +63,7 @@ impl Content for About {
             brand: Some(Brand {
                 name: "Panda Koder".to_owned(),
                 address: "panda-pishet-kod.dev".to_owned(),
+                link: Id::Site,
             }),
             body: Node::Column(vec![
                 Node::Header {
@@ -98,6 +101,11 @@ impl Content for About {
     fn event(&mut self, event: Event<Id>) -> Reply {
         match event {
             Event::Pressed(Id::Close) => Reply::Close,
+            Event::Pressed(Id::Site) => {
+                let page = crate::letters::links::program_url(self.language);
+                let _ = crate::settings::open_in_the_shell(page);
+                Reply::Stay
+            }
             _ => Reply::Stay,
         }
     }
