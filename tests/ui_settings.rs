@@ -386,3 +386,50 @@ fn the_details_open_a_window_owned_by_the_settings() {
         "owned by the window of the settings"
     );
 }
+
+/// **The C3 of T-120-20 (решение 208.160): every section shows its subtitle under its title, and the
+/// window its own eyebrow** — `IDS_SETTINGS_EYEBROW`, not the word of the wizard it borrowed before.
+/// English and German tell the two keys apart («Settings» against «The settings», «Einstellungen»);
+/// in Russian both say «Настройки».
+#[test]
+fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
+    with_product_strings();
+    let sections = [
+        ("settings General", settings::IDS_SECTION_GENERAL_SUB),
+        ("settings Hotkey", settings::IDS_SECTION_HOTKEY_SUB),
+        ("settings Layouts", settings::IDS_SECTION_LAYOUTS_SUB),
+        ("settings Exclusions", settings::IDS_SECTION_EXCLUSIONS_SUB),
+        (
+            "settings Diagnostics",
+            settings::IDS_SECTION_DIAGNOSTICS_SUB,
+        ),
+    ];
+    for language in [Language::Ru, Language::En, Language::De] {
+        let eyebrow = settings::text_in(language, settings::IDS_SETTINGS_EYEBROW);
+        if language != Language::Ru {
+            // ⚠ Контроль: where the two keys say the same, the check below proves nothing.
+            assert_ne!(
+                eyebrow,
+                settings::text_in(language, settings::IDS_WIZARD_ATTACH_SETTINGS),
+                "{language:?}: the eyebrow and the word of the wizard must differ for this check"
+            );
+        }
+        let states = window_of_settings::states(language);
+        for (state, subtitle) in sections {
+            let (_, window) = states
+                .iter()
+                .find(|(name, _)| name == state)
+                .unwrap_or_else(|| panic!("{state}"));
+            let words = format!("{:?}", window.body);
+            let subtitle = settings::text_in(language, subtitle);
+            assert!(
+                words.contains(&format!("eyebrow: Some({eyebrow:?})")),
+                "{language:?} {state}: the eyebrow of its own, «{eyebrow}»"
+            );
+            assert!(
+                words.contains(&format!("subtitle: Some({subtitle:?})")),
+                "{language:?} {state}: the subtitle under the title, «{subtitle}»"
+            );
+        }
+    }
+}
