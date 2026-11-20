@@ -8,6 +8,7 @@ pub mod letter;
 pub mod letters_list;
 pub mod settings;
 pub mod tray_menu;
+pub mod wizard;
 
 use crate::settings::Language;
 use crate::ui::scene::Window;
@@ -36,6 +37,12 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
         letters_list::states(language)
             .into_iter()
             .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+    );
+    // The wizard «Написать автору» (T-120-19) on its eight pages.
+    all.extend(
+        wizard::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&wizard::Id::number))),
     );
     // The windows in the corner (T-120-14): the hint of the flag and «Обновлено» in the words of
     // `corner.rs`; the knock of a letter in the words of `letters.rs`.

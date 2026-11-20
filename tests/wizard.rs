@@ -10,6 +10,7 @@
 use lang_switcher::letters::report::{Attach, Draft, Facts, Field, Repeat, Trouble, build};
 use lang_switcher::letters::{self, Step};
 use lang_switcher::settings;
+use lang_switcher::ui::windows::wizard;
 
 /// The interface strings of the product, so that the labels of an appeal are the real ones.
 ///
@@ -67,62 +68,37 @@ fn the_road_of_an_idea_is_shorter_than_the_road_of_a_trouble() {
     assert!(!Trouble::NothingHappened.is_idea());
 }
 
-/// **Every step shows something, and no two steps share a slot** — the table
-/// [`letters::controls_of`] is what hides the rest of the pool, so a slot in two steps at once
-/// would be a control that never goes away.
-#[test]
-fn no_slot_of_the_pool_belongs_to_two_steps() {
-    // ⚠ Seven and not six since task Т-33-3: «Готово» is a step of this window with two slots
-    // of its own, and a step left out of this list is a step whose slots look like slots
-    // belonging to nobody.
-    const STEPS: [Step; 7] = [
-        Step::What,
-        Step::Where,
-        Step::Did,
-        Step::Idea,
-        Step::Attach,
-        Step::Preview,
-        Step::Done,
-    ];
-
-    let mut seen: Vec<i32> = Vec::new();
-
-    for step in STEPS {
-        let controls = letters::controls_of(step);
-
-        assert!(!controls.is_empty(), "{step:?} shows nothing at all");
-
-        for control in controls {
-            assert!(
-                !seen.contains(control),
-                "{control} is shown by {step:?} and by an earlier step as well"
-            );
-
-            seen.push(*control);
-        }
-    }
-
-    // And the pool is walked whole: every slot the window has belongs to exactly one step.
-    assert_eq!(
-        seen.len(),
-        letters::wizard_slot_count(),
-        "every slot of the template belongs to one step"
-    );
-}
-
 // =========================================================================================
 // Where an appeal goes — решения 199.1, 199.3, 199.10, 199.11, задача T-107-3
 // =========================================================================================
 
-// The slots of the last step, mirrored from `app.rc` — what the shapes below are written in.
-const IDC_WZ_PREVIEW: i32 = 1346;
-const IDC_WZ_COPY: i32 = 1347;
-const IDC_WZ_SAVE: i32 = 1348;
-const IDC_WZ_STATUS: i32 = 1349;
-const IDC_WZ_ADDRESS: i32 = 1355;
-const IDC_WZ_COPY_ADDRESS: i32 = 1356;
-const IDC_WZ_CONTACT_LABEL: i32 = 1357;
-const IDC_WZ_CONTACT: i32 = 1358;
+/// The page `name` of `letters::wizard_pages`, described in Russian as the window of the shell
+/// shows it (T-120-19), and the identifiers of its elements and of its row.
+fn page(name: &str) -> (Vec<wizard::Id>, Vec<wizard::Id>) {
+    use lang_switcher::ui::host::Content;
+
+    let (_, wizard) = letters::wizard_pages()
+        .into_iter()
+        .find(|(page, _)| *page == name)
+        .unwrap_or_else(|| panic!("{name} is a page of the wizard"));
+    let window = wizard::Page {
+        wizard,
+        language: settings::Language::Ru,
+        theme: lang_switcher::theme::ThemeSetting::Light,
+    }
+    .describe();
+    let ids = |node: String| -> Vec<wizard::Id> {
+        wizard::ALL
+            .iter()
+            .copied()
+            .filter(|id| node.contains(&format!("id: {id:?},")))
+            .collect()
+    };
+    (
+        ids(format!("{:?}", window.body)),
+        ids(format!("{:?}", window.buttons)),
+    )
+}
 
 /// **Задача T-107-3, решения 199.3 и 199.11 — every appeal goes to the site, and the letter is the
 /// way back.** Ready and on its way, the last step shows the text, the contact under it and
@@ -135,7 +111,7 @@ const IDC_WZ_CONTACT: i32 = 1358;
 /// ⚠ Control: a shape that offers the letter before the site was asked is caught.
 #[test]
 fn every_appeal_goes_to_the_site_and_the_letter_is_the_way_back() {
-    use letters::{Post, StepWords, preview_controls, step_words};
+    use letters::{Post, StepWords, step_words};
 
     let ready = step_words(Step::Preview, Post::Ready);
     let sending = step_words(Step::Preview, Post::Sending(7));
@@ -160,38 +136,33 @@ fn every_appeal_goes_to_the_site_and_the_letter_is_the_way_back() {
         }
     );
 
+    // The shapes, asked of the window of the shell (T-120-19): ready — the text, the contact and
+    // the two quiet buttons; not taken — the address and the three buttons of the letter.
+    let (ready_body, ready_row) = page("wizard preview");
+    let (failed_body, failed_row) = page("wizard failed");
+    println!("ready {ready_body:?} {ready_row:?}; failed {failed_body:?} {failed_row:?}");
     let with_contact = [
-        IDC_WZ_PREVIEW,
-        IDC_WZ_CONTACT_LABEL,
-        IDC_WZ_CONTACT,
-        IDC_WZ_SAVE,
-        IDC_WZ_STATUS,
+        wizard::Id::Appeal,
+        wizard::Id::Contact,
+        wizard::Id::CopyText,
+        wizard::Id::Save,
     ];
     let with_letter = [
-        IDC_WZ_PREVIEW,
-        IDC_WZ_ADDRESS,
-        IDC_WZ_COPY,
-        IDC_WZ_COPY_ADDRESS,
-        IDC_WZ_SAVE,
-        IDC_WZ_STATUS,
+        wizard::Id::CopyText,
+        wizard::Id::CopyAddress,
+        wizard::Id::Save,
     ];
 
-    assert_eq!(preview_controls(Post::Ready), with_contact);
-    assert_eq!(preview_controls(Post::Sending(7)), with_contact);
-    assert_eq!(preview_controls(Post::Failed), with_letter);
+    assert_eq!(ready_body, with_contact, "the last step, ready");
+    assert_eq!(failed_body, with_letter, "«Не удалось отправить»");
+    assert!(
+        ready_row.contains(&wizard::Id::Back) && !failed_row.contains(&wizard::Id::Back),
+        "«Назад» on the last step, not on the failure: {ready_row:?} {failed_row:?}"
+    );
 
-    // Every slot of the two shapes belongs to the step, so `layout_wizard` hides what is not
-    // named and never leaves a stranger on the screen.
-    for control in with_contact.iter().chain(&with_letter) {
-        assert!(
-            letters::controls_of(Step::Preview).contains(control),
-            "{control}"
-        );
-    }
-
+    // The control: the letter offered before the site was asked.
     assert_ne!(
-        preview_controls(Post::Ready),
-        with_letter,
+        ready_body, with_letter,
         "the control: the letter before the site was asked must be caught"
     );
 }
@@ -596,156 +567,20 @@ fn the_line_beside_the_box_is_the_line_in_the_appeal() {
     );
 }
 
-/// **Т-33-2, решение 103.2** — the six labels of the three cards are carriers of strings and
-/// not elements of the window.
-///
-/// The defect this guards against was found by the eye and measured by the stand: while the
-/// labels were visible statics, hovering a card wiped its two lines off the screen. The cards
-/// stand **above** their labels in the z-order of the template, no control of the window
-/// carries `WS_CLIPSIBLINGS`, and a repaint of the button alone therefore painted over words
-/// nobody would ask to be painted again — ink inside a card measured 3030 → 0
-/// (`scratchpad-Э33\причина-2-наведение.log`).
-///
-/// The cure is one body of drawing: `draw_card` paints the card and its two lines together,
-/// and the statics keep only the words. `NOT WS_VISIBLE` is what makes that true, and it is
-/// read here out of `app.rc` — the file that decides it — because a label shown again would
-/// bring the whole defect back and nothing else in the battery would notice.
-#[test]
-fn the_six_labels_of_the_cards_are_invisible_carriers_of_their_words() {
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc");
-    let text = std::fs::read_to_string(&script).expect("app.rc must be readable");
-
-    for label in [
-        "IDC_WZ_CARD_T1",
-        "IDC_WZ_CARD_T2",
-        "IDC_WZ_CARD_T3",
-        "IDC_WZ_CARD_S1",
-        "IDC_WZ_CARD_S2",
-        "IDC_WZ_CARD_S3",
-    ] {
-        let line = text
-            .lines()
-            .find(|line| line.trim_start().starts_with("LTEXT") && line.contains(label))
-            .unwrap_or_else(|| panic!("app.rc has no LTEXT for {label}"));
-
-        println!("{line}");
-
-        assert!(
-            line.contains("NOT WS_VISIBLE"),
-            "{label} is a visible static again — hovering its card will wipe it: {line}"
-        );
-    }
-
-    // And the three cards themselves are still shown: a card hidden with them would be a step
-    // with nothing on it.
-    for card in ["IDC_WZ_CARD_1", "IDC_WZ_CARD_2", "IDC_WZ_CARD_3"] {
-        let line = text
-            .lines()
-            .find(|line| line.trim_start().starts_with("CONTROL") && line.contains(card))
-            .unwrap_or_else(|| panic!("app.rc has no CONTROL for {card}"));
-
-        assert!(!line.contains("NOT WS_VISIBLE"), "{card} is hidden: {line}");
-    }
-}
-
-/// **Т-33-3, решение 103.3** — «Готово» is a step of this window and not a second window.
-///
-/// The road is what «Шаг N из M» counts, and [`Step::Done`] is deliberately **not** in it: the
-/// thanks is where the wizard ends, not the sixth of five. What this test holds is the whole of
-/// that arrangement — the roads keep their five and three, the last step has slots of its own,
-/// and the pool still adds up.
-/// **Задача Т-33а-2, находка глазом пользователя: «строки ввода как будто стали ниже».**
-///
-/// Коробку однострочного поля рисует фон окна вокруг контрола, и её высота обязана совпасть с
-/// высотой кнопки рядом — так стоит в макете (поле и кнопка 30 px при 96 DPI). До ремонта
-/// коробку задавала константа окна настроек (12 DLU), а кнопка мастера — 14 DLU, и на снимке
-/// вышло 19 px против 25 (`scratchpad-Э33а\красное-до-2-высоты.log`).
-///
-/// Таблица держит то, чего снимок держать не может: **сумма** воздуха и контрола равна коробке
-/// РОВНО, включая нечётный остаток. Одно число на обе стороны — то, чем отвечает
-/// `theme::field_frame_air`, — на нечётном остатке теряет пиксель, и коробка выходит ниже
-/// кнопки на единицу.
-#[test]
-fn the_box_of_a_wizard_field_is_exactly_the_height_it_is_asked_for() {
-    // (коробка, контрол, толщина) → (сверху, снизу)
-    let table = [
-        // Чётный остаток: поровну.
-        ((Some(26), 16, 1), (5, 5)),
-        // ⭐ Нечётный остаток: лишний пиксель ВНИЗ, сумма всё равно ровно коробка.
-        ((Some(26), 15, 1), (5, 6)),
-        ((Some(25), 16, 1), (4, 5)),
-        // Контрол уже с коробку или выше — прежняя рамка в одну толщину.
-        ((Some(16), 16, 1), (1, 1)),
-        ((Some(14), 16, 1), (1, 1)),
-        // Остаток меньше двух толщин — тоже прежняя рамка: коробка не может быть тоньше рамки.
-        ((Some(17), 16, 1), (1, 1)),
-        // NFR-13: `MapDialogRect` отказал — рамка в одну толщину, как до задачи Т-33-7.
-        ((None, 15, 1), (1, 1)),
-        // Толщина больше единицы — на 125 % и 150 % экрана.
-        ((Some(32), 18, 2), (7, 7)),
-        ((Some(33), 18, 2), (7, 8)),
-    ];
-
-    for ((box_height, control, border), want) in table {
-        // ⚠ Задача Т-45-2: тело переехало в общий слой элементов и не изменилось; правило
-        // «лишний пиксель вниз» стало явным значением `OddPixel::Below`. ⭐ Задача Т-46-5:
-        // параметра больше нет — это правило стало **стандартом для всех окон** (решение 109.6),
-        // и таблица ниже теперь описывает не мастера, а программу.
-        let got = lang_switcher::widgets::field::air(box_height, control, border);
-
-        println!("коробка {box_height:?}, контрол {control}, рамка {border} → {got:?}");
-
-        assert_eq!(
-            got, want,
-            "коробка {box_height:?}, контрол {control}, рамка {border}"
-        );
-
-        // И главное свойство, ради которого функция существует: сумма равна коробке ровно —
-        // всякий раз, когда коробка вообще больше контрола на две толщины.
-        if let Some(box_height) = box_height
-            && box_height - control >= border * 2
-        {
-            assert_eq!(
-                control + got.0 + got.1,
-                box_height,
-                "коробка обязана выйти ровно {box_height} px — иначе поле не вровень с кнопкой"
-            );
-        }
-    }
-}
-
 #[test]
 fn the_thanks_is_a_step_of_the_wizard_and_no_road_counts_it() {
     // The two roads are unchanged: the thanks is not a step of either.
     assert_eq!(Trouble::WrongResult.steps(), 5);
     assert_eq!(Trouble::Idea.steps(), 3);
 
-    let done = letters::controls_of(Step::Done);
-
-    println!("{done:?}");
-
+    // The page of the thanks (T-120-19): the words of the owner and «Открыть канал» in it, and
+    // «Закрыть» alone in the row — the main button, where «Далее» stands on the steps.
+    let (body, row) = page("wizard sent");
+    println!("{body:?} {row:?}");
     assert_eq!(
-        done.len(),
-        2,
-        "«Готово» shows the paragraph and the one button"
+        body,
+        [wizard::Id::Channel],
+        "the thanks carries «Открыть канал»"
     );
-
-    // The slots of the thanks belong to no other step — the assertion
-    // `no_slot_of_the_pool_belongs_to_two_steps` walks that whole table, and this is the half
-    // of it that names the new step out loud.
-    for step in [
-        Step::What,
-        Step::Where,
-        Step::Did,
-        Step::Idea,
-        Step::Attach,
-        Step::Preview,
-    ] {
-        for control in letters::controls_of(step) {
-            assert!(
-                !done.contains(control),
-                "{control} is shown by {step:?} and by the thanks as well"
-            );
-        }
-    }
+    assert_eq!(row, [wizard::Id::Next], "and «Закрыть» alone in its row");
 }

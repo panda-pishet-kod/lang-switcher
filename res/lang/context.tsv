@@ -133,8 +133,8 @@ IDS_CAPTURE_HINT	shell_settings	-	343x34 (2 lines)	-	key names as on the keyboar
 IDS_TIP_ACTIVE	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_TIP_PAUSED	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	-	the state word of the tooltip: {1} of IDS_TIP_FORMAT
 IDS_LETTER_CAPTION	shell_letter	caption	window caption: 448 px wide	-	-
-IDS_CLOSE	shell_letter,shell_letters_list,shell_author,IDD_WIZARD	IDC_WZ_NEXT	89x30	-	-
-IDS_CHANNEL_OPEN	IDD_WIZARD	IDC_WZ_CHANNEL	158x30	-	-
+IDS_CLOSE	shell_letter,shell_letters_list,shell_author,shell_wizard	-	the shell: a letter, «Последние письма», «От автора» and the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_CHANNEL_OPEN	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_FEEDBACK_OPEN	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_SUPPORT_OPEN	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	-
 IDS_HELLO_TITLE	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	«Panda» is the author's name in the letters (decision 155.2); voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); greeting without formality: «Привет», not «Здравствуйте» (208.107) — the informal greeting of the language; E120 (T-120-16): changed text — 208.106 п. 1–2, 208.107, 208.108 (the accepted letters, mock-up v2); translate anew in the wave
@@ -190,78 +190,78 @@ IDS_NEWS_LETTER_TITLE	shell_letter,window in the corner / menu (drawn by the pro
 IDS_NEWS_LATER	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): one wording for both buttons that put a letter off, IDS_THANKS_SNOOZE and IDS_NEWS_LATER — «Напомнить позже» / Remind me later; when it reminds is said by the foot, GLOSSARY-E120 §3
 IDS_NEWS_OPEN_LINK	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-10): named by where it leads, the site; no arrow ↗ in the string — the shell draws it, GLOSSARY-E120 §4
 IDS_NEWS_FOOT	shell_letter	-	the shell: a letter; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14); E120 (T-120-10): quotes IDS_NEWS_LATER exactly as it is translated, GLOSSARY-E120 §3
-IDS_WIZARD_CAPTION	IDD_WIZARD	caption	window caption: 448 px wide	-	-
-IDS_WIZARD_STEP	IDD_WIZARD	IDC_WZ_STEP	406x19	{0} = this step, «2»; {1} = the number of steps, «5» (code: &(wizard.step + 1).to_string(), &road.len().to_string())	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CANCEL	IDD_WIZARD	IDC_WZ_CANCEL	98x30	-	-
-IDS_WIZARD_BACK	IDD_WIZARD	IDC_WZ_BACK	81x30	-	-
-IDS_WIZARD_NEXT	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	-
-IDS_WIZARD_DONE	IDD_WIZARD	IDC_WZ_STEP	406x19	-	the word in the place of «Step N of M» on the thanks; since 1.2.0 no button says it
-IDS_WIZARD_WHAT_TITLE	report,IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; also a heading of the report text of the letter
-IDS_WIZARD_WHAT_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CARD_WRONG	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CARD_WRONG_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not; E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
-IDS_WIZARD_CARD_NOTHING	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CARD_NOTHING_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CARD_IDEA	report,IDD_WIZARD	IDC_WZ_CARD_T1	375x23	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the user — «I» is the person using the program, no gender (RULES 14)
-IDS_WIZARD_CARD_IDEA_SUB	IDD_WIZARD	IDC_WZ_CARD_S1	375x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_WHERE_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_WHERE_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_PROGRAM	report,IDD_WIZARD	IDC_WZ_PROGRAM_LABEL	105x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CAPTURE	IDD_WIZARD	IDC_WZ_CAPTURE	102x30	-	-
-IDS_WIZARD_CAPTURE_NOTE	IDD_WIZARD	IDC_WZ_CAPTURE_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_CAPTURE_COUNT	IDD_WIZARD	IDC_WZ_CAPTURE	102x30	{0} = seconds left, «5» (code: &wizard.countdown.to_string())	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7); the caption of the button while it counts down
+IDS_WIZARD_CAPTION	shell_wizard	caption	the shell: the caption of the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_STEP	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = this step, «2»; {1} = the number of steps, «5» (code: &(wizard.step + 1).to_string(), &road.len().to_string())	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CANCEL	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_BACK	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_NEXT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_DONE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the word in the place of «Step N of M» on the thanks; since 1.2.0 no button says it
+IDS_WIZARD_WHAT_TITLE	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not; also a heading of the report text of the letter
+IDS_WIZARD_WHAT_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CARD_WRONG	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CARD_WRONG_SUB	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not; E120 (T-120-10): the main action of the program is one word, «исправить» / fix — the one word of the language for it, GLOSSARY-E120 §1
+IDS_WIZARD_CARD_NOTHING	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CARD_NOTHING_SUB	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CARD_IDEA	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not; voice: the user — «I» is the person using the program, no gender (RULES 14)
+IDS_WIZARD_CARD_IDEA_SUB	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_WHERE_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_WHERE_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_PROGRAM	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CAPTURE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_CAPTURE_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_CAPTURE_COUNT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = seconds left, «5» (code: &wizard.countdown.to_string())	a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7); the caption of the button while it counts down
 IDS_WIZARD_WHERE_FIELD	report	-	the text of the report: no limit	-	a line of the report text of the letter
-IDS_WIZARD_FIELD_NORMAL	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
-IDS_WIZARD_FIELD_PASSWORD	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	-
-IDS_WIZARD_FIELD_PASSWORD_SUB	IDD_WIZARD	IDC_WZ_FIELD_2_SUB	383x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_FIELD_UNKNOWN	report,IDD_WIZARD	IDC_WZ_FIELD_1	406x21	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
-IDS_WIZARD_DID_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_DID_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_TYPED_IN	report,IDD_WIZARD	IDC_WZ_TYPED_LABEL	175x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_AND_PRESSED	IDD_WIZARD	IDC_WZ_PRESSED_LABEL	53x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_EXPECTED	report,IDD_WIZARD	IDC_WZ_EXPECTED_LABEL	175x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_GOT	report,IDD_WIZARD	IDC_WZ_GOT_LABEL	175x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_REPEAT	report,IDD_WIZARD	IDC_WZ_REPEAT_LABEL	175x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_REPEAT_ALWAYS	report,IDD_WIZARD	IDC_WZ_REPEAT_1	130x21	-	-
-IDS_WIZARD_REPEAT_SOMETIMES	report,IDD_WIZARD	IDC_WZ_REPEAT_1	130x21	-	-
-IDS_WIZARD_REPEAT_ONCE	report,IDD_WIZARD	IDC_WZ_REPEAT_1	130x21	-	-
-IDS_WIZARD_IDEA_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_IDEA_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_IDEA_WHAT	report,IDD_WIZARD	IDC_WZ_IDEA_LABEL	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_IDEA_HELPS	report,IDD_WIZARD	IDC_WZ_HELPS_LABEL	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_FIELD_NORMAL	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_FIELD_PASSWORD	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_FIELD_PASSWORD_SUB	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_FIELD_UNKNOWN	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	voice: the user — «I» is the person using the program, no gender (RULES 14)
+IDS_WIZARD_DID_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_DID_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_TYPED_IN	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_AND_PRESSED	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_EXPECTED	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_GOT	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_REPEAT	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_REPEAT_ALWAYS	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_REPEAT_SOMETIMES	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_REPEAT_ONCE	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_IDEA_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_IDEA_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_IDEA_WHAT	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_IDEA_HELPS	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_WIZARD_TRANSLATION_NOW	report,shell_wizard	-	the shell: the page of the idea of the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-22): an appeal about the translation; GLOSSARY-E120 §6 — the label of the first field: what the program says now; written into the text of the appeal as «label: text»
 IDS_WIZARD_TRANSLATION_RIGHT	report,shell_wizard	-	the shell: the page of the idea of the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	E120 (T-120-22): an appeal about the translation; GLOSSARY-E120 §6 — the label of the second field: how it should read; written into the text of the appeal as «label: text»
 IDS_WIZARD_TRANSLATION_LINE	report	-	the text of the report: no limit	{0} = the tag of the interface language, «de»	E120 (T-120-22): an appeal about the translation; GLOSSARY-E120 §6 — the first line of the text of the appeal; the tag is not translated
-IDS_WIZARD_ATTACH_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_ATTACH_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_ATTACH_MACHINE	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
-IDS_WIZARD_ATTACH_LAYOUTS	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
-IDS_WIZARD_ATTACH_SETTINGS	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
-IDS_WIZARD_ATTACH_JOURNAL	report,IDD_WIZARD	IDC_WZ_ATTACH_1	406x21	-	-
-IDS_WIZARD_ATTACH_JOURNAL_SUB	IDD_WIZARD	IDC_WZ_ATTACH_V1	383x21	{0} = a count of journal entries, «42» (code: &entries)	the window is laid out when shown: the height grows with the text, the width does not; a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
-IDS_WIZARD_ATTACH_FOOT	IDD_WIZARD	IDC_WZ_ATTACH_FOOT	406x64 (3 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_PREVIEW_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_PREVIEW_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_SAVE	IDD_WIZARD	IDC_WZ_SAVE	172x30	-	-
-IDS_WIZARD_MAIL_ADDRESS	IDD_WIZARD	IDC_WZ_ADDRESS	406x21	{0} = the address, «lang.switcher@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_COPY_TEXT	IDD_WIZARD	IDC_WZ_COPY	228x30	-	-
-IDS_WIZARD_COPY_ADDRESS	IDD_WIZARD	IDC_WZ_COPY_ADDRESS	172x30	-	-
-IDS_WIZARD_TEXT_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = code: address | links::MAIL_ADDRESS	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_ADDRESS_COPIED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = the address of the letter (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_SAVED	IDD_WIZARD	IDC_WZ_STATUS	406x21	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_FAILED	IDD_WIZARD	IDC_WZ_STATUS	406x21	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_ATTACH_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_ATTACH_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_ATTACH_MACHINE	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_ATTACH_LAYOUTS	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_ATTACH_SETTINGS	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_ATTACH_JOURNAL	report,shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_ATTACH_JOURNAL_SUB	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = a count of journal entries, «42» (code: &entries)	the window is laid out when shown: the height grows with the text, the width does not; a count: «label: {n}» or «… {n}», never «{n} entries» (RULES 7)
+IDS_WIZARD_ATTACH_FOOT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_PREVIEW_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_PREVIEW_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_SAVE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_MAIL_ADDRESS	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = the address, «lang.switcher@panda-pishet-kod.dev» (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_COPY_TEXT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_COPY_ADDRESS	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	-
+IDS_WIZARD_TEXT_COPIED	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = code: address | links::MAIL_ADDRESS	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_ADDRESS_COPIED	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = the address of the letter (code: links::MAIL_ADDRESS)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_SAVED	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	{0} = a file path (code: &name)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_FAILED	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_LIST_SEPARATOR	shell_settings	-	343x36 (2 lines)	-	the separator of the list in {0} of IDS_LAYOUT_NOTE, «, » with its space; right to left: the separator of the language («،») is the translator's choice, the stand checks it
 IDS_CYCLE_ARROW	shell_settings	-	704x19	-	between the layouts of the cycle in {0} of IDS_STATE_CYCLE, « → » with its spaces; right to left « ← »: the code embeds every name, the first stands on the right (решение 202.19о)
 IDS_TIP_FORMAT	tray_tip	-	tooltip: 127 characters with «Lang Switcher — »	{0} = «Lang Switcher», not translated; {1} = IDS_TIP_ACTIVE or IDS_TIP_PAUSED (code: APP_NAME, &state)	the tooltip of the tray icon; the order and the joiner are the language's
-IDS_WIZARD_SEND	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the main button of the last step: the appeal goes to the site only when it is pressed (decision 199.5)
-IDS_WIZARD_SENDING	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the same button, grey, while the appeal is on its way (up to 15 seconds)
-IDS_WIZARD_RETRY	IDD_WIZARD	IDC_WZ_NEXT	89x30	-	the same button once the site did not answer: sends the same appeal again
-IDS_WIZARD_CONTACT	IDD_WIZARD	IDC_WZ_CONTACT_LABEL	406x21	-	the label above the one-line contact field, one ink; two lines allowed; Telegram is not translated; no promise to answer (decisions 199.10, 201.11a)
+IDS_WIZARD_SEND	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the main button of the last step: the appeal goes to the site only when it is pressed (decision 199.5)
+IDS_WIZARD_SENDING	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the same button, grey, while the appeal is on its way (up to 15 seconds)
+IDS_WIZARD_RETRY	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the same button once the site did not answer: sends the same appeal again
+IDS_WIZARD_CONTACT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the label above the one-line contact field, one ink; two lines allowed; Telegram is not translated; no promise to answer (decisions 199.10, 201.11a)
 IDS_WIZARD_CONTACT_LINE	report	-	the text of the report: no limit	-	a line of the report text, «label: contact», written only when a contact was typed (decision 199.10)
-IDS_WIZARD_FAILED_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_FAILED_NOTE	IDD_WIZARD	IDC_WZ_NOTE	406x43 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the two button names are IDS_WIZARD_RETRY and the letter is IDS_WIZARD_COPY_TEXT and IDS_WIZARD_COPY_ADDRESS
-IDS_WIZARD_SENT_TITLE	IDD_WIZARD	IDC_WZ_TITLE	406x34 (2 lines)	-	the window is laid out when shown: the height grows with the text, the width does not
-IDS_WIZARD_SENT_TEXT	IDD_WIZARD	IDC_WZ_THANKS	406x128 (7 lines)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
+IDS_WIZARD_FAILED_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_FAILED_NOTE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not; the two button names are IDS_WIZARD_RETRY and the letter is IDS_WIZARD_COPY_TEXT and IDS_WIZARD_COPY_ADDRESS
+IDS_WIZARD_SENT_TITLE	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not
+IDS_WIZARD_SENT_TEXT	shell_wizard	-	the shell: the wizard; the limit is the fit of FIT-E120 (T-120-11)	-	the window is laid out when shown: the height grows with the text, the width does not; the owner's own words (decision 199.10): no number of the appeal, no promise of an answer; voice: the author — «I» is Panda, in the masculine forms of the Russian text (RULES 14)
 IDS_MENU_SUSPEND	shell_menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME	shell_menu	-	menu: grows with the text	-	-
 IDS_MENU_RESUME_RESTART	shell_menu	-	menu: grows with the text	-	-

@@ -2048,7 +2048,7 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
 /// The half a pure function cannot show: which address the window's own code hands the shell. So
 /// the bodies are read — the arm of «Спасибо» in [`letters::plan_for`] must name
 /// [`links::feedback_url`] and not `CHANNEL_URL`; the action of «Спасибо» must open the address of
-/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`IDC_WZ_CHANNEL`) are
+/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`Id::Channel`) are
 /// on the channel as before.
 ///
 /// ⭐ Until stage E107 the wizard's «Скопировать и открыть…» was the second of the two; решение
@@ -2069,7 +2069,7 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         letters_function_body(&source, "fn act(")
             .expect("src\\letters.rs must still declare `act`"),
     );
-    let wizard_thanks = plan_arm(&source, "IDC_WZ_CHANNEL => {", "return true;");
+    let wizard_thanks = wizard_events();
 
     assert!(
         the_thanks_sends_a_person_to_write(thanks),
@@ -2092,7 +2092,8 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         "«Открыть канал» of «От автора» (FR-103) is the channel as before"
     );
     assert!(
-        squeezed_code(wizard_thanks).contains("open_link(links::CHANNEL_URL);"),
+        squeezed_code(&wizard_thanks).contains("Event::Pressed(Id::Channel) => {")
+            && squeezed_code(&wizard_thanks).contains("Action::OpenChannel"),
         "the thanks of the wizard opens the channel as before:\n{wizard_thanks}"
     );
 
@@ -2119,15 +2120,43 @@ fn copies_and_opens_nothing(body: &str) -> bool {
 }
 
 /// Whether the code of the wizard's buttons hands the shell nothing but the channel of its thanks —
-/// no group, no GitHub Issues, no page of the site (решение 199.3).
+/// no group, no GitHub Issues, no page of the site (решение 199.3). Since T-120-19 the buttons are
+/// the events of `ui::windows::wizard::Product`, and what they open is an action of `letters`.
 fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
     let code = squeezed_code(body);
-
-    code.matches("open_link(").count() == 1
-        && code.contains("open_link(links::CHANNEL_URL)")
+    code.matches("Action::Open").count() == 1
+        && code.contains("Action::OpenChannel")
+        && !code.contains("open_link(")
         && !code.contains("feedback_url")
         && !code.contains("GROUP_URL")
         && !code.contains("ISSUES_URL")
+}
+
+/// The body of a method of an `impl` — from its signature to the brace of its indentation.
+fn method_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    let (_, after) = source.split_once(signature)?;
+
+    after.split_once("\n    }\n").map(|(body, _)| body)
+}
+
+/// What the window of the wizard does with an event — `Product::event` of `ui::windows::wizard`,
+/// a window of the shell since T-120-19.
+fn wizard_events() -> String {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("ui")
+            .join("windows")
+            .join("wizard.rs"),
+    )
+    .expect("src\\ui\\windows\\wizard.rs must be readable")
+    .replace("\r\n", "\n");
+    let (_, product) = source
+        .split_once("impl Content for Product {")
+        .expect("the window of the wizard is a content of the shell");
+    method_body(product, "fn event(")
+        .expect("the window of the wizard answers its events")
+        .to_owned()
 }
 
 /// **Задача T-107-3, решение 199.3 (until 1.2.0 — задача T-103-7, сторож (2), решение 181.6) — the
@@ -2143,13 +2172,13 @@ fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
 #[test]
 fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     let source = letters_module_source();
-    let text = letters_function_body(&source, "fn wizard_copy_text(")
-        .expect("src\\letters.rs must declare `wizard_copy_text`");
-    let address = letters_function_body(&source, "fn wizard_copy_address(")
-        .expect("src\\letters.rs must declare `wizard_copy_address`");
-    let command = letters_function_body(&source, "fn wizard_command(")
-        .expect("src\\letters.rs must declare `wizard_command`");
-    let button = squeezed_code(plan_arm(&source, "IDC_WZ_COPY => {", "return true;"));
+    let text = method_body(&source, "    pub fn copy_appeal(")
+        .expect("src\\letters.rs must declare `Wizard::copy_appeal`");
+    let address = method_body(&source, "    pub fn copy_address(")
+        .expect("src\\letters.rs must declare `Wizard::copy_address`");
+    let command = wizard_events();
+    let command = command.as_str();
+    let button = squeezed_code(command);
 
     assert!(
         copies_and_opens_nothing(text),
@@ -2164,7 +2193,7 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
         "199.3: «Скопировать и открыть группу» left the wizard"
     );
     assert!(
-        button.contains("wizard_copy_text(hwnd, links::MAIL_ADDRESS);"),
+        button.contains("Event::Pressed(Id::CopyText) => wizard.copy_appeal(self.owner),"),
         "the one button copies the text of the letter for every appeal:\n{button}"
     );
     assert!(
@@ -2173,8 +2202,8 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let issues = command.replace(
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);",
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);\n            open_link(links::ISSUES_URL);",
+        "letters::act(&deed, Action::OpenChannel);",
+        "letters::act(&deed, Action::OpenChannel);\n                letters::act(&deed, Action::OpenFeedback);",
     );
     assert_ne!(issues, command, "the control must change the body");
     assert!(
@@ -2187,8 +2216,8 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let opening = text.replace(
-        "wizard_say(hwnd, said);",
-        "open_link(links::GROUP_URL);\n    wizard_say(hwnd, said);",
+        "self.status = if",
+        "open_link(links::GROUP_URL);\n        self.status = if",
     );
     assert_ne!(opening, text, "the control must change the body");
     assert!(
@@ -3118,185 +3147,6 @@ fn squeezed_code(text: &str) -> String {
         .replace(" )", ")")
 }
 
-/// The calls that put pixels into a DC — the ones a glyph body makes, and the GDI calls a later
-/// hand could put in front of them.
-const PAINT_CALLS: [&str; 9] = [
-    "FillRect(",
-    "paint_rounded(",
-    "paint_ellipse(",
-    "draw_check_mark(",
-    "paint_label(",
-    "DrawTextW(",
-    "RoundRect(",
-    "Polyline(",
-    "BitBlt(",
-];
-
-/// Whether the first thing a body paints is its whole rectangle in the colour of the ground the
-/// element lies on — the condition on which the door of task Т-45-3 may be taken.
-///
-/// ⚠ Since task T-71-5 the fill stands in the one glyph body `draw_glyph`, drawn into its buffer
-/// with the ground the door names (the wizard names the window — the sentry of that task asserts
-/// it); until then it stood in `draw_switch` of the old «От автора» as `FillRect(dc, &rect,
-/// brushes.panel_bg())`.
-fn paints_its_whole_rectangle_first(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let Some(fill) = code.find("FillRect(target, &rect, ground)") else {
-        return false;
-    };
-
-    PAINT_CALLS
-        .iter()
-        .filter_map(|call| code.find(call))
-        .all(|at| at >= fill)
-}
-
-/// **Task T-71-2, finding Э70-Б-2 — the one glyph body paints its whole rectangle first.**
-///
-/// The owner's word of 2026-09-14: «при снятии и проставлении галки строка моргает». The cure was
-/// the door `widgets::repaint::control_no_erase` of task Т-45-3 — a repaint without the erase
-/// frame of the window's brush — and that door is only for an element that paints its whole
-/// rectangle itself before anything else. The switch of «От автора» that took it is a toggle of
-/// the shell since T-120-17, drawn by the host in one frame; the wizard still takes the door, and
-/// its glyphs are drawn by the one glyph body `draw_glyph`.
-///
-/// ⚠ Controls: the fill put after the figure, and a fill of the glyph cell instead of the
-/// rectangle, are caught.
-#[test]
-fn the_one_glyph_body_paints_its_whole_rectangle_first() {
-    let source = letters_module_source();
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        paints_its_whole_rectangle_first(body),
-        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and the \
-         one glyph body no longer fills its rectangle before anything else:\n{body}"
-    );
-
-    let fill = "FillRect(target, &rect, ground)";
-
-    let moved = body
-        .lines()
-        .filter(|line| !line.contains(fill))
-        .chain([fill])
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !paints_its_whole_rectangle_first(&moved),
-        "the sweep does not see the fill put after the figure"
-    );
-
-    let of_the_cell = body.replace(fill, "FillRect(target, &cell, ground)");
-    assert_ne!(
-        of_the_cell, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !paints_its_whole_rectangle_first(&of_the_cell),
-        "the sweep does not see a fill of the glyph cell instead of the rectangle"
-    );
-}
-
-/// Whether a body paints nothing itself and hands its element to the one glyph body.
-fn hands_its_glyph_to_the_one_body(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    code.contains("draw_glyph(dc, rect, state, glyph, label)")
-        && PAINT_CALLS.iter().all(|call| !code.contains(call))
-}
-
-/// Whether a glyph body draws in one frame: into the buffer of `theme::PaintBuffer`, every paint
-/// call aimed at the buffer and none at the DC of the message, and one blit at the end.
-fn draws_in_one_frame(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let buffered = code
-        .contains("let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };")
-        && code.contains("let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);")
-        && code.contains("buffer.blit(dc)");
-
-    let aimed_at_the_message = PAINT_CALLS
-        .iter()
-        .filter(|call| **call != "BitBlt(")
-        .any(|call| code.contains(&format!("{call}dc,")));
-
-    buffered && !aimed_at_the_message
-}
-
-/// **Task T-71-5, decision 132.3 — the glyphs are drawn by the one glyph body, in one frame.**
-///
-/// After task T-71-2 the owner still saw the switch blink on the live 0.71.0. The erase was gone;
-/// what was left was the body: `draw_switch` laid its fill, its figure, its tick and its caption
-/// **straight into the DC of the message**, call by call, and a click brings at least four
-/// `WM_DRAWITEM` (the press, the focus, the release, the repaint of the branch) — DWM sampled the
-/// window between the calls and the row stood blank for a frame. Its twin in the wizard blinked the
-/// same way until task Т-33-5 gave it `theme::PaintBuffer`. The owner's word: the ready solution
-/// the wizard's check boxes already have, not a copy of the repair — so both elements go through
-/// one body, and what tells them apart is what does: where «checked» is read and what they lie on.
-/// The switch of «От автора» is a toggle of the shell since T-120-17, drawn by the host in one
-/// frame; the wizard's glyphs keep the one body.
-///
-/// ⚠ Controls: a door that paints something itself, a body whose paint goes to the DC of the
-/// message, and a body without the buffer are caught.
-#[test]
-fn the_wizard_glyphs_are_drawn_by_the_one_glyph_body_in_one_frame() {
-    let source = letters_module_source();
-    let wizard = letters_function_body(&source, "unsafe fn draw_wizard_glyph(")
-        .expect("src\\letters.rs must still declare `draw_wizard_glyph`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(wizard),
-        "решение 132.3: the wizard's glyphs must go through the one glyph body:\n{wizard}"
-    );
-
-    assert!(
-        squeezed_code(wizard).contains("ground: Ground::Window"),
-        "the wizard's glyphs lie on the window"
-    );
-
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        draws_in_one_frame(body),
-        "the one glyph body must draw into theme::PaintBuffer and blit once:\n{body}"
-    );
-
-    // Controls of the doors.
-    assert!(
-        !hands_its_glyph_to_the_one_body(&format!(
-            "{wizard}\n    unsafe {{ FillRect(dc, &rect, brushes.panel_bg()) }};"
-        )),
-        "the sweep does not see a door that paints something itself"
-    );
-
-    // Controls of the body.
-    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
-    assert_ne!(
-        at_the_message, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&at_the_message),
-        "the sweep does not see a paint call aimed at the DC of the message"
-    );
-
-    let unbuffered = body.replace(
-        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
-        "let target = dc;",
-    );
-    assert_ne!(
-        unbuffered, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&unbuffered),
-        "the sweep does not see a body that draws past the buffer"
-    );
-}
-
 /// The version line of «От автора» says what is installed, and what is available when the feed
 /// names something newer.
 #[test]
@@ -3620,92 +3470,6 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
 // =========================================================================================
 // The colours and the grounds of the windows — FR-92а's vocabulary, reused
 // =========================================================================================
-
-/// **Every label that stands on a block is filled with the block's colour**, and the runs are
-/// whole.
-///
-/// ⚠ The test exists because the twin of this rule was written short once: the gate of
-/// `WM_DRAWITEM` named the first row of a letter and not the four rows, and «Привет» came up with
-/// three markers and one sentence. A run written short is the defect this file is watching for.
-///
-/// «От автора», whose paragraphs stood on its three panels, is a window of the shell since
-/// T-120-17; what is left on a block is the wizard — the two lines of each of its three cards.
-#[test]
-fn every_row_of_every_run_stands_on_its_panel() {
-    // The title and the line of each of the three cards of the wizard (`IDC_WZ_CARD_T1…T3`,
-    // `IDC_WZ_CARD_S1…S3`).
-    for control in [1307, 1308, 1309, 1310, 1311, 1312] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} stands on a card of the wizard"
-        );
-    }
-
-    // And what does **not**: the heading and the note of the wizard and the card itself, which
-    // stand on the window — and the paragraphs of the old «От автора», which no window carries.
-    for control in [1302, 1303, 1304, 1264, 1268, 1275, 1269, 1270, 1273, 1277] {
-        assert!(
-            !letters::stands_on_a_panel(control),
-            "control {control} stands on the window's own ground"
-        );
-    }
-}
-
-/// **⭐⭐ A BUTTON asks the same question as a label, and until task T-80-1 it did not** —
-/// finding of the live acceptance of `e79`.
-///
-/// The drawing cuts a rounded figure out of the button's rectangle and fills what it cuts away
-/// with **the ground the button stands on**. The buttons of these windows were handed
-/// `window_bg` unconditionally, and five of the buttons of «От автора» stand **on panels**. So
-/// the corners came out in the colour of the window over a panel of another colour — measured
-/// 18/16/13 in «Туман» and 7/8/9 in «Графит» — and what the eye saw was four square corners round
-/// a button whose own face, in «Туман», is the panel's colour exactly. Word of the user: «видны
-/// углы по краям кнопок… в темной теме также видны углы кнопок».
-///
-/// ⛔ The answer is **the function the labels already use**, not a second one beside it. That is
-/// the whole of what «привести все кнопки к типизированному механизму, который у нас уже
-/// существует» asks for.
-///
-/// «От автора», whose five buttons stood on panels, is a window of the shell since T-120-17, and
-/// the shell draws its own corners. The buttons of the wizard stand on its own ground, and the
-/// drawing still asks the one question for every button it draws.
-#[test]
-fn a_button_on_a_panel_says_so_by_the_same_question_a_label_does() {
-    // The buttons of the wizard — «Отмена», «Назад», «Далее», «Открыть канал» — stand on the
-    // window's own ground. A list that said «panel» for one of them would paint its corners in the
-    // panel's colour over the window, which is the defect facing the other way.
-    for (control, what) in [
-        (1350, "«Отмена»"),
-        (1351, "«Назад»"),
-        (1352, "«Далее»"),
-        (1354, "«Открыть канал»"),
-    ] {
-        assert!(
-            !letters::stands_on_a_panel(control),
-            "{what} ({control}) of the wizard stands on the window's own ground"
-        );
-    }
-
-    // ⚠⚠ **And the drawing must ASK.** A list that answers right while nobody consults it is a
-    // guard that cannot fail — measured: with the question put back to a flat `window_bg()`, every
-    // assertion above stayed green and the defect was whole. So the body that chooses the button's
-    // ground is read, and it has to name this function.
-    let source = letters_source();
-    let body = body_of(&source, "unsafe fn on_draw_item(");
-
-    assert!(
-        body.contains("stands_on_a_panel(control)"),
-        "the button branch of on_draw_item must ask stands_on_a_panel for its ground"
-    );
-
-    // Отрицательный контроль — the shape of `e79`, which the reading must refuse.
-    assert!(
-        !body
-            .replace("stands_on_a_panel(control)", "false")
-            .contains("stands_on_a_panel(control)"),
-        "the reading must refuse the body that asked nothing"
-    );
-}
 
 // =========================================================================================
 // The mark of the first run — stage E116, task T-116-12, решение 208.59
@@ -4155,6 +3919,73 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
         declared.is_empty() && not_shell.is_empty(),
         "app.rc declares {declared:?}; not windows of the shell: {not_shell:?}"
     );
+}
+
+/// **T-120-19, the red «before»: the wizard opens as a window of the shell, and «Закрыть» of the
+/// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
+/// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
+/// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
+/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
+/// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
+///
+/// Before the task the door made a dialog out of `IDD_WIZARD` — the class `#32770`.
+#[cfg(feature = "testing")]
+#[test]
+fn the_wizard_is_a_window_of_the_shell_and_its_row_stands_still() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::windows::wizard;
+
+    let _guard = with_product_strings();
+
+    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
+        .expect("app.rc must be readable");
+    let owner = HiddenOwner::new();
+    let window = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let mut class = [0u16; 64];
+    // SAFETY: a live window this test opened; the buffer is a local of this frame.
+    let length =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
+    let class = String::from_utf16_lossy(&class[..usize::try_from(length).unwrap_or(0)]);
+    let shell = class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
+    assert!(
+        shell && !script.contains("IDD_WIZARD DIALOGEX"),
+        "the wizard must be a window of the shell ({class}) and app.rc must carry no IDD_WIZARD"
+    );
+
+    let text = Text::new(Language::Ru.tag(), Direction::LeftToRight).expect("DirectWrite");
+    let next = wizard::Id::Next.number();
+    for (class, w, h) in [(Class::Narrow, 620.0, 500.0), (Class::Large, 1280.0, 720.0)] {
+        let k = fit::k_for(Language::Ru.tag(), class);
+        let mut places = Vec::new();
+        for (name, page) in wizard::states(Language::Ru) {
+            let page = page.map(&wizard::Id::number);
+            let layout = lay_out(&page, client_size(w, h), k, false, &text);
+            let rect = layout
+                .items
+                .iter()
+                .find(|item| item.id == Some(next))
+                .map(|item| item.rect)
+                .unwrap_or_else(|| panic!("{name}: the main button must be laid out"));
+            println!(
+                "{w} × {h}, {name}: right {:.1}, top {:.1}",
+                rect.x + rect.w,
+                rect.y
+            );
+            places.push((name, rect.x + rect.w, rect.y));
+        }
+        let (first, right, top) = &places[0];
+        for (name, other_right, other_top) in &places {
+            assert!(
+                (other_right - right).abs() < 0.5 && (other_top - top).abs() < 0.5,
+                "{w} × {h}: the main button of «{name}» stands at ({other_right:.1}, \
+                 {other_top:.1}), of «{first}» at ({right:.1}, {top:.1})"
+            );
+        }
+    }
 }
 
 /// Every button of a description, the cards' and the row's, with what it says about the browser.
