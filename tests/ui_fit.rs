@@ -823,7 +823,9 @@ fn the_table_has_a_factor_for_every_language() {
 /// «Спасибо», 208.193): the label of the button of the card «Поддержать автора» ran over, and the
 /// instrument named the lead — taking the lead away changed the steps of giving way so that the
 /// window fitted. Here the label in English is made long — another string of the program, not in
-/// this window — and the instrument must name its key, not a paragraph.
+/// this window — and the instrument must name its key, not a paragraph. It does not set the trap of the
+/// case — a paragraph whose removal also makes the window fit — and does not catch the rule
+/// «across» taken away; the next test does.
 #[test]
 fn a_button_too_wide_for_its_room_is_named_with_its_key() {
     with_product_strings();
