@@ -6378,8 +6378,9 @@ fn mul_div(number: i32, numerator: i32, denominator: i32) -> i32 {
         .expect("a dialog is small")
 }
 
-/// A window of `letters`, built hidden through a measuring door and destroyed on drop — «От автора»
-/// (задача T-83-1) and, since задача T-98-1, «Последние письма».
+/// A window of `letters`, built hidden through a measuring door and destroyed on drop — the wizard;
+/// «От автора» (задача T-83-1) and «Последние письма» (T-98-1) were built here too until T-120-16
+/// and T-120-17 moved them to the shell.
 #[cfg(feature = "testing")]
 struct HiddenWindow {
     owner: windows::Win32::Foundation::HWND,
@@ -6388,21 +6389,6 @@ struct HiddenWindow {
 
 #[cfg(feature = "testing")]
 impl HiddenWindow {
-    /// «От автора» as the product opens it — the words out of the configuration and the feed of a
-    /// test binary, which has neither: the window of a first day.
-    fn open(version: &str) -> Self {
-        Self::on_owner(|owner| {
-            letters::testing::open_author_hidden(owner, ProductImage::shared().module, version)
-        })
-    }
-
-    /// «От автора» with the words of `view` — the door of задача T-98-1.
-    fn author(view: letters::AuthorView) -> Self {
-        Self::on_owner(|owner| {
-            letters::testing::open_author_hidden_with(owner, ProductImage::shared().module, view)
-        })
-    }
-
     /// An owner shaped like `LangSwitcher.Hidden` — a popup of no size at the origin, never shown —
     /// and the window `open` makes on it.
     fn on_owner(
@@ -6435,69 +6421,6 @@ impl HiddenWindow {
         let window = open(owner).expect("the window must open out of the product's templates");
 
         Self { owner, window }
-    }
-
-    /// One control's rectangle in the client coordinates of the window, corners in order.
-    fn control_rect(&self, control: i32) -> windows::Win32::Foundation::RECT {
-        use windows::Win32::Foundation::{POINT, RECT};
-        use windows::Win32::Graphics::Gdi::ScreenToClient;
-        use windows::Win32::UI::WindowsAndMessaging::{GetDlgItem, GetWindowRect};
-
-        // SAFETY: the window is live until `Drop`; the buffers are locals of this frame.
-        unsafe {
-            let child = GetDlgItem(Some(self.window), control).expect("the control must exist");
-            let mut rect = RECT::default();
-            GetWindowRect(child, &mut rect).expect("its rectangle must be readable");
-            let mut corners = [
-                POINT {
-                    x: rect.left,
-                    y: rect.top,
-                },
-                POINT {
-                    x: rect.right,
-                    y: rect.bottom,
-                },
-            ];
-            for corner in &mut corners {
-                let _ = ScreenToClient(self.window, corner);
-            }
-            RECT {
-                left: corners[0].x.min(corners[1].x),
-                top: corners[0].y.min(corners[1].y),
-                right: corners[0].x.max(corners[1].x),
-                bottom: corners[0].y.max(corners[1].y),
-            }
-        }
-    }
-
-    /// The `lfHeight` of the font the dialog manager gave the window — what the template's
-    /// `pointsize` became (C7).
-    fn dialog_font_height(&self) -> i32 {
-        use windows::Win32::Graphics::Gdi::{GetObjectW, HGDIOBJ};
-        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_GETFONT};
-
-        // SAFETY: the window is live until `Drop`; the font is the manager's and only read.
-        unsafe {
-            let font = SendMessageW(self.window, WM_GETFONT, None, None);
-            let mut logical = LOGFONTW::default();
-            let _ = GetObjectW(
-                HGDIOBJ(font.0 as *mut _),
-                i32::try_from(size_of::<LOGFONTW>()).expect("small"),
-                Some(std::ptr::from_mut(&mut logical).cast()),
-            );
-            logical.lfHeight
-        }
-    }
-
-    /// The height of the client area — what `layout_author` made the window.
-    fn client_height(&self) -> i32 {
-        use windows::Win32::Foundation::RECT;
-        use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
-
-        let mut client = RECT::default();
-        // SAFETY: the window is live until `Drop`.
-        unsafe { GetClientRect(self.window, &mut client) }.expect("the client rectangle");
-        client.bottom - client.top
     }
 }
 
@@ -6559,74 +6482,6 @@ fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
             ("Uk, told", group),
         ],
         "181.1: the address follows the language of the window, and moves when it moves"
-    );
-}
-
-/// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
-/// pages of the site too.** «От автора» opened hidden out of the templates of the built product and
-/// asked by the door of the task which pages «Открыть страницу загрузки» and the name of the program
-/// would open — the very calls `perform` reads them by. Built in Russian, the Russian pages; the
-/// language moved to English and [`letters::language_changed`] told the window, the pages under
-/// `/en/`; Ukrainian, its own under `/uk/` since stage E112 (Q-206-1); Kazakh, the Russian ones
-/// again (181.33 п. 2, 202.6).
-///
-/// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
-/// the window shows.
-#[cfg(feature = "testing")]
-#[test]
-fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
-    let _guard = with_product_strings();
-
-    settings::set_ui_language(Language::Ru);
-
-    let author = HiddenWindow::open("0.83.0");
-    let pages = |window: &HiddenWindow| {
-        letters::testing::site_pages(window.window).expect("a window of `letters`")
-    };
-
-    let mut seen = Vec::new();
-
-    seen.push(("built in Ru", pages(&author)));
-
-    // The control: the language moved and nobody told the window.
-    settings::set_ui_language(Language::En);
-    seen.push(("En, not told", pages(&author)));
-
-    letters::language_changed(author.owner);
-    seen.push(("En, told", pages(&author)));
-
-    settings::set_ui_language(Language::Uk);
-    letters::language_changed(author.owner);
-    seen.push(("Uk, told", pages(&author)));
-
-    settings::set_ui_language(Language::Kk);
-    letters::language_changed(author.owner);
-    seen.push(("Kk, told", pages(&author)));
-
-    settings::set_ui_language(Language::Ru);
-
-    println!("{seen:#?}");
-
-    let russian = (letters::links::DOWNLOAD_URL, letters::links::PROGRAM_URL);
-    let english = (
-        letters::links::DOWNLOAD_URL_EN,
-        letters::links::PROGRAM_URL_EN,
-    );
-    let ukrainian = (
-        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk",
-        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk",
-    );
-
-    assert_eq!(
-        seen,
-        [
-            ("built in Ru", russian),
-            ("En, not told", russian),
-            ("En, told", english),
-            ("Uk, told", ukrainian),
-            ("Kk, told", russian),
-        ],
-        "181.33: the pages follow the language of the window, and move when it moves"
     );
 }
 
@@ -8131,148 +7986,6 @@ fn cell_of(face: i32) -> i32 {
     }
 }
 
-/// **The model of «От автора» IS the live window — задача T-83-2, the known answer.**
-///
-/// The model that counts the tallest window at every face has to be held against the window it
-/// stands for before anything is believed of it (the lesson of Э81: the one instrument worth
-/// trusting at once was the one held against a known answer). The known answer is the live
-/// «От автора» itself — built hidden through the measuring door, laid out by the product's own
-/// `WM_INITDIALOG` — in all fourteen languages at the template's face.
-///
-/// ⚠ The numbers of П6 in the ТЗ (789 / 827 / 846) are those of Э81's model **before** T-81-6 made
-/// the head the template's; on `e82` the window is two pixels taller: 791 / 829 (measured here).
-///
-/// ⭐ Since задача T-98-2 the window is held in **every state FR-102 gives it** (Э83-Б-1, решение
-/// 166.2): the first day, as the product opens it; and a machine whose feed is live — the quiet
-/// line about the file with «доступна» in the line of the version, and the switch with its sentence
-/// with «это последняя» — «Последние письма» in the row both times.
-#[cfg(feature = "testing")]
-#[test]
-fn the_model_of_the_author_window_is_the_live_window() {
-    let _guard = with_product_strings();
-    let mut differences = Vec::new();
-
-    for language in Language::shipped() {
-        settings::set_ui_language(language);
-
-        // ⚠ Stage E108, решение 202.40: the step of a window goes by its language now, and on the
-        // screen of this machine Tamil and Malayalam open below ten points — the model counts at
-        // the template's face, so the live window is held at ten points too.
-        let words = AuthorWords::now("0.83.0");
-        let live =
-            settings::testing::with_font_step(10, || HiddenWindow::open("0.83.0").client_height());
-        let model = author_client_by_model(13, 96, &words);
-
-        println!("{language:?}: live {live} px, model {model} px");
-
-        if live != model {
-            differences.push(format!("{language:?}: live {live}, model {model}"));
-        }
-
-        let feed = PublishedFeed::now();
-
-        for (switch, version) in [(false, BEHIND_THE_FEED), (true, PAST_THE_FEED)] {
-            let view = fed_view(switch, 9, version, &feed);
-            let model = author_client_by_model(13, 96, &AuthorWords::of(view.clone()));
-            let live = settings::testing::with_font_step(10, || {
-                HiddenWindow::author(view).client_height()
-            });
-
-            println!("{language:?}, feed live, switch {switch}: live {live} px, model {model} px");
-
-            if live != model {
-                differences.push(format!(
-                    "{language:?}, switch {switch}: live {live}, model {model}"
-                ));
-            }
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    assert!(
-        differences.is_empty(),
-        "the model of layout_author is not the window: {differences:?}"
-    );
-}
-
-/// **The model of «От автора» IS the live window at every face a test can reach — задача T-83-3.**
-///
-/// The debug substitution of the step opens the window at 8…15 pt, and at 96 DPI those are the
-/// faces 11, 12, 13, 15, 16, 17, 19 and 20 px — every face the rule may answer with except 14 and
-/// 18, which a 96-DPI screen cannot make and the model alone gives. Fourteen languages × eight
-/// faces: the model must be the window at all of them, and the window must have been given the face
-/// the step asks for (C7 through the product's own road — `put_font_step` in `show_modeless_dialog`).
-///
-/// ⚠ «Красное до»: without the substitution every one of these windows opens at 13 px.
-///
-/// ⭐ Since задача T-98-2 in the three states of [`the_model_of_the_author_window_is_the_live_window`]
-/// — the first day and both states of FR-102 with the feed live (Э83-Б-1).
-#[cfg(feature = "testing")]
-#[test]
-fn the_model_of_the_author_window_is_the_live_window_at_every_reachable_face() {
-    let _guard = with_product_strings();
-    let mut differences = Vec::new();
-    let mut measured = 0;
-
-    for language in Language::shipped() {
-        settings::set_ui_language(language);
-
-        let feed = PublishedFeed::now();
-        let fed = [(false, BEHIND_THE_FEED), (true, PAST_THE_FEED)]
-            .map(|(switch, version)| fed_view(switch, 9, version, &feed));
-        // `(what, the view the window is opened with — `None` for the product's own road)`.
-        let states = [
-            ("first day", None),
-            ("quiet line", Some(fed[0].clone())),
-            ("switch", Some(fed[1].clone())),
-        ];
-
-        for (what, view) in states {
-            let words = view
-                .clone()
-                .map_or_else(|| AuthorWords::now("0.83.0"), AuthorWords::of);
-
-            for step in 8..=15_u16 {
-                let face = theme::face_at(step, 96);
-                let (live, font) = settings::testing::with_font_step(step, || {
-                    let window = view
-                        .clone()
-                        .map_or_else(|| HiddenWindow::open("0.83.0"), HiddenWindow::author);
-                    (window.client_height(), window.dialog_font_height())
-                });
-                let model = author_client_by_model(face, theme::drawing_dpi_at(96, step), &words);
-                measured += 1;
-
-                if font != -face {
-                    differences.push(format!(
-                        "{language:?} {what} {step} pt: the window got lfHeight {font}, not \
-                         -{face} (C7)"
-                    ));
-                } else if live != model {
-                    differences.push(format!(
-                        "{language:?} {what} {step} pt ({face} px): live {live}, model {model}"
-                    ));
-                }
-            }
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    println!("{measured} windows measured, differences: {differences:?}");
-
-    assert_eq!(
-        measured,
-        Language::shipped().count() * 3 * 8,
-        "every language the build offers, three states, eight faces"
-    );
-    assert!(
-        differences.is_empty(),
-        "the model of layout_author is not the window at every face: {differences:?}"
-    );
-}
-
 /// The faces the rule may answer with, at the least — every face from the floor up to the 40 px
 /// of ten points at 300 % (задача T-83-2; the ТЗ names 11…20 «как минимум»). Custom scaling makes
 /// any DPI, so every whole face in between is one some screen can ask for.
@@ -8659,8 +8372,9 @@ fn the_rule_keeps_its_floor_and_its_ceiling() {
 /// The dialog templates of the program — `IDD_SETTINGS` … `IDD_WIZARD` — with the offset of
 /// their `pointsize`, measured by the probe of the stage (`scratchpad-E83\probe-premises-e83.log`).
 /// Six then; `IDD_ABOUT` (201) went when «О программе» moved to the shell (FR-92а), `IDD_LETTER` and
-/// `IDD_LETTERS_LIST` (202, 203) when the letters did (T-120-16).
-const TEMPLATES: [(u16, usize); 3] = [(200, 82), (204, 50), (205, 62)];
+/// `IDD_LETTERS_LIST` (202, 203) when the letters did (T-120-16), `IDD_AUTHOR` (204) when «От
+/// автора» did (T-120-17).
+const TEMPLATES: [(u16, usize); 2] = [(200, 82), (205, 62)];
 
 /// **The font block of the six templates is found where the dialog manager reads it — задача
 /// T-83-3.**
@@ -9176,74 +8890,6 @@ fn the_drawing_dpi_follows_the_step_of_the_font() {
     assert_eq!(theme::drawing_dpi_at(144, 7), 100);
 }
 
-/// **The live window draws by its step — задача T-83-4, the check of the function on a window.**
-///
-/// «От автора», hidden, at ten points and at eight on this 96-DPI machine: at ten its drawing DPI
-/// is the screen's own; at eight it is 96 × 8 / 10, and the corner radius, the frame, the pitch of
-/// a line and the logo are `scaled(x, 76)` — the logo is read off the window itself, the size of its
-/// icon control after `STM_SETICON`.
-///
-/// ⚠ «Красное до»: the drawing of `e82` ignores the step — 96 and a 40 px logo at eight points.
-#[cfg(feature = "testing")]
-#[test]
-fn the_live_window_draws_by_its_step() {
-    use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
-
-    let _guard = with_product_strings();
-    settings::set_ui_language(Language::Ru);
-
-    let at = |step: u16| -> (i32, i32, i32) {
-        settings::testing::with_font_step(step, || {
-            let window = HiddenWindow::open("0.83.0");
-            // SAFETY: the window is live for this block; the DC is released at once.
-            let (screen, drawing) = unsafe {
-                let dc = GetDC(Some(window.window));
-                let answer = (theme::dc_dpi(dc), theme::drawing_dpi(dc));
-                ReleaseDC(Some(window.window), dc);
-                answer
-            };
-            let logo = window.control_rect(1260);
-            (screen, drawing, logo.right - logo.left)
-        })
-    };
-
-    let (screen, at_ten, logo_at_ten) = at(10);
-    let (_, at_eight, logo_at_eight) = at(8);
-
-    println!(
-        "screen {screen} DPI; drawing at 10 pt {at_ten}, logo {logo_at_ten} px; at 8 pt {at_eight}, \
-         logo {logo_at_eight} px"
-    );
-
-    assert_eq!(
-        at_ten, screen,
-        "at ten points our drawing is the screen's own DPI"
-    );
-    assert_eq!(
-        at_eight,
-        screen * 8 / 10,
-        "at eight points it is the screen's × 8 / 10"
-    );
-    assert_eq!(
-        logo_at_eight,
-        theme::scaled(56, screen * 8 / 10),
-        "the logo is scaled by the step"
-    );
-    assert_eq!(logo_at_ten, theme::scaled(56, screen));
-
-    for (what, length) in [
-        ("the corner radius", 6),
-        ("the frame", 1),
-        ("a line's pitch", 23),
-    ] {
-        assert_eq!(
-            theme::scaled(length, at_eight),
-            theme::scaled(length, screen * 8 / 10),
-            "{what} at eight points"
-        );
-    }
-}
-
 /// **⛔⛔ The paint buffer draws by the step of the window it stands for — задача T-83-6, находка
 /// 143б живой приёмки `e83`.**
 ///
@@ -9433,135 +9079,6 @@ fn the_record_of_a_paint_buffer_lives_as_long_as_the_buffer() {
     }
 }
 
-/// **⛔⛔ The paragraphs of «От автора» are drawn inside their rectangles at every step — задача
-/// T-83-6, находка 143б.**
-///
-/// The layout gives a paragraph the height of its lines at the pitch of the body face; the drawing
-/// sets it in the window's text face at the model pitch of a label, `scaled(23, drawing DPI)`, which
-/// the model refuses whenever it is not larger than the face's own line (В-6). Drawn through the
-/// buffer at the screen's DPI, the model pitch came out larger than the body's pitch at the steps
-/// of 150 % and 175 %, and the last line was cut: at 150 %, 94 px of drawing in 83 px of room.
-///
-/// The live window, hidden, in the fourteen locales at the five steps on this screen; each
-/// paragraph drawn in the text face with the label's own pitch is measured **the way its drawing
-/// measures it** — through a `PaintBuffer` made for the control's own DC, by `theme::measure_label`,
-/// the documented twin of the painter — and must not ask for more than the rectangle the layout gave
-/// it.
-///
-/// ⚠ At 96 DPI the steps 7 and 6 are faces of 9 and 8 px, which the rule never shows on this screen
-/// — but the error is a ratio, screen / drawing = 10 / step, and 96 at step 7 is the ratio of 144 at
-/// step 7: the lab stands for 150 %. «Красное до» (`e83`): cut at 7 and 6 points.
-#[cfg(feature = "testing")]
-#[test]
-fn the_paragraphs_of_the_author_window_are_drawn_inside_their_rectangles() {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::Graphics::Gdi::{
-        CreateFontIndirectW, DeleteObject, GetDC, GetObjectW, HGDIOBJ, ReleaseDC, SelectObject,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GWL_STYLE, GetDlgItem, GetWindowLongW, GetWindowTextW, SendMessageW, WM_GETFONT, WS_VISIBLE,
-    };
-
-    /// What «От автора» draws in the text face at the label's own pitch — `letters::label_face`
-    /// answers `(faces.text, None)` for each of them.
-    const PARAGRAPHS: [(&str, i32); 6] = [
-        ("IDC_AUTHOR_TEXT", 1264),
-        ("IDC_NEWS_ABOUT", 1268),
-        ("IDC_NEWS_STATE", 1269),
-        ("IDC_NEWS_VERSION", 1270),
-        ("IDC_NEWS_FILE_ONLY", 1273),
-        ("IDC_FEEDBACK_TEXT", 1277),
-    ];
-
-    let _guard = with_product_strings();
-    let mut cut = Vec::new();
-    let mut measured = 0_usize;
-
-    for step in [10_u16, 9, 8, 7, 6] {
-        for language in Language::shipped() {
-            settings::set_ui_language(language);
-
-            settings::testing::with_font_step(step, || {
-                let window = HiddenWindow::open("0.83.0");
-
-                // SAFETY: the window and its children are live for this block; the face made here
-                // is selected out of every DC before it is deleted, and every DC is released.
-                unsafe {
-                    let font = SendMessageW(window.window, WM_GETFONT, None, None);
-                    let mut base = LOGFONTW::default();
-                    let _ = GetObjectW(
-                        HGDIOBJ(font.0 as *mut _),
-                        i32::try_from(size_of::<LOGFONTW>()).expect("small"),
-                        Some(std::ptr::from_mut(&mut base).cast()),
-                    );
-                    let text_face = CreateFontIndirectW(&theme::smoothed_logfont(base));
-
-                    for (name, control) in PARAGRAPHS {
-                        let Ok(child) = GetDlgItem(Some(window.window), control) else {
-                            continue;
-                        };
-
-                        if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
-                            continue;
-                        }
-
-                        let rect = window.control_rect(control);
-                        let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
-                        let mut text = [0_u16; 1024];
-                        let copied = usize::try_from(GetWindowTextW(child, &mut text)).unwrap_or(0);
-
-                        if copied == 0 || width <= 0 || height <= 0 {
-                            continue;
-                        }
-
-                        let mut caption = text[..copied].to_vec();
-                        let dc = GetDC(Some(child));
-                        let area = RECT {
-                            left: 0,
-                            top: 0,
-                            right: width,
-                            bottom: height,
-                        };
-                        let asked = theme::PaintBuffer::for_rect(dc, &area)
-                            .map(|buffer| {
-                                let previous = SelectObject(buffer.dc(), text_face.into());
-                                let asked =
-                                    theme::measure_label(buffer.dc(), width, &mut caption, None);
-                                SelectObject(buffer.dc(), previous);
-                                asked
-                            })
-                            .expect("a buffer for the paragraph");
-                        ReleaseDC(Some(child), dc);
-                        measured += 1;
-
-                        if asked > height {
-                            cut.push(format!(
-                                "{step} pt, {language:?}, {name}: the drawing asks {asked} px in \
-                                 {height}"
-                            ));
-                        }
-                    }
-
-                    let _ = DeleteObject(text_face.into());
-                }
-            });
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
-
-    println!("{measured} paragraphs measured; cut: {cut:?}");
-
-    assert!(
-        measured >= 5 * 14 * 4,
-        "every step, every locale, at least the four paragraphs that always show: {measured}"
-    );
-    assert!(
-        cut.is_empty(),
-        "⛔⛔ 143б: a paragraph of «От автора» is drawn past its rectangle — {cut:?}"
-    );
-}
-
 /// **The pitch the drawing takes fits the room the layout gives, on every screen of the rule —
 /// задача T-83-6, находка 143б.** The model of the two halves, at the real faces.
 ///
@@ -9727,72 +9244,6 @@ fn a_grown_window_moves_only_when_it_would_leave_the_air() {
 
     // A window taller than the work area goes to its top, never above it.
     assert_eq!(settings::grown_window_top(-40, 1200, 0, 1008), 0);
-}
-
-/// **The live «От автора» stands where решение 143.10 puts it — задача T-83-3.**
-///
-/// At the template's ten points the grown window stays where the manager centred it for its
-/// template — exactly; at fifteen points on this 96-DPI machine (the debug substitution) the greek
-/// window no longer keeps the air where it stands and is put in the middle of the work area.
-#[cfg(feature = "testing")]
-#[test]
-fn the_live_author_window_stands_where_the_rule_expects() {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-
-    let _guard = with_product_strings();
-    settings::set_ui_language(Language::El);
-
-    for step in [10_u16, 11, 15] {
-        let face = theme::face_at(step, 96);
-        let (outer, client, work) = settings::testing::with_font_step(step, || {
-            let window = HiddenWindow::open("0.83.0");
-            let mut outer = RECT::default();
-            // SAFETY: the window is live for this block; the buffers are locals.
-            let work = unsafe {
-                let _ = GetWindowRect(window.window, &mut outer);
-                let monitor = MonitorFromWindow(window.window, MONITOR_DEFAULTTONEAREST);
-                let mut info = MONITORINFO {
-                    cbSize: u32::try_from(size_of::<MONITORINFO>()).expect("small"),
-                    ..Default::default()
-                };
-                let _ = GetMonitorInfoW(monitor, &mut info);
-                info.rcWork
-            };
-            (outer, window.client_height(), work)
-        });
-
-        let frame = (outer.bottom - outer.top) - client;
-        let template = mul_div(345, cell_of(face), 8) + frame;
-        let centred = work.top + ((work.bottom - work.top) - template) / 2;
-        let expected =
-            settings::grown_window_top(centred, outer.bottom - outer.top, work.top, work.bottom);
-
-        println!(
-            "El {step} pt ({face} px): the window {} px stands at {} (the template's centre {centred}, \
-             the rule's place {expected}); {} px below",
-            outer.bottom - outer.top,
-            outer.top,
-            work.bottom - outer.bottom
-        );
-
-        assert_eq!(
-            outer.top, expected,
-            "El {step} pt: the place of решение 143.10"
-        );
-
-        if step == 10 {
-            assert_eq!(
-                outer.top, centred,
-                "at the template's ten points the window must stand where it always stood"
-            );
-        }
-    }
-
-    settings::set_ui_language(Language::Ru);
 }
 
 /// **The monitor is measured before the window exists — задача T-83-3, посылка П5.**
@@ -13311,10 +12762,10 @@ fn every_dialog_of_the_program_asks_for_the_same_font() {
 
     assert_eq!(
         fonts.len(),
-        3,
-        "три окна — настройки, «От автора», мастер («О программе» ушло на оболочку, FR-92а; письма \
-         и «Последние письма» — T-120-16); если шаблонов стало больше, этот сторож обязан узнать \
-         об этом первым"
+        2,
+        "два окна — настройки и мастер («О программе» ушло на оболочку, FR-92а; письма и \
+         «Последние письма» — T-120-16; «От автора» — T-120-17); если шаблонов стало больше, этот \
+         сторож обязан узнать об этом первым"
     );
 
     let first = fonts[0];
@@ -27364,12 +26815,12 @@ fn the_program_asks_for_something_to_be_opened_in_exactly_one_place() {
 
 /// The windows of the old kind that became one family in stage Э81 — решение 142.2 п. 2 и п. 3.
 /// Five then; «О программе» has left the templates for the shell (FR-92а), the letters and «Последние
-/// письма» too (T-120-16).
+/// письма» too (T-120-16), «От автора» too (T-120-17).
 ///
 /// The settings dialog is deliberately absent: it is 430 units wide by the owner's word and its
 /// controls keep their own columns. Its width is held below all the same, so that «the four came
 /// to 256» cannot quietly become «all six did».
-const FAMILY_OF_E81: [&str; 2] = ["IDD_AUTHOR", "IDD_WIZARD"];
+const FAMILY_OF_E81: [&str; 1] = ["IDD_WIZARD"];
 
 /// One `DIALOGEX` of `app.rc`: its name, its `(cx, cy)`, and every control statement inside it
 /// as `(statement, x, y, cx, cy)`.
@@ -27511,10 +26962,10 @@ fn what_breaks_the_family_of_e81(text: &str) -> Vec<String> {
     let mut broken = Vec::new();
 
     // Six in stage Э81; five since «О программе» moved to the shell (FR-92а); three since the letters
-    // and «Последние письма» did (T-120-16).
-    if dialogs.len() != 3 {
+    // and «Последние письма» did (T-120-16); two since «От автора» did (T-120-17).
+    if dialogs.len() != 2 {
         broken.push(format!(
-            "app.rc declares {} dialogs, not three",
+            "app.rc declares {} dialogs, not two",
             dialogs.len()
         ));
     }
@@ -27615,11 +27066,12 @@ fn the_five_windows_of_the_family_share_one_width_and_one_margin() {
     );
 
     // Контроль прибора, первый — **отрицательный**: the resource as `e80` had it. Three windows
-    // were 191 units wide and one 246 — «От автора» stands for them here, the about template
-    // being gone; a sweep that passes this text is measuring nothing.
+    // were 191 units wide and one 246 — the wizard stands for them here, the about template and
+    // «От автора» being gone (FR-92а, T-120-17); a sweep that passes this text is measuring
+    // nothing.
     let of_e80 = text.replace(
-        "IDD_AUTHOR DIALOGEX 0, 0, 256,",
-        "IDD_AUTHOR DIALOGEX 0, 0, 246,",
+        "IDD_WIZARD DIALOGEX 0, 0, 256,",
+        "IDD_WIZARD DIALOGEX 0, 0, 246,",
     );
 
     assert_ne!(
@@ -27781,8 +27233,8 @@ fn every_window_of_the_program_carries_the_same_bottom_row() {
     let mut broken = Vec::new();
 
     // «О программе» has left the templates for the shell (FR-92а), and the letters and «Последние
-    // письма» too (T-120-16): their row of buttons is the passport's.
-    for name in ["IDD_SETTINGS", "IDD_AUTHOR", "IDD_WIZARD"] {
+    // письма» too (T-120-16), «От автора» too (T-120-17): their row of buttons is the passport's.
+    for name in ["IDD_SETTINGS", "IDD_WIZARD"] {
         let dialog = dialogs
             .iter()
             .find(|dialog| dialog.name == name)
@@ -27834,15 +27286,15 @@ fn every_window_of_the_program_carries_the_same_bottom_row() {
 
     // Контроль прибора — **мутант**: the row of one window pushed one unit off the bottom, which
     // is the smallest thing this rule forbids. A guard that passes it is measuring nothing.
-    let author = dialogs_of_the_resource(&text)
+    let wizard = dialogs_of_the_resource(&text)
         .into_iter()
-        .find(|dialog| dialog.name == "IDD_AUTHOR")
-        .expect("app.rc must declare IDD_AUTHOR");
+        .find(|dialog| dialog.name == "IDD_WIZARD")
+        .expect("app.rc must declare IDD_WIZARD");
 
     let moved = RcDialog {
-        name: author.name.clone(),
-        size: (author.size.0, author.size.1 + 1),
-        controls: author.controls.clone(),
+        name: wizard.name.clone(),
+        size: (wizard.size.0, wizard.size.1 + 1),
+        controls: wizard.controls.clone(),
     };
 
     assert_ne!(
@@ -28177,9 +27629,9 @@ fn the_authors_signature_left_the_resource_with_all_fourteen_translations() {
 /// the narrower `chip_overhang`. An instrument that errs towards «taller» is the safe one for
 /// choosing a height.
 ///
-/// ⛔ **«Два других — нет» is an assertion and not forgetfulness.** «От автора» and «Последние
-/// письма» compute their own height from their content (решение 142.2 п. 8), so a template height
-/// equal to the typical one would mean somebody had quietly made them typical too.
+/// «Два других» — «От автора» and «Последние письма», which computed their own height from their
+/// content (решение 142.2 п. 8) — are windows of the shell now (T-120-16, T-120-17): what stays
+/// is the wizard at the typical height.
 #[test]
 fn three_windows_share_one_height_and_two_keep_their_own() {
     /// The height of решение 142.2 п. 8 — a literal, as everywhere in these template tests.
@@ -28210,62 +27662,10 @@ fn three_windows_share_one_height_and_two_keep_their_own() {
         );
     }
 
-    // «Последние письма» counted its own until T-120-16 moved it to the shell.
-    {
-        let name = "IDD_AUTHOR";
-        println!("{name}: {} units tall — by its content", height(name));
-
-        assert_ne!(
-            height(name),
-            TYPICAL,
-            "{name} counts its own height from what it says, and a template height equal to the \
-             typical one would mean somebody had made it typical after all"
-        );
-    }
-
-    // ⭐⭐ **And it really does count it** — решение 142.3. The count is the guard: one caller,
-    // «От автора», and no second (the second, `layout_list`, went with its window in T-120-16).
-    let letters = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src")
-            .join("letters.rs"),
-    )
-    .expect("src\\letters.rs must be readable")
-    .replace("\r\n", "\n");
-
-    let body_of = |needle: &str| -> String {
-        let at = letters
-            .find(needle)
-            .unwrap_or_else(|| panic!("src\\letters.rs must hold «{needle}»"));
-        let rest = &letters[at..];
-        let end = rest
-            .find("\n}")
-            .expect("a function closes with a brace of its own");
-        rest[..end].to_owned()
-    };
-
-    {
-        let what = "unsafe fn layout_author(";
-        assert!(
-            body_of(what).contains("resize_client("),
-            "«{what}» must give its window the height its content asks for"
-        );
-    }
-
-    assert!(
-        !body_of("unsafe fn layout_wizard(").contains("resize_client("),
-        "the wizard must not resize itself — a window that grew under the mouse as «Далее» was \
-         pressed is the very thing its template forbids"
-    );
-
-    // Контроль прибора: the reading must refuse a body that lost the call, or the three
-    // assertions above hold of nothing.
-    let without = body_of("unsafe fn layout_author(").replace("resize_client(", "let _ = (");
-
-    assert!(
-        !without.contains("resize_client("),
-        "the control must differ from the body in exactly the way the assertions look at"
-    );
+    // «От автора» and «Последние письма» counted their own height from their content until
+    // T-120-16 and T-120-17 moved them to the shell (решение 142.3). The guard that the wizard
+    // does not resize itself read `resize_client(`, which went with `layout_author` (T-120-17);
+    // the wizard goes to the shell with T-120-19.
 
     // ⚠ **Мутант:** the typical one moved by a single unit, which is the smallest thing this rule
     // forbids. A guard that passes it is measuring nothing.

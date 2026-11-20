@@ -4549,6 +4549,77 @@ fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
     );
 }
 
+/// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
+/// pages of the site too.** «От автора», a window of the shell since T-120-17 (the test moved here
+/// from `tests\settings.rs`, where it opened the dialog `IDD_AUTHOR`), opened hidden and asked by
+/// the door of the task which pages «Открыть страницу загрузки» and the address under the panda
+/// would open — by the language `letters::act` chooses them by. Built in Russian, the Russian
+/// pages; English after [`letters::language_changed`], the pages under `/en/`; Ukrainian, its own
+/// under `/uk/` (Q-206-1); Kazakh, the Russian ones again (181.33 п. 2, 202.6).
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_author_hidden(owner.0, HMODULE::default(), "0.83.0")
+        .expect("«От автора» must open");
+    let now = || {
+        let window = letters::testing::author_window().expect("«От автора» is open");
+        let pages = letters::testing::site_pages(window).expect("a window of `letters`");
+        (window, pages)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, pages) = now();
+    seen.push(("En, told", pages));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Kk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Kk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let russian = (links::DOWNLOAD_URL, links::PROGRAM_URL);
+    let english_pages = (links::DOWNLOAD_URL_EN, links::PROGRAM_URL_EN);
+    let ukrainian = (
+        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk",
+        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk",
+    );
+
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", russian),
+            ("En, not told", russian),
+            ("En, told", english_pages),
+            ("Uk, told", ukrainian),
+            ("Kk, told", russian),
+        ],
+        "181.33: the pages follow the language of the window, and move when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "«От автора» is built again in the new language"
+    );
+}
+
 /// **The pictures of C3 of T-120-16** — the four letters and «Последние письма» drawn in memory by
 /// the drawing of the shell itself (the layout and `elements::draw`, as a live window draws them):
 /// Russian straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080

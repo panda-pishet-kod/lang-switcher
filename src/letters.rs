@@ -5605,6 +5605,12 @@ pub mod testing {
         window_of(Kind::Letter)
     }
 
+    /// «От автора» open on this thread now — a new window after a change of language, which builds
+    /// it again (T-120-17).
+    pub fn author_window() -> Option<HWND> {
+        window_of(Kind::Author)
+    }
+
     /// [`super::language_changed`] with the windows of this module left hidden: the letter and the
     /// list it opens again in the new language are not shown on the screen of a test.
     pub fn language_changed_hidden(owner: HWND) {
