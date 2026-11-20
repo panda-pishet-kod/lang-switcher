@@ -289,3 +289,164 @@ fn the_memory_after_openings_of_the_about_window_with_parts_taken_away() {
         pump();
     }
 }
+
+/// The words Direct2D's debug layer writes to the debugger, caught inside the process: a debug string
+/// raises an exception a vectored handler sees first, with or without a debugger.
+mod debug_words {
+    use std::ffi::c_void;
+    use std::sync::Mutex;
+
+    #[repr(C)]
+    struct Record {
+        code: u32,
+        flags: u32,
+        record: *mut Record,
+        address: *mut c_void,
+        parameters: u32,
+        information: [usize; 15],
+    }
+
+    #[repr(C)]
+    struct Pointers {
+        record: *mut Record,
+        context: *mut c_void,
+    }
+
+    #[link(name = "kernel32")]
+    // SAFETY: the documented exports of kernel32, same signatures.
+    unsafe extern "system" {
+        fn AddVectoredExceptionHandler(
+            first: u32,
+            handler: unsafe extern "system" fn(*mut Pointers) -> i32,
+        ) -> *mut c_void;
+        fn RemoveVectoredExceptionHandler(handle: *mut c_void) -> u32;
+        fn OutputDebugStringW(text: *const u16);
+    }
+
+    const PRINT_ANSI: u32 = 0x4001_0006;
+    const PRINT_WIDE: u32 = 0x4001_000A;
+
+    static WORDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    unsafe extern "system" fn catch(pointers: *mut Pointers) -> i32 {
+        // SAFETY: the system hands a live record for the exception being dispatched; the string of
+        // a debug print lives across the dispatch.
+        unsafe {
+            let record = &*(*pointers).record;
+            let (length, address) = (record.information[0], record.information[1]);
+            let words = match record.code {
+                PRINT_WIDE => Some(String::from_utf16_lossy(std::slice::from_raw_parts(
+                    address as *const u16,
+                    length.saturating_sub(1),
+                ))),
+                PRINT_ANSI => Some(
+                    String::from_utf8_lossy(std::slice::from_raw_parts(
+                        address as *const u8,
+                        length.saturating_sub(1),
+                    ))
+                    .into_owned(),
+                ),
+                _ => None,
+            };
+            if let Some(words) = words
+                && let Ok(mut all) = WORDS.lock()
+            {
+                all.push(words);
+            }
+        }
+        0
+    }
+
+    /// Catches the debug strings of the process until the value goes.
+    pub struct Catch(*mut c_void);
+
+    impl Catch {
+        pub fn new() -> Self {
+            // SAFETY: a handler of this module, first in the chain.
+            Self(unsafe { AddVectoredExceptionHandler(1, catch) })
+        }
+
+        /// A debug string of the test's own — the positive control of the catch.
+        pub fn say(words: &str) {
+            let wide: Vec<u16> = words.encode_utf16().chain([0]).collect();
+            // SAFETY: a NUL-terminated string that lives across the call.
+            unsafe { OutputDebugStringW(wide.as_ptr()) };
+        }
+
+        pub fn words() -> Vec<String> {
+            WORDS.lock().map(|all| all.clone()).unwrap_or_default()
+        }
+    }
+
+    impl Drop for Catch {
+        fn drop(&mut self) {
+            // SAFETY: the handle the call above answered.
+            unsafe { RemoveVectoredExceptionHandler(self.0) };
+        }
+    }
+}
+
+/// **What Direct2D's debug layer says of «О программе»'s picture** — the series of the picture of the
+/// panel with the debug layer on (`LANGSW_TESTING_D2D_DEBUG`, set here): its words about objects left
+/// alive, caught in the process and printed. Needs the Graphics Tools of Windows (the stand
+/// `lab-gfx`, 208.181); without them the layer says nothing — the positive control of the catch is
+/// printed either way.
+#[test]
+#[ignore = "an instrument: run on purpose with --ignored --nocapture"]
+fn the_debug_layer_names_what_the_picture_leaves() {
+    // SAFETY: the variable of this test process, set before any window of it.
+    unsafe { std::env::set_var("LANGSW_TESTING_D2D_DEBUG", "1") };
+    let catch = debug_words::Catch::new();
+    debug_words::Catch::say("ui_memory: the catch hears");
+    let rounds: usize = std::env::var("LANGSW_UI_MEMORY_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(200);
+    let (before, _) = memory();
+    for _ in 0..rounds {
+        let hwnd = host::create(
+            About {
+                language: Language::Ru,
+                key: "Pause".to_owned(),
+                theme: ThemeSetting::Light,
+            },
+            None,
+        )
+        .expect("the window of the shell");
+        // SAFETY: a window of this thread; the messages go straight to its procedure.
+        unsafe {
+            SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0)));
+            SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        pump();
+    }
+    let (after, _) = memory();
+    let words = debug_words::Catch::words();
+    drop(catch);
+
+    let mut counted: Vec<(String, usize)> = Vec::new();
+    for line in &words {
+        let line = line.trim().to_owned();
+        match counted.iter_mut().find(|(known, _)| *known == line) {
+            Some((_, count)) => *count += 1,
+            None => counted.push((line, 1)),
+        }
+    }
+    let mut text = format!(
+        "rounds {rounds}, private +{:.2} MB; debug strings {} ({} kinds)\r\n",
+        after - before,
+        words.len(),
+        counted.len()
+    );
+    for (line, count) in &counted {
+        text.push_str(&format!("{count:5} × {line}\r\n"));
+    }
+    println!("{text}");
+    if let Some(path) = std::env::var_os("LANGSW_UI_MEMORY") {
+        std::fs::write(path, &text).expect("the words written");
+    }
+    assert!(
+        words.iter().any(|line| line.contains("the catch hears")),
+        "the catch heard nothing, not even itself"
+    );
+}

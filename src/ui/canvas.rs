@@ -199,8 +199,19 @@ fn create_factory() -> WinResult<ID2D1Factory> {
     // SAFETY: `D2D1CreateFactory` has exactly the signature of [`CreateFactory`] (d2d1.h).
     let create: CreateFactory = unsafe { std::mem::transmute(export) };
 
+    // The testing build may ask for the debug layer (`LANGSW_TESTING_D2D_DEBUG`): it names the objects
+    // left alive when a factory goes — the instrument of the memory of a window (tests\ui_memory.rs).
+    // It needs the Graphics Tools of Windows; without them Direct2D says nothing.
+    #[cfg(feature = "testing")]
+    let debug_level = if std::env::var_os("LANGSW_TESTING_D2D_DEBUG").is_some() {
+        ::windows::Win32::Graphics::Direct2D::D2D1_DEBUG_LEVEL_INFORMATION
+    } else {
+        D2D1_DEBUG_LEVEL_NONE
+    };
+    #[cfg(not(feature = "testing"))]
+    let debug_level = D2D1_DEBUG_LEVEL_NONE;
     let options = D2D1_FACTORY_OPTIONS {
-        debugLevel: D2D1_DEBUG_LEVEL_NONE,
+        debugLevel: debug_level,
     };
     let mut raw = std::ptr::null_mut();
 
