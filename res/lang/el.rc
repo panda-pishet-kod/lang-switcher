@@ -173,13 +173,9 @@ BEGIN
     IDS_TOAST_TITLE         "Ένα γράμμα από τον δημιουργό"
     IDS_TOAST_NEWS          "Ο Πάντα έχει μια είδηση για σας. Κάντε κλικ για να τη διαβάσετε, θα πάρει ένα λεπτό."
     IDS_TOAST_THANKS        "Πέρασε ένας μήνας από την εγκατάσταση. Ο Πάντα θέλει να πει δυο λόγια. Κάντε κλικ για να τα διαβάσετε."
-    IDS_TOAST_UPDATE_TITLE  "Κυκλοφόρησε η έκδοση {0}"
-    IDS_TOAST_UPDATE        "Τρεις αλλαγές και ένας σύνδεσμος λήψης. Κάντε κλικ για να το διαβάσετε."
     IDS_ABOUT_AUTHOR        "Από τον δημιουργό…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · ενημέρωση · έχετε την {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · αδιάβαστο"
     IDS_ENTRY_READ_MARK     "{0} · διαβασμένο"
-    IDS_UPDATE_SUB          "έχετε την {0} · κυκλοφόρησε {1}"
     IDS_UPDATE_HOW          "Πώς γίνεται η ενημέρωση"
     IDS_UPDATE_STEP_1       "Πατήστε «Άνοιγμα της σελίδας λήψης»: εκεί βρίσκεται πάντα η τελευταία έκδοση."
     IDS_UPDATE_STEP_2       "Κατεβάστε το αρχείο LangSwitcher-setup.exe και εκτελέστε το."
@@ -278,6 +274,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x08, 0x01

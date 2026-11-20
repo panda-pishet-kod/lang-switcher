@@ -534,10 +534,10 @@ impl FeedView<'_> {
 ///    slot: FR-101 shows it «сразу», because the program has just been installed and the
 ///    person is looking at the screen they installed it from.
 /// 2. **A quiet moment.** Everything else is a knock at somebody's door.
-/// 3. **One letter a day.** The three remaining letters share one slot, and the slot is spent
+/// 3. **One letter a day.** The two remaining letters share one slot, and the slot is spent
 ///    by whichever of them is shown.
-/// 4. **«Обновление» → «Новость» → «Спасибо»** — the priority of FR-101, from the letter about
-///    the program the person is running to the letter about the author.
+/// 4. **«Новость» → «Спасибо»** — the priority of FR-101. «Обновление» left the schedule with
+///    task T-119-9: it opens only when the person asks for it (see the body).
 ///
 /// ⛔ **«Что нового» в этом порядке нет — решение 118.5 закрыло его ворота, решение 208.94 п. 4
 /// (задача T-119-8) убрало само письмо.**
@@ -559,12 +559,12 @@ pub fn due(
     // ⚠ **`last_seen_version` движется без письма** — её ведёт [`initialise`] на каждом старте;
     // по ней [`was_updated`] узнаёт первый старт после обновления.
 
-    // ⭐ TZ E104 §0 п. 20 (решение 189.18): since stage Э104 the updater installs a new version by
-    // itself, and «Обновление» is its fallback — due only once the feed has named the newer version
-    // for three days and this build is still the old one.
-    if update_is_due(state, version, feed) && update_fallback_is_open(state, today) {
-        return Some(Letter::Update);
-    }
+    // ⛔ **«Обновления» в расписании нет — задача T-119-9, решения 208.98, 208.99.** Since stage
+    // Э104 the updater installs a new version by itself, and «Обновление» is its fallback; since
+    // 1.8.0 it never comes by itself — no balloon, no dot, no window of its own accord. It opens
+    // only from the menu entry «Доступна версия X…» ([`pending`]) or from its row of «Последние
+    // письма» ([`list_entries`]), and both stand from the seventh day ([`update_fallback_is_open`]).
+    let _ = version;
 
     if let Some(id) = news_due(state, today, feed) {
         return Some(Letter::News(id));
@@ -577,13 +577,16 @@ pub fn due(
     None
 }
 
-/// Days the feed must have named a version newer than this build before the letter «Обновление»
-/// and the entry «Доступна версия X…» of FR-91 come — TZ E104 §0 п. 20, решение 189.18.
+/// Days the feed must have named a version newer than this build before the entry «Доступна
+/// версия X…» of FR-91 and the row of «Последние письма» come — the two doors of the letter
+/// «Обновление». **Seven since task T-119-9** (решение 208.98): three until then (TZ E104 §0 п. 20,
+/// решение 189.18).
 ///
-/// The updater reads the same feed once a day and installs in the next idle moment (§0 п. 14);
-/// three days of a newer version that is still not here is three days of an updater that could
-/// not, and only then does the program say so by itself.
-pub const UPDATE_FALLBACK_DAYS: i64 = 3;
+/// The updater reads the same feed once a day and installs in the next idle moment (§0 п. 14),
+/// and about 95 % of copies have the new version within two days (решение 208.96); a week of a
+/// newer version that is still not here is a week of an updater that could not, and only then
+/// does the program offer the way by hand — quietly, in the menu, never on its own (208.98).
+pub const UPDATE_FALLBACK_DAYS: i64 = 7;
 
 /// **Whether the fallback of an update is open** — §0 п. 20: the feed has named a version newer
 /// than this build ([`notice_update`]) for at least [`UPDATE_FALLBACK_DAYS`] days.
@@ -1899,13 +1902,15 @@ pub struct PlanContext<'a> {
 /// string tables, the state and the feed.
 pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
-        IDS_CLOSE, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD, IDS_HELLO_OK,
-        IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS,
-        IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
-        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
-        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_PARA,
-        IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1,
-        IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_UPDATE_SUB, format_text, text,
+        IDS_CLOSE, IDS_FALLBACK_NOTICE, IDS_FALLBACK_REPEATS, IDS_FALLBACK_SUB, IDS_FALLBACK_TITLE,
+        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_HELLO_DEMO_CAP, IDS_HELLO_LEAD,
+        IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3,
+        IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT,
+        IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON,
+        IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD,
+        IDS_THANKS_PARA, IDS_THANKS_SNOOZE, IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW,
+        IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2, IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR, format_text,
+        text,
     };
 
     let caption = text(IDS_LETTER_CAPTION);
@@ -1984,21 +1989,33 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
             let released = item.date.map(format_date).unwrap_or_default();
 
             if is_update {
-                // «Обновление» — FR-101 and the mock-up: the author's own words about what
-                // changed stand as the paragraph, and the panel under them is the program's:
-                // three steps, in words a person who has never installed anything can follow.
-                //
-                // The version in the heading is **the entry's own**: the author writes the
-                // heading, and the number in it is the one being announced. What the program
-                // adds underneath is the version running here and the day of the release.
+                // ⭐ «Обновление» — **the honest letter of task T-119-9** (решения 208.95–208.99,
+                // макет «Запасное письмо „Обновление“», третья версия). It opens only when the
+                // person asks — the menu entry or the row of «Последние письма», from the seventh
+                // day — so it says what happened: the program could not put the version in by
+                // itself. The heading is the program's; the release date stands as a date and not
+                // as a count of days; the author's own words about the release come under «Что
+                // нового в X»; the panel keeps its three steps, and its last row offers the wizard
+                // (208.97 п. 2). **The look of the letter is the old one** (ТЗ: the new one is the
+                // next stage's): the notice and the label go into the one paragraph, the line
+                // about the author into a fourth row of the panel, the button under it.
                 let announced = item.version.clone().unwrap_or_default();
+                let notice = format_text(IDS_FALLBACK_NOTICE, &[&announced, &released]);
+                let whats_new = format_text(IDS_FALLBACK_WHATS_NEW, &[&announced]);
 
                 return LetterPlan {
                     caption,
-                    title: item.title.clone(),
-                    subtitle: format_text(IDS_UPDATE_SUB, &[&context.version, &released]),
-                    para: item.text.clone(),
+                    title: text(IDS_FALLBACK_TITLE),
+                    subtitle: format_text(
+                        IDS_FALLBACK_SUB,
+                        &[&announced, &context.version, &released],
+                    ),
+                    para: format!("{notice}\n\n{whats_new}\n{}", item.text),
                     panel: text(IDS_UPDATE_HOW),
+                    panel_buttons: vec![Button::live(
+                        text(IDS_WRITE_TO_AUTHOR),
+                        Action::OpenWizard,
+                    )],
                     rows: vec![
                         Row {
                             marker: "1".to_owned(),
@@ -2011,6 +2028,10 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
                         Row {
                             marker: "3".to_owned(),
                             text: text(IDS_UPDATE_STEP_3),
+                        },
+                        Row {
+                            marker: String::new(),
+                            text: text(IDS_FALLBACK_REPEATS),
                         },
                     ],
                     left: Some(Button::live(text(IDS_CLOSE), Action::Close)),
@@ -5880,20 +5901,31 @@ pub struct Entry {
 /// The update first, when there is one worth showing, then the news the program keeps, newest
 /// first. Stage А never has anything to put here: the feed is stage Б, and an empty list is a
 /// window with its own line under it saying what it holds.
-pub fn list_entries(state: &Letters, version: &str, feed: FeedView<'_>) -> Vec<Entry> {
+///
+/// ⭐ **The update only from the seventh day — task T-119-9** (решение 208.99 п. 2): its row is
+/// the second door of the letter «Обновление», and it stands exactly when the first one, the menu
+/// entry of [`pending`], does — [`update_fallback_is_open`] on `today`; no day (`None`), no row.
+/// Its words are the letter's own: «Обновиться автоматически не получилось», «доступна X · у вас Y».
+pub fn list_entries(
+    state: &Letters,
+    today: Option<Date>,
+    version: &str,
+    feed: FeedView<'_>,
+) -> Vec<Entry> {
     use crate::settings::{
-        IDS_ENTRY_READ_MARK, IDS_ENTRY_UNREAD_MARK, IDS_ENTRY_UPDATE_MARK, format_text,
+        IDS_ENTRY_FALLBACK_MARK, IDS_ENTRY_READ_MARK, IDS_ENTRY_UNREAD_MARK, IDS_FALLBACK_TITLE,
+        format_text, text,
     };
 
     let mut entries = Vec::with_capacity(NEWS_KEPT + 1);
+    let fallback = today.is_some_and(|today| update_fallback_is_open(state, today));
 
-    if let Some(update) = update_is_pending(version, feed) {
+    if let Some(update) = update_is_pending(version, feed).filter(|_| fallback) {
+        let announced = update.version.as_deref().unwrap_or_default();
+
         entries.push(Entry {
-            title: update.title.clone(),
-            meta: format_text(
-                IDS_ENTRY_UPDATE_MARK,
-                &[&update.date.map_or_else(String::new, format_date), version],
-            ),
+            title: text(IDS_FALLBACK_TITLE),
+            meta: format_text(IDS_ENTRY_FALLBACK_MARK, &[announced, version]),
             excerpt: first_line(&update.text),
             news: None,
             unread: false,
@@ -7358,7 +7390,7 @@ pub fn open_list(owner: HWND) {
     let version = version_string();
     let mut state = fresh_state(owner, Kind::List);
 
-    state.entries = with_feed(|feed| list_entries(&stored, &version, feed));
+    state.entries = with_feed(|feed| list_entries(&stored, today(), &version, feed));
 
     open_window(owner, state, true);
 }
@@ -7431,6 +7463,14 @@ pub fn start_feed_read(owner: HWND, language: String, first: bool) {
             if first && answered {
                 FIRST_ANSWERED.store(true, Ordering::Release);
             }
+
+            // ⭐ Task T-119-9, решение 208.98: the good document is kept on disk as it came, so
+            // that a restart on the same day still has the feed ([`restore_feed`]). Written here,
+            // on the feed's own thread, and before the nudge — the UI thread never waits on a disk.
+            let answer = answer.map(|(fresh, document)| {
+                keep_feed_document(&document);
+                fresh
+            });
 
             if let Ok(mut box_of) = MAILBOX.lock() {
                 *box_of = answer;
@@ -7518,6 +7558,76 @@ pub fn take_feed() {
     }
 }
 
+/// **Keeps the good feed on disk** — task T-119-9, решение 208.98 (п. 2 of 208.97): the signed
+/// document as it came, [`settings::kept_feed_path`], written atomically by the body that writes
+/// the configuration. Called on the feed's own thread. A write that fails leaves the old copy and
+/// a line in the journal; nothing else depends on it.
+fn keep_feed_document(document: &str) {
+    let Some(path) = settings::kept_feed_path() else {
+        return;
+    };
+
+    if settings::write_bytes_to(&path, document.as_bytes()).is_err() {
+        crate::diag::record(
+            crate::diag::Operation::from_name("feed keep"),
+            crate::diag::OsCode::NONE,
+        );
+    }
+}
+
+/// **The kept feed, read again** — task T-119-9, решение 208.98: the document of
+/// [`keep_feed_document`] goes through [`feed::read_document`] with the author's keys **every
+/// time**, exactly as an answer of the site does. A file that is spoilt, cut, foreign or signed by
+/// anybody else is **no feed at all** (`None`), never half of one.
+pub fn kept_feed(document: &str, language: &str) -> Option<feed::Feed> {
+    feed::read_document(document, language, feed::verify_signature).ok()
+}
+
+/// **Puts the kept feed back after a start** — task T-119-9, решение 208.98: a restart on the
+/// same day, after the day's read, no longer loses the entry «Доступна версия X…», the letter and
+/// the row of «Последние письма» until tomorrow. On the UI thread, once, before the first tick.
+///
+/// Nothing when the feed is off (`[letters] feed = false`): a feed turned off shows nothing, kept
+/// or fresh. Only the published feed and the day the newer version was first named
+/// ([`notice_update`]) move; the day of the read does not — this is not a read.
+pub fn restore_feed() {
+    let stored = state_now();
+
+    if !stored.feed {
+        return;
+    }
+
+    let Some(document) =
+        settings::kept_feed_path().and_then(|path| std::fs::read_to_string(path).ok())
+    else {
+        return;
+    };
+
+    let Some(kept) = kept_feed(&document, settings::ui_language().tag()) else {
+        crate::diag::record(
+            crate::diag::Operation::from_name("kept feed refused"),
+            crate::diag::OsCode::NONE,
+        );
+        return;
+    };
+
+    publish_feed(kept.update.clone(), kept.news.clone());
+
+    if let Some(today) = today() {
+        let mut moved = stored;
+        let view = FeedView {
+            update: kept.update.as_ref(),
+            news: &kept.news,
+        };
+
+        if notice_update(&mut moved, &version_string(), view, today) {
+            update_state(move |state| *state = moved);
+        }
+    }
+
+    crate::tray::refresh_unread_mark();
+}
+
 /// **One tick of the schedule of FR-101** — the whole of what the letters do on their own.
 ///
 /// Called by the tray's clock: ninety seconds after the start (NFR-08) and once an hour after
@@ -7594,7 +7704,7 @@ pub fn tick(owner: HWND) {
 
     // The first knock: the balloon. Nothing is recorded as shown — the letter is due until it
     // is actually on the screen.
-    announce(letter, &version);
+    announce(letter);
     ANNOUNCED.with_borrow_mut(|slot| *slot = Some(letter));
 }
 
@@ -7656,43 +7766,29 @@ fn show(owner: HWND, letter: Letter, today: Date, version: &str, activate: bool)
 /// нужен живой трей. Теперь выбор — чистая функция, и `tests\letters.rs` перебирает по ней все
 /// письма разом. Письма «Что нового» с её стуком больше нет (решение 208.94 п. 4, T-119-8).
 pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
-    use crate::settings::{
-        IDS_TOAST_NEWS, IDS_TOAST_THANKS, IDS_TOAST_TITLE, IDS_TOAST_UPDATE, IDS_TOAST_UPDATE_TITLE,
-    };
+    use crate::settings::{IDS_TOAST_NEWS, IDS_TOAST_THANKS, IDS_TOAST_TITLE};
 
     match letter {
-        Letter::Welcome => None,
+        // ⛔ «Обновление» не стучит — задача T-119-9, решение 208.99 п. 1: уведомления Windows о нём
+        // нет, письмо открывает только сам человек (пункт меню, строка «Последних писем»).
+        Letter::Welcome | Letter::Update => None,
         Letter::Thanks => Some((IDS_TOAST_TITLE, IDS_TOAST_THANKS)),
         Letter::News(_) => Some((IDS_TOAST_TITLE, IDS_TOAST_NEWS)),
-        Letter::Update => Some((IDS_TOAST_UPDATE_TITLE, IDS_TOAST_UPDATE)),
     }
 }
 
 /// Knocks once with the balloon of the icon — FR-101, every letter but «Привет».
-fn announce(letter: Letter, version: &str) {
-    use crate::settings::{format_text, text};
+fn announce(letter: Letter) {
+    use crate::settings::text;
 
     // «Привет» is never announced: FR-101 shows it at once, and this function is not reached
-    // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks.
+    // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks —
+    // «Обновление» too, since task T-119-9 (it is not in the schedule at all).
     let Some((title_id, body_id)) = toast_strings(letter) else {
         return;
     };
 
-    let title = match letter {
-        // The version in the update's title is the one the **feed** named, not the one running.
-        Letter::Update => {
-            let newer = with_feed(|feed| {
-                update_is_pending(version, feed)
-                    .and_then(|item| item.version.clone())
-                    .unwrap_or_default()
-            });
-
-            format_text(title_id, &[&newer])
-        }
-        _ => text(title_id),
-    };
-
-    crate::tray::announce_letter(&title, &text(body_id));
+    crate::tray::announce_letter(&text(title_id), &text(body_id));
 }
 
 /// FR-94, решение 99.1 — the interface language changed while one of these windows was open.
@@ -12478,8 +12574,11 @@ pub mod feed {
     /// [`read_now`] does, and whether **any** address gave an HTTP answer, of any status — the
     /// moment the mark counts as sent. The program reads the feed through this function; the
     /// updater does not, and never sends the mark.
-    pub fn read_now_marked(language: &str, first: bool) -> (Option<Feed>, bool) {
-        read_from_marked(&super::links::FEED_URLS, language, first)
+    ///
+    /// ⭐ Task T-119-9: the good feed comes **with its document**, the signed text as the site gave
+    /// it — the program keeps it on disk ([`super::keep_feed_document`]).
+    pub fn read_now_marked(language: &str, first: bool) -> (Option<(Feed, String)>, bool) {
+        read_document_from_marked(&super::links::FEED_URLS, language, first)
     }
 
     /// ⭐ **The address of the feed with the mark of the first run** — stage E116, task T-116-12:
@@ -12492,6 +12591,18 @@ pub mod feed {
     /// [`read_from`] with the mark of the first run — stage E116, task T-116-12. See
     /// [`read_now_marked`].
     pub fn read_from_marked(urls: &[&str], language: &str, first: bool) -> (Option<Feed>, bool) {
+        let (good, answered) = read_document_from_marked(urls, language, first);
+
+        (good.map(|(feed, _)| feed), answered)
+    }
+
+    /// [`read_from_marked`] that also answers **the document** the good feed was read out of —
+    /// task T-119-9. One body for both: the text kept on disk is the text that was just checked.
+    pub fn read_document_from_marked(
+        urls: &[&str],
+        language: &str,
+        first: bool,
+    ) -> (Option<(Feed, String)>, bool) {
         let mut answered = false;
 
         for &url in urls {
@@ -12511,7 +12622,7 @@ pub mod feed {
             };
 
             match read_document(&text, language, verify_signature) {
-                Ok(feed) => return (Some(feed), answered),
+                Ok(feed) => return (Some((feed, text)), answered),
                 Err(refusal) => {
                     // SEC-07: the name of what went wrong and not a word of the document.
                     crate::diag::record(

@@ -2111,7 +2111,14 @@ thread_local! {
 /// menu the window manager refused to create. A shell that is not up yet is **not** one of
 /// them — that is FR-81's business, and it is reported rather than raised.
 pub fn attach(hwnd: HWND, instance: HINSTANCE) -> WinResult<Attachment> {
-    attach_at(hwnd, instance, settings::default_config_path())
+    let attachment = attach_at(hwnd, instance, settings::default_config_path())?;
+
+    // ⭐ Task T-119-9, решение 208.98: the feed kept by the last good read comes back before the
+    // first tick and before the first menu — the product's own start only: the tests that attach
+    // a tray of their own never read the `%APPDATA%` of the machine they run on.
+    crate::letters::restore_feed();
+
+    Ok(attachment)
 }
 
 /// The same, with the configuration read from `config_path` — task T-13-14.

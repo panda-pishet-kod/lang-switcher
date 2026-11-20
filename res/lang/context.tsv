@@ -37,6 +37,12 @@ IDS_HINT_OPEN	window in the corner / menu (drawn by the program)	-	the main butt
 IDS_MENU_WHATSNEW	window in the corner / menu (drawn by the program)	-	an entry of the menu of the tray icon, one line	{0}: the version installed, e.g. 1.8.0	E119 (T-119-7): stands in the menu for a week after an update; opens the window «Обновлено» again or the page of the changes
 IDS_UPDATES_SWITCH	window in the corner / menu (drawn by the program)	-	the switch of «От автора» in place of the switch of the feed, one line	-	E119 (T-119-10): turns the window «Обновлено» on and off - the same setting as its check box
 IDS_NEWS_OFF_IN_FILE	IDD_AUTHOR	IDC_NEWS_SWITCH_SUB	the line under the switch of «От автора», 205 dialog units wide, up to two lines	-	E119 (T-119-10): shown only when [letters] feed = false in config.toml; says the news of the author stays off and is turned on in the file, not here
+IDS_FALLBACK_TITLE	IDD_LETTER	IDC_LETTER_TITLE	354x19	-	E119 (T-119-9): the heading of the letter «Обновление», which opens only from the tray menu entry «Доступна версия X…» or from «Последние письма», a week after the release when the program could not update itself; plain and honest, no blame
+IDS_FALLBACK_SUB	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	{0} = the new version, «1.8.0»; {1} = the installed version, «1.6.1»; {2} = the day of the release, «16 ноября» (code: &announced, &context.version, &released)	the window is laid out when shown: the height grows with the text, the width does not
+IDS_FALLBACK_NOTICE	IDD_LETTER	IDC_LETTER_PARA	406x19	{0} = the new version; {1} = the day of the release, «16 ноября» (code: &announced, &released)	the first paragraph of the letter; a date and not a count of days; the window is laid out when shown: the height grows with the text, the width does not
+IDS_FALLBACK_WHATS_NEW	IDD_LETTER	IDC_LETTER_PARA	406x19	{0} = the new version (code: &announced)	a label over the author's own text about the release, in the same paragraph
+IDS_FALLBACK_REPEATS	IDD_LETTER	IDC_LETTER_ROW_4	362x19	-	the last row of the panel «Как обновиться», over the button «Написать автору…»; the height grows with the text
+IDS_ENTRY_FALLBACK_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = the new version; {1} = the installed version (code: &announced, version)	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_GROUP_EXCLUSIONS	IDD_SETTINGS	IDC_GROUP_EXCLUSIONS	350x17	-	-
 IDS_EXCLUSION_REMOVE	IDD_SETTINGS	IDC_EXCLUSION_REMOVE	105x30	-	-
 IDS_EXCLUSION_ADD	IDD_SETTINGS	IDC_EXCLUSION_ADD	105x30	-	-
@@ -166,13 +172,9 @@ IDS_MENU_UPDATE	menu	-	menu: grows with the text	{0} = code: version	-
 IDS_TOAST_TITLE	toast	title	balloon title: 63 characters	-	-
 IDS_TOAST_NEWS	toast	text	balloon text: 255 characters	-	-
 IDS_TOAST_THANKS	toast	text	balloon text: 255 characters	-	-
-IDS_TOAST_UPDATE_TITLE	toast	title	balloon title: 63 characters	{0} = the new version, «1.1.0»	-
-IDS_TOAST_UPDATE	toast	text	balloon text: 255 characters	-	-
 IDS_ABOUT_AUTHOR	IDD_ABOUT	IDC_ABOUT_AUTHOR	161x30	-	the button takes it since 1.1.0 (stage E106, T-106-2); in 1.0.0 it showed the Russian literal of the template
-IDS_ENTRY_UPDATE_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date; {1} = the installed version, «1.0.0» (code: &update.date.map_or_else(String::new, format_date), version)	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_ENTRY_UNREAD_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
 IDS_ENTRY_READ_MARK	IDD_LETTERS_LIST	IDC_LETTERS_D1	382x19	{0} = a date, «27.10.2026»	the window is laid out when shown: the height grows with the text, the width does not; rows 1..4 alike: IDC_LETTERS_D1..D4
-IDS_UPDATE_SUB	IDD_LETTER	IDC_LETTER_SUBTITLE	354x19	{0} = the installed version; {1} = a date of release (code: &context.version, &released)	the window is laid out when shown: the height grows with the text, the width does not
 IDS_UPDATE_HOW	IDD_LETTER	IDC_LETTER_PANEL_TITLE	382x23	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_UPDATE_STEP_1	IDD_LETTER	IDC_LETTER_ROW_1	362x19	-	the window is laid out when shown: the height grows with the text, the width does not
 IDS_UPDATE_STEP_2	IDD_LETTER	IDC_LETTER_ROW_2	362x19	-	the window is laid out when shown: the height grows with the text, the width does not; LangSwitcher-setup.exe is a file name: not translated

@@ -166,13 +166,9 @@ BEGIN
     IDS_TOAST_TITLE         "Scrisoare de la autor"
     IDS_TOAST_NEWS          "Panda are o veste pentru dvs. Faceți clic pentru a o citi, durează un minut."
     IDS_TOAST_THANKS        "A trecut o lună de la instalare. Panda ar vrea să vă spună câteva cuvinte. Faceți clic pentru a citi."
-    IDS_TOAST_UPDATE_TITLE  "A apărut versiunea {0}"
-    IDS_TOAST_UPDATE        "Trei modificări și un link spre descărcare. Faceți clic pentru a citi."
     IDS_ABOUT_AUTHOR        "De la autor…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · actualizare · aveți {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · necitită"
     IDS_ENTRY_READ_MARK     "{0} · citită"
-    IDS_UPDATE_SUB          "aveți {0} · lansare: {1}"
     IDS_UPDATE_HOW          "Cum se actualizează"
     IDS_UPDATE_STEP_1       "Apăsați „Deschidere pagină de descărcare”: acolo se află mereu ultima versiune."
     IDS_UPDATE_STEP_2       "Descărcați fișierul LangSwitcher-setup.exe și rulați-l."
@@ -271,6 +267,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x18, 0x01

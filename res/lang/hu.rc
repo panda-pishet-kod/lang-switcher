@@ -168,13 +168,9 @@ BEGIN
     IDS_TOAST_TITLE         "Levél a szerzőtől"
     IDS_TOAST_NEWS          "Pandának híre van az Ön számára. Kattintson az elolvasáshoz, csak egy percet vesz igénybe."
     IDS_TOAST_THANKS        "Eltelt egy hónap a telepítés óta. Panda szeretne mondani pár szót. Kattintson az elolvasáshoz."
-    IDS_TOAST_UPDATE_TITLE  "Megjelent a(z) {0} verzió"
-    IDS_TOAST_UPDATE        "Három változás és egy letöltési hivatkozás. Kattintson az elolvasáshoz."
     IDS_ABOUT_AUTHOR        "A szerzőtől…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · frissítés · Önnél: {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · olvasatlan"
     IDS_ENTRY_READ_MARK     "{0} · olvasott"
-    IDS_UPDATE_SUB          "Önnél: {0} · megjelent: {1}"
     IDS_UPDATE_HOW          "A frissítés menete"
     IDS_UPDATE_STEP_1       "Kattintson a „Letöltési oldal megnyitása” gombra: ott mindig a legfrissebb verzió található."
     IDS_UPDATE_STEP_2       "Töltse le a LangSwitcher-setup.exe fájlt, és futtassa."
@@ -273,6 +269,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x0E, 0x01

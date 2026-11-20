@@ -25,6 +25,12 @@ page. Dates are the days the releases were published (UTC).
 - In «From the author» the switch «Tell me about the author’s updates and news» gave way to «Tell me about updates
   of the program»: it turns the window «Updated» on and off, the same setting as its tick. Letters and news are turned
   off in the settings file (`[letters] feed = false`); whoever has done that keeps it, and the window says so in a line.
+- When the program could not install a new version by itself, it no longer says so on its own: no notification and no
+  window. From the seventh day (it was the third) the menu of the icon has «Version X is available…» and «Recent
+  letters» have its row; the letter opens only from there and says it honestly — «Could not update automatically»,
+  the day the version came out, what is new in it, how to update by hand, and «Write to the author…» if it repeats.
+- The last good news file is kept on disk (`news.toml` beside the settings) and its signature is checked again at
+  every start, so a restart on the same day no longer loses that menu entry, the letter or the row until tomorrow.
 
 ## 1.6.1 — 2026-11-16
 

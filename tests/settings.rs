@@ -8733,8 +8733,15 @@ fn fed_view(switch: bool, month: u32, version: &str, feed: &PublishedFeed) -> le
 /// is behind it) and the three news items, none of them read, each with its «Прочитано»
 /// (решение 166.2).
 fn full_list(feed: &PublishedFeed) -> Vec<letters::Entry> {
-    let entries =
-        letters::list_entries(&settings::Letters::default(), BEHIND_THE_FEED, feed.view());
+    // Task T-119-9: the row of the update stands from the seventh day the feed has named the newer
+    // version — the update was noticed a week before the day the list is opened on.
+    let noticed = letters::Date::from_ymd(2026, 9, 1);
+    let state = settings::Letters {
+        update_noticed: noticed,
+        ..settings::Letters::default()
+    };
+    let today = noticed.map(|day| day.plus_days(letters::UPDATE_FALLBACK_DAYS));
+    let entries = letters::list_entries(&state, today, BEHIND_THE_FEED, feed.view());
 
     assert_eq!(
         entries.len(),
@@ -18493,7 +18500,7 @@ fn read_name(bytes: &[u8], at: &mut usize) -> Option<String> {
 ///
 /// ⚠ **247 since task T-119-3, part Б** — решение 208.88: the title and the link of the list of the
 /// program's own (3265, 3266) — 245 + 2.
-const FR_94_STRINGS: [(u16, &str, &str); 259] = [
+const FR_94_STRINGS: [(u16, &str, &str); 261] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -19086,22 +19093,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 259] = [
         "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать.",
         "It has been a month since you installed it. Panda would like a word. Click to read it.",
     ),
-    (
-        settings::IDS_TOAST_UPDATE_TITLE,
-        "Вышла версия {0}",
-        "Version {0} is out",
-    ),
-    (
-        settings::IDS_TOAST_UPDATE,
-        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать.",
-        "Three changes and a link to the download. Click to read it.",
-    ),
+    // ⛔ Task T-119-9 (решение 208.99 п. 1): the balloon of «Обновление» (3137, 3138) is gone.
     (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
-    (
-        settings::IDS_ENTRY_UPDATE_MARK,
-        "{0} · обновление · у вас {1}",
-        "{0} · update · you have {1}",
-    ),
+    // ⛔ Task T-119-9: the row of the update in «Последние письма» speaks the letter's words — 3140
+    // left, 3297 and 3302 below.
     (
         settings::IDS_ENTRY_UNREAD_MARK,
         "{0} · не прочитано",
@@ -19112,11 +19107,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 259] = [
         "{0} · прочитано",
         "{0} · read",
     ),
-    (
-        settings::IDS_UPDATE_SUB,
-        "у вас {0} · выпуск {1}",
-        "you have {0} · released {1}",
-    ),
+    // ⛔ Task T-119-9: the quiet line of «Обновление» names the version of the feed — 3143 left,
+    // 3298 below.
     (settings::IDS_UPDATE_HOW, "Как обновиться", "How to update"),
     (
         settings::IDS_UPDATE_STEP_1,
@@ -19638,6 +19630,39 @@ const FR_94_STRINGS: [(u16, &str, &str); 259] = [
         settings::IDS_NEWS_OFF_IN_FILE,
         "Новости автора выключены в файле настроек",
         "News from the author is off in the settings file",
+    ),
+    // Task T-119-9 (решения 208.95–208.99): the honest letter «Обновление», by the mock-up.
+    (
+        settings::IDS_FALLBACK_TITLE,
+        "Обновиться автоматически не получилось",
+        "Could not update automatically",
+    ),
+    (
+        settings::IDS_FALLBACK_SUB,
+        "доступна {0} · у вас {1} · выпуск {2}",
+        "available {0} · you have {1} · released {2}",
+    ),
+    (
+        settings::IDS_FALLBACK_NOTICE,
+        "Версия {0} вышла {1}, но программа не смогла поставить её сама. Обновите вручную — это \
+         займёт минуту.",
+        "Version {0} came out on {1}, but the program could not install it by itself. Update by \
+         hand — it takes a minute.",
+    ),
+    (
+        settings::IDS_FALLBACK_WHATS_NEW,
+        "Что нового в {0}",
+        "What’s new in {0}",
+    ),
+    (
+        settings::IDS_FALLBACK_REPEATS,
+        "Если так повторяется, напишите автору — это поможет найти причину.",
+        "If this keeps happening, write to the author — it helps to find the cause.",
+    ),
+    (
+        settings::IDS_ENTRY_FALLBACK_MARK,
+        "доступна {0} · у вас {1}",
+        "available {0} · you have {1}",
     ),
 ];
 
@@ -27186,9 +27211,12 @@ fn every_locale_carries_every_interface_string() {
 fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     const RETIRED: u16 = 3004;
     // Stage E119, task T-119-8 (решение 208.94 п. 4): «Что нового» and «обновлён до X»; task
-    // T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124).
-    const RETIRED_E119: [u16; 13] = [
-        3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124,
+    // T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124); task
+    // T-119-9 (решение 208.99): the balloon of «Обновление» and its two old words (3137, 3138, 3140,
+    // 3143).
+    const RETIRED_E119: [u16; 17] = [
+        3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124, 3137, 3138,
+        3140, 3143,
     ];
 
     assert!(
@@ -27224,18 +27252,22 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     // ⛔ **Eleven more holes since stage E119, task T-119-8** — решение 208.94 п. 4: the letter
     // «Что нового» with its eight words (3102…3109) and its balloon (3212), and the balloon
     // «обновлён до X» with its two (3249, 3250). Two more since task T-119-10 (решение 208.119):
-    // the switch of the feed in «От автора» and the line under it (3123, 3124). Held by the same
-    // three checks.
+    // the switch of the feed in «От автора» and the line under it (3123, 3124). Four more since
+    // task T-119-9 (решение 208.99): the balloon of «Обновление» and two of its old words (3137,
+    // 3138, 3140, 3143). Held by the same three checks.
     for hole in RETIRED_E119 {
         assert!(
             !settings::INTERFACE_STRINGS.contains(&hole),
-            "{hole} left the vocabulary with task T-119-8 or T-119-10 and must not come back into it"
+            "{hole} left the vocabulary with task T-119-8, T-119-9 or T-119-10 and must not come back into it"
         );
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        259,
-        "two hundred and FIFTY-NINE identifiers in use since task T-119-10 (решение 208.119): the \
+        261,
+        "two hundred and SIXTY-ONE identifiers in use since task T-119-9 (решения 208.95–208.99): \
+         the balloon of «Обновление» left (3137, 3138), and two of its old words whose meaning \
+         changed (3140, 3143); the honest letter came with six (3297…3302). Two hundred and \
+         fifty-nine since task T-119-10 (решение 208.119): the \
          switch of the news in «От автора» left with its two strings (3123, 3124), the note «Новости \
          автора выключены в файле настроек» came (3296). Two hundred and sixty since tasks \
          T-119-5, -6, -7: the window in the corner, the entry «Что нового в X…» and the switch of \
@@ -27313,10 +27345,12 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         // (task T-93-2) sits in the block 3040..3055.
         // Since task T-119-8: 3101 before the run 3102…3109, 3213 and 3215 round 3212, 3248, 3251
         // and 3263 round 3249…3250 (3110 after the run is read above). Since task T-119-10: 3122
-        // and 3125 round 3123…3124 and 3135, the last row of the block 3120…3135.
+        // and 3125 round 3123…3124 and 3135, the last row of the block 3120…3135. Since task
+        // T-119-9: 3136 and 3139 round 3137…3138, 3141 after 3140, 3142 and 3144 round 3143, and
+        // 3151, the last row of the block 3136…3151.
         for id in [
             3003_u16, 3005, 3015, 3110, 3112, 3119, 3040, 3042, 3055, 3101, 3213, 3215, 3248, 3251,
-            3263, 3122, 3125, 3135,
+            3263, 3122, 3125, 3135, 3136, 3139, 3141, 3142, 3144, 3151,
         ] {
             let string = product.string_of_langid(langid, id);
             read += 1;
@@ -27341,8 +27375,8 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     );
     assert_eq!(
         read,
-        shipped_locales().len() * 18,
-        "eighteen rows in each locale — three round the holes of task T-119-10, six round the holes of task T-119-8, and nine, three round each of the first three holes (the \
+        shipped_locales().len() * 24,
+        "twenty-four rows in each locale — six round the holes of task T-119-9, three round the holes of task T-119-10, six round the holes of task T-119-8, and nine, three round each of the first three holes (the \
          third, 3041, since task T-93-2); «no holes» out of no readings is the cheapest lie such \
          a sweep tells"
     );

@@ -162,13 +162,9 @@ BEGIN
     IDS_TOAST_TITLE         "Thư của tác giả"
     IDS_TOAST_NEWS          "Panda có tin cho bạn. Nhấn để đọc, chỉ mất một phút."
     IDS_TOAST_THANKS        "Đã một tháng kể từ khi bạn cài đặt. Panda muốn nói vài lời. Nhấn để đọc."
-    IDS_TOAST_UPDATE_TITLE  "Đã ra mắt phiên bản {0}"
-    IDS_TOAST_UPDATE        "Ba thay đổi và liên kết tải xuống. Nhấn để đọc."
     IDS_ABOUT_AUTHOR        "Từ tác giả…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · cập nhật · bạn có {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · chưa đọc"
     IDS_ENTRY_READ_MARK     "{0} · đã đọc"
-    IDS_UPDATE_SUB          "bạn có {0} · phát hành {1}"
     IDS_UPDATE_HOW          "Cách cập nhật"
     IDS_UPDATE_STEP_1       "Nhấn “Mở trang tải xuống”: ở đó luôn có phiên bản mới nhất."
     IDS_UPDATE_STEP_2       "Tải tệp LangSwitcher-setup.exe và chạy nó."
@@ -267,6 +263,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x2A, 0x01

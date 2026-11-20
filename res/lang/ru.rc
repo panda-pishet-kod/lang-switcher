@@ -169,13 +169,9 @@ BEGIN
     IDS_TOAST_TITLE         "Письмо от автора"
     IDS_TOAST_NEWS          "У Панды новость для вас. Нажмите, чтобы прочитать, это займёт минуту."
     IDS_TOAST_THANKS        "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать."
-    IDS_TOAST_UPDATE_TITLE  "Вышла версия {0}"
-    IDS_TOAST_UPDATE        "Три изменения и ссылка на загрузку. Нажмите, чтобы прочитать."
     IDS_ABOUT_AUTHOR        "От автора…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · обновление · у вас {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · не прочитано"
     IDS_ENTRY_READ_MARK     "{0} · прочитано"
-    IDS_UPDATE_SUB          "у вас {0} · выпуск {1}"
     IDS_UPDATE_HOW          "Как обновиться"
     IDS_UPDATE_STEP_1       "Нажмите «Открыть страницу загрузки»: там всегда последняя версия."
     IDS_UPDATE_STEP_2       "Скачайте файл LangSwitcher-setup.exe и запустите его."
@@ -274,6 +270,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "Что нового в {0}…"
     IDS_UPDATES_SWITCH      "Сообщать об обновлениях программы"
     IDS_NEWS_OFF_IN_FILE    "Новости автора выключены в файле настроек"
+    IDS_FALLBACK_TITLE      "Обновиться автоматически не получилось"
+    IDS_FALLBACK_SUB        "доступна {0} · у вас {1} · выпуск {2}"
+    IDS_FALLBACK_NOTICE     "Версия {0} вышла {1}, но программа не смогла поставить её сама. Обновите вручную — это займёт минуту."
+    IDS_FALLBACK_WHATS_NEW  "Что нового в {0}"
+    IDS_FALLBACK_REPEATS    "Если так повторяется, напишите автору — это поможет найти причину."
+    IDS_ENTRY_FALLBACK_MARK "доступна {0} · у вас {1}"
 END
 
 LANGUAGE 0x19, 0x01

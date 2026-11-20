@@ -163,13 +163,9 @@ BEGIN
     IDS_TOAST_TITLE         "Писмо од авторот"
     IDS_TOAST_NEWS          "Панда има вест за вас. Кликнете за да ја прочитате — ќе одземе една минута."
     IDS_TOAST_THANKS        "Помина еден месец од инсталирањето. Панда сака да каже неколку зборови. Кликнете за да прочитате."
-    IDS_TOAST_UPDATE_TITLE  "Излезе верзија {0}"
-    IDS_TOAST_UPDATE        "Три промени и врска за преземање. Кликнете за да прочитате."
     IDS_ABOUT_AUTHOR        "Од авторот…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · ажурирање · имате {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · непрочитано"
     IDS_ENTRY_READ_MARK     "{0} · прочитано"
-    IDS_UPDATE_SUB          "имате {0} · издание од {1}"
     IDS_UPDATE_HOW          "Како да се ажурира"
     IDS_UPDATE_STEP_1       "Притиснете „Отвори ја страницата за преземање“: таму секогаш е последната верзија."
     IDS_UPDATE_STEP_2       "Преземете ја датотеката LangSwitcher-setup.exe и стартувајте ја."
@@ -268,6 +264,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x2F, 0x01

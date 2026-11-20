@@ -164,13 +164,9 @@ BEGIN
     IDS_TOAST_TITLE         "ଲେଖକଙ୍କ ଚିଠି"
     IDS_TOAST_NEWS          "ପାଣ୍ଡାଙ୍କ ପାଖରେ ଆପଣଙ୍କ ପାଇଁ ଖବର ଅଛି। ପଢ଼ିବାକୁ କ୍ଲିକ୍ କରନ୍ତୁ, ଏକ ମିନିଟ୍ ଲାଗିବ।"
     IDS_TOAST_THANKS        "ଇନଷ୍ଟଲ୍ କରିବାର ଏକ ମାସ ବିତିଗଲା। ପାଣ୍ଡା କିଛି କହିବାକୁ ଚାହାଁନ୍ତି। ପଢ଼ିବାକୁ କ୍ଲିକ୍ କରନ୍ତୁ।"
-    IDS_TOAST_UPDATE_TITLE  "ସଂସ୍କରଣ {0} ଆସିଗଲା"
-    IDS_TOAST_UPDATE        "ତିନୋଟି ପରିବର୍ତ୍ତନ ଓ ଡାଉନଲୋଡ୍ ଲିଙ୍କ୍। ପଢ଼ିବାକୁ କ୍ଲିକ୍ କରନ୍ତୁ।"
     IDS_ABOUT_AUTHOR        "ଲେଖକଙ୍କଠାରୁ…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · ଅପଡେଟ୍ · ଆପଣଙ୍କ ପାଖରେ {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · ପଢ଼ା ହୋଇନାହିଁ"
     IDS_ENTRY_READ_MARK     "{0} · ପଢ଼ା ହୋଇଛି"
-    IDS_UPDATE_SUB          "ଆପଣଙ୍କ ପାଖରେ {0} · ପ୍ରକାଶିତ {1}"
     IDS_UPDATE_HOW          "କିପରି ଅପଡେଟ୍ କରିବେ"
     IDS_UPDATE_STEP_1       "“ଡାଉନଲୋଡ୍ ପୃଷ୍ଠା ଖୋଲନ୍ତୁ” ଦବାନ୍ତୁ: ସର୍ବଶେଷ ସଂସ୍କରଣ ସବୁବେଳେ ସେଠାରେ ଥାଏ।"
     IDS_UPDATE_STEP_2       "LangSwitcher-setup.exe ଫାଇଲ ଡାଉନଲୋଡ୍ କରି ଚଲାନ୍ତୁ।"
@@ -269,6 +265,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x48, 0x01

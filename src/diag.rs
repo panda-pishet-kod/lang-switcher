@@ -850,6 +850,12 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // (NFR-13). `Kind::Tray`, the group of every other icon row; appended at the end so that no
     // index above it moves; a fact and no value — not the layout, not the size.
     ("CreateIconIndirect(flag)", Kind::Tray),
+    // Stage E119, task T-119-9, решение 208.98: the last good feed is kept on disk and read again
+    // at the start. «feed keep» — the copy could not be written (the old one stays); «kept feed
+    // refused» — the copy did not pass the signature or the reading again, and counts as no feed.
+    // Facts and no value — not a path, not a word of the document; appended at the end.
+    ("feed keep", Kind::Process),
+    ("kept feed refused", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

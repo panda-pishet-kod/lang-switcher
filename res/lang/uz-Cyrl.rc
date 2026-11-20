@@ -165,13 +165,9 @@ BEGIN
     IDS_TOAST_TITLE         "Муаллифдан хат"
     IDS_TOAST_NEWS          "Панданинг сизга янгилиги бор. Ўқиш учун босинг, бир дақиқа вақт олади."
     IDS_TOAST_THANKS        "Ўрнатганингизга бир ой бўлди. Панда сизга икки оғиз гап айтмоқчи. Ўқиш учун босинг."
-    IDS_TOAST_UPDATE_TITLE  "{0} версияси чиқди"
-    IDS_TOAST_UPDATE        "Учта ўзгариш ва юклаб олиш ҳаволаси. Ўқиш учун босинг."
     IDS_ABOUT_AUTHOR        "Муаллифдан…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · янгиланиш · сизда {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · ўқилмаган"
     IDS_ENTRY_READ_MARK     "{0} · ўқилган"
-    IDS_UPDATE_SUB          "сизда {0} · чиқиш санаси: {1}"
     IDS_UPDATE_HOW          "Қандай янгилаш керак"
     IDS_UPDATE_STEP_1       "«Юклаб олиш саҳифасини очиш» тугмасини босинг: у ерда доим энг сўнгги версия туради."
     IDS_UPDATE_STEP_2       "LangSwitcher-setup.exe файлини юклаб олинг ва ишга туширинг."
@@ -270,6 +266,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x43, 0x02

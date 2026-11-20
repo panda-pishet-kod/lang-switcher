@@ -209,7 +209,9 @@ How it works, in detail:
   computer, and stops after the site's first answer; an update sends no such mark. The header
   carries only the name and the version number of the program, for example `LangSwitcher/1.6.0`.
   If it does not come, the next try is not before tomorrow. Letters and news
-  from it can be turned off in the settings file (`[letters] feed = false`).
+  from it can be turned off in the settings file (`[letters] feed = false`). The last good copy
+  of the file is kept in `%APPDATA%\Lang_Switcher\news.toml`, its signature is checked again at
+  every start, and the uninstaller removes it.
 - **Updates** are installed not by the program itself but by a separate file without a window,
   `LangSwitcherUpdate.exe`, a scheduled task "Lang Switcher Update" running as the system. It takes
   the installer only from the `/langswitcher/files/` folder of the same site; its size and SHA-256

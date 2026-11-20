@@ -127,17 +127,18 @@ fn update(version: &str) -> FeedItem {
 ///
 /// Письма «Что нового» с его стуком больше нет (решение 208.94 п. 4, T-119-8); сторож остался на
 /// том, ради чего он был: ни одно письмо не стучится чужими словами.
+///
+/// ⛔ **«Обновление» не стучится с задачи T-119-9** (решение 208.99 п. 1): уведомления Windows о нём
+/// нет, его слова 3137 и 3138 сняты, письмо открывает только сам человек.
 #[test]
 fn every_letter_knocks_with_its_own_words() {
-    let update = letters::toast_strings(Letter::Update).expect("«Обновление» объявляется");
-
     assert_eq!(
-        update,
-        (settings::IDS_TOAST_UPDATE_TITLE, settings::IDS_TOAST_UPDATE),
-        "у «Обновления» слова не менялись"
+        letters::toast_strings(Letter::Update),
+        None,
+        "решение 208.99 п. 1: «Обновление» уведомлением не объявляется"
     );
 
-    // Остальные три письма — на месте, и «Привет» по-прежнему не объявляется вовсе.
+    // Остальные два письма — на месте, и «Привет» по-прежнему не объявляется вовсе.
     assert_eq!(
         letters::toast_strings(Letter::Thanks),
         Some((settings::IDS_TOAST_TITLE, settings::IDS_TOAST_THANKS))
@@ -484,8 +485,8 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
     let mut state = settled("0.38.0");
     state.thanks_due = Some(day(2026, 9, 1));
     let today = day(2026, 9, 3);
-    // TZ E104 §0 п. 20: «Обновление» is the fallback of the updater, due once the feed has named
-    // the newer version for three days — the order of the letters is what this test is about.
+    // TZ E104 §0 п. 20: «Обновление» is the fallback of the updater — the menu entry stands from
+    // the seventh day; the order of the letters is what this test is about (T-119-9: without it).
     state.update_noticed = Some(today.plus_days(-letters::UPDATE_FALLBACK_DAYS));
     let items = [news(12)];
     let announced = update("0.40.0");
@@ -496,19 +497,23 @@ fn the_priority_of_fr_101_is_whats_new_update_news_thanks() {
 
     // ⛔ Ступень, которой не стало: `last_seen_version` = «0.38.0» при сборке «0.39.0» — ровно
     // то состояние, что прежде давало письмо «Что нового» первым (решение 118.5 закрыло его,
-    // 208.94 убрало). Первым идёт «Обновление», и это проверяется здесь же.
+    // 208.94 убрало).
+    //
+    // ⛔ И вторая ступень, которой не стало, — **«Обновление», задача T-119-9** (решения 208.98,
+    // 208.99): письмо само не приходит вовсе, даже на седьмой день и с неизвестной ещё версией —
+    // его открывает только сам человек. Первой идёт «Новость», и это проверяется здесь же.
     assert_eq!(
         letters::due(&state, today, "0.39.0", feed, true),
-        Some(Letter::Update),
-        "решение 118.5: непросмотренная версия письма больше не даёт — первым идёт \
-         «Обновление»"
+        Some(Letter::News(12)),
+        "решения 118.5 и 208.98: ни «Что нового», ни «Обновление» сами не приходят — первой идёт \
+         «Новость»"
     );
 
     state.last_seen_version = "0.39.0".to_owned();
-    assert_eq!(
+    assert_ne!(
         letters::due(&state, today, "0.39.0", feed, true),
         Some(Letter::Update),
-        "then the one about the version they could be running"
+        "the version they could be running is not a letter of its own accord"
     );
 
     state.latest_known = "0.40.0".to_owned();
@@ -656,22 +661,33 @@ fn a_newer_version_is_newer_by_number_and_not_by_spelling() {
     assert!(letters::version_is_newer("1.1.0", "1.0.9"));
 }
 
-/// One letter per announced version, and the menu entry outlives the letter.
+/// **The letter «Обновление» never comes by itself, and the menu entry outlives the letter** —
+/// task T-119-9 (решения 208.98, 208.99): no balloon, no window of its own accord, even with the
+/// fallback open and the version not yet announced; a letter the person opened from the menu is
+/// still remembered as announced.
 #[test]
 fn the_update_letter_is_shown_once_for_each_announced_version() {
     let mut state = settled("0.39.0");
-    let today = day(2026, 9, 3);
-    // The fallback of TZ E104 §0 п. 20 is open: the feed named 0.40.0 three days ago.
-    state.update_noticed = Some(today.plus_days(-letters::UPDATE_FALLBACK_DAYS));
+    let today = day(2026, 9, 8);
+    // The fallback of TZ E104 §0 п. 20 is open: the feed named 0.40.0 seven days ago.
+    state.update_noticed = Some(day(2026, 9, 1));
     let announced = update("0.40.0");
     let feed = FeedView {
         update: Some(&announced),
         news: &[],
     };
 
+    assert!(letters::update_fallback_is_open(&state, today));
+    assert!(letters::update_is_due(&state, "0.39.0", feed));
     assert_eq!(
         letters::due(&state, today, "0.39.0", feed, true),
-        Some(Letter::Update)
+        None,
+        "решение 208.98: «Обновление» само не открывается"
+    );
+    assert_eq!(
+        letters::toast_strings(Letter::Update),
+        None,
+        "и не стучится — 208.99 п. 1"
     );
 
     letters::after_shown(&mut state, Letter::Update, today, "0.40.0");
@@ -711,12 +727,14 @@ fn an_update_that_is_not_newer_is_not_a_letter() {
 // The updater's fallback and the balloon after an update — TZ E104 §0 п. 20, 21 (T-104-7)
 // =========================================================================================
 
-/// **No letter «Обновление» until the feed has named the newer version for three days** — §0
-/// п. 20: the updater installs in the next idle moment, and the letter is its fallback. The day
-/// is the first read that named it ([`letters::notice_update`]), kept while the feed goes on
-/// naming it and cleared by a read that does not.
+/// **No door to the letter «Обновление» until the feed has named the newer version for seven
+/// days** — §0 п. 20, **seven since task T-119-9** (решение 208.98; three until then): the updater
+/// installs in the next idle moment, and the letter is its fallback. The day is the first read
+/// that named it ([`letters::notice_update`]), kept while the feed goes on naming it and cleared
+/// by a read that does not. The doors are the menu entry and the row of «Последние письма»; the
+/// letter itself is never due on its own.
 #[test]
-fn the_update_letter_waits_three_days_for_the_updater() {
+fn the_update_letter_waits_seven_days_for_the_updater() {
     let mut state = settled("0.103.0");
     let first = day(2026, 10, 24);
     let announced = update("0.104.0");
@@ -738,40 +756,52 @@ fn the_update_letter_waits_three_days_for_the_updater() {
     assert_eq!(state.update_noticed, Some(first));
 
     // ⚠ The days are written out and not taken from the constant: the first mutant «zero days»
-    // passed a loop over `0..UPDATE_FALLBACK_DAYS` (scratchpad-E104\t7-mutants.log). Three is the
-    // number of §0 п. 20, and the test holds it.
-    assert_eq!(letters::UPDATE_FALLBACK_DAYS, 3, "§0 п. 20: three days");
+    // passed a loop over `0..UPDATE_FALLBACK_DAYS` (scratchpad-E104\t7-mutants.log). Seven is the
+    // number of решение 208.98, and the test holds it.
+    assert_eq!(
+        letters::UPDATE_FALLBACK_DAYS,
+        7,
+        "решение 208.98: seven days"
+    );
 
-    for offset in 0..3 {
+    for offset in 0..7 {
+        assert!(
+            !letters::update_fallback_is_open(&state, first.plus_days(offset)),
+            "day {offset}: the updater still has its chance"
+        );
+        assert!(
+            letters::list_entries(&state, Some(first.plus_days(offset)), "0.103.0", feed)
+                .is_empty(),
+            "day {offset}: and «Последние письма» say nothing of it"
+        );
+    }
+
+    let seventh = first.plus_days(7);
+
+    assert!(letters::update_fallback_is_open(&state, seventh));
+    assert_eq!(
+        letters::list_entries(&state, Some(seventh), "0.103.0", feed).len(),
+        1,
+        "seven days and still the old build — the row of the fallback"
+    );
+
+    for offset in 0..=10 {
         assert_ne!(
             letters::due(&state, first.plus_days(offset), "0.103.0", feed, true),
             Some(Letter::Update),
-            "day {offset}: the updater still has its chance"
+            "day {offset}: the letter never comes by itself (T-119-9)"
         );
-        assert!(!letters::update_fallback_is_open(
-            &state,
-            first.plus_days(offset)
-        ));
     }
 
-    let third = first.plus_days(3);
-
-    assert!(letters::update_fallback_is_open(&state, third));
-    assert_eq!(
-        letters::due(&state, third, "0.103.0", feed, true),
-        Some(Letter::Update),
-        "three days and still the old build — the fallback"
-    );
-
     // The updater did its work: the build is the version the feed names, and nothing is pending.
-    assert!(letters::notice_update(&mut state, "0.104.0", feed, third));
+    assert!(letters::notice_update(&mut state, "0.104.0", feed, seventh));
     assert_eq!(
         state.update_noticed, None,
         "a read that names nothing newer clears it"
     );
     assert!(!letters::update_fallback_is_open(
         &state,
-        third.plus_days(10)
+        seventh.plus_days(10)
     ));
 }
 
@@ -2740,6 +2770,12 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 
     // An update has nothing to mark as read: its accented button is the download page, and the
     // three steps of FR-102 stand in the panel under the author's own words.
+    //
+    // ⭐ **Task T-119-9 (решения 208.95–208.99), the honest letter by the mock-up.** The heading
+    // is the program's — the updater could not, and the letter says so; the quiet line names the
+    // version of the feed, the one installed here and the day of the release; the paragraph opens
+    // with the notice (a date, not a count of days), then «Что нового в X» over the author's words;
+    // the panel's fourth row offers the wizard, and its button opens it.
     let update = update("0.41.0");
     let plan = letters::plan_for(
         Letter::Update,
@@ -2756,23 +2792,72 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
         "«Открыть страницу загрузки» is the accented button of an update — the mock-up"
     );
     assert!(plan.left.is_some(), "and it closes with the plain button");
-    assert_eq!(plan.para, update.text, "the author says what changed");
-    assert_eq!(plan.rows.len(), 3, "and the program says how to update");
+    assert_eq!(
+        plan.title,
+        settings::text(settings::IDS_FALLBACK_TITLE),
+        "the heading is the program's and says what happened — T-119-9"
+    );
+    assert_ne!(
+        plan.title, update.title,
+        "not the author's heading of the release"
+    );
+
+    let released = update.date.map(letters::format_date).unwrap_or_default();
+
+    assert!(!released.is_empty(), "the entry is dated");
+    assert_eq!(
+        plan.subtitle,
+        settings::format_text(settings::IDS_FALLBACK_SUB, &["0.41.0", "0.39.0", &released]),
+        "«доступна X · у вас Y · выпуск <дата>»"
+    );
+
+    let notice = settings::format_text(settings::IDS_FALLBACK_NOTICE, &["0.41.0", &released]);
+    let whats_new = settings::format_text(settings::IDS_FALLBACK_WHATS_NEW, &["0.41.0"]);
+
+    assert_eq!(
+        plan.para,
+        format!("{notice}\n\n{whats_new}\n{}", update.text),
+        "the notice with the date, then «Что нового в X» over what the author says changed"
+    );
+    assert!(
+        plan.para.contains(&released) && !released.chars().all(|c| c.is_ascii_digit()),
+        "the notice carries the date of the release — решение 208.99 п. 3"
+    );
+    assert_eq!(
+        plan.rows.len(),
+        4,
+        "the program says how to update, and what if it repeats"
+    );
     assert_eq!(
         plan.rows
             .iter()
             .map(|row| row.marker.as_str())
             .collect::<Vec<_>>(),
-        ["1", "2", "3"],
-        "the steps are numbered, not bulleted"
+        ["1", "2", "3", ""],
+        "the steps are numbered, not bulleted, and the line about the author is not a step"
     );
+    assert_eq!(
+        plan.rows[3].text,
+        settings::text(settings::IDS_FALLBACK_REPEATS)
+    );
+    assert_eq!(
+        plan.panel_buttons.len(),
+        1,
+        "one button in the panel — решение 208.97 п. 2"
+    );
+    assert_eq!(plan.panel_buttons[0].action, letters::Action::OpenWizard);
+    assert_eq!(
+        plan.panel_buttons[0].label,
+        settings::text(settings::IDS_WRITE_TO_AUTHOR)
+    );
+    assert!(plan.panel_buttons[0].enabled, "and it can be pressed");
     assert!(
         plan.rows.iter().all(|row| !row.text.trim().is_empty()),
         "every step is written in all fourteen tables"
     );
     assert!(
-        plan.subtitle.contains("0.39.0"),
-        "the quiet line names the version installed here, not the one announced"
+        plan.subtitle.contains("0.39.0") && plan.subtitle.contains("0.41.0"),
+        "the quiet line names the version installed here and the one announced"
     );
     assert!(
         plan.foot.contains("0.41.0"),
@@ -4440,11 +4525,44 @@ fn the_list_shows_the_update_and_the_three_news_newest_first() {
 
     state.mark_read(12);
 
-    let entries = letters::list_entries(&state, "0.39.0", feed);
+    // ⭐ Task T-119-9 (решение 208.99 п. 2): the row of the update is the second door of the letter
+    // «Обновление» and stands, as the menu entry does, from the seventh day the feed has named the
+    // newer version — the days written out, not taken from the constant.
+    let first = day(2026, 9, 1);
+    state.update_noticed = Some(first);
+
+    for offset in 0..7 {
+        let entries = letters::list_entries(&state, Some(first.plus_days(offset)), "0.39.0", feed);
+
+        assert_eq!(
+            entries.len(),
+            3,
+            "day {offset}: three news and no update yet"
+        );
+        assert!(entries.iter().all(|entry| entry.news.is_some()));
+    }
+
+    assert_eq!(
+        letters::list_entries(&state, None, "0.39.0", feed).len(),
+        3,
+        "no day, no row of the update"
+    );
+
+    let entries = letters::list_entries(&state, Some(first.plus_days(7)), "0.39.0", feed);
 
     assert_eq!(entries.len(), 4, "one update and three news");
     assert_eq!(entries[0].news, None, "the update is first and is not news");
     assert!(!entries[0].unread, "and it is never «unread»");
+    assert_eq!(
+        entries[0].title,
+        settings::text(settings::IDS_FALLBACK_TITLE),
+        "the row says what the letter says — the program could not update by itself"
+    );
+    assert_eq!(
+        entries[0].meta,
+        settings::format_text(settings::IDS_ENTRY_FALLBACK_MARK, &["0.40.0", "0.39.0"]),
+        "«доступна X · у вас Y»"
+    );
     assert_eq!(entries[1].news, Some(13), "then the newest news");
     assert_eq!(entries[2].news, Some(12));
     assert_eq!(entries[3].news, Some(11));
@@ -4458,7 +4576,10 @@ fn the_list_shows_the_update_and_the_three_news_newest_first() {
     }
 
     // An installation with no feed behind it has nothing to show, which is the whole of stage А.
-    assert!(letters::list_entries(&state, "0.39.0", FeedView::EMPTY).is_empty());
+    assert!(
+        letters::list_entries(&state, Some(first.plus_days(7)), "0.39.0", FeedView::EMPTY)
+            .is_empty()
+    );
 }
 
 /// A letter out of the feed can find its own entry again — task Т-32-6.
@@ -4990,5 +5111,87 @@ fn the_letter_whats_new_and_the_balloon_after_an_update_are_gone() {
     assert!(
         retired_names_in("settings.rs", "pub const IDS_TOAST_UPDATE: u16 = 3138;\n").is_empty(),
         "and the letter «Обновление», which stays, is not taken for the balloon that left"
+    );
+}
+
+/// ⭐ **The good feed is kept beside the configuration and comes back at the start** — task
+/// T-119-9, решение 208.98 (п. 2 of 208.97): a restart on the same day, after the day's read, no
+/// longer loses the menu entry «Доступна версия X…», the letter and the row of «Последние письма»
+/// until tomorrow. Where the copy lives, who writes it and how it comes back — held here by the
+/// shape of the code; that a copy nobody signed is no feed is held in `tests\feed.rs`.
+#[test]
+fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() {
+    let home = Path::new(r"C:\Users\A\AppData\Roaming");
+
+    assert_eq!(
+        settings::kept_feed_path_in(home),
+        home.join("Lang_Switcher").join("news.toml")
+    );
+    assert_eq!(
+        settings::kept_feed_path_in(home).parent(),
+        settings::config_path_in(home).parent(),
+        "beside the configuration"
+    );
+
+    let source = letters_source();
+
+    let start = body_of(&source, "pub fn start_feed_read(");
+    let lines: Vec<&str> = code_lines(start).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+    assert!(
+        matches!(
+            (at("feed::read_now_marked(&language, first)"), at("keep_feed_document(&document)"), at("MAILBOX.lock()")),
+            (Some(a), Some(b), Some(c)) if a < b && b < c
+        ),
+        "the good document is kept on the feed's own thread, after the read and before the nudge:\n{start}"
+    );
+
+    let keep = body_of(&source, "fn keep_feed_document(");
+    assert!(
+        code_lines(keep).any(|line| line.contains("settings::write_bytes_to(&path")),
+        "written by the body that writes the configuration — atomically:\n{keep}"
+    );
+
+    let kept = body_of(&source, "pub fn kept_feed(");
+    assert!(
+        code_lines(kept)
+            .any(|line| line
+                .contains("feed::read_document(document, language, feed::verify_signature)")),
+        "read again through the author's keys, every time:\n{kept}"
+    );
+
+    let restore = body_of(&source, "pub fn restore_feed(");
+    let lines: Vec<&str> = code_lines(restore).collect();
+    let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
+    assert!(
+        matches!(
+            (at("if !stored.feed"), at("kept_feed(&document"), at("publish_feed(")),
+            (Some(a), Some(b), Some(c)) if a < b && b < c
+        ),
+        "a feed turned off restores nothing, and only a copy that passed is published:\n{restore}"
+    );
+    assert!(
+        at("feed_last_read").is_none() && at("feed_last_try").is_none(),
+        "a restore is not a read: the days of the read do not move"
+    );
+
+    // The product's own start, and only it: the tests that attach a tray never read the
+    // `%APPDATA%` of the machine they run on.
+    let tray_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("tray.rs");
+    let tray = std::fs::read_to_string(&tray_path)
+        .expect("src\tray.rs must be readable")
+        .replace("\r\n", "\n");
+
+    assert!(
+        code_lines(body_of(&tray, "pub fn attach("))
+            .any(|line| line.contains("crate::letters::restore_feed()")),
+        "the product's start puts the kept feed back"
+    );
+    assert!(
+        !code_lines(body_of(&tray, "pub fn attach_at_via("))
+            .any(|line| line.contains("restore_feed")),
+        "and the start the tests use does not"
     );
 }

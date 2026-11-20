@@ -162,13 +162,9 @@ BEGIN
     IDS_TOAST_TITLE         "Autora vēstule"
     IDS_TOAST_NEWS          "Panda vēlas jums pastāstīt jaunumu. Noklikšķiniet, lai izlasītu, tas aizņems minūti."
     IDS_TOAST_THANKS        "Pagājis mēnesis kopš instalēšanas. Panda vēlas pateikt pāris vārdu. Noklikšķiniet, lai izlasītu."
-    IDS_TOAST_UPDATE_TITLE  "Iznākusi versija {0}"
-    IDS_TOAST_UPDATE        "Trīs izmaiņas un saite uz lejupielādi. Noklikšķiniet, lai izlasītu."
     IDS_ABOUT_AUTHOR        "No autora…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · atjauninājums · jums ir {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · neizlasīta"
     IDS_ENTRY_READ_MARK     "{0} · izlasīta"
-    IDS_UPDATE_SUB          "jums ir {0} · izlaista {1}"
     IDS_UPDATE_HOW          "Kā atjaunināt"
     IDS_UPDATE_STEP_1       "Nospiediet «Atvērt lejupielādes lapu»: tur vienmēr ir jaunākā versija."
     IDS_UPDATE_STEP_2       "Lejupielādējiet failu LangSwitcher-setup.exe un palaidiet to."
@@ -267,6 +263,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x26, 0x01

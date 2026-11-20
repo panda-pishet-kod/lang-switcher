@@ -169,13 +169,9 @@ BEGIN
     IDS_TOAST_TITLE         "Yazardan bir mektup"
     IDS_TOAST_NEWS          "Panda'nın size bir haberi var. Okumak için tıklayın, bir dakika sürer."
     IDS_TOAST_THANKS        "Kurulumdan bu yana bir ay geçti. Panda birkaç söz söylemek istiyor. Okumak için tıklayın."
-    IDS_TOAST_UPDATE_TITLE  "{0} sürümü çıktı"
-    IDS_TOAST_UPDATE        "Üç değişiklik ve indirme bağlantısı. Okumak için tıklayın."
     IDS_ABOUT_AUTHOR        "Yazardan…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · güncelleme · sizde {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · okunmadı"
     IDS_ENTRY_READ_MARK     "{0} · okundu"
-    IDS_UPDATE_SUB          "sizde {0} · çıkış {1}"
     IDS_UPDATE_HOW          "Nasıl güncellenir"
     IDS_UPDATE_STEP_1       "“İndirme sayfasını aç” düğmesine basın: son sürüm her zaman oradadır."
     IDS_UPDATE_STEP_2       "LangSwitcher-setup.exe dosyasını indirin ve çalıştırın."
@@ -274,6 +270,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x1F, 0x01

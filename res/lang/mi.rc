@@ -162,13 +162,9 @@ BEGIN
     IDS_TOAST_TITLE         "Reta nā te kaituhi"
     IDS_TOAST_NEWS          "He pūrongo tā Panda māu. Pāwhiria kia pānui, kotahi meneti noa iho."
     IDS_TOAST_THANKS        "Kua kotahi marama mai i tō whakaurunga. Kei te hiahia kōrero a Panda. Pāwhiria kia pānui."
-    IDS_TOAST_UPDATE_TITLE  "Kua tae mai te putanga {0}"
-    IDS_TOAST_UPDATE        "E toru ngā panoni me te hono ki te tikiake. Pāwhiria kia pānui."
     IDS_ABOUT_AUTHOR        "Nā te kaituhi…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · whakahoutanga · kei a koe {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · kāore anō kia pānuitia"
     IDS_ENTRY_READ_MARK     "{0} · kua pānuitia"
-    IDS_UPDATE_SUB          "kei a koe {0} · i whakaputaina {1}"
     IDS_UPDATE_HOW          "Me pēhea te whakahou"
     IDS_UPDATE_STEP_1       "Pāwhiria “Whakatuwhera i te whārangi tikiake”: kei reira tonu te putanga hou rawa."
     IDS_UPDATE_STEP_2       "Tikiakehia te kōnae LangSwitcher-setup.exe, ā, whakahaerea."
@@ -267,6 +263,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x81, 0x01

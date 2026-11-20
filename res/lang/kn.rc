@@ -166,13 +166,9 @@ BEGIN
     IDS_TOAST_TITLE         "ಲೇಖಕರಿಂದ ಪತ್ರ"
     IDS_TOAST_NEWS          "ಪಾಂಡಾ ಬಳಿ ನಿಮಗಾಗಿ ಸುದ್ದಿ ಇದೆ. ಓದಲು ಕ್ಲಿಕ್ ಮಾಡಿ, ಒಂದು ನಿಮಿಷ ಸಾಕು."
     IDS_TOAST_THANKS        "ಸ್ಥಾಪಿಸಿ ಒಂದು ತಿಂಗಳಾಯಿತು. ಪಾಂಡಾ ನಿಮ್ಮೊಂದಿಗೆ ಎರಡು ಮಾತು ಹೇಳಲು ಬಯಸುತ್ತಾರೆ. ಓದಲು ಕ್ಲಿಕ್ ಮಾಡಿ."
-    IDS_TOAST_UPDATE_TITLE  "ಆವೃತ್ತಿ {0} ಬಿಡುಗಡೆಯಾಗಿದೆ"
-    IDS_TOAST_UPDATE        "ಮೂರು ಬದಲಾವಣೆಗಳು ಮತ್ತು ಡೌನ್‌ಲೋಡ್ ಲಿಂಕ್. ಓದಲು ಕ್ಲಿಕ್ ಮಾಡಿ."
     IDS_ABOUT_AUTHOR        "ಲೇಖಕರಿಂದ…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · ನವೀಕರಣ · ನಿಮ್ಮಲ್ಲಿ {1} ಇದೆ"
     IDS_ENTRY_UNREAD_MARK   "{0} · ಓದಿಲ್ಲ"
     IDS_ENTRY_READ_MARK     "{0} · ಓದಲಾಗಿದೆ"
-    IDS_UPDATE_SUB          "ನಿಮ್ಮಲ್ಲಿ {0} ಇದೆ · ಬಿಡುಗಡೆ {1}"
     IDS_UPDATE_HOW          "ನವೀಕರಿಸುವುದು ಹೇಗೆ"
     IDS_UPDATE_STEP_1       "“ಡೌನ್‌ಲೋಡ್ ಪುಟ ತೆರೆಯಿರಿ” ಒತ್ತಿ: ಇತ್ತೀಚಿನ ಆವೃತ್ತಿ ಯಾವಾಗಲೂ ಅಲ್ಲೇ ಇರುತ್ತದೆ."
     IDS_UPDATE_STEP_2       "LangSwitcher-setup.exe ಫೈಲ್ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ ಮತ್ತು ಚಲಾಯಿಸಿ."
@@ -271,6 +267,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x4B, 0x01

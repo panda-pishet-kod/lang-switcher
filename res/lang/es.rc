@@ -167,13 +167,9 @@ BEGIN
     IDS_TOAST_TITLE         "Una carta del autor"
     IDS_TOAST_NEWS          "Panda tiene una noticia para usted. Pulse para leerla, le llevará un minuto."
     IDS_TOAST_THANKS        "Ha pasado un mes desde la instalación. Panda quiere decirle un par de cosas. Pulse para leerlas."
-    IDS_TOAST_UPDATE_TITLE  "Ha salido la versión {0}"
-    IDS_TOAST_UPDATE        "Tres cambios y un enlace de descarga. Pulse para leerlo."
     IDS_ABOUT_AUTHOR        "Del autor…"
-    IDS_ENTRY_UPDATE_MARK   "{0} · actualización · usted tiene la {1}"
     IDS_ENTRY_UNREAD_MARK   "{0} · sin leer"
     IDS_ENTRY_READ_MARK     "{0} · leída"
-    IDS_UPDATE_SUB          "usted tiene la {0} · publicada el {1}"
     IDS_UPDATE_HOW          "Cómo actualizar"
     IDS_UPDATE_STEP_1       "Pulse «Abrir la página de descarga»: allí siempre está la última versión."
     IDS_UPDATE_STEP_2       "Descargue el archivo LangSwitcher-setup.exe y ejecútelo."
@@ -272,6 +268,12 @@ BEGIN
     IDS_MENU_WHATSNEW       "What’s new in {0}…"
     IDS_UPDATES_SWITCH      "Tell me about updates of the program"
     IDS_NEWS_OFF_IN_FILE    "News from the author is off in the settings file"
+    IDS_FALLBACK_TITLE      "Could not update automatically"
+    IDS_FALLBACK_SUB        "available {0} · you have {1} · released {2}"
+    IDS_FALLBACK_NOTICE     "Version {0} came out on {1}, but the program could not install it by itself. Update by hand — it takes a minute."
+    IDS_FALLBACK_WHATS_NEW  "What’s new in {0}"
+    IDS_FALLBACK_REPEATS    "If this keeps happening, write to the author — it helps to find the cause."
+    IDS_ENTRY_FALLBACK_MARK "available {0} · you have {1}"
 END
 
 LANGUAGE 0x0A, 0x01
