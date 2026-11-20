@@ -10,7 +10,7 @@ use lang_switcher::ui::layout::{
     Class, Layout, Part, Placed, WindowSize, columns_fit, lay_out, window_size,
 };
 use lang_switcher::ui::scene::{Art, Brand, ButtonKind, Node, Surface, Window, WindowKind};
-use lang_switcher::ui::text::{FixedAdvance, Measure, Style};
+use lang_switcher::ui::text::{FixedAdvance, Measure, Style, Wrap};
 use lang_switcher::ui::tokens::{
     BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BUTTON_GAP, CONTENT_PAD, PAIR_MIN_HALF, Role, TYPE_FLOOR,
 };
@@ -842,5 +842,92 @@ fn the_brand_line_is_the_name_and_the_address_beside_it() {
         } else {
             assert!(address.x >= name.right(), "the address after the name");
         }
+    }
+}
+
+/// The example with a key: the word typed, the key, the arrow, the word fixed, in this order from
+/// the start; in Hebrew the row mirrors and the arrow points left.
+#[test]
+fn the_example_with_a_key_reads_the_way_the_language_reads() {
+    let window = bare(Node::Example {
+        typed: "ghbdtn".to_owned(),
+        key: "Pause".to_owned(),
+        fixed: "привет".to_owned(),
+    });
+    for rtl in [false, true] {
+        let layout = lay_out(&window, usual(), 1.0, rtl, &MEASURE);
+        let key = rects_of(&layout, |part| matches!(part, Part::Key { .. }))[0];
+        let word = |wanted: &str| {
+            layout
+                .items
+                .iter()
+                .find(|item| matches!(&item.part, Part::Text { text, .. } if text == wanted))
+                .map(|item| item.rect)
+                .unwrap_or_else(|| panic!("no «{wanted}»"))
+        };
+        let (typed, fixed) = (word("ghbdtn"), word("привет"));
+        let arrow = word(if rtl { "←" } else { "→" });
+        if rtl {
+            assert!(typed.x > key.right() && key.x > arrow.right() && arrow.x > fixed.right());
+        } else {
+            assert!(typed.right() < key.x && key.right() < arrow.x && arrow.right() < fixed.x);
+        }
+    }
+}
+
+/// The card of a letter: its buttons at the end in the middle of its height, its text one line cut
+/// with a meant ellipsis.
+#[test]
+fn the_card_of_a_letter_has_its_buttons_at_the_end() {
+    let window = bare(Node::LetterCard {
+        label: "Письмо".to_owned(),
+        title: "Обновление 1.8.0".to_owned(),
+        text: "Очень длинный текст письма, который не помещается в одну строку карточки письма \
+               и обрезается многоточием"
+            .to_owned(),
+        buttons: vec![Node::Button {
+            id: Id::Site,
+            label: "Открыть".to_owned(),
+            kind: ButtonKind::Normal,
+            browser: false,
+        }],
+    });
+    let layout = lay_out(&window, usual(), 1.0, false, &MEASURE);
+    let card = rects_of(&layout, |part| matches!(part, Part::Surface(_)))[0];
+    let button = rects_of(&layout, |part| matches!(part, Part::Button { .. }))[0];
+    assert!(
+        button.right() <= card.right() && button.x > card.x + card.w / 2.0,
+        "the button is not at the end"
+    );
+    assert!(
+        layout.items.iter().any(|item| matches!(
+            &item.part,
+            Part::Text {
+                wrap: Wrap::Ellipsis,
+                ..
+            }
+        )),
+        "the text of the card is not one line cut with a meant ellipsis"
+    );
+}
+
+/// Every picture a window may name is a drawing of `res\art`.
+#[test]
+fn the_pictures_of_the_windows_are_drawings_of_res_art() {
+    let names: Vec<&str> = lang_switcher::ui::art::names().collect();
+    for art in [
+        Art::About,
+        Art::Avatar,
+        Art::Hello,
+        Art::Thanks,
+        Art::News,
+        Art::Update,
+        Art::Wizard,
+    ] {
+        assert!(
+            names.contains(&art.name()),
+            "{art:?}: no «{}» among the drawings",
+            art.name()
+        );
     }
 }

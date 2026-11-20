@@ -63,6 +63,9 @@ pub enum Wrap {
     Words,
     /// One line, cut with an ellipsis.
     OneLine,
+    /// One line where the cut is meant — the text of a letter card: drawn as [`Wrap::OneLine`], and
+    /// the instrument of fitting does not count it.
+    Ellipsis,
 }
 
 /// Where the lines stand in their width. `Start` is the edge the language reads from: the left
@@ -140,7 +143,7 @@ impl Measure for FixedAdvance {
         let advance = self.0 * style.size;
         let length = |word: &str| word.chars().count() as f32 * advance;
 
-        if wrap == Wrap::OneLine || text.is_empty() {
+        if wrap != Wrap::Words || text.is_empty() {
             return Size {
                 width: length(text).min(width),
                 height: style.line_height(),
@@ -404,7 +407,7 @@ impl Text {
 
             match wrap {
                 Wrap::Words => format.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?,
-                Wrap::OneLine => {
+                Wrap::OneLine | Wrap::Ellipsis => {
                     format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                     let sign = self.factory.CreateEllipsisTrimmingSign(&format)?;
                     let trimming = DWRITE_TRIMMING {
@@ -416,11 +419,7 @@ impl Text {
             }
         }
 
-        let height = if wrap == Wrap::OneLine {
-            line
-        } else {
-            UNBOUNDED
-        };
+        let height = if wrap != Wrap::Words { line } else { UNBOUNDED };
         // SAFETY: the string and the format live across the call.
         let layout = unsafe { self.factory.CreateTextLayout(&wide, &format, width, height) }?;
 

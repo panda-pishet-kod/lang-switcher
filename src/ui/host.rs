@@ -666,6 +666,18 @@ pub fn open<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<
     Ok(hwnd)
 }
 
+/// Opens a window of the shell as [`open`] does, without taking the foreground: a letter the clock
+/// of the program shows (as `show_letter(.., activate = false)` of the old windows).
+pub fn open_inactive<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<HWND> {
+    let hwnd = create(content, owner)?;
+    cloak(hwnd, true);
+    // SAFETY: a live window of this thread; shown without taking the focus.
+    let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+    paint_now(hwnd);
+    cloak(hwnd, false);
+    Ok(hwnd)
+}
+
 /// Makes the window of `content` and places it, without showing it: the tests send it messages
 /// with nothing on the screen.
 pub fn create<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<HWND> {
