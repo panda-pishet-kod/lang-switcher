@@ -538,6 +538,7 @@ fn a_switch_stands_at_the_end_of_its_line_and_a_check_box_before_its_label() {
             id: Id::Sound,
             label: "Sound".to_owned(),
             on: false,
+            hint: None,
         },
     ]);
     let layout = lay(&bare(body), usual());
@@ -782,6 +783,7 @@ fn every_window() -> Vec<Window<Id>> {
                             id: Id::Sound,
                             label: "Sound".to_owned(),
                             on: true,
+                            hint: None,
                         },
                     ])),
                 )),
@@ -1402,4 +1404,111 @@ fn a_small_window_opens_at_the_least_size() {
         window_size(600.0, 400.0),
         "a tiny work area"
     );
+}
+
+/// **The wizard** (T-120-19, passport §6): its progress — bars of 0,3 B with 0,35 B between them
+/// across the width, the passed ones and the current `accent`; its row of buttons — «Отмена» at the
+/// left edge, «Назад» and the main one at the right; a check box with a line under its label.
+#[test]
+fn the_wizard_has_its_progress_its_row_and_its_check_boxes_with_a_line() {
+    use lang_switcher::ui::tokens::{WIZARD_STEP, WIZARD_STEP_GAP};
+
+    let window = Window {
+        kind: WindowKind::Wizard,
+        buttons: vec![
+            button(Id::Cancel, "Cancel", ButtonKind::Quiet),
+            button(Id::Back, "Back", ButtonKind::Normal),
+            button(Id::Next, "Next", ButtonKind::Primary),
+        ],
+        ..bare(Node::Column(vec![
+            Node::Progress {
+                total: 4,
+                current: 1,
+            },
+            Node::Check {
+                id: Id::Sound,
+                label: "The journal".to_owned(),
+                on: true,
+                hint: Some("The last 500 lines".to_owned()),
+            },
+        ]))
+    };
+    let layout = lay(&window, usual());
+    let b = layout.b;
+
+    let bars: Vec<(bool, Rect)> = layout
+        .items
+        .iter()
+        .filter_map(|item| match item.part {
+            Part::Progress { done } => Some((done, item.rect)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bars.iter().map(|(done, _)| *done).collect::<Vec<_>>(),
+        vec![true, true, false, false],
+        "passed and current — accent"
+    );
+    assert!(
+        bars.iter()
+            .all(|(_, rect)| close(rect.h, WIZARD_STEP.at(b)))
+    );
+    assert!(close(
+        bars[1].1.x - bars[0].1.right(),
+        WIZARD_STEP_GAP.at(b)
+    ));
+    assert!(close(bars[0].1.w, bars[3].1.w), "equal bars");
+
+    let at = |id: Id| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.id == Some(id) && matches!(item.part, Part::Button { .. }))
+            .expect("the button")
+            .rect
+    };
+    let (cancel, back, next) = (at(Id::Cancel), at(Id::Back), at(Id::Next));
+    let content_x = bars[0].1.x;
+    assert!(
+        close(cancel.x, content_x),
+        "«Отмена» at the left edge: {cancel:?}"
+    );
+    assert!(
+        next.x > back.x && back.x > cancel.right() + BUTTON_GAP.at(b),
+        "the others at the right"
+    );
+    assert!(
+        close(next.right(), bars[3].1.right()),
+        "the main one the rightmost"
+    );
+
+    let texts = texts(&layout);
+    assert_eq!(texts.len(), 2, "the label and its line");
+    assert!(
+        texts[1].y >= texts[0].bottom(),
+        "the line under the label: {texts:?}"
+    );
+
+    // Mirrored with the window: «Отмена» at the right edge, the first bar the rightmost.
+    let mirrored = lay_out(&window, usual(), 1.0, true, &MEASURE);
+    let cancel_m = mirrored
+        .items
+        .iter()
+        .find(|item| item.id == Some(Id::Cancel))
+        .expect("the button")
+        .rect;
+    assert!(
+        close(cancel_m.x, usual().w - cancel.right()),
+        "mirrored: {cancel_m:?}"
+    );
+
+    // The line is a text of the window too: the instrument of fitting lengthens it.
+    let mut window = window;
+    let mut small = Vec::new();
+    window.texts_mut(&mut |role, s| {
+        if matches!(role, Role::Small) {
+            small.push(s.clone());
+        }
+    });
+    assert_eq!(small, vec!["The last 500 lines".to_owned()]);
 }

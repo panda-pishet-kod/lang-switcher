@@ -67,6 +67,7 @@ impl Content for Probe {
                     id: Id::Sound,
                     label: "Sound".to_owned(),
                     on: false,
+                    hint: None,
                 },
                 Node::Segments {
                     id: Id::Theme,

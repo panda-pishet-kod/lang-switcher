@@ -137,6 +137,7 @@ fn window_has_check(window: &lang_switcher::ui::scene::Window<Id>) -> bool {
                 lang_switcher::ui::scene::Node::Check {
                     id: Id::Check,
                     on: true,
+                    hint: None,
                     ..
                 }
             )

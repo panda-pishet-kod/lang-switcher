@@ -51,6 +51,7 @@ use crate::ui::tokens::{
     ON_PICTURE_KEY_PAD, ON_PICTURE_WEIGHT, ON_PICTURE_WORD, ON_PICTURE_WORD_INSET,
 };
 use crate::ui::tokens::{ROW_FIELD_MIN, SETTINGS_PANEL_GAP, SETTINGS_PANEL_PAD, STATUS_DOT};
+use crate::ui::tokens::{WIZARD_STEP, WIZARD_STEP_GAP};
 
 /// The class of a window by its width: the table of type sizes has a factor per class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -849,7 +850,7 @@ impl<I: Copy> Placer<'_, I> {
 
         if let Some((rule, buttons)) = row {
             self.push(Part::ButtonRule, Rect::new(x, rule, column, LINE.0), None);
-            self.buttons(&window.buttons, x, buttons, column);
+            self.window_buttons(window, x, buttons, column);
         }
         self.out.extend(brand_line);
 
@@ -925,12 +926,32 @@ impl<I: Copy> Placer<'_, I> {
                     w,
                 )
             }
-            Node::Check { id, label, on } => {
+            Node::Progress { total, current } => {
+                let (h, gap) = (self.em(WIZARD_STEP), self.em(WIZARD_STEP_GAP));
+                let count = (*total).max(1);
+                let each = ((w - gap * (count - 1) as f32) / count as f32).max(0.0);
+                for index in 0..count {
+                    self.push(
+                        Part::Progress {
+                            done: index <= *current,
+                        },
+                        Rect::new(x + (each + gap) * index as f32, y, each, h),
+                        None,
+                    );
+                }
+                h
+            }
+            Node::Check {
+                id,
+                label,
+                on,
+                hint,
+            } => {
                 let side = CHECK.at(self.b);
                 self.control(
                     *id,
                     (label, None),
-                    None,
+                    hint.as_deref(),
                     Part::Check { on: *on },
                     (side, side),
                     true,
@@ -1972,6 +1993,31 @@ impl<I: Copy> Placer<'_, I> {
             };
             self.push(part, at, Some(*id));
         }
+    }
+
+    /// The row of buttons of a window. In the wizard the first of them («Отмена») stands at the
+    /// left edge and the others to the right as in any window (passport §6), while the row fits on
+    /// one line; else as in any window (§3а).
+    fn window_buttons(&mut self, window: &Window<I>, x: f32, y: f32, w: f32) -> f32 {
+        if window.kind == WindowKind::Wizard
+            && let Some((first, rest)) = window.buttons.split_first()
+            && !rest.is_empty()
+        {
+            let gap = self.em(BUTTON_GAP);
+            let rest: Vec<&Node<I>> = rest.iter().collect();
+            let (first_w, first_h) = self.button_size(first);
+            if first_w + gap + self.row_width(&rest) <= w {
+                self.button(first, Rect::new(x, y, first_w, first_h));
+                let h = self.buttons(
+                    &window.buttons[1..],
+                    x + first_w + gap,
+                    y,
+                    w - first_w - gap,
+                );
+                return h.max(first_h);
+            }
+        }
+        self.buttons(&window.buttons, x, y, w)
     }
 
     /// A row of buttons pressed to the right, the main one the rightmost. When it does not fit —

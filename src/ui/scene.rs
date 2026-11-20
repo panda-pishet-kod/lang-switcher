@@ -163,7 +163,16 @@ pub enum Node<I> {
         badge: Option<String>,
     },
     /// A check box before its label; the whole line is pressed.
-    Check { id: I, label: String, on: bool },
+    Check {
+        id: I,
+        label: String,
+        on: bool,
+        /// A line in `small` under the label (the wizard's «what to attach», T-120-19).
+        hint: Option<String>,
+    },
+    /// The progress of a wizard (passport §6): `total` bars across, the ones passed and the current
+    /// `accent`, the rest `line2`; mirrored with the window.
+    Progress { total: usize, current: usize },
     /// A radio button before its label; the whole line is pressed.
     Radio { id: I, label: String, on: bool },
     /// A choice card: a radio button, a title and a line under it; the whole card is pressed.
@@ -364,11 +373,18 @@ impl<I> Node<I> {
                 on,
                 badge,
             },
-            Node::Check { id, label, on } => Node::Check {
+            Node::Check {
+                id,
+                label,
+                on,
+                hint,
+            } => Node::Check {
                 id: f(id),
                 label,
                 on,
+                hint,
             },
+            Node::Progress { total, current } => Node::Progress { total, current },
             Node::Radio { id, label, on } => Node::Radio {
                 id: f(id),
                 label,
@@ -540,7 +556,14 @@ impl<I> Node<I> {
                     f(Role::Label, badge);
                 }
             }
-            Node::Check { label, .. } | Node::Radio { label, .. } => f(Role::Body, label),
+            Node::Check { label, hint, .. } => {
+                f(Role::Body, label);
+                if let Some(hint) = hint {
+                    f(Role::Small, hint);
+                }
+            }
+            Node::Radio { label, .. } => f(Role::Body, label),
+            Node::Progress { .. } => {}
             Node::ChoiceCard { title, words, .. } => {
                 f(Role::Strong, title);
                 f(Role::Small, words);
