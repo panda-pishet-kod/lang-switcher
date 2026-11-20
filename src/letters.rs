@@ -6466,8 +6466,8 @@ pub fn sample_entry() -> FeedItem {
     }
 }
 
-/// «Последние письма» full, for the instrument of fitting: the letter of the update and three news
-/// items, two of them unread — each of [`sample_entry`], in `language`.
+/// «Последние письма» full, for the instrument of fitting: the row of the update in the words of
+/// its letter and three news items, two of them unread — of [`sample_entry`], in `language`.
 pub fn sample_entries(language: Language) -> Vec<Entry> {
     let item = sample_entry();
     let date = item.date.map(format_date).unwrap_or_default();
@@ -6483,8 +6483,18 @@ pub fn sample_entries(language: Language) -> Vec<Entry> {
         news,
         unread,
     };
+    // The row of the update has the words of its letter, as `list_entries` gives them.
+    let update = Entry {
+        title: settings::text_in(language, settings::IDS_FALLBACK_TITLE),
+        meta: settings::text_in(language, settings::IDS_ENTRY_FALLBACK_MARK)
+            .replace("{0}", item.version.as_deref().unwrap_or_default())
+            .replace("{1}", "1.8.0"),
+        excerpt: first_line(&item.text),
+        news: None,
+        unread: false,
+    };
     vec![
-        entry(None, false),
+        update,
         entry(Some(9), true),
         entry(Some(8), true),
         entry(Some(7), false),
