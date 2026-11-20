@@ -4540,7 +4540,7 @@ fn print_the_letters() {
     use lang_switcher::ui::layout::{client_size, lay_out};
     use lang_switcher::ui::text::{Direction, Text};
     use lang_switcher::ui::tokens::{Color, Theme};
-    use lang_switcher::ui::windows::{letter, letters_list};
+    use lang_switcher::ui::windows::{author, letter, letters_list};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 
     let Some(folder) = std::env::var_os("LANGSW_LETTERS_DIR") else {
@@ -4569,6 +4569,11 @@ fn print_the_letters() {
                     letters_list::states(language)
                         .into_iter()
                         .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+                )
+                .chain(
+                    author::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&author::Id::number))),
                 )
                 .collect();
         for (name, window) in &windows {
@@ -4708,4 +4713,56 @@ fn hello_shows_the_frame_of_its_tick() {
     for letter in [Letter::Thanks, Letter::Update, Letter::News(7)] {
         assert_eq!(view(letter).tick(), None, "{letter:?} stands still");
     }
+}
+
+/// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
+/// window, 620 × 500, at a type not under 12 points** — in every language, at the factor of the
+/// table, laid out by the layout of the shell and measured by DirectWrite; the pair of its cards
+/// stands side by side there (the rule of the pair). A language that needs more than the pair gives
+/// way to is named by the instrument of fitting (`tests\ui_fit.rs`) and the common list of what is
+/// excused.
+///
+/// Before the task «От автора» was the dialog `IDD_AUTHOR`: there was no description to lay out, and
+/// its template did not fit 620 × 500 (the mock-up's measure: 84 points short).
+#[test]
+fn the_author_window_fits_the_narrowest_window() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::TYPE_FLOOR;
+    use lang_switcher::ui::windows::catalogue;
+
+    let _guard = with_product_strings();
+
+    let mut faults = Vec::new();
+    for language in [Language::Ru, Language::De, Language::En, Language::He] {
+        let Some((_, window)) = catalogue(language)
+            .into_iter()
+            .find(|(name, _)| name == "author")
+        else {
+            faults.push(format!(
+                "{language:?}: «От автора» is not a window of the shell"
+            ));
+            continue;
+        };
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        let k = fit::k_for(language.tag(), Class::Narrow);
+        let layout = lay_out(&window, client_size(620.0, 500.0), k, rtl, &text);
+        if !layout.shortfall.fits() {
+            faults.push(format!(
+                "{language:?}: does not fit 620 × 500, {:.1} down",
+                layout.shortfall.h
+            ));
+        }
+        if layout.b < TYPE_FLOOR.0 {
+            faults.push(format!("{language:?}: type {:.2} under 12", layout.b));
+        }
+    }
+    assert!(faults.is_empty(), "«От автора»:\n{}", faults.join("\n"));
 }

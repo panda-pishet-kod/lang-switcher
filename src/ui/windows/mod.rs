@@ -2,6 +2,7 @@
 //! coordinates.
 
 pub mod about;
+pub mod author;
 pub mod corner;
 pub mod letter;
 pub mod letters_list;
@@ -19,6 +20,11 @@ pub fn catalogue(language: Language) -> Vec<(String, Window<u16>)> {
         about::states(language)
             .into_iter()
             .map(|(name, window)| (name, window.map(&|id| id as u16))),
+    );
+    all.extend(
+        author::states(language)
+            .into_iter()
+            .map(|(name, window)| (name, window.map(&author::Id::number))),
     );
     all.extend(
         letter::states(language)

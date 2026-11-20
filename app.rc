@@ -56,11 +56,9 @@
 // rather than as the wrong one.
 #define IDD_SETTINGS 200
 
-// «От автора» — FR-103, task Т-32-2. Next in the dialog row: a dialog identifier is only unique
-// within its type, and keeping the numbering distinct makes a mismatched constant in the Rust
-// source show up as a missing resource rather than as the wrong window. 202 and 203 were the
-// letters and «Последние письма», windows of the shell since task T-120-16.
-#define IDD_AUTHOR 204
+// The dialog identifiers stay distinct, so that a mismatched constant in the Rust source shows up
+// as a missing resource rather than as the wrong window. 202, 203 and 204 were the letters,
+// «Последние письма» and «От автора» — windows of the shell since tasks T-120-16 and T-120-17.
 // The wizard of FR-104 — task Т-32-8. Six steps in one window, five of them on the road of a
 // trouble and three on the road of an idea.
 #define IDD_WIZARD 205
@@ -166,36 +164,6 @@
 // label block too: 1110 and 1111 were its first free numbers.
 #define IDC_EXCLUSION_AUTO_LABEL 1110
 #define IDC_EXCLUSION_MANUAL_LABEL 1111
-
-// Controls of the «От автора» window IDD_AUTHOR — FR-103, task Т-32-3. Three panels: the
-// author, the news and the feed, and the way to write to the author.
-#define IDC_AUTHOR_ICON        1260
-#define IDC_AUTHOR_NAME        1261
-#define IDC_AUTHOR_VERSION     1262
-#define IDC_AUTHOR_PANEL       1263
-#define IDC_AUTHOR_TEXT        1264
-#define IDC_AUTHOR_SUPPORT     1265
-#define IDC_AUTHOR_CHANNEL     1266
-#define IDC_NEWS_PANEL         1267
-#define IDC_NEWS_ABOUT         1268
-#define IDC_NEWS_STATE         1269
-#define IDC_NEWS_VERSION       1270
-#define IDC_NEWS_DOWNLOAD      1271
-#define IDC_NEWS_LETTERS       1272
-#define IDC_NEWS_FILE_ONLY     1273
-// The switch of FR-102, which appears only after the feed has shown a letter and ninety days
-// have passed. A check box on the terms every check box of this program is on: BS_OWNERDRAW
-// with BS_NOTIFY, the glyph drawn by this program.
-#define IDC_NEWS_SWITCH        1274
-#define IDC_NEWS_SWITCH_SUB    1275
-#define IDC_FEEDBACK_PANEL     1276
-#define IDC_FEEDBACK_TEXT      1277
-#define IDC_FEEDBACK_WRITE     1278
-#define IDC_AUTHOR_CLOSE       1279
-// ⭐ Две строки описания общей шапки — задача T-81-3, решение 142.2 п. 4. Слова у них те же, что
-// в «О программе» (`IDS_ABOUT_LINE_1` и `_2`): шапка у двух окон одна, а не две похожие.
-#define IDC_AUTHOR_LINE_1      1280
-#define IDC_AUTHOR_LINE_2      1281
 
 // Controls of the wizard IDD_WIZARD — FR-104, task Т-32-8. A block of their own from 1300,
 // with the gap after 1279 left deliberately: the three windows above may still grow a slot,
@@ -837,68 +805,11 @@ END
 // FR-101 and FR-103 -- the windows of the letters from the author. Task Т-32-2.
 // =======================================================================================
 //
-// ⚠ **Two templates, «От автора» and the wizard, and every rectangle in them is a slot rather
-// than a layout**: `letters` places every control top to bottom out of the height its own text
-// needs, measured with the same `DrawTextW` that will draw it, and hides the slots a state does
-// not use. What a template fixes is the size of the window, the font its units are in and which
-// slots exist. The letters and «Последние письма» are windows of the shell (task T-120-16:
-// `src\ui\windows\letter.rs`, `letters_list.rs`) and have no template here.
-
-// «От автора» — FR-103. Wider than a letter and the one window of the three whose height the
-// content decides: the accepted mock-up draws it 430 px across, and 430 × 4 / 7 is 246 units at
-// this font. Three panels, and the middle one has two states — before the feed has shown a
-// letter it carries a quiet line saying the setting is edited in the file, and after it (and
-// after ninety days) a switch stands in that line's place (FR-102).
-IDD_AUTHOR DIALOGEX 0, 0, 256, 345
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-EXSTYLE 0x00040000
-CAPTION "От автора"
-FONT 10, "Segoe UI", 400, 0, 0x1
-BEGIN
-    // ⚠⚠ **Пере-разложено задачей T-81-1 под ширину 256** (246 → 256, решение 142.2 п. 2): те же
-    // колонки, что у остальных четырёх окон семьи — поле 12, панель 12…244 = 232, её содержимое
-    // 19…237 = 218, колонка текста рядом со значком 42…244 = 202. Числа шаблона — стартовая
-    // форма: `letters::layout_author` кладёт всё от клиентской ширины и **сам считает высоту
-    // окна**, почему кнопка «Закрыть» и стоит здесь за нижним краем шаблона.
-    // ⭐⭐ **Шапка ТОЧЬ-В-ТОЧЬ как у `IDD_ABOUT` — задача T-81-3, решение 142.2 п. 4 и п. 6.**
-    // Значок стоял в тех же координатах и до этого этапа. Имя стало **кнопкой** с тем же
-    // прямоугольником-правилом, что у `IDC_ABOUT_NAME`: 38 вместо 42 и 11 вместо 12 — это не
-    // сдвиг имени, а комната под подложку (задача T-79-2), и текст ложится в те же 42, 12.
-    // Строка версии опустилась с 25 на **24** — она стояла на единицу ниже, чем в «О программе»,
-    // без причины. Две строки описания заведены здесь впервые и несут те же слова
-    // `IDS_ABOUT_LINE_1` и `_2`: шапка у двух окон **одна**, а не две похожие.
-    // ⚠ Всё, что ниже шапки, съехало ровно на **19** единиц — на столько выросла шапка
-    // (34 → 57 по нижнему краю, минус прежний зазор). Числа шаблона — стартовая форма:
-    // `letters::layout_author` кладёт всё заново и сам считает высоту окна.
-    ICON            IDI_APP_ACTIVE, IDC_AUTHOR_ICON, 12, 13, 23, 22
-    PUSHBUTTON      "Lang Switcher", IDC_AUTHOR_NAME, 38, 11, 206, 12, BS_OWNERDRAW | NOT WS_TABSTOP
-    LTEXT           "", IDC_AUTHOR_VERSION, 42, 24, 202, 8, SS_OWNERDRAW
-    LTEXT           "Исправляет текст, набранный не в той раскладке.", IDC_AUTHOR_LINE_1, 42, 37, 202, 10, SS_OWNERDRAW
-    LTEXT           "Исправление — по нажатию одной клавиши.", IDC_AUTHOR_LINE_2, 42, 47, 202, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_AUTHOR_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 63, 232, 76
-    LTEXT           "", IDC_AUTHOR_TEXT, 19, 79, 218, 40, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_SUPPORT, 19, 120, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_AUTHOR_CHANNEL, 133, 120, 63, 14, BS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 145, 232, 100
-    LTEXT           "", IDC_NEWS_ABOUT, 19, 161, 218, 30, SS_OWNERDRAW
-    CONTROL         "", IDC_NEWS_SWITCH, "Button", BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, 19, 161, 218, 10
-    LTEXT           "", IDC_NEWS_SWITCH_SUB, 32, 172, 205, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_STATE, 19, 194, 218, 20, SS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_VERSION, 19, 215, 218, 10, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_NEWS_DOWNLOAD, 19, 226, 110, 14, BS_OWNERDRAW
-    PUSHBUTTON      "", IDC_NEWS_LETTERS, 133, 226, 63, 14, BS_OWNERDRAW
-    LTEXT           "", IDC_NEWS_FILE_ONLY, 19, 242, 218, 10, SS_OWNERDRAW
-    CONTROL         "", IDC_FEEDBACK_PANEL, "Button", BS_OWNERDRAW | NOT WS_VISIBLE, 12, 251, 232, 60
-    LTEXT           "", IDC_FEEDBACK_TEXT, 19, 267, 218, 30, SS_OWNERDRAW
-    PUSHBUTTON      "", IDC_FEEDBACK_WRITE, 19, 292, 110, 14, BS_OWNERDRAW
-    // ⚠⚠ **Кнопка вернулась внутрь шаблона — задача T-81-2.** Она стояла на `y = 296` при высоте
-    // 300, то есть за нижним краем: шаблон здесь условен, потому что окно пересчитывает свою
-    // высоту на ходу. Условность — не повод: правило решения 142.2 п. 7 проверяется по шаблону,
-    // и шаблон обязан его нести. Высота 300 → 326 → **345** (T-81-3, общая шапка подняла всё на
-    // 19): панель «Обратная связь» кончается на 311, над рядом `air::GAP` = 8, ряд 319…333, под
-    // ним поле 12.
-    PUSHBUTTON      "", IDC_AUTHOR_CLOSE, 193, 319, 51, 14, BS_OWNERDRAW
-END
+// ⚠ **One template, the wizard's, and every rectangle in it is a slot rather than a layout**:
+// `letters` places every control top to bottom out of the height its own text needs, measured with
+// the same `DrawTextW` that will draw it, and hides the slots a step does not use. The letters,
+// «Последние письма» (task T-120-16) and «От автора» (task T-120-17) are windows of the shell —
+// `src\ui\windows\` — and have no template here.
 
 // The wizard «Написать автору» — FR-104, task Т-32-8.
 //
