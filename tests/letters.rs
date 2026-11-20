@@ -4765,6 +4765,40 @@ fn hello_shows_the_frame_of_its_tick() {
     }
 }
 
+/// **«Обновление» dates the release in the language of its window** — the same as «От автора»
+/// below (T-120-17): `plan_in` speaks `language`, and the day of the release came out in the
+/// program's («Version 1.7.1 came out on 16 ноября» in Tamil, the list of the wave of T-120-24).
+#[test]
+fn the_update_letter_dates_the_release_in_the_language_of_its_window() {
+    use lang_switcher::letters::{format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let day = item.date.expect("the sample entry carries its day");
+    let context = letters::PlanContext {
+        version: "1.7.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: false,
+        item: Some(&item),
+    };
+    let plan = letters::plan_in(Language::De, Letter::Update, &context);
+    let german = format_date_in(Language::De, day);
+    let russian = format_date_in(Language::Ru, day);
+
+    println!("De: {} (the program speaks Russian)", plan.note);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        plan.note.contains(&german) && !plan.note.contains(&russian),
+        "the notice of «Обновление» must carry «{german}», the day in the language of the window: {}",
+        plan.note
+    );
+}
+
 /// **T-120-17: «От автора» dates the reading of the feed in the language of its window**, not in
 /// the program's. The two are one in the running program; a description built for another language
 /// — the pictures of C3, the instrument of fitting, the window built again after a change — printed

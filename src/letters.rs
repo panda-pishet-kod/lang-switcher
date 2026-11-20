@@ -1934,7 +1934,10 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
                 return LetterPlan::default();
             };
 
-            let released = item.date.map(format_date).unwrap_or_default();
+            let released = item
+                .date
+                .map(|day| format_date_in(language, day))
+                .unwrap_or_default();
 
             if matches!(letter, Letter::Update) {
                 // ⭐ «Обновление» — the honest letter of task T-119-9 (решения 208.95–208.99). It
