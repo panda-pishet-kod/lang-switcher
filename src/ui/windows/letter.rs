@@ -296,14 +296,20 @@ impl Content for LetterView {
 }
 
 /// Every letter as the instrument of fitting sees it: built in `language`, the letters out of
-/// the feed for `letters::sample_entry`, «Спасибо» with its snooze.
+/// the feed for `letters::sample_entry_in` — an entry of the longest text the feed allows in that
+/// language (`tools\feed-caps.tsv`) — «Спасибо» with its snooze.
 pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
-    let item = letters::sample_entry();
+    states_with(language, &letters::sample_entry_in(language))
+}
+
+/// [`states`] with `item` for the entry of the feed — for the instrument that measures the cap of
+/// the text of an entry (`tests\ui_fit.rs`).
+pub fn states_with(language: Language, item: &letters::FeedItem) -> Vec<(String, Window<Id>)> {
     let context = |snooze_offered| letters::PlanContext {
         version: "1.7.0".to_owned(),
         hotkey: String::new(),
         snooze_offered,
-        item: Some(&item),
+        item: Some(item),
     };
     [
         ("letter hello", Letter::Welcome),

@@ -4025,24 +4025,26 @@ pub fn sample_entry() -> FeedItem {
 }
 
 /// The entry the instrument of fitting (`ui::windows::catalogue`) puts into «Новость» and
-/// «Обновление», with the words a person reading the program in `language` sees: the update of the
-/// last real feed (`tests\fixtures\news-before-1.6.1.toml`, the feed of 16.11.2026) in `language`,
-/// else `en`, else `ru` — the choice of the product itself (`feed::parse_body`). Its number, date,
-/// address and version stay those of [`sample_entry`]. The feed is in the build only with the
-/// feature `testing`; without it the words are those of [`sample_entry`].
+/// «Обновление», in the words a person reading the program in `language` sees, and as long as the
+/// feed allows in that language.
+/// - The words: the last real feed (`tests\fixtures\news-before-1.6.1.toml`, 16.11.2026) in
+///   `language`, else `en`, else `ru` — the choice of the product itself (`feed::parse_body`).
+/// - The length: the cap of `language` in `tools\feed-caps.tsv` ([`feed_cap`]), which
+///   `sign-news.ps1` holds every entry to. A language with no cap measured keeps the text of the
+///   real update.
+///
+/// Its number, date, address and version stay those of [`sample_entry`]. The feed is in the build
+/// only with the feature `testing`; without it the words are those of [`sample_entry`].
 pub fn sample_entry_in(language: Language) -> FeedItem {
     #[cfg(feature = "testing")]
     {
-        const FEED: &str = include_str!("../tests/fixtures/news-before-1.6.1.toml");
         let mut item = sample_entry();
-        // The first line is the signature; the body under it is what `parse_body` reads.
-        let body = FEED.split_once('\n').map_or(FEED, |(_, body)| body);
-        if let Ok(feed) = feed::parse_body(body, language.tag())
-            && let Some(update) = feed.update
-        {
-            item.title = update.title;
-            item.text = update.text;
-        }
+        let (title, text) = fixture_words(language);
+        item.title = title;
+        item.text = match feed_cap(language) {
+            Some(cap) if cap > 0 => sample_text(language, cap),
+            _ => text,
+        };
         item
     }
     #[cfg(not(feature = "testing"))]
@@ -4050,6 +4052,65 @@ pub fn sample_entry_in(language: Language) -> FeedItem {
         let _ = language;
         sample_entry()
     }
+}
+
+/// The title and the text of the update of the last real feed in `language` (testing).
+#[cfg(feature = "testing")]
+fn fixture_feed(language: Language) -> Option<feed::Feed> {
+    const FEED: &str = include_str!("../tests/fixtures/news-before-1.6.1.toml");
+    // The first line is the signature; the body under it is what `parse_body` reads.
+    let body = FEED.split_once('\n').map_or(FEED, |(_, body)| body);
+    feed::parse_body(body, language.tag()).ok()
+}
+
+/// The title of the update of the last real feed in `language`, and its text (testing).
+#[cfg(feature = "testing")]
+fn fixture_words(language: Language) -> (String, String) {
+    fixture_feed(language)
+        .and_then(|feed| feed.update)
+        .map(|update| (update.title, update.text))
+        .unwrap_or_default()
+}
+
+/// A text of `points` code points in `language`, counted as `sign-news.ps1` counts — line breaks
+/// not counted: the texts of the last real feed in that language (the update and the news, one
+/// after another) over again, their line breaks where they fall (testing).
+#[cfg(feature = "testing")]
+pub fn sample_text(language: Language, points: usize) -> String {
+    let mut words = String::new();
+    if let Some(feed) = fixture_feed(language) {
+        for item in feed.update.iter().chain(feed.news.iter()) {
+            words.push_str(item.text.trim());
+            words.push('\n');
+        }
+    }
+    let words: Vec<char> = words.chars().filter(|c| *c != '\r').collect();
+    let mut text = String::new();
+    let mut counted = 0;
+    let mut at = 0;
+    while counted < points && !words.is_empty() {
+        let c = words[at % words.len()];
+        at += 1;
+        text.push(c);
+        if c != '\n' {
+            counted += 1;
+        }
+    }
+    text
+}
+
+/// The cap of the text of an entry of the feed in `language`, in code points (line breaks not
+/// counted): `tools\feed-caps.tsv`, printed by the instrument of fitting
+/// (`print_the_caps_of_the_feed`); 0 — the letter does not fit even without a text (testing).
+#[cfg(feature = "testing")]
+pub fn feed_cap(language: Language) -> Option<usize> {
+    const CAPS: &str = include_str!("../tools/feed-caps.tsv");
+    CAPS.lines()
+        .filter(|line| !line.starts_with('#'))
+        .find_map(|line| {
+            let (tag, cap) = line.split_once('\t')?;
+            (tag.trim() == language.tag()).then(|| cap.trim().parse().ok())?
+        })
 }
 
 /// «Последние письма» full, for the instrument of fitting: the row of the update in the words of

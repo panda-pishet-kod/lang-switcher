@@ -65,7 +65,7 @@ pub const EXCUSED: &[Excuse] = &[
     Excuse {
         window: "letter update",
         class: Class::Narrow,
-        languages: &["ml", "ta"],
+        languages: &["ml"],
         category: Some(Category::Wave),
         until: "T-120-24",
         decision: None,
