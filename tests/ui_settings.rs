@@ -122,3 +122,56 @@ fn print_the_pictures_of_the_window_of_the_settings() {
     }
     std::fs::write(folder.join("settings-layouts.txt"), lines.join("\r\n")).expect("the list");
 }
+
+/// **The list of «Исключения» takes what the section leaves** — in the least window too, where a
+/// list of its natural six rows would push the two ways to add one under the rule of the buttons.
+#[test]
+fn the_list_of_exclusions_takes_what_the_section_leaves() {
+    use lang_switcher::ui::layout::Part;
+
+    with_product_strings();
+    for language in [Language::Ru, Language::De, Language::Ml, Language::Ta] {
+        let text = Text::new(language.tag(), Direction::LeftToRight).expect("DirectWrite");
+        let (_, window) = window_of_settings::states(language)
+            .into_iter()
+            .find(|(name, _)| name == "settings Exclusions")
+            .expect("the state of «Исключения»");
+        let size = client_size(620.0, 500.0);
+        let layout = fit::emergency(
+            &window,
+            size,
+            fit::k_for(language.tag(), size.class),
+            false,
+            &text,
+        );
+        let rows = layout
+            .items
+            .iter()
+            .filter(|item| matches!(item.part, Part::ListRow { .. }))
+            .count();
+        let rule = layout
+            .items
+            .iter()
+            .find(|item| matches!(item.part, Part::ButtonRule))
+            .map(|item| item.rect.y)
+            .expect("the rule over the row of buttons");
+        // The content is what starts above the rule — the buttons of the sections among it.
+        let lowest = layout
+            .items
+            .iter()
+            .filter(|item| item.rect.y < rule && !matches!(item.part, Part::Panel))
+            .map(|item| item.rect.y + item.rect.h)
+            .fold(0.0_f32, f32::max);
+        println!(
+            "{language:?}: rows {rows}, rule {rule}, lowest {lowest}, shortfall {:?}, k {}",
+            layout.shortfall, layout.k
+        );
+        assert!(
+            (1..=6).contains(&rows),
+            "{language:?}: the list shows what the room lets it, {rows} rows"
+        );
+        // ⚠ Not `layout.shortfall`: the core measures it from the natural height, where a list in a
+        // fill has its six rows (reported to the core, T-120-20).
+        assert!(lowest <= rule, "{language:?}: nothing under the rule");
+    }
+}

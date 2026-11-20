@@ -373,7 +373,8 @@ impl Settings {
             let names: Vec<LayoutId> = self.rows.iter().map(|row| row.layout).collect();
             let row_labels = settings::layout_labels(&names, &self.session);
             nodes.push(Node::Text(Role::Small, self.line(IDS_CYCLE_HINT)));
-            nodes.push(Node::List {
+            // The list takes what the section leaves (the mock-up's `.grow`).
+            nodes.push(Node::Fill(Box::new(Node::List {
                 id: Id::Cycle,
                 rows: self
                     .rows
@@ -387,7 +388,7 @@ impl Settings {
                     .collect(),
                 selected: self.cycle_selected,
                 first: 0,
-            });
+            })));
             nodes.push(Node::Buttons(vec![
                 button(Id::Up, self.line(IDS_CYCLE_UP)),
                 button(Id::Down, self.line(IDS_CYCLE_DOWN)),
@@ -398,7 +399,8 @@ impl Settings {
 
     fn exclusions(&self) -> Vec<Node<Id>> {
         vec![
-            Node::List {
+            // The list takes what the section leaves (the mock-up's `.grow`).
+            Node::Fill(Box::new(Node::List {
                 id: Id::Exclusions,
                 rows: self
                     .config
@@ -414,7 +416,7 @@ impl Settings {
                     .collect(),
                 selected: 0,
                 first: 0,
-            },
+            })),
             Node::Buttons(vec![button(Id::Remove, self.line(IDS_EXCLUSION_REMOVE))]),
             // The two ways to add one, side by side as in the mock-up (`.form2`).
             Node::Pair(
@@ -719,7 +721,9 @@ impl Content for Settings {
                     .unwrap_or(0),
             },
         ];
-        body.push(Node::Rows(content));
+        // The section takes the rest of the column, so that a list in it can take the rest of the
+        // section.
+        body.push(Node::Fill(Box::new(Node::Rows(content))));
 
         Window {
             kind: WindowKind::Settings,

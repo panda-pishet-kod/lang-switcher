@@ -2987,10 +2987,12 @@ pub fn menu_opened(menu: HWND) {
 }
 
 /// The menu is gone, by whatever road: forgets it, and has the command chosen in it, if one was,
-/// run on `owner` once this message is over; gone without a choice, notes when.
-pub fn menu_closed(owner: HWND, chosen: Option<u32>) {
+/// run on `owner` once this message is over. Gone without a choice and not by Esc — the foreground
+/// left it, as a press on the icon takes it — notes when; gone by Esc, the next press on the icon is
+/// a new one however soon it comes (finding of the stand of T-120-15).
+pub fn menu_closed(owner: HWND, chosen: Option<u32>, escaped: bool) {
     MENU_WINDOW.with(|record| record.set(0));
-    MENU_CLOSED_AT.with(|at| at.set(chosen.is_none().then(Instant::now)));
+    MENU_CLOSED_AT.with(|at| at.set((chosen.is_none() && !escaped).then(Instant::now)));
 
     if let Some(command) = chosen {
         MENU_CHOSEN.with(|record| record.set(command));

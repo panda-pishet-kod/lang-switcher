@@ -8448,7 +8448,6 @@ fn no_figure_of_the_dialog_is_drawn_by_a_bare_number() {
     }
 }
 
-
 // =========================================================================================
 // FR-92а — the closed part of the combo boxes, the rounded check-box glyph and the exclusion
 // list that paints its own selection. Task T-11-14.

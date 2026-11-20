@@ -5798,6 +5798,49 @@ fn esc_closes_the_menu_and_runs_nothing() {
     assert!(!chosen, "and nothing runs");
 }
 
+/// **Finding of the stand of T-120-15: a press on the icon right after Esc opens the menu again.**
+/// Esc is no press on the icon, so the guard of the second press (`tray::MENU_REPRESS`) has nothing
+/// to swallow; it swallowed the press all the same, and the stand lost two checks of the menu.
+#[cfg(feature = "testing")]
+#[test]
+fn a_press_on_the_icon_right_after_esc_opens_the_menu_again() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_KEYDOWN};
+
+    let window = TestWindow::new();
+    let home = TestDir::new("menu-esc-again");
+    let _ui = attach_ui(&window, &home);
+
+    press_the_icon(WM_CONTEXTMENU);
+    let menu = tray::open_menu_window().expect("the press opens the menu");
+    // SAFETY: a key to a live window of this thread.
+    unsafe {
+        SendMessageW(
+            menu,
+            WM_KEYDOWN,
+            Some(WPARAM(usize::from(VK_ESCAPE.0))),
+            None,
+        )
+    };
+    pump_the_menu(menu);
+    let closed = tray::open_menu_window();
+
+    press_the_icon(WM_CONTEXTMENU);
+    let again = shell_windows_of_this_thread();
+    println!("after Esc: {closed:?}; a press at once: {again:?}");
+    for hwnd in &again {
+        // SAFETY: windows of this thread.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert_eq!(closed, None, "Esc closes the menu");
+    assert_eq!(
+        again.len(),
+        1,
+        "and a press on the icon at once opens it again"
+    );
+}
+
 /// **Losing the foreground closes the menu** — a click beside it, Win, Alt+Tab: the menu must not
 /// stay hanging (the lesson of Э73).
 #[cfg(feature = "testing")]
