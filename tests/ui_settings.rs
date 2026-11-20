@@ -76,7 +76,10 @@ fn print_the_pictures_of_the_window_of_the_settings() {
             Direction::LeftToRight
         };
         let text = Text::new(language.tag(), direction).expect("DirectWrite");
-        for (state, window) in window_of_settings::states(language) {
+        for (state, window) in lang_switcher::ui::windows::catalogue(language)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("settings"))
+        {
             for theme in [Theme::Light, Theme::Dark] {
                 for (name, size) in sizes {
                     let k = fit::k_for(language.tag(), size.class);
@@ -206,8 +209,10 @@ fn the_block_of_the_state_speaks_to_a_person_before_the_details() {
                 "{language:?}: «{word}» stands in the block before «Подробности для автора»"
             );
         }
-        let details = the_block_of_the_state(language, "settings Diagnostics details")
-            .expect("the block with the details open");
+        let details = format!(
+            "{:?}",
+            window_of_settings::details_states(language)[0].1.body
+        );
         assert!(
             details.to_lowercase().contains("hkcu"),
             "{language:?}: «Подробности для автора» opens the lines of the author"
@@ -246,8 +251,10 @@ fn the_three_states_of_the_program_are_the_menus_three() {
 #[test]
 fn the_details_show_the_lines_of_the_author_with_the_path_apart() {
     with_product_strings();
-    let block =
-        the_block_of_the_state(Language::Ru, "settings Diagnostics details").expect("the block");
+    let block = format!(
+        "{:?}",
+        window_of_settings::details_states(Language::Ru)[0].1.body
+    );
     let path = r"C:\Program Files\Lang_Switcher\LangSwitcher.exe";
     let code_lines = block.matches("Text(Code,").count();
     assert_eq!(code_lines, 5, "four lines and the path apart: {block}");
@@ -266,5 +273,116 @@ fn the_details_show_the_lines_of_the_author_with_the_path_apart() {
             )
         )),
         "the line of the `Run` key keeps its words: {block}"
+    );
+}
+
+/// **«Копировать» puts the four lines on the clipboard word for word; «Закрыть» closes; the window
+/// opens at the least size** (T-120-21 Б, C6 (а)).
+#[test]
+fn the_window_of_the_details_copies_the_lines_and_closes() {
+    use lang_switcher::ui::host::{Content, Reply};
+    use lang_switcher::ui::scene::Event;
+    use lang_switcher::ui::windows::settings::{Details, DetailsId, Program};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    with_product_strings();
+    let program = Program {
+        enabled: true,
+        fail_safe: false,
+        details: vec![
+            "line one".to_owned(),
+            "line two".to_owned(),
+            r"Autostart: yes, C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned(),
+            "line four".to_owned(),
+        ],
+        path: Some(r"C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned()),
+    };
+    let copied = Rc::new(RefCell::new(Vec::new()));
+    let log = Rc::clone(&copied);
+    let mut details = Details::new(
+        Language::Ru,
+        lang_switcher::theme::ThemeSetting::Light,
+        program.clone(),
+        Box::new(move |words: &str| {
+            log.borrow_mut().push(words.to_owned());
+            true
+        }),
+    );
+
+    let stays = details.event(Event::Pressed(DetailsId::Copy));
+    let closes = details.event(Event::Pressed(DetailsId::Close));
+
+    assert_eq!(stays, Reply::Stay, "«Копировать» leaves the window open");
+    assert_eq!(
+        copied.borrow().as_slice(),
+        [program.details.join("\r\n")],
+        "and puts the four lines on the clipboard word for word"
+    );
+    assert_eq!(closes, Reply::Close, "«Закрыть» closes");
+    assert!(
+        details.least(),
+        "the window opens at the least size of the passport"
+    );
+    assert_eq!(
+        details.shown_lines()[2..4],
+        [
+            "Autostart: yes".to_owned(),
+            r"C:\Program Files\Lang_Switcher\LangSwitcher.exe".to_owned()
+        ],
+        "the path of the `Run` key on a line of its own"
+    );
+}
+
+/// **«Подробности для автора» opens a window of the shell owned by the window of the settings.**
+#[test]
+fn the_details_open_a_window_owned_by_the_settings() {
+    use lang_switcher::ui::windows::settings::{Program, open_details, testing};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GW_OWNER, GetWindow, WINDOW_EX_STYLE, WS_POPUP,
+    };
+    use windows::core::w;
+
+    with_product_strings();
+    // SAFETY: a hidden window of this thread stands in for the window of the settings.
+    let owner = unsafe {
+        CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("STATIC"),
+            w!("owner"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+    .expect("a window of this thread");
+    let details = testing::hidden_while(|| {
+        open_details(
+            owner,
+            Language::Ru,
+            lang_switcher::theme::ThemeSetting::Light,
+            Program::default(),
+        )
+    });
+    // SAFETY: windows of this thread.
+    let owned_by = details.map(|window| unsafe { GetWindow(window, GW_OWNER) });
+    if let Some(window) = details {
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(window) };
+    }
+    // SAFETY: the window made above.
+    let _ = unsafe { DestroyWindow(owner) };
+
+    assert!(details.is_some(), "the window of the details opens");
+    assert_eq!(
+        owned_by.and_then(Result::ok),
+        Some(owner),
+        "owned by the window of the settings"
     );
 }

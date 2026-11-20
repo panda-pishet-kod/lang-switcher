@@ -28,8 +28,8 @@ use crate::settings::{
     IDS_SECTION_EXCLUSIONS_SUB, IDS_SECTION_GENERAL_SUB, IDS_SECTION_HOTKEY_SUB,
     IDS_SECTION_LAYOUTS_SUB, IDS_SETTINGS_EYEBROW, IDS_STATE_AUTOSTART, IDS_STATE_HEALTH,
     IDS_STATE_JOINED, IDS_STATE_LAYOUTS, IDS_STATE_NO_FAILURES, IDS_STATE_PAIR, IDS_STATE_WORKING,
-    IDS_STATUS_AUTOSTART_OFF, IDS_STATUS_AUTOSTART_ON, IDS_STATUS_DETAILS, IDS_STATUS_FIXES,
-    IDS_STATUS_FIXES_NONE, IDS_STATUS_HOTKEY,
+    IDS_STATUS_AUTOSTART_OFF, IDS_STATUS_AUTOSTART_ON, IDS_STATUS_COPY, IDS_STATUS_DETAILS,
+    IDS_STATUS_FIXES, IDS_STATUS_FIXES_NONE, IDS_STATUS_HOTKEY,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
@@ -152,8 +152,6 @@ pub struct Settings {
     pick_note: Option<String>,
     /// What the block «Состояние» of «Диагностика» shows; none — no block (T-120-21).
     program: Option<Program>,
-    /// «Подробности для автора» is open.
-    details_open: bool,
     /// «Сохранить журнал»: the journal into its folder, and whether it was written.
     save_journal: fn() -> bool,
     apply: Apply,
@@ -232,7 +230,6 @@ impl Settings {
             pick_at: None,
             pick_note: None,
             program: None,
-            details_open: false,
             save_journal: save_journal_in_force,
             apply,
         }
@@ -520,8 +517,7 @@ impl Settings {
 
     /// **«Состояние» in the words of a person** (T-120-21): the state of the program with the dot of
     /// the head of the menu, what the program fixes, the key, the start with Windows; the lines for
-    /// the author only under «Подробности для автора», word for word as they were, the path of the
-    /// `Run` key on a line of its own (the mock-up's `.spath`).
+    /// the author only in the window «Подробности для автора» opens ([`Details`], C6 (а)).
     fn status_block(&self, program: &Program) -> Vec<Node<Id>> {
         let (state, words) = tray_menu::status(program.enabled, program.fail_safe);
         let autostart = if self.config.general.autostart {
@@ -529,7 +525,7 @@ impl Settings {
         } else {
             IDS_STATUS_AUTOSTART_OFF
         };
-        let mut nodes = vec![
+        vec![
             Node::Status {
                 state,
                 words: self.line(words),
@@ -547,21 +543,7 @@ impl Settings {
                 kind: ButtonKind::Quiet,
                 browser: false,
             }]),
-        ];
-        if self.details_open {
-            for line in &program.details {
-                match program.path.as_deref().filter(|path| line.contains(*path)) {
-                    Some(path) => {
-                        let head = line.replace(path, "");
-                        let head = head.trim_end_matches([',', ' ']).to_owned();
-                        nodes.push(Node::Text(Role::Code, head));
-                        nodes.push(Node::Text(Role::Code, path.to_owned()));
-                    }
-                    None => nodes.push(Node::Text(Role::Code, line.clone())),
-                }
-            }
-        }
-        nodes
+        ]
     }
 
     /// «Исправляет: English → Русский»: the pair source → target, or the layouts of the cycle in
@@ -1010,7 +992,6 @@ impl Content for Settings {
                     self.marked = vec![false; self.config.exclusions.processes.len()];
                 }
             }
-            Event::Pressed(Id::Details) => self.details_open = !self.details_open,
             Event::Pressed(Id::OpenFolder) => {
                 if let Some(folder) = crate::diag::log_dir() {
                     let _ = settings::open_in_the_shell(&folder.display().to_string());
@@ -1101,6 +1082,20 @@ impl Content for Product {
         let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
+                Reply::Stay
+            }
+            // C6 (а) of T-120-21: the lines for the author in a small window of their own.
+            Event::Pressed(Id::Details) => {
+                if let (Some(window), Some(program)) =
+                    (settings::open_window(), self.settings.program.clone())
+                {
+                    open_details(
+                        window,
+                        self.settings.language,
+                        self.settings.config.general.theme,
+                        program,
+                    );
+                }
                 Reply::Stay
             }
             event => self.settings.event(event),
@@ -1233,16 +1228,12 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     window.section = Section::Layouts;
     window.config.layouts.mode = LayoutMode::Cycle;
     all.push(("settings Layouts cycle".to_owned(), window.describe()));
-    // «Состояние»: the two other states of the program, and the lines for the author open — the
-    // longest «Диагностика».
+    // «Состояние»: the two other states of the program.
     window.section = Section::Diagnostics;
     for (name, enabled, fail_safe) in [("paused", false, false), ("restart", false, true)] {
         window.showing_program(sample_program(language, enabled, fail_safe));
         all.push((format!("settings Diagnostics {name}"), window.describe()));
     }
-    window.showing_program(sample_program(language, true, false));
-    window.details_open = true;
-    all.push(("settings Diagnostics details".to_owned(), window.describe()));
     all
 }
 
@@ -1279,4 +1270,177 @@ fn sample_program(language: Language, enabled: bool, fail_safe: bool) -> Program
         ],
         path: Some(path),
     }
+}
+
+/// The elements of the window of «Подробности для автора».
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetailsId {
+    Copy,
+    Close,
+}
+
+/// What «Копировать» puts the words on the clipboard with, and whether it did.
+pub type Copier = Box<dyn Fn(&str) -> bool>;
+
+/// **The small window of «Подробности для автора»** (T-120-21 Б, C6 (а) of the controller): the
+/// four lines of the author word for word, in the face of code, the path of the `Run` key on a line
+/// of its own (the mock-up's `.spath`); «Копировать» puts them on the clipboard, «Закрыть» and Esc
+/// close. An ordinary window of the shell at the least size of the passport, owned by the window of
+/// the settings.
+pub struct Details {
+    pub language: Language,
+    pub theme: ThemeSetting,
+    pub program: Program,
+    copy: Copier,
+}
+
+impl Details {
+    /// The window over `program`; «Копировать» goes through `copy`.
+    pub fn new(language: Language, theme: ThemeSetting, program: Program, copy: Copier) -> Self {
+        Self {
+            language,
+            theme,
+            program,
+            copy,
+        }
+    }
+
+    fn line(&self, id: u16) -> String {
+        settings::text_in(self.language, id)
+    }
+
+    /// The lines as the window shows them: the line of the `Run` key without its path, the path on
+    /// a line of its own.
+    pub fn shown_lines(&self) -> Vec<String> {
+        let mut shown = Vec::new();
+        for line in &self.program.details {
+            match self
+                .program
+                .path
+                .as_deref()
+                .filter(|path| line.contains(*path))
+            {
+                Some(path) => {
+                    let head = line.replace(path, "");
+                    shown.push(head.trim_end_matches([',', ' ']).to_owned());
+                    shown.push(path.to_owned());
+                }
+                None => shown.push(line.clone()),
+            }
+        }
+        shown
+    }
+
+    /// What «Копировать» puts on the clipboard: the four lines word for word, one to a line.
+    pub fn clipboard_words(&self) -> String {
+        self.program.details.join("\r\n")
+    }
+}
+
+impl Content for Details {
+    type Id = DetailsId;
+
+    fn describe(&self) -> Window<DetailsId> {
+        let mut body = vec![Node::Header {
+            eyebrow: Some(self.line(IDS_SETTINGS_EYEBROW)),
+            title: self.line(IDS_STATUS_DETAILS),
+            subtitle: None,
+        }];
+        body.push(Node::Rows(
+            self.shown_lines()
+                .into_iter()
+                .map(|line| Node::Text(Role::Code, line))
+                .collect(),
+        ));
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(body),
+            buttons: vec![
+                Node::Button {
+                    id: DetailsId::Copy,
+                    label: self.line(IDS_STATUS_COPY),
+                    kind: ButtonKind::Normal,
+                    browser: false,
+                },
+                Node::Button {
+                    id: DetailsId::Close,
+                    label: self.line(IDS_CLOSE),
+                    kind: ButtonKind::Primary,
+                    browser: false,
+                },
+            ],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<DetailsId>) -> Reply {
+        match event {
+            Event::Pressed(DetailsId::Copy) => {
+                let _ = (self.copy)(&self.clipboard_words());
+                Reply::Stay
+            }
+            Event::Pressed(DetailsId::Close) => Reply::Close,
+            _ => Reply::Stay,
+        }
+    }
+
+    fn title(&self) -> String {
+        self.line(IDS_STATUS_DETAILS)
+    }
+
+    fn language(&self) -> (String, bool) {
+        (self.language.tag().to_owned(), self.language.is_rtl())
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        self.theme
+    }
+
+    fn least(&self) -> bool {
+        true
+    }
+}
+
+/// Opens the window of «Подробности для автора» over `owner`, the window of the settings; under
+/// the `testing` feature the hidden door of this module makes it without showing it.
+pub fn open_details(
+    owner: HWND,
+    language: Language,
+    theme: ThemeSetting,
+    program: Program,
+) -> Option<HWND> {
+    let copy: Copier =
+        Box::new(move |words: &str| crate::selection::write_unicode_text(owner, words).is_ok());
+    let details = Details::new(language, theme, program, copy);
+
+    #[cfg(feature = "testing")]
+    let made = if testing::hidden() {
+        host::create(details, Some(owner))
+    } else {
+        host::open(details, Some(owner))
+    };
+    #[cfg(not(feature = "testing"))]
+    let made = host::open(details, Some(owner));
+
+    match made {
+        Ok(window) => Some(window),
+        Err(error) => {
+            crate::app::report_non_critical("CreateWindowExW", &error);
+            None
+        }
+    }
+}
+
+/// The window of «Подробности для автора» for the instrument of fitting and the pictures, in
+/// `language`.
+pub fn details_states(language: Language) -> Vec<(String, Window<DetailsId>)> {
+    let details = Details::new(
+        language,
+        ThemeSetting::Light,
+        sample_program(language, true, false),
+        Box::new(|_| true),
+    );
+    vec![("settings details".to_owned(), details.describe())]
 }
