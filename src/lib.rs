@@ -24,6 +24,7 @@ pub mod inject;
 pub mod layouts;
 pub mod letter_stats;
 pub mod letters;
+pub mod sandbox;
 pub mod selection;
 pub mod settings;
 pub mod sticky;
