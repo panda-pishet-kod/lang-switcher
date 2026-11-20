@@ -271,6 +271,7 @@ fn release_factory() {
                     std::mem::forget(factory);
                     FACTORY_REFS_LEFT.store(i64::from(left), std::sync::atomic::Ordering::Relaxed);
                     give_back_free_memory();
+                    crate::ui::probe::note_heaps();
                 }
                 #[cfg(not(feature = "testing"))]
                 {
