@@ -596,9 +596,10 @@ pub struct Letters {
 
     /// Whether the window «Обновлено» comes up after an important release — task T-119-6
     /// (решения 208.93, 208.119). The check box «Больше не показывать окна обновлений» of that
-    /// window and the switch «Сообщать об обновлениях программы» of «От автора» (T-119-10) are this
-    /// one setting; it silences only that window — the entry of the menu and the fallback letter
-    /// stay. On by default. No schema of its own, as `update_noticed` before it.
+    /// window and the switch «Сообщать об обновлениях программы» of «От автора» (T-119-10) and of
+    /// «Общие» of the settings (T-120-20, Д6) are this one setting; it silences only that window —
+    /// the entry of the menu and the fallback letter stay. On by default. No schema of its own, as
+    /// `update_noticed` before it.
     #[serde(default = "default_true")]
     pub release_window: bool,
 

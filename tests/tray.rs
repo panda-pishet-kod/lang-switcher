@@ -6731,17 +6731,18 @@ mod window_of_the_settings {
     }
 
     /// The switch of the window and the switch of «От автора» are one setting: what the window
-    /// turned off is what «От автора» reads (T-120-17).
+    /// turned off is what «От автора» reads (T-120-17) — `[letters] release_window`, the window
+    /// «Обновлено» (решение 208.119); this test read the feed, and so held Д6 in place.
     #[test]
     fn the_news_go_in_force_for_both_switches() {
         goes_in_force(
-            "t20-feed",
+            "t20-release-window",
             |_| {},
             |window, before| {
-                window.event(Event::Toggled(Id::Updates, !before.letters.feed));
+                window.event(Event::Toggled(Id::Updates, !before.letters.release_window));
             },
-            |config| config.letters.feed,
-            || tray::config_now().expect("a tray is attached").letters.feed,
+            |config| config.letters.release_window,
+            || lang_switcher::letters::state_now().release_window,
         );
     }
 
@@ -7350,6 +7351,122 @@ fn the_details_button_opens_their_window_over_the_settings() {
         "the press opens one window of the details"
     );
     assert_eq!(owner, opened, "owned by the window of the settings");
+}
+
+/// Whether the switch `id` the layout of `hwnd` placed is on; none — no such switch.
+#[cfg(feature = "testing")]
+fn switch_of(hwnd: HWND, id: &str) -> Option<bool> {
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_PAINT};
+
+    // SAFETY: a message to a live window of this thread.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    let probe = lang_switcher::ui::host::probe(hwnd)?;
+    // The row of the switch carries its identifier too: the track is the part `Toggle`.
+    probe
+        .items
+        .iter()
+        .find(|(part, item, _)| item.as_deref() == Some(id) && part.starts_with("Toggle"))
+        .map(|(part, _, _)| part.contains("on: true"))
+}
+
+/// **Д6 (the stand of 21.11, Windows 10) — «Сообщать об обновлениях программы» is one setting in
+/// both windows**, `[letters] release_window`: «Общие» of the settings hold «та же настройка, что
+/// в „От автора“» (T-120-20, решение 208.119). The window of the settings wrote `[letters] feed`,
+/// and on the stand «От автора» showed the switch off while «Общие» showed it on.
+///
+/// A file with the feed on and the window «Обновлено» off: both windows show the switch off. A
+/// click in «Общие» is seen in «От автора» opened after it, a click there — in «Общие», still open;
+/// the feed is never moved. And a change made in «Общие» after «От автора» wrote does not bring
+/// back the copy the window of the settings took at its opening.
+#[cfg(feature = "testing")]
+#[test]
+fn the_switch_of_updates_is_one_setting_in_the_settings_and_in_from_the_author() {
+    use lang_switcher::letters;
+    use lang_switcher::ui::windows::settings as window_of_settings;
+    use windows::Win32::Foundation::HMODULE;
+
+    let window = TestWindow::new();
+    let home = TestDir::new("updates-switch");
+    fs::write(
+        home.config(),
+        format!(
+            "schema_version = {}\r\n\r\n[letters]\r\nfeed = true\r\nrelease_window = false\r\n",
+            settings::CURRENT_SCHEMA_VERSION
+        ),
+    )
+    .expect("the configuration file must be writable");
+    let _locale = locale_turn();
+    let _toggle = toggle_turn();
+    let _ui = attach_ui(&window, &home);
+    let in_force = || {
+        let letters = letters::state_now();
+        (letters.release_window, letters.feed)
+    };
+    let open_author =
+        || letters::testing::open_author_hidden(window.handle, HMODULE::default(), "1.8.0");
+
+    window_of_settings::testing::hidden_while(|| {
+        tray::dispatch_command(window.handle, tray::CMD_SETTINGS);
+    });
+    let opened = settings::open_window();
+    let author = open_author();
+    let at_opening = (
+        opened.and_then(|hwnd| switch_of(hwnd, "Updates")),
+        author.and_then(|hwnd| switch_of(hwnd, "Switch")),
+    );
+
+    let in_settings = opened.is_some_and(|hwnd| click_the_element(hwnd, "Updates"));
+    let after_settings = in_force();
+    if let Some(hwnd) = author {
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(hwnd) };
+    }
+    let author = open_author();
+    let author_sees = author.and_then(|hwnd| switch_of(hwnd, "Switch"));
+
+    let in_author = author.is_some_and(|hwnd| click_the_element(hwnd, "Switch"));
+    let after_author = in_force();
+    let sound = opened.is_some_and(|hwnd| click_the_element(hwnd, "Sound"));
+    let after_sound = in_force();
+    let settings_sees = opened.and_then(|hwnd| switch_of(hwnd, "Updates"));
+    println!(
+        "settings {opened:?}, author {author:?}; at the opening {at_opening:?}; a click in «Общие» \
+         {in_settings} → {after_settings:?}, «От автора» sees {author_sees:?}; a click there \
+         {in_author} → {after_author:?}; «Звуковой отклик» {sound} → {after_sound:?}, «Общие» see \
+         {settings_sees:?}"
+    );
+    for hwnd in author.iter().chain(opened.iter()) {
+        // SAFETY: windows of this thread; a gone one refuses.
+        let _ = unsafe { DestroyWindow(*hwnd) };
+    }
+
+    assert!(opened.is_some() && author.is_some(), "both windows open");
+    assert_eq!(
+        at_opening,
+        (Some(false), Some(false)),
+        "the window «Обновлено» off, the feed on: the switch is off in both windows"
+    );
+    assert!(
+        in_settings && in_author && sound,
+        "the switches are there to press"
+    );
+    assert_eq!(
+        after_settings,
+        (true, true),
+        "the click in «Общие» turns on the window «Обновлено», and not the feed"
+    );
+    assert_eq!(author_sees, Some(true), "«От автора» sees it");
+    assert_eq!(
+        after_author,
+        (false, true),
+        "the click in «От автора» turns it off"
+    );
+    assert_eq!(
+        after_sound,
+        (false, true),
+        "a change in «Общие» keeps what «От автора» wrote"
+    );
+    assert_eq!(settings_sees, Some(false), "and «Общие» see it");
 }
 
 /// **T-120-22 Б — the red before.** With the interface in German, «Общие» of the window of the

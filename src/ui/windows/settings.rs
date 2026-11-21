@@ -307,10 +307,12 @@ impl Settings {
                 // window is the window of 1.8.0 (T-120-20, passport §6).
                 badge: Some(self.line(IDS_NEW_BADGE)),
             },
+            // The setting of «От автора» (T-120-20, решение 208.119): the window «Обновлено» —
+            // `[letters] release_window`; the feed is not this switch (Д6).
             toggle(
                 Id::Updates,
                 self.line(IDS_UPDATES_SWITCH),
-                self.config.letters.feed,
+                self.config.letters.release_window,
             ),
             Node::Choice {
                 id: Id::Language,
@@ -919,7 +921,7 @@ impl Content for Settings {
                 Id::Sound => config.feedback.sound = on,
                 Id::Selection => config.selection.enabled = on,
                 Id::TrayFlag => config.general.tray_flag = on,
-                Id::Updates => config.letters.feed = on,
+                Id::Updates => config.letters.release_window = on,
                 Id::Log => config.diagnostics.log_enabled = on,
                 _ => {}
             }),
@@ -1094,6 +1096,14 @@ impl Content for Product {
     }
 
     fn event(&mut self, event: Event<Id>) -> Reply {
+        // Д6: `[letters]` is the program's own state — «От автора», the letters and the clock of
+        // the feed write it while this window is open — and a change here puts in force the whole
+        // configuration. So the section is the one in force at every event: the switch «Сообщать
+        // об обновлениях программы» shows what «От автора» wrote, and a change made here does not
+        // bring back the copy of the opening.
+        if let Some(now) = crate::tray::config_now() {
+            self.settings.config.letters = now.letters;
+        }
         let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
