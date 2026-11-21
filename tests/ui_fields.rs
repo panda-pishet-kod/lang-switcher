@@ -607,6 +607,79 @@ fn a_field_of_code_is_set_in_the_monospace_face() {
     );
 }
 
+/// **208.202 — a field of code whose text has a letter the monospace face lacks goes wholly in the
+/// face of `body`.** Consolas has no Hebrew and no Arabic, and on Windows 10 the face put in their
+/// place was markedly smaller (the stand of 21.11). The font follows the text as it is typed, both
+/// ways: Latin — the monospace face; a Japanese letter, which no monospace face of the program has —
+/// `body`; Hebrew — `body` under Consolas; Latin again — the monospace face again. Twice: in
+/// Consolas, the face of Windows 10, and in the face of this system (Cascadia Mono has Hebrew).
+///
+/// The text is typed: a field of many lines tells no change of a text set from outside (`EN_CHANGE`
+/// is not sent for `WM_SETTEXT`), and the window would put its own text back.
+#[cfg(feature = "testing")]
+#[test]
+fn a_field_of_code_with_a_letter_its_monospace_face_lacks_goes_in_the_face_of_body() {
+    use windows::Win32::UI::Controls::EM_SETSEL;
+    use windows::Win32::UI::WindowsAndMessaging::WM_CHAR;
+
+    const LATIN: &str = "Windows 10 22H2, 0409 040D";
+    const JAPANESE: &str = "Windows 10 \u{2014} \u{65E5}\u{672C}\u{8A9E}";
+    const HEBREW: &str = "\u{05E9}\u{05DC}\u{05D5}\u{05DD}, Windows 10";
+    let mut seen = Vec::new();
+    for answered in [Some("Consolas"), None] {
+        host::answer_mono_face(answered);
+        let open = Open::with_note(
+            3,
+            false,
+            ("he-IL", true),
+            ThemeSetting::Light,
+            FieldKind::Code { rtl: true },
+        );
+        let (note, body) = (open.field(Id::Note), face_of(open.field(Id::Name)));
+        let typed = |text: &str| {
+            send(note, EM_SETSEL, 0, -1);
+            for unit in text.encode_utf16() {
+                send(note, WM_CHAR, usize::from(unit), 1);
+            }
+            send(open.hwnd, WM_PAINT, 0, 0);
+            (text_of(note) == text, face_of(note))
+        };
+        let faces = [LATIN, JAPANESE, HEBREW, LATIN].map(typed);
+        drop(open);
+        seen.push((answered, body, faces));
+    }
+    host::answer_mono_face(None);
+    println!("{seen:#?}");
+
+    let mono = ["Cascadia Mono", "Consolas"];
+    assert_eq!(seen[0].2[0].1, "Consolas", "the face answered");
+    for (answered, body, [latin, japanese, hebrew, again]) in &seen {
+        assert!(
+            [latin, japanese, hebrew, again]
+                .iter()
+                .all(|(kept, _)| *kept),
+            "the typing reached the window ({answered:?})"
+        );
+        assert!(!mono.contains(&body.as_str()), "body: {body}");
+        assert!(
+            mono.contains(&latin.1.as_str()),
+            "Latin: the monospace face ({answered:?}), {}",
+            latin.1
+        );
+        assert_eq!(
+            japanese.1, *body,
+            "a Japanese letter, which no monospace face of the program has ({answered:?})"
+        );
+        if latin.1 == "Consolas" {
+            assert_eq!(hebrew.1, *body, "Hebrew under Consolas");
+        }
+        assert_eq!(
+            again.1, latin.1,
+            "Latin again: the monospace face again ({answered:?})"
+        );
+    }
+}
+
 /// **The monospace font is let go** once no field of the window is of code. Counted as the fonts
 /// the fields hold: GDI defers deleting a font still selected into a cached DC of an edit control,
 /// so `GetObjectW` may answer for a font already deleted (measured: `DeleteObject` gave TRUE).

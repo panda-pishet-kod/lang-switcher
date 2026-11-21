@@ -8,7 +8,9 @@
 //!   dark theme it stays light — the accepted price, T-120-18 п. 6).
 //! * **Colours from the table** through `WM_CTLCOLOREDIT` (the window answers it with
 //!   [`Fields::colours`]); the font is the role `body`'s face and size, made for the scale now; a field of code is set in the
-//!   monospace face of the role `code` (T-120-19).
+//!   monospace face of the role `code` (T-120-19) — or wholly in the font of `body`, while its text
+//!   has a letter the monospace face lacks (208.202: Consolas has no Hebrew and no Arabic, and the
+//!   face Windows 10 puts in their place is markedly smaller).
 //! * **The hint** of an empty field is drawn in `ink3` by the field's own procedure after Windows
 //!   paints it: the cue banner of Windows (`EM_SETCUEBANNER`) takes no colour (◆).
 //! * **Right to left:** the reading order and the alignment of the language.
@@ -23,9 +25,9 @@ use ::windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM
 use ::windows::Win32::Graphics::Gdi::{
     CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush, DEFAULT_CHARSET,
     DT_EDITCONTROL, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_RTLREADING, DT_SINGLELINE, DT_WORDBREAK,
-    DeleteObject, DrawTextW, GetDC, GetTextMetricsW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect,
-    OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, SetBkColor, SetBkMode, SetTextColor, TEXTMETRICW,
-    TRANSPARENT,
+    DeleteObject, DrawTextW, GDI_ERROR, GGI_MARK_NONEXISTING_GLYPHS, GetDC, GetGlyphIndicesW,
+    GetTextMetricsW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, ReleaseDC,
+    SelectObject, SetBkColor, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
 };
 use ::windows::Win32::UI::Controls::EM_SETMARGINS;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -48,7 +50,7 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 use ::windows::Win32::UI::WindowsAndMessaging::{
     IsWindowVisible, SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow,
 };
-use ::windows::core::{HSTRING, w};
+use ::windows::core::{HSTRING, PCWSTR, w};
 use std::cell::{Cell, RefCell};
 
 /// A key of a field of a key in its capture, to the window it stands in (T-120-20), sent at once:
@@ -73,7 +75,8 @@ pub struct Spec<'a, I> {
     /// The wrapper less its paddings.
     pub inner: RECT,
     pub multiline: bool,
-    /// A field of code (T-120-19): the monospace face of [`Look`].
+    /// A field of code (T-120-19): the monospace face of [`Look`] — the face of `body` while its
+    /// text has a letter the monospace face lacks (208.202).
     pub code: bool,
     /// The direction of its text: the window's, or its own (a field of code).
     pub rtl: bool,
@@ -123,7 +126,24 @@ struct Item<I> {
     ink: Rgb,
     fill: Rgb,
     font: HFONT,
+    /// A field of code: the text last asked of the monospace face, and whether the face has every
+    /// letter of it — asked again only when the text changes.
+    covered: Option<(String, bool)>,
     data: Box<Data>,
+}
+
+impl<I> Item<I> {
+    /// Whether the monospace `font` has every letter of `text`.
+    fn monospace_has(&mut self, font: HFONT, text: &str) -> bool {
+        match &self.covered {
+            Some((asked, has)) if asked == text => *has,
+            _ => {
+                let has = has_every_letter(font, text);
+                self.covered = Some((text.to_owned(), has));
+                has
+            }
+        }
+    }
 }
 
 /// The fields of one window.
@@ -226,17 +246,22 @@ impl<I: Copy + PartialEq> Fields<I> {
                 },
             };
             let line = self.line;
+            let item = &mut self.items[at];
+            // 208.202: a field of code whose text has a letter the monospace face lacks goes wholly
+            // in the font of `body`, at its size — not a smaller face Windows would put in.
             let font = match code_font {
-                Some(code_font) if spec.code => code_font,
+                Some(code_font) if spec.code && item.monospace_has(code_font, spec.value) => {
+                    code_font
+                }
                 _ => font,
             };
-            let item = &mut self.items[at];
             // Told before anything moves the keyboard: a capture that has ended reports no loss.
             item.data.capture.set(spec.capture);
 
             if item.font != font {
                 item.font = font;
-                tell(item.hwnd, WM_SETFONT, font.0 as usize, 0);
+                // Redrawn at once: the font changes under the typing too (208.202).
+                tell(item.hwnd, WM_SETFONT, font.0 as usize, 1);
                 tell(
                     item.hwnd,
                     EM_SETMARGINS,
@@ -471,6 +496,57 @@ fn line_of(font: HFONT) -> i32 {
     metrics.tmHeight
 }
 
+/// Whether `font` has a glyph of its own for every letter of `text` — what GDI answers for the face
+/// itself, before Windows looks for another one. The breaks of the line and the invisible marks of
+/// direction and format are not asked: no face draws them. Unanswered — yes, and the face stays.
+fn has_every_letter(font: HFONT, text: &str) -> bool {
+    let wide: Vec<u16> = text
+        .chars()
+        .filter(|letter| !letter.is_control() && !is_format(*letter))
+        .collect::<String>()
+        .encode_utf16()
+        .collect();
+    let Ok(count) = i32::try_from(wide.len()) else {
+        return true;
+    };
+    if count == 0 {
+        return true;
+    }
+    let mut glyphs = vec![0_u16; wide.len()];
+    // SAFETY: the screen's DC, released below; the font is selected and put back; the string and
+    // the out buffer are locals of `count` units.
+    let answered = unsafe {
+        let dc = GetDC(None);
+        let old = SelectObject(dc, HGDIOBJ(font.0));
+        let answered = GetGlyphIndicesW(
+            dc,
+            PCWSTR(wide.as_ptr()),
+            count,
+            glyphs.as_mut_ptr(),
+            GGI_MARK_NONEXISTING_GLYPHS,
+        );
+        SelectObject(dc, old);
+        ReleaseDC(None, dc);
+        answered
+    };
+    // `GGI_MARK_NONEXISTING_GLYPHS`: a letter the face lacks is answered 0xFFFF.
+    answered == GDI_ERROR as u32 || !glyphs.contains(&0xFFFF)
+}
+
+/// The invisible characters of format: the marks and embeddings of direction, the joiners, the soft
+/// hyphen, the mark of byte order.
+fn is_format(letter: char) -> bool {
+    matches!(
+        letter,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+    )
+}
+
 fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I>> {
     let mut style = WS_CHILD.0 | WS_VISIBLE.0;
     style |= if spec.multiline {
@@ -528,6 +604,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
         ink: spec.ink,
         fill: spec.fill,
         font: HFONT::default(),
+        covered: None,
         data,
     })
 }

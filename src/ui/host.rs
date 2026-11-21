@@ -909,6 +909,20 @@ pub fn answer_dpi(dpi: Option<u32>) {
     DPI_ANSWER.with(|answer| answer.set(dpi));
 }
 
+#[cfg(feature = "testing")]
+thread_local! {
+    /// Testing: the monospace face of the fields of code of this thread, in place of the one the
+    /// system has.
+    static MONO_ANSWER: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// Testing: the monospace face the fields of code of this thread are set in (`None` — the
+/// system's): Consolas, as on Windows 10, on a machine that has Cascadia Mono (208.202).
+#[cfg(feature = "testing")]
+pub fn answer_mono_face(face: Option<&'static str>) {
+    MONO_ANSWER.with(|answer| answer.set(face));
+}
+
 /// The DPI of `hwnd` as Windows answers it now: that of the monitor the window stands on, the
 /// process being aware of each monitor (PerMonitorV2). Not `GetDeviceCaps(LOGPIXELSY)`: that is
 /// the DPI of the system as it was when the process started, and a window opened after the scale
@@ -1803,11 +1817,17 @@ impl<C: Content> Host<C> {
         let px = |points: f32| (points * scale).round() as i32;
         let style = Style::of(Role::Body, layout.b, layout.size.h);
         let code_style = Style::of(Role::Code, layout.b, layout.size.h);
+        #[cfg(feature = "testing")]
+        let code_face = MONO_ANSWER
+            .with(std::cell::Cell::get)
+            .unwrap_or(text.mono_face());
+        #[cfg(not(feature = "testing"))]
+        let code_face = text.mono_face();
         let look = field::Look {
             face: text.main_face().to_owned(),
             px: px(style.size),
             weight: style.weight,
-            code_face: text.mono_face().to_owned(),
+            code_face: code_face.to_owned(),
             code_px: px(code_style.size),
             code_weight: code_style.weight,
             hint: Color::Ink3.get(self.theme),
