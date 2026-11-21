@@ -1,0 +1,980 @@
+signature = "KPAH/IYyAEYhyE7fQ3dhpje4FG56VRIxKqz2iKb82mK/mAuC29Ng6SrkrLmROsMvA47KcM56eqQdcpRSrPdFfw=="
+# news.toml — лента автора Lang Switcher (FR-102).
+#
+# Подпись ставится над всем, что ниже первой строки, и проверяется открытым ключом из сборки.
+# Файл подписывается скриптом tools\sign-news.ps1, который сначала проверяет его состав:
+# не больше трёх новостей, не больше одной записи об обновлении, у каждой записи есть ru и en,
+# номера уникальны и возрастают, тело до 192 КБ.
+
+schema = 1
+
+[[item]]
+id = 12
+type = "news"
+date = 2026-10-27
+link = "https://panda-pishet-kod.dev/langswitcher/download/"
+[item.ru]
+title = "Программа теперь обновляется сама"
+text = """
+С версии 0.104.0 Lang Switcher сам скачивает новые версии с сайта автора
+и ставит их, проверив подпись. Установите новую версию один раз — дальше
+обновления придут сами. В этой версии починен и запуск на Windows без
+пакета Visual C++: версии 0.90.0–0.103.0 там не запускались.
+"""
+[item.en]
+title = "The program now updates itself"
+text = """
+Starting with 0.104.0, Lang Switcher downloads new versions from the
+author's site and installs them on its own, after checking the signature.
+Install the new version once, and the updates will come by themselves. This version
+also fixes starting on a Windows without the Visual C++ package: versions
+0.90.0 to 0.103.0 did not start there.
+"""
+[item.uk]
+title = "Програма тепер оновлюється сама"
+text = """
+Починаючи з версії 0.104.0, Lang Switcher сам завантажує нові версії
+з сайту автора й встановлює їх, перевіривши підпис. Встановіть нову версію
+один раз — далі оновлення прийдуть самі. У цій версії також виправлено
+запуск у Windows без пакета Visual C++: версії 0.90.0–0.103.0 там не
+запускалися.
+"""
+[item.de]
+title = "Das Programm aktualisiert sich jetzt selbst"
+text = """
+Ab Version 0.104.0 lädt Lang Switcher neue Versionen selbst von der Seite
+des Autors herunter und installiert sie, nachdem es die Signatur geprüft
+hat. Installieren Sie die neue Version einmal – danach kommen die Updates von
+selbst. Diese Version behebt auch den Start unter Windows ohne das
+Visual-C++-Paket: Die Versionen 0.90.0–0.103.0 starteten dort nicht.
+"""
+[item.fr]
+title = "Le programme se met désormais à jour tout seul"
+text = """
+Depuis la version 0.104.0, Lang Switcher télécharge lui-même les nouvelles
+versions depuis le site de l'auteur et les installe après avoir vérifié la
+signature. Installez la nouvelle version une fois : ensuite, les mises à jour
+arriveront d'elles-mêmes. Cette version corrige aussi le démarrage sous
+Windows sans le paquet Visual C++ : les versions 0.90.0 à 0.103.0 n'y
+démarraient pas.
+"""
+[item.es]
+title = "El programa ahora se actualiza solo"
+text = """
+Desde la versión 0.104.0, Lang Switcher descarga por sí mismo las nuevas
+versiones del sitio del autor y las instala tras comprobar la firma.
+Instale la nueva versión una vez: después las actualizaciones llegarán solas. Esta
+versión también corrige el inicio en Windows sin el paquete Visual C++:
+las versiones 0.90.0 a 0.103.0 no arrancaban allí.
+"""
+[item.pt]
+title = "O programa agora se atualiza sozinho"
+text = """
+A partir da versão 0.104.0, o Lang Switcher baixa sozinho as novas versões
+do site do autor e as instala depois de verificar a assinatura. Instale a
+nova versão uma vez — depois as atualizações chegarão sozinhas. Esta versão
+também corrige a inicialização no Windows sem o pacote Visual C++: as
+versões 0.90.0 a 0.103.0 não iniciavam ali.
+"""
+[item.it]
+title = "Il programma ora si aggiorna da solo"
+text = """
+Dalla versione 0.104.0 Lang Switcher scarica da solo le nuove versioni dal
+sito dell'autore e le installa dopo averne verificato la firma. Installa la
+nuova versione una volta: poi gli aggiornamenti arriveranno da soli. Questa
+versione corregge anche l'avvio su Windows senza il pacchetto Visual C++:
+le versioni dalla 0.90.0 alla 0.103.0 lì non si avviavano.
+"""
+[item.pl]
+title = "Program aktualizuje się teraz sam"
+text = """
+Od wersji 0.104.0 Lang Switcher sam pobiera nowe wersje ze strony autora
+i instaluje je po sprawdzeniu podpisu. Zainstaluj nową wersję raz — dalej
+aktualizacje przyjdą same. Ta wersja naprawia też uruchamianie w Windows
+bez pakietu Visual C++: wersje 0.90.0–0.103.0 się tam nie uruchamiały.
+"""
+[item.cs]
+title = "Program se teď aktualizuje sám"
+text = """
+Od verze 0.104.0 Lang Switcher sám stahuje nové verze ze stránek autora
+a po ověření podpisu je instaluje. Nainstalujte novou verzi jednou — další
+aktualizace pak přijdou samy. Tato verze také opravuje spuštění ve Windows
+bez balíčku Visual C++: verze 0.90.0–0.103.0 se tam nespouštěly.
+"""
+[item.tr]
+title = "Program artık kendini güncelliyor"
+text = """
+0.104.0 sürümünden itibaren Lang Switcher yeni sürümleri yazarın
+sitesinden kendisi indirir ve imzayı doğruladıktan sonra kurar. Yeni sürümü
+bir kez kurun; sonraki güncellemeler kendiliğinden gelecek. Bu sürüm,
+Visual C++ paketi olmayan Windows'ta başlatma sorununu da gideriyor:
+0.90.0–0.103.0 sürümleri orada başlamıyordu.
+"""
+[item.el]
+title = "Το πρόγραμμα πλέον ενημερώνεται μόνο του"
+text = """
+Από την έκδοση 0.104.0, το Lang Switcher κατεβάζει μόνο του τις νέες
+εκδόσεις από τον ιστότοπο του δημιουργού και τις εγκαθιστά αφού ελέγξει
+την υπογραφή. Εγκαταστήστε τη νέα έκδοση μία φορά — στη συνέχεια οι
+ενημερώσεις θα έρχονται μόνες τους. Αυτή η έκδοση διορθώνει επίσης την
+εκκίνηση σε Windows χωρίς το πακέτο Visual C++: οι εκδόσεις
+0.90.0–0.103.0 δεν ξεκινούσαν εκεί.
+"""
+[item.he]
+title = "התוכנה מתעדכנת עכשיו בעצמה"
+text = """
+החל מגרסה 0.104.0, Lang Switcher מוריד בעצמו גרסאות חדשות מאתר המחבר
+ומתקין אותן לאחר בדיקת החתימה. התקינו את הגרסה החדשה פעם אחת — מכאן
+העדכונים יגיעו מעצמם. גרסה זו גם מתקנת את ההפעלה ב-Windows ללא חבילת
+Visual C++: הגרסאות 0.90.0–0.103.0 לא נפתחו שם.
+"""
+[item.ar]
+title = "البرنامج يحدّث نفسه الآن"
+text = """
+بدءًا من الإصدار 0.104.0، يقوم Lang Switcher بتنزيل الإصدارات الجديدة من
+موقع المؤلف بنفسه وتثبيتها بعد التحقق من التوقيع. ثبّت الإصدار الجديد
+مرة واحدة، وبعدها ستصل التحديثات تلقائيًا. يصلح هذا الإصدار أيضًا التشغيل
+على Windows دون حزمة Visual C++: لم تكن الإصدارات 0.90.0–0.103.0 تعمل هناك.
+"""
+[item.hi]
+title = "प्रोग्राम अब अपने-आप अपडेट होता है"
+text = """
+संस्करण 0.104.0 से Lang Switcher नए संस्करण खुद डाउनलोड और इंस्टॉल करता है।
+फ़ाइलें लेखक की साइट से आती हैं, और इंस्टॉल से पहले हस्ताक्षर जाँचा जाता है।
+नया संस्करण एक बार इंस्टॉल कर लें — आगे के अपडेट अपने-आप आ जाएँगे।
+इस संस्करण में बिना Visual C++ पैकेज वाले Windows पर शुरू होना भी ठीक किया
+गया है: संस्करण 0.90.0–0.103.0 वहाँ शुरू नहीं होते थे।
+"""
+[item.bn]
+title = "প্রোগ্রাম এখন নিজেই আপডেট হয়"
+text = """
+সংস্করণ 0.104.0 থেকে Lang Switcher নতুন সংস্করণ নিজেই ডাউনলোড ও ইনস্টল করে।
+ফাইল আসে নির্মাতার সাইট থেকে, আর ইনস্টলের আগে স্বাক্ষর যাচাই করা হয়।
+নতুন সংস্করণ একবার ইনস্টল করে নিন — পরের আপডেটগুলো নিজে থেকেই আসবে।
+এই সংস্করণে Visual C++ প্যাকেজ ছাড়া Windows-এ চালু হওয়ার সমস্যাও ঠিক
+করা হয়েছে: সংস্করণ 0.90.0–0.103.0 সেখানে চালু হত না।
+"""
+[item.ur]
+title = "پروگرام اب خود کو اپ ڈیٹ کرتا ہے"
+text = """
+ورژن 0.104.0 سے Lang Switcher نئے ورژن خود ڈاؤن لوڈ اور انسٹال کرتا ہے۔
+فائلیں ڈویلپر کی سائٹ سے آتی ہیں، اور انسٹال سے پہلے دستخط کی جانچ ہوتی ہے۔
+نیا ورژن ایک بار انسٹال کر لیں — اس کے بعد اپ ڈیٹس خود آ جائیں گی۔
+اس ورژن میں Visual C++ پیکیج کے بغیر Windows پر شروع ہونے کی خرابی بھی
+دور کر دی گئی ہے: ورژن 0.90.0 سے 0.103.0 وہاں شروع نہیں ہوتے تھے۔
+"""
+[item.pa]
+title = "ਪ੍ਰੋਗਰਾਮ ਹੁਣ ਆਪਣੇ-ਆਪ ਅੱਪਡੇਟ ਹੁੰਦਾ ਹੈ"
+text = """
+ਵਰਜਨ 0.104.0 ਤੋਂ Lang Switcher ਨਵੇਂ ਵਰਜਨ ਆਪ ਡਾਊਨਲੋਡ ਅਤੇ ਇੰਸਟਾਲ ਕਰਦਾ ਹੈ।
+ਫ਼ਾਈਲਾਂ ਲੇਖਕ ਦੀ ਸਾਈਟ ਤੋਂ ਆਉਂਦੀਆਂ ਹਨ, ਇੰਸਟਾਲ ਤੋਂ ਪਹਿਲਾਂ ਦਸਤਖ਼ਤ ਜਾਂਚੇ ਜਾਂਦੇ ਹਨ।
+ਨਵਾਂ ਵਰਜਨ ਇੱਕ ਵਾਰ ਇੰਸਟਾਲ ਕਰ ਲਓ — ਅੱਗੋਂ ਅੱਪਡੇਟ ਆਪਣੇ-ਆਪ ਆ ਜਾਣਗੇ।
+ਇਸ ਵਰਜਨ ਵਿੱਚ Visual C++ ਪੈਕੇਜ ਤੋਂ ਬਿਨਾਂ Windows ਉੱਤੇ ਸ਼ੁਰੂ ਹੋਣਾ ਵੀ ਠੀਕ
+ਕੀਤਾ ਗਿਆ ਹੈ: ਵਰਜਨ 0.90.0–0.103.0 ਉੱਥੇ ਸ਼ੁਰੂ ਨਹੀਂ ਹੁੰਦੇ ਸਨ।
+"""
+[item.mr]
+title = "प्रोग्राम आता स्वतःच अद्यतनित होतो"
+text = """
+आवृत्ती 0.104.0 पासून Lang Switcher नवीन आवृत्त्या स्वतःच इन्स्टॉल करतो.
+त्या लेखकाच्या साइटवरून डाउनलोड होतात आणि स्वाक्षरी तपासल्यानंतरच
+इन्स्टॉल होतात. नवीन आवृत्ती एकदा इन्स्टॉल करा, पुढची अद्यतने आपोआप
+येतील. या आवृत्तीत Visual C++ पॅकेज नसलेल्या Windows वर प्रोग्राम सुरू
+न होण्याचीही दुरुस्ती केली आहे: आवृत्त्या 0.90.0 ते 0.103.0 तिथे सुरू
+होत नव्हत्या.
+"""
+[item.te]
+title = "ప్రోగ్రామ్ ఇప్పుడు తనంతట తానే నవీకరించుకుంటుంది"
+text = """
+0.104.0 నుండి Lang Switcher కొత్త సంస్కరణలను తానే ఇన్‌స్టాల్ చేసుకుంటుంది.
+ఫైళ్లు రచయిత సైట్ నుండి వస్తాయి; ఇన్‌స్టాల్‌కు ముందు సంతకం తనిఖీ అవుతుంది.
+కొత్త సంస్కరణను ఒక్కసారి ఇన్‌స్టాల్ చేయండి — తర్వాతి నవీకరణలు
+వాటంతట అవే వస్తాయి. ఈ సంస్కరణలో Visual C++ ప్యాకేజీ లేని Windows లో
+ప్రారంభం కావడం కూడా సరిచేయబడింది: సంస్కరణలు 0.90.0–0.103.0 అక్కడ
+ప్రారంభం కాలేదు.
+"""
+[item.ta]
+title = "நிரல் இப்போது தானே புதுப்பித்துக்கொள்ளும்"
+text = """
+0.104.0 முதல் Lang Switcher புதிய பதிப்புகளைத் தானே நிறுவுகிறது.
+கோப்புகள் உருவாக்குநரின் தளத்திலிருந்து வருகின்றன, நிறுவும் முன் கையொப்பம்
+சரிபார்க்கப்படும். புதிய பதிப்பை ஒருமுறை நிறுவுங்கள் — இனி புதுப்பிப்புகள்
+தாமாகவே வரும். இந்தப் பதிப்பில் Visual C++ தொகுப்பு இல்லாத Windows
+கணினியிலும் நிரல் தொடங்கும்படி சரிசெய்யப்பட்டுள்ளது: 0.90.0–0.103.0
+பதிப்புகள் அங்கு தொடங்கவில்லை.
+"""
+[item.fa]
+title = "برنامه اکنون خودش به‌روزرسانی می‌شود"
+text = """
+از نسخه‌ی 0.104.0، Lang Switcher نسخه‌های جدید را خودش بارگیری و نصب می‌کند.
+نسخه‌ها از سایت سازنده می‌آیند و پیش از نصب، امضا بررسی می‌شود.
+نسخه‌ی جدید را فقط یک بار نصب کنید — از آن پس به‌روزرسانی‌ها خودشان می‌رسند.
+در این نسخه، اجرا روی Windows بدون بسته‌ی Visual C++ هم درست شده است:
+نسخه‌های 0.90.0 تا 0.103.0 آنجا اجرا نمی‌شدند.
+"""
+[item.gu]
+title = "પ્રોગ્રામ હવે જાતે અપડેટ થાય છે"
+text = """
+વર્ઝન 0.104.0 થી Lang Switcher નવાં વર્ઝન જાતે ડાઉનલોડ અને ઇન્સ્ટોલ કરે છે.
+ફાઇલો લેખકની સાઇટ પરથી આવે છે, અને ઇન્સ્ટોલ પહેલાં હસ્તાક્ષર ચકાસાય છે.
+નવું વર્ઝન એક વાર ઇન્સ્ટોલ કરી લો — આગળના અપડેટ જાતે આવી જશે.
+આ વર્ઝનમાં Visual C++ પૅકેજ વગરના Windows પર શરૂ થવાનું પણ ઠીક કર્યું છે:
+વર્ઝન 0.90.0–0.103.0 ત્યાં શરૂ થતાં નહોતાં.
+"""
+[item.th]
+title = "โปรแกรมอัปเดตตัวเองได้แล้ว"
+text = """
+ตั้งแต่เวอร์ชัน 0.104.0 Lang Switcher ดาวน์โหลดเวอร์ชันใหม่เองได้แล้ว
+จากเว็บไซต์ของผู้พัฒนา แล้วติดตั้งให้เองหลังตรวจสอบลายเซ็น
+ติดตั้งเวอร์ชันใหม่เพียงครั้งเดียว แล้วการอัปเดตต่อไปจะมาเอง
+เวอร์ชันนี้ยังแก้การเริ่มทำงานบน Windows ที่ไม่มีแพ็กเกจ Visual C++ ด้วย
+เวอร์ชัน 0.90.0–0.103.0 เริ่มทำงานบนเครื่องแบบนั้นไม่ได้
+"""
+[item.kn]
+title = "ಪ್ರೋಗ್ರಾಂ ಈಗ ತಾನೇ ನವೀಕರಿಸಿಕೊಳ್ಳುತ್ತದೆ"
+text = """
+0.104.0 ರಿಂದ Lang Switcher ಹೊಸ ಆವೃತ್ತಿಗಳನ್ನು ತಾನೇ ಸ್ಥಾಪಿಸಿಕೊಳ್ಳುತ್ತದೆ.
+ಫೈಲ್‌ಗಳು ಲೇಖಕರ ಸೈಟ್‌ನಿಂದ ಬರುತ್ತವೆ; ಸ್ಥಾಪನೆಗೆ ಮುನ್ನ ಸಹಿ ಪರಿಶೀಲನೆಯಾಗುತ್ತದೆ.
+ಹೊಸ ಆವೃತ್ತಿಯನ್ನು ಒಮ್ಮೆ ಸ್ಥಾಪಿಸಿ — ಮುಂದಿನ ನವೀಕರಣಗಳು ತಾನಾಗಿಯೇ
+ಬರುತ್ತವೆ. ಈ ಆವೃತ್ತಿಯಲ್ಲಿ Visual C++ ಪ್ಯಾಕೇಜ್ ಇಲ್ಲದ Windows ನಲ್ಲಿ
+ಪ್ರಾರಂಭವಾಗದಿರುವುದೂ ಸರಿಪಡಿಸಲಾಗಿದೆ: ಆವೃತ್ತಿಗಳು 0.90.0–0.103.0 ಅಲ್ಲಿ
+ಪ್ರಾರಂಭವಾಗುತ್ತಿರಲಿಲ್ಲ.
+"""
+[item.or]
+title = "ପ୍ରୋଗ୍ରାମ ଏବେ ନିଜେ ଅପଡେଟ୍ ହୁଏ"
+text = """
+ସଂସ୍କରଣ 0.104.0 ଠାରୁ Lang Switcher ନିଜେ ଅପଡେଟ୍ ହୁଏ: ଲେଖକଙ୍କ ସାଇଟରୁ
+ନୂଆ ସଂସ୍କରଣ ଡାଉନଲୋଡ୍ କରେ ଏବଂ ସ୍ୱାକ୍ଷର ଯାଞ୍ଚ କରି ଇନଷ୍ଟଲ୍ କରେ। ନୂଆ ସଂସ୍କରଣ
+ଥରେ ଇନଷ୍ଟଲ୍ କରନ୍ତୁ — ତା ପରେ ଅପଡେଟ୍ ନିଜେ ଆସିବ। ଏହି ସଂସ୍କରଣରେ Visual C++
+ପ୍ୟାକେଜ୍ ନଥିବା Windows ରେ ଆରମ୍ଭ ହେବାର ସମସ୍ୟା ମଧ୍ୟ ଠିକ୍ ହୋଇଛି:
+0.90.0–0.103.0 ସଂସ୍କରଣ ସେଠାରେ ଚାଲୁନଥିଲା।
+"""
+[item.ml]
+title = "പ്രോഗ്രാം ഇനി സ്വയം അപ്ഡേറ്റ് ചെയ്യും"
+text = """
+0.104.0 മുതൽ Lang Switcher പുതിയ പതിപ്പുകൾ സ്വയം ഇൻസ്റ്റാൾ ചെയ്യുന്നു.
+ഫയലുകൾ നിർമ്മാതാവിന്റെ സൈറ്റിൽ നിന്ന് വരുന്നു, ഇൻസ്റ്റാൾ ചെയ്യുന്നതിന്
+മുമ്പ് ഒപ്പ് പരിശോധിക്കും. പുതിയ പതിപ്പ് ഒരിക്കൽ ഇൻസ്റ്റാൾ ചെയ്യുക —
+പിന്നീടുള്ള അപ്ഡേറ്റുകൾ സ്വയം വരും. ഈ പതിപ്പിൽ Visual C++ പാക്കേജ്
+ഇല്ലാത്ത Windows കമ്പ്യൂട്ടറിലും പ്രോഗ്രാം ആരംഭിക്കുന്ന വിധം ശരിയാക്കി:
+0.90.0–0.103.0 പതിപ്പുകൾ അവിടെ ആരംഭിച്ചിരുന്നില്ല.
+"""
+[item.uz]
+title = "Dastur endi oʻzi yangilanadi"
+text = """
+0.104.0 versiyasidan boshlab Lang Switcher yangilanishlarni oʻzi oʻrnatadi.
+Yangi versiyalar muallif saytidan yuklab olinadi, oʻrnatishdan oldin esa
+imzo tekshiriladi. Yangi versiyani bir marta oʻrnating — keyingi
+yangilanishlar oʻzi keladi. Bu versiyada Visual C++ paketi yoʻq Windows
+tizimida ishga tushish ham tuzatildi: 0.90.0–0.103.0 versiyalari u yerda
+ishga tushmasdi.
+"""
+[item.uz-Cyrl]
+title = "Дастур энди ўзи янгиланади"
+text = """
+0.104.0 версиясидан бошлаб Lang Switcher янгиланишларни ўзи ўрнатади.
+Янги версиялар муаллиф сайтидан юклаб олинади, ўрнатишдан олдин эса
+имзо текширилади. Янги версияни бир марта ўрнатинг — кейинги
+янгиланишлар ўзи келади. Бу версияда Visual C++ пакети йўқ Windows
+тизимида ишга тушиш ҳам тузатилди: 0.90.0–0.103.0 версиялари у ерда
+ишга тушмасди.
+"""
+[item.ne]
+title = "प्रोग्राम अब आफैँ अद्यावधिक हुन्छ"
+text = """
+संस्करण 0.104.0 देखि Lang Switcher नयाँ संस्करण आफैँ स्थापना गर्छ।
+ती लेखकको साइटबाट डाउनलोड हुन्छन् र हस्ताक्षर जाँचेपछि मात्र स्थापना
+हुन्छन्। नयाँ संस्करण एक पटक स्थापना गर्नुहोस्, उप्रान्तका अद्यावधिक
+आफैँ आउनेछन्। यो संस्करणमा Visual C++ प्याकेज नभएको Windows मा पनि
+प्रोग्राम सुरु हुने गरी सच्याइएको छ: संस्करण 0.90.0 देखि 0.103.0 सम्म
+त्यहाँ सुरु हुँदैनथे।
+"""
+[item.as]
+title = "প্ৰগ্ৰামটো এতিয়া নিজেই আপডেট হয়"
+text = """
+0.104.0-ৰ পৰা Lang Switcher-এ নতুন সংস্কৰণ নিজেই ডাউনলোড আৰু ইনষ্টল কৰে।
+ফাইল নিৰ্মাতাৰ ছাইটৰ পৰা আহে, আৰু ইনষ্টলৰ আগতে স্বাক্ষৰ পৰীক্ষা কৰা হয়।
+নতুন সংস্কৰণ এবাৰ ইনষ্টল কৰি লওক — পিছৰ আপডেটবোৰ নিজেই আহিব।
+এই সংস্কৰণত Visual C++ পেকেজ নথকা Windows-ত আৰম্ভ হোৱাৰ সমস্যাও শুধৰোৱা
+হৈছে: সংস্কৰণ 0.90.0–0.103.0 তাত আৰম্ভ হোৱা নাছিল।
+"""
+[item.az]
+title = "Proqram artıq özünü yeniləyir"
+text = """
+Lang Switcher 0.104.0 versiyasından yeni versiyaları özü yükləyir
+və quraşdırır: faylları müəllifin saytından götürür, imzanı yoxlayır.
+Yeni versiyanı bir dəfə quraşdırın — sonra yeniləmələr özü gələcək.
+Bu versiyada Visual C++ paketi olmayan Windows sistemində proqramın
+işə düşməməsi də düzəldilib: 0.90.0–0.103.0 versiyaları orada işə
+düşmürdü.
+"""
+[item.km]
+title = "កម្មវិធីអាចធ្វើបច្ចុប្បន្នភាពខ្លួនឯងបានហើយ"
+text = """
+ចាប់ពីកំណែ 0.104.0 Lang Switcher ទាញយកកំណែថ្មីពីគេហទំព័រអ្នកបង្កើត
+ដោយខ្លួនឯង ហើយដំឡើងវា បន្ទាប់ពីពិនិត្យហត្ថលេខា។ គ្រាន់តែដំឡើងកំណែថ្មី
+ម្ដង បន្ទាប់ពីនោះបច្ចុប្បន្នភាពនឹងមកដោយខ្លួនឯង។ កំណែនេះក៏បានដោះស្រាយ
+ការចាប់ផ្ដើមលើ Windows ដែលគ្មានកញ្ចប់ Visual C++ ផងដែរ: កំណែ
+0.90.0–0.103.0 មិនអាចចាប់ផ្ដើមនៅទីនោះបានទេ។
+"""
+[item.kk]
+title = "Бағдарлама енді өзі жаңарады"
+text = """
+0.104.0 нұсқасынан бастап Lang Switcher өзі жаңарады.
+Жаңа нұсқаларды автордың сайтынан жүктеп алып, қолтаңбаны тексергеннен
+кейін өзі орнатады. Жаңа нұсқаны бір рет орнатыңыз — одан әрі жаңартулар
+өздігінен келіп тұрады. Бұл нұсқада Visual C++ пакеті жоқ Windows
+жүйесінде іске қосылу да түзетілді: 0.90.0–0.103.0 нұсқалары онда іске
+қосылмайтын еді.
+"""
+[item.sr]
+title = "Програм се сада ажурира сам"
+text = """
+Од верзије 0.104.0 Lang Switcher сам преузима нове верзије са сајта аутора
+и инсталира их пошто провери потпис. Инсталирајте нову верзију једном —
+убудуће ће ажурирања стизати сама. У овој верзији је исправљено и
+покретање на систему Windows без пакета Visual C++: верзије 0.90.0–0.103.0
+тамо нису могле да се покрену.
+"""
+[item.sr-Latn]
+title = "Program se sada ažurira sam"
+text = """
+Od verzije 0.104.0 Lang Switcher sam preuzima nove verzije sa sajta autora
+i instalira ih pošto proveri potpis. Instalirajte novu verziju jednom —
+ubuduće će ažuriranja stizati sama. U ovoj verziji je ispravljeno i
+pokretanje na sistemu Windows bez paketa Visual C++: verzije 0.90.0–0.103.0
+tamo nisu mogle da se pokrenu.
+"""
+[item.ug]
+title = "پروگرامما ئەمدى ئۆزى يېڭىلىنىدۇ"
+text = """
+0.104.0 نەشرىدىن باشلاپ Lang Switcher يېڭى نەشرلەرنى ئۆزى چۈشۈرۈپ ئورنىتىدۇ.
+ئۇلار ئاپتورنىڭ تور بېكىتىدىن كېلىدۇ، ئورنىتىشتىن بۇرۇن ئىمزا تەكشۈرۈلىدۇ.
+يېڭى نەشرىنى بىر قېتىم ئورنىتىڭ — ئۇنىڭدىن كېيىن يېڭىلانمىلار ئۆزى كېلىدۇ.
+بۇ نەشرىدە Visual C++ بوغچىسى يوق Windows سىستېمىسىدا ئىجرا بولماسلىق
+مەسىلىسىمۇ تۈزىتىلدى: 0.90.0 – 0.103.0 نەشرلىرى ئۇ يەردە ئىجرا بولمايتتى.
+"""
+[item.bg]
+title = "Програмата вече се актуализира сама"
+text = """
+Lang Switcher вече сам изтегля и инсталира новите си версии.
+Считано от 0.104.0, програмата взема версиите от сайта на автора и ги
+инсталира, след като провери подписа. Инсталирайте новата версия
+веднъж — оттук нататък актуализациите идват сами. В тази версия е
+поправено и стартирането на Windows без пакета Visual C++: версии
+0.90.0–0.103.0 там не се стартираха.
+"""
+[item.hy]
+title = "Ծրագիրը հիմա ինքն է թարմացվում"
+text = """
+0.104.0 տարբերակից Lang Switcher-ը նոր տարբերակներն ինքն է ներբեռնում
+հեղինակի կայքից և տեղադրում՝ նախապես ստուգելով ստորագրությունը։
+Նոր տարբերակը տեղադրեք մեկ անգամ, հետո թարմացումները կգան ինքնուրույն։
+Այս տարբերակում ուղղված է նաև Visual C++ փաթեթ չունեցող Windows-ում
+գործարկումը. 0.90.0–0.103.0 տարբերակներն այնտեղ չէին գործարկվում։
+"""
+[item.lo]
+title = "ໂປຣແກຣມອັບເດດຕົວເອງໄດ້ແລ້ວ"
+text = """
+ຕັ້ງແຕ່ເວີຊັນ 0.104.0 Lang Switcher ດາວໂຫຼດເວີຊັນໃໝ່ເອງໄດ້ແລ້ວ
+ຈາກເວັບໄຊຂອງຜູ້ພັດທະນາ ແລ້ວຕິດຕັ້ງໃຫ້ເອງຫຼັງກວດສອບລາຍເຊັນ
+ຕິດຕັ້ງເວີຊັນໃໝ່ພຽງເທື່ອດຽວ ແລ້ວການອັບເດດຕໍ່ໄປຈະມາເອງ
+ເວີຊັນນີ້ຍັງແກ້ການເລີ່ມເຮັດວຽກໃນ Windows ທີ່ບໍ່ມີແພັກເກດ Visual C++ ນຳ
+ເວີຊັນ 0.90.0–0.103.0 ເລີ່ມເຮັດວຽກໃນເຄື່ອງແບບນັ້ນບໍ່ໄດ້
+"""
+[item.be]
+title = "Праграма цяпер абнаўляецца сама"
+text = """
+Пачынаючы з версіі 0.104.0, Lang Switcher сам спампоўвае новыя версіі
+з сайта аўтара і ўсталёўвае іх, праверыўшы подпіс. Усталюйце новую
+версію адзін раз — далей абнаўленні прыйдуць самі. У гэтай версіі
+выпраўлены і запуск на Windows без пакета Visual C++: версіі
+0.90.0–0.103.0 там не запускаліся.
+"""
+[item.tt]
+title = "Программа хәзер үз-үзен яңарта"
+text = """
+0.104.0 версиясеннән башлап Lang Switcher үз-үзен яңарта.
+Яңа версияләрне ул автор сайтыннан йөкләп ала һәм имзаны тикшергәч
+урнаштыра. Яңа версияне бер тапкыр урнаштырыгыз — алга таба яңартулар
+үзеннән-үзе киләчәк. Бу версиядә Visual C++ пакеты булмаган Windows
+системасында эшләтеп җибәрү дә төзәтелде: 0.90.0–0.103.0 версияләре
+анда эшләми иде.
+"""
+[item.ka]
+title = "პროგრამა ახლა თავად განახლდება"
+text = """
+ვერსია 0.104.0-დან Lang Switcher ახალ ვერსიებს თავად ჩამოტვირთავს
+ავტორის საიტიდან და ხელმოწერის შემოწმების შემდეგ თავადვე დააინსტალირებს.
+დააინსტალირეთ ახალი ვერსია ერთხელ — შემდეგ განახლებები თავისით მოვა.
+ამ ვერსიაში გასწორებულია გაშვებაც Windows-ზე Visual C++ პაკეტის გარეშე:
+ვერსიები 0.90.0–0.103.0 იქ არ ეშვებოდა.
+"""
+[item.mk]
+title = "Програмата сега се ажурира сама"
+text = """
+Lang Switcher сега сам ги презема и инсталира новите верзии.
+Од верзија 0.104.0 програмата ги зема верзиите од сајтот на авторот и
+ги инсталира откако ќе го провери потписот. Инсталирајте ја новата
+верзија еднаш — натаму ажурирањата доаѓаат сами. Во оваа верзија е
+поправено и стартувањето на Windows без пакетот Visual C++: верзиите
+0.90.0–0.103.0 таму не се стартуваа.
+"""
+[item.vi]
+title = "Chương trình giờ đây tự cập nhật"
+text = """
+Từ phiên bản 0.104.0, Lang Switcher tự cập nhật.
+Chương trình tự tải các phiên bản mới từ trang web của tác giả và
+cài đặt chúng sau khi kiểm tra chữ ký. Chỉ cần cài phiên bản mới một lần —
+các bản cập nhật sau đó sẽ tự đến. Phiên bản này cũng sửa lỗi khởi động
+trên Windows không có gói Visual C++: các phiên bản 0.90.0–0.103.0 không
+chạy được ở đó.
+"""
+[item.nl]
+title = "Het programma werkt zichzelf nu bij"
+text = """
+Sinds 0.104.0 werkt Lang Switcher zichzelf bij.
+Nieuwe versies downloadt het van de site van de auteur en installeert het
+zelf, na controle van de handtekening. Installeer de nieuwe versie één
+keer, daarna komen de updates vanzelf. Deze versie lost ook het starten op
+Windows zonder het Visual C++-pakket op: de versies 0.90.0 tot en met
+0.103.0 startten daar niet.
+"""
+[item.ro]
+title = "Programul se actualizează acum singur"
+text = """
+Lang Switcher descarcă și instalează singur versiunile noi.
+Începând cu versiunea 0.104.0, le descarcă de pe site-ul autorului și
+le instalează după ce verifică semnătura digitală. Instalați noua
+versiune o singură dată, iar actualizările vor veni de la sine. Această
+versiune repară și pornirea pe un Windows fără pachetul Visual C++:
+versiunile 0.90.0–0.103.0 nu porneau acolo.
+"""
+[item.hu]
+title = "A program mostantól magától frissül"
+text = """
+A Lang Switcher mostantól maga tölti le és telepíti az új verziókat.
+A 0.104.0 verziótól kezdve a szerző webhelyéről tölti le őket, és az
+aláírás ellenőrzése után telepíti. Telepítse az új verziót egyszer,
+és a frissítések attól kezdve maguktól jönnek. Ez a verzió azt is
+javítja, hogy a program elinduljon olyan Windowson, amelyen nincs
+Visual C++ csomag: a 0.90.0–0.103.0 verziók ott nem indultak el.
+"""
+[item.sv]
+title = "Programmet uppdaterar nu sig självt"
+text = """
+Från och med 0.104.0 uppdaterar Lang Switcher sig självt.
+Programmet hämtar nya versioner från utvecklarens webbplats och installerar
+dem efter att ha kontrollerat signaturen. Installera den nya versionen
+en gång, så kommer uppdateringarna av sig själva. Den här versionen
+åtgärdar också starten i Windows utan Visual C++-paketet: versionerna
+0.90.0–0.103.0 startade inte där.
+"""
+[item.sq]
+title = "Programi tani përditësohet vetë"
+text = """
+Që nga 0.104.0, Lang Switcher i shkarkon vetë versionet e reja.
+I merr nga faqja e autorit dhe i instalon, pasi kontrollon nënshkrimin.
+Instaloni versionin e ri një herë dhe përditësimet do të vijnë vetë.
+Ky version rregullon edhe nisjen në Windows pa paketën Visual C++:
+versionet 0.90.0–0.103.0 nuk niseshin atje.
+"""
+[item.da]
+title = "Programmet opdaterer nu sig selv"
+text = """
+Fra og med 0.104.0 opdaterer Lang Switcher sig selv.
+Programmet henter nye versioner fra udviklerens websted og installerer
+dem, efter at have kontrolleret signaturen. Installer den nye version én
+gang, så kommer opdateringerne af sig selv. Denne version retter også
+opstart på Windows uden Visual C++-pakken: Versionerne 0.90.0–0.103.0
+startede ikke dér.
+"""
+[item.fi]
+title = "Ohjelma päivittyy nyt itsestään"
+text = """
+Lang Switcher lataa ja asentaa nyt uudet versiot itse.
+Versiosta 0.104.0 alkaen se hakee ne tekijän sivustolta ja asentaa
+ne tarkistettuaan digitaalisen allekirjoituksen. Asenna uusi versio
+kerran, niin päivitykset tulevat jatkossa itsestään. Tämä versio
+korjaa myös käynnistymisen Windowsissa, jossa ei ole Visual C++ -pakettia:
+versiot 0.90.0–0.103.0 eivät käynnistyneet siellä.
+"""
+[item.hr]
+title = "Program se sada ažurira sam"
+text = """
+Lang Switcher se od verzije 0.104.0 ažurira sam.
+Nove verzije preuzima s autorova web-mjesta i instalira ih nakon provjere
+potpisa. Instalirajte novu verziju jednom, a dalje će ažuriranja stizati
+sama. U ovoj je verziji popravljeno i pokretanje na sustavu Windows bez
+paketa Visual C++: verzije 0.90.0–0.103.0 ondje se nisu pokretale.
+"""
+[item.sk]
+title = "Program sa teraz aktualizuje sám"
+text = """
+Od verzie 0.104.0 sa Lang Switcher aktualizuje sám.
+Nové verzie sťahuje zo stránky autora a po overení podpisu ich
+nainštaluje. Novú verziu nainštalujte raz — ďalšie aktualizácie prídu
+samy. Táto verzia opravuje aj spúšťanie v systéme Windows bez balíka
+Visual C++: verzie 0.90.0–0.103.0 sa tam nespúšťali.
+"""
+[item.nb]
+title = "Programmet oppdaterer seg nå selv"
+text = """
+Fra og med 0.104.0 oppdaterer Lang Switcher seg selv.
+Programmet laster ned nye versjoner fra utviklerens nettsted og
+installerer dem etter å ha kontrollert signaturen. Installer den nye
+versjonen én gang, så kommer oppdateringene av seg selv. Denne
+versjonen retter også oppstart på Windows uten Visual C++-pakken:
+versjonene 0.90.0–0.103.0 startet ikke der.
+"""
+[item.lt]
+title = "Programa dabar atsinaujina pati"
+text = """
+Lang Switcher dabar pats atsisiunčia ir įdiegia naujas versijas.
+Nuo versijos 0.104.0 programa jas ima iš autoriaus svetainės ir diegia
+pati, patikrinusi skaitmeninį parašą. Įdiekite naują versiją vieną
+kartą — toliau atnaujinimai ateis patys. Šioje versijoje taip pat
+ištaisytas paleidimas sistemoje Windows be Visual C++ paketo: versijos
+0.90.0–0.103.0 ten nepasileisdavo.
+"""
+[item.sl]
+title = "Program se zdaj posodablja sam"
+text = """
+Od različice 0.104.0 se Lang Switcher posodablja sam.
+Nove različice prenese s spletnega mesta avtorja in jih po preverjanju
+podpisa namesti. Novo različico namestite enkrat — nato bodo posodobitve
+prišle same. Ta različica popravlja tudi zagon v sistemu Windows brez
+paketa Visual C++: različice 0.90.0–0.103.0 se tam niso zagnale.
+"""
+[item.bs]
+title = "Program se sada ažurira sam"
+text = """
+Lang Switcher se od verzije 0.104.0 ažurira sam.
+Nove verzije preuzima sa sajta autora i instalira ih nakon provjere potpisa.
+Instalirajte novu verziju jednom, a dalje će ažuriranja stizati sama.
+U ovoj verziji popravljeno je i pokretanje na sistemu Windows bez paketa
+Visual C++: verzije 0.90.0–0.103.0 tamo se nisu pokretale.
+"""
+[item.lv]
+title = "Programma tagad atjaunināsies pati"
+text = """
+Lang Switcher tagad pats lejupielādē un instalē jaunās versijas.
+Sākot ar versiju 0.104.0, programma ņem tās no autora vietnes un instalē
+pati, pārbaudījusi digitālo parakstu. Instalējiet jauno versiju vienu
+reizi — turpmāk atjauninājumi parādīsies paši. Šajā versijā labota arī
+palaišana sistēmā Windows bez Visual C++ pakotnes: versijas
+0.90.0–0.103.0 tur nepalaidās.
+"""
+[item.et]
+title = "Programm värskendab nüüd ennast ise"
+text = """
+Lang Switcher laadib ja paigaldab nüüd uued versioonid ise.
+Alates versioonist 0.104.0 võtab programm need autori saidilt ja
+paigaldab pärast digiallkirja kontrollimist. Paigaldage uus versioon
+ühe korra, edaspidi tulevad värskendused ise. See versioon parandab ka
+käivitumise Windowsis, kus puudub Visual C++ pakett: versioonid
+0.90.0–0.103.0 seal ei käivitunud.
+"""
+[item.cy]
+title = "Mae'r rhaglen bellach yn diweddaru ei hun"
+text = """
+Ers 0.104.0, mae Lang Switcher yn diweddaru ei hun.
+Mae'n lawrlwytho fersiynau newydd o wefan yr awdur ac yn eu gosod,
+ar ôl gwirio'r llofnod. Gosodwch y fersiwn newydd unwaith, a daw'r
+diweddariadau ohonynt eu hunain. Mae'r fersiwn hon hefyd yn trwsio
+cychwyn ar Windows heb y pecyn Visual C++: ni chychwynnodd fersiynau
+0.90.0 i 0.103.0 yno.
+"""
+[item.mt]
+title = "Il-programm issa jaġġorna lilu nnifsu"
+text = """
+Mill-verżjoni 0.104.0 Lang Switcher jniżżel il-verżjonijiet il-ġodda waħdu.
+Jieħdhom mis-sit tal-awtur u jinstallahom, wara li jivverifika l-firma.
+Installa l-verżjoni l-ġdida darba waħda u l-aġġornamenti jaslu waħedhom.
+Din il-verżjoni ssewwi wkoll il-bidu fuq Windows mingħajr il-pakkett
+Visual C++: il-verżjonijiet 0.90.0–0.103.0 ma kinux jibdew hemm.
+"""
+[item.is]
+title = "Forritið uppfærir sig nú sjálft"
+text = """
+Frá og með 0.104.0 uppfærir Lang Switcher sig sjálft.
+Forritið sækir nýjar útgáfur af vef höfundar og setur þær upp sjálft,
+eftir að hafa athugað undirskriftina. Settu nýju útgáfuna upp einu sinni
+og uppfærslurnar koma af sjálfu sér. Þessi útgáfa lagar líka ræsingu á
+Windows án Visual C++ pakkans: útgáfur 0.90.0 til 0.103.0 ræstust ekki þar.
+"""
+[item.lb]
+title = "De Programm aktualiséiert sech elo selwer"
+text = """
+Zënter 0.104.0 aktualiséiert Lang Switcher sech selwer.
+Nei Versioune luet hie vum Site vum Auteur erof an installéiert se selwer,
+nodeems d'Ënnerschrëft kontrolléiert ass. Installéiert déi nei Versioun
+eemol, duerno kommen d'Updates vun eleng. An dëser Versioun ass och de
+Start op Windows ouni de Visual-C++-Package korrigéiert: d'Versioune
+0.90.0 bis 0.103.0 sinn do net gestart.
+"""
+[item.mi]
+title = "Ka whakahou aunoa te hōtaka ināianei"
+text = """
+Mai i te putanga 0.104.0, ka whakahou aunoa a Lang Switcher.
+Ka tikiake te hōtaka i ngā putanga hou mai i te pae tukutuku a te kaituhi,
+ā, ka whakauru i aua putanga mā ia anō i muri i te arotake i te waitohu.
+Kotahi noa iho te whakauru i te putanga hou, ā, ka tae mai ngā whakahou
+o muri mā rātou anō. Kua whakatikaina hoki e tēnei putanga te tīmatanga
+i runga i a Windows kāore he mōkī Visual C++: kāore ngā putanga
+0.90.0–0.103.0 i tīmata ki reira.
+"""
+[item.nn]
+title = "Programmet oppdaterer seg no sjølv"
+text = """
+Frå og med 0.104.0 oppdaterer Lang Switcher seg sjølv.
+Programmet lastar ned nye versjonar frå nettstaden til utviklaren og
+installerer dei etter at signaturen er kontrollert. Installer den nye
+versjonen éin gong, så kjem oppdateringane av seg sjølv. Denne
+versjonen rettar òg oppstart på Windows utan Visual C++-pakken:
+versjonane 0.90.0–0.103.0 starta ikkje der.
+"""
+
+[[item]]
+id = 24
+type = "update"
+date = 2026-11-15
+version = "1.6.0"
+link = "https://panda-pishet-kod.dev/langswitcher/download/"
+[item.ru]
+title = "Вышла версия 1.6.0"
+text = """
+Новое: раскладка меняется и в мастере на кнопке, а стук звучит только при настоящем отказе.
+Подробности — на странице загрузки.
+"""
+[item.en]
+title = "Version 1.6.0 is out"
+text = """
+New: the layout switches in the wizard on a button too, and the knock sounds only for a real refusal.
+Details are on the download page.
+"""
+[item.uk]
+title = "Вийшла версія 1.6.0"
+text = """
+Подробиці — на сторінці завантаження.
+"""
+[item.de]
+title = "Version 1.6.0 ist da"
+text = """
+Einzelheiten auf der Download-Seite.
+"""
+[item.fr]
+title = "La version 1.6.0 est sortie"
+text = """
+Les détails sont sur la page de téléchargement.
+"""
+[item.es]
+title = "Ha salido la versión 1.6.0"
+text = """
+Los detalles están en la página de descarga.
+"""
+[item.pt]
+title = "Saiu a versão 1.6.0"
+text = """
+Os detalhes estão na página de download.
+"""
+[item.it]
+title = "È uscita la versione 1.6.0"
+text = """
+I dettagli sono nella pagina di download.
+"""
+[item.pl]
+title = "Wyszła wersja 1.6.0"
+text = """
+Szczegóły na stronie pobierania.
+"""
+[item.cs]
+title = "Vyšla verze 1.6.0"
+text = """
+Podrobnosti najdete na stránce ke stažení.
+"""
+[item.tr]
+title = "1.6.0 sürümü çıktı"
+text = """
+Ayrıntılar indirme sayfasında.
+"""
+[item.el]
+title = "Κυκλοφόρησε η έκδοση 1.6.0"
+text = """
+Λεπτομέρειες στη σελίδα λήψης.
+"""
+[item.he]
+title = "יצאה גרסה 1.6.0"
+text = """
+הפרטים בעמוד ההורדה.
+"""
+[item.ar]
+title = "صدر الإصدار 1.6.0"
+text = """
+التفاصيل في صفحة التنزيل.
+"""
+[item.hi]
+title = "संस्करण 1.6.0 आ गया है"
+text = """
+विवरण डाउनलोड पृष्ठ पर हैं।
+"""
+[item.bn]
+title = "সংস্করণ 1.6.0 এসেছে"
+text = """
+বিস্তারিত ডাউনলোড পৃষ্ঠায় আছে।
+"""
+[item.ur]
+title = "ورژن 1.6.0 جاری ہو گیا"
+text = """
+تفصیلات ڈاؤن لوڈ کے صفحے پر ہیں۔
+"""
+[item.pa]
+title = "ਵਰਜਨ 1.6.0 ਆ ਗਿਆ ਹੈ"
+text = """
+ਵੇਰਵੇ ਡਾਊਨਲੋਡ ਪੰਨੇ ਤੇ ਹਨ।
+"""
+[item.mr]
+title = "आवृत्ती 1.6.0 आली आहे"
+text = """
+तपशील डाउनलोड पृष्ठावर आहेत.
+"""
+[item.te]
+title = "సంస్కరణ 1.6.0 విడుదలైంది"
+text = """
+వివరాలు డౌన్‌లోడ్ పేజీలో ఉన్నాయి.
+"""
+[item.ta]
+title = "பதிப்பு 1.6.0 வெளியானது"
+text = """
+விவரங்கள் பதிவிறக்கப் பக்கத்தில் உள்ளன.
+"""
+[item.fa]
+title = "نسخه‌ی 1.6.0 منتشر شد"
+text = """
+جزئیات در صفحه‌ی بارگیری است.
+"""
+[item.gu]
+title = "વર્ઝન 1.6.0 આવી ગયું છે"
+text = """
+વિગતો ડાઉનલોડ પૃષ્ઠ પર છે.
+"""
+[item.th]
+title = "เวอร์ชัน 1.6.0 ออกแล้ว"
+text = """
+ดูรายละเอียดได้ที่หน้าดาวน์โหลด
+"""
+[item.kn]
+title = "ಆವೃತ್ತಿ 1.6.0 ಬಿಡುಗಡೆಯಾಗಿದೆ"
+text = """
+ವಿವರಗಳು ಡೌನ್‌ಲೋಡ್ ಪುಟದಲ್ಲಿವೆ.
+"""
+[item.or]
+title = "ସଂସ୍କରଣ 1.6.0 ଆସିଗଲା"
+text = """
+ବିବରଣୀ ଡାଉନଲୋଡ୍ ପୃଷ୍ଠାରେ ଅଛି।
+"""
+[item.ml]
+title = "പതിപ്പ് 1.6.0 പുറത്തിറങ്ങി"
+text = """
+വിശദാംശങ്ങൾ ഡൗൺലോഡ് പേജിലുണ്ട്.
+"""
+[item.uz]
+title = "1.6.0 versiyasi chiqdi"
+text = """
+Tafsilotlar yuklab olish sahifasida.
+"""
+[item.uz-Cyrl]
+title = "1.6.0 версияси чиқди"
+text = """
+Тафсилотлар юклаб олиш саҳифасида.
+"""
+[item.ne]
+title = "संस्करण 1.6.0 आएको छ"
+text = """
+विवरण डाउनलोड पृष्ठमा छन्।
+"""
+[item.as]
+title = "সংস্কৰণ 1.6.0 ওলাল"
+text = """
+বিৱৰণ ডাউনলোড পৃষ্ঠাত আছে।
+"""
+[item.az]
+title = "1.6.0 versiyası çıxdı"
+text = """
+Ətraflı məlumat yükləmə səhifəsindədir.
+"""
+[item.km]
+title = "កំណែ 1.6.0 បានចេញហើយ"
+text = """
+សូមមើលព័ត៌មានលម្អិតនៅទំព័រទាញយក។
+"""
+[item.kk]
+title = "1.6.0 нұсқасы шықты"
+text = """
+Толығырақ — жүктеп алу бетінде.
+"""
+[item.sr]
+title = "Изашла је верзија 1.6.0"
+text = """
+Детаљи су на страници за преузимање.
+"""
+[item.sr-Latn]
+title = "Izašla je verzija 1.6.0"
+text = """
+Detalji su na stranici za preuzimanje.
+"""
+[item.ug]
+title = "يېڭى نەشرى چىقتى: 1.6.0"
+text = """
+تەپسىلاتى چۈشۈرۈش بېتىدە.
+"""
+[item.bg]
+title = "Излезе версия 1.6.0"
+text = """
+Подробности — на страницата за изтегляне.
+"""
+[item.hy]
+title = "Թողարկվեց 1.6.0 տարբերակը"
+text = """
+Մանրամասները՝ ներբեռնման էջում։
+"""
+[item.lo]
+title = "ເວີຊັນ 1.6.0 ອອກແລ້ວ"
+text = """
+ເບິ່ງລາຍລະອຽດໄດ້ທີ່ໜ້າດາວໂຫຼດ
+"""
+[item.be]
+title = "Выйшла версія 1.6.0"
+text = """
+Падрабязнасці — на старонцы загрузкі.
+"""
+[item.tt]
+title = "1.6.0 версиясе чыкты"
+text = """
+Тулырак мәгълүмат — йөкләп алу битендә.
+"""
+[item.ka]
+title = "გამოვიდა ვერსია 1.6.0"
+text = """
+დეტალები ჩამოტვირთვის გვერდზეა.
+"""
+[item.mk]
+title = "Излезе верзија 1.6.0"
+text = """
+Подробностите се на страницата за преземање.
+"""
+[item.vi]
+title = "Đã ra mắt phiên bản 1.6.0"
+text = """
+Chi tiết có trên trang tải xuống.
+"""
+[item.nl]
+title = "Versie 1.6.0 is verschenen"
+text = """
+Details staan op de downloadpagina.
+"""
+[item.ro]
+title = "A apărut versiunea 1.6.0"
+text = """
+Detaliile se găsesc pe pagina de descărcare.
+"""
+[item.hu]
+title = "Megjelent a(z) 1.6.0 verzió"
+text = """
+A részletek a letöltési oldalon találhatók.
+"""
+[item.sv]
+title = "Version 1.6.0 har släppts"
+text = """
+Detaljer finns på nedladdningssidan.
+"""
+[item.sq]
+title = "Doli versioni 1.6.0"
+text = """
+Detajet janë në faqen e shkarkimit.
+"""
+[item.da]
+title = "Version 1.6.0 er udgivet"
+text = """
+Detaljer findes på downloadsiden.
+"""
+[item.fi]
+title = "Versio 1.6.0 on julkaistu"
+text = """
+Lisätietoja on lataussivulla.
+"""
+[item.hr]
+title = "Izašla je verzija 1.6.0"
+text = """
+Pojedinosti su na stranici za preuzimanje.
+"""
+[item.sk]
+title = "Vyšla verzia 1.6.0"
+text = """
+Podrobnosti nájdete na stránke na stiahnutie.
+"""
+[item.nb]
+title = "Versjon 1.6.0 er ute"
+text = """
+Detaljer finnes på nedlastingssiden.
+"""
+[item.lt]
+title = "Išleista versija 1.6.0"
+text = """
+Išsamiau — atsisiuntimo puslapyje.
+"""
+[item.sl]
+title = "Izšla je različica 1.6.0"
+text = """
+Podrobnosti so na strani za prenos.
+"""
+[item.bs]
+title = "Izašla je verzija 1.6.0"
+text = """
+Detalji su na stranici za preuzimanje.
+"""
+[item.lv]
+title = "Iznākusi versija 1.6.0"
+text = """
+Sīkāka informācija — lejupielādes lapā.
+"""
+[item.et]
+title = "Versioon 1.6.0 on välja antud"
+text = """
+Üksikasjad on allalaadimislehel.
+"""
+[item.cy]
+title = "Rhyddhawyd fersiwn 1.6.0"
+text = """
+Mae'r manylion ar y dudalen lawrlwytho.
+"""
+[item.mt]
+title = "Ħarġet il-verżjoni 1.6.0"
+text = """
+Id-dettalji jinsabu fil-paġna tat-tniżżil.
+"""
+[item.is]
+title = "Útgáfa 1.6.0 er komin út"
+text = """
+Nánari upplýsingar eru á niðurhalssíðunni.
+"""
+[item.lb]
+title = "D'Versioun 1.6.0 ass do"
+text = """
+Détailer stinn op der Downloadsäit.
+"""
+[item.mi]
+title = "Kua tae mai te putanga 1.6.0"
+text = """
+Kei te whārangi tikiake ngā taipitopito.
+"""
+[item.nn]
+title = "Versjon 1.6.0 er ute"
+text = """
+Detaljar finst på nedlastingssida.
+"""
+
+[download]
+version = "1.6.0"
+url = "https://panda-pishet-kod.dev/langswitcher/files/e116/LangSwitcher-setup.exe"
+sha256 = "8EE4B06B5EC54B4FD5374A57AC2DFD58AABD199B027427A3709B58539943BDA4"
+size = 4242840

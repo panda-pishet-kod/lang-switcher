@@ -13,10 +13,12 @@
 //! exists from the very first task (decision R-11).
 
 pub mod app;
+pub mod appeal;
 pub mod buffer;
 pub mod convert;
 pub mod corner;
 pub mod diag;
+pub mod feed;
 pub mod flags;
 pub mod guard;
 pub mod hook;
@@ -24,12 +26,15 @@ pub mod inject;
 pub mod layouts;
 pub mod letter_stats;
 pub mod letters;
+pub mod links;
+pub mod sandbox;
 pub mod selection;
 pub mod settings;
 pub mod sticky;
 pub mod switch;
 pub mod theme;
 pub mod tray;
+pub mod ui;
 /// The updater of stage Э104 — `LangSwitcherUpdate.exe` (вопрос 189, TZ E104 §0 п. 13–19). The
 /// program does not call it; the second binary of this crate does.
 pub mod update;

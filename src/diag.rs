@@ -871,6 +871,19 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // The same: the system refused to put the cursor on the row it was found at — the call, as the
     // other refusals of a call are named; the code is the system's.
     ("SetCursorPos", Kind::Tray),
+    // Stage Э120, task T-120-3: the canvas of the interface shell (`ui::canvas`) — Direct2D refused
+    // a render target, and, after two refusals in a row, the canvas turned to the plain look of
+    // GDI. Appended at the end so that no index above them moves; a fact and no value.
+    ("ui canvas: target refused", Kind::Window),
+    ("ui canvas: plain look", Kind::Window),
+    // Stage Э120, task T-120-5: a window of the shell did not fit at the factor of its type size
+    // and was laid out at a smaller one, down to the floor of 12 points (`ui::fit`). A fact and no
+    // value; appended at the end so that no index above it moves.
+    ("ui layout: type size lowered", Kind::Window),
+    // Stage Э120, task T-120-13: Windows refused to make a window of the shell — «О программе»
+    // (`ui::windows::about::open`). The name of the call and its code; appended at the end so that
+    // no index above it moves.
+    ("CreateWindowExW", Kind::Window),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.
@@ -1371,6 +1384,7 @@ pub fn write_as(path: &Path, session: Session) -> io::Result<()> {
 
 /// The three steps of [`write_as`]: the folder, the temporary file, the rename.
 fn write_replacing(path: &Path, session: Session) -> io::Result<()> {
+    crate::sandbox::guard_path(path);
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {

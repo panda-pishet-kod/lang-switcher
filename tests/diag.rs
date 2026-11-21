@@ -184,7 +184,12 @@ fn every_operation_name_of_the_settings_code_is_in_the_vocabulary() {
             .to_string_lossy()
             .into_owned();
         let owned_by_this_task =
-            file == "settings.rs" || file == "tray.rs" || file == "watchdog.rs";
+            // T-120-23: `config.rs` and `hotkey_capture.rs` are the children of `settings.rs`.
+            file == "settings.rs"
+                || file == "config.rs"
+                || file == "hotkey_capture.rs"
+                || file == "tray.rs"
+                || file == "watchdog.rs";
         let text = std::fs::read_to_string(&path).expect("a source file must be readable");
 
         for occurrence in text.split("report_non_critical(\"").skip(1) {

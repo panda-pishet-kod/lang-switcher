@@ -1,0 +1,664 @@
+//! **Capturing the hotkey by pressing it** — FR-94: what one press amounts to, the refusals, the
+//! double press of `Shift`, and the session that suspends the hotkey while a capture is armed.
+//!
+//! Moved out of `settings.rs` whole by task T-120-23 — only moved: no body and no name changed.
+//! A child of `settings`, so it sees what it saw there; `settings` re-exports every public item.
+
+use super::*;
+
+// =========================================================================================
+// FR-94 — capturing the hotkey by pressing it
+// =========================================================================================
+
+/// The modifiers held at the moment a key went down.
+///
+/// A value rather than a query, so that the decision below is a function of its arguments and
+/// can be checked without a keyboard.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Modifiers {
+    /// Either `Ctrl`.
+    pub ctrl: bool,
+    /// Either `Alt`.
+    pub alt: bool,
+    /// Either `Shift`.
+    pub shift: bool,
+    /// Either `Windows` key.
+    pub win: bool,
+}
+
+impl Modifiers {
+    /// Whether anything at all is held.
+    pub const fn any(self) -> bool {
+        self.ctrl || self.alt || self.shift || self.win
+    }
+
+    /// The three modifiers of FR-96, read exactly as `hook::emergency_modifiers_held` reads
+    /// them: all three down, and the `Windows` key is not part of the question.
+    pub const fn emergency(self) -> bool {
+        self.ctrl && self.alt && self.shift
+    }
+
+    /// The same press as the set `hook` compares — `hook::MOD_CTRL`, `MOD_ALT`, `MOD_SHIFT`, and
+    /// `MOD_WIN` for a `Windows` key (task T-93-2, вопрос 157).
+    pub const fn set(self) -> u16 {
+        use crate::hook::{MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_WIN};
+
+        (if self.ctrl { MOD_CTRL } else { 0 })
+            | (if self.alt { MOD_ALT } else { 0 })
+            | (if self.shift { MOD_SHIFT } else { 0 })
+            | (if self.win { MOD_WIN } else { 0 })
+    }
+
+    /// What is held right now, from the message queue.
+    ///
+    /// `GetKeyState` and not `GetAsyncKeyState`: the answer wanted is the state as of the
+    /// keystroke being handled, which is what the queue-synchronised call gives, and which is
+    /// what the user actually pressed together.
+    pub(crate) fn held_now() -> Self {
+        Self {
+            ctrl: key_is_down(VK_CONTROL),
+            alt: key_is_down(VK_MENU),
+            shift: key_is_down(VK_SHIFT),
+            win: key_is_down(VK_LWIN) || key_is_down(VK_RWIN),
+        }
+    }
+}
+
+/// Whether one virtual key is down, as the message queue sees it.
+///
+/// `pub(crate)` с задачи Т-46-2: правило нажатия глифа живёт теперь в `widgets::glyph`, и его
+/// `arrow_is_down` спрашивает то же самое тем же телом — второго спрашивающего у этой мерки
+/// не заводится.
+pub(crate) fn key_is_down(key: VIRTUAL_KEY) -> bool {
+    // SAFETY: takes a virtual-key code by value and touches no memory of ours. The high bit of
+    // the `i16` it answers is "down", which for a signed value is "negative".
+    unsafe { GetKeyState(i32::from(key.0)) < 0 }
+}
+
+/// Why a press cannot become the hotkey — FR-94, FR-95, FR-96.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// A modifier on its own. `Ctrl` is not a hotkey, it is half of one.
+    ///
+    /// ⚠ **`Combination` stood after this until task T-93-2** — a key with a modifier held was
+    /// refused, because section 7 stored one key name and the callback compared one code. Вопрос
+    /// 157 widened both (`[hotkey] modifiers`, schema 7; the set compared in `hook::classify`), so
+    /// a combination of `Ctrl`, `Alt` and `Shift` is now taken, and the refusal went with its
+    /// fourteen sentences. A modifier on its own is still refused — the single tap is rejected by
+    /// 157.1, and the double one is stage 2.
+    Modifier,
+    /// `Ctrl+Alt+Shift+F12`, the emergency exit of FR-96. Never assignable, in either build.
+    Emergency,
+    /// A key the system owns and an application never gets as a plain key — and, since task
+    /// T-93-2, **any press with a `Windows` key held**: `Win` is not one of the modifiers a
+    /// hotkey may carry (вопрос 157), and the shell acts on its release whatever anybody else
+    /// does with the press.
+    Reserved,
+    /// ⭐ **A key typing itself needs** — task T-36-5, finding Н9, решение 123.3.
+    ///
+    /// `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown` and the four arrows: row 3 of the
+    /// FR-10 table, the keys that move the caret or take text away. Two things went wrong when
+    /// one of them was accepted, and the second is the one a person pays for:
+    ///
+    /// * the row of FR-10 quietly stopped working — a press that is the hotkey never reaches the
+    ///   buffer, so the boundary it was supposed to be never happened;
+    /// * **the key was lost in every application.** FR-95 suppresses the hotkey whenever the
+    ///   program is active, so somebody who assigned `Delete` had no `Delete` anywhere, with no
+    ///   warning in the file and none in the dialog.
+    ///
+    /// ⛔ Not [`Self::Reserved`]: «the system owns this key» would be a lie about a key the
+    /// system does not own. The list is read from `buffer::is_editing_key` — the table of FR-10
+    /// lives there and is not copied here.
+    ///
+    /// ⚠ **The file is not touched by this.** `[hotkey] key = "Delete"` written by hand is still
+    /// read, published and acted on: refusing it there would silently return the hotkey to
+    /// `Pause`, which is substituting this program's choice for the person's own.
+    ///
+    /// ⚠ **With modifiers too — 157.12, task T-93-2.** `Shift` + an arrow selects text, `Ctrl` + an
+    /// arrow walks a word, `Ctrl+Home` goes to the top: the combinations of these keys are the
+    /// editing typing needs just as much, so the key decides and the set does not.
+    Editing,
+    /// ⭐ **A key that types a character** — task Т-23-5, решение 82.6.
+    ///
+    /// Until that task a text key was **taken**: the capture ended, the file got `Q`, and the
+    /// note under the field carried the warning of FR-95 afterwards. The user asked for the
+    /// other order — «текстовая клавиша — предупреждение и захват НЕ гаснет» — and accepted
+    /// the live mock-up that behaves that way: the press is refused, the warning appears, and
+    /// the capture goes on waiting for the next key instead of quietly assigning the one that
+    /// was pressed by accident.
+    ///
+    /// ⚠ **A text key remains a legal hotkey** and FR-95 is untouched: `[hotkey] key = "Q"`
+    /// written by hand is read, published and warned about exactly as before. What changed is
+    /// the one road that used to assign one without asking — the capture.
+    ///
+    /// It says the FR-92 warning and not a sentence of its own ([`IDS_NOTE_TEXT_KEY`]): the
+    /// warning already says the true and useful thing — while the program is active that key
+    /// stops typing its character.
+    ///
+    /// ⚠ **The set decides since task T-93-2 — 157.10, вариант 1 until the owner's word.** A text
+    /// key with `Ctrl` or `Alt` types nothing and is taken (`Ctrl+K`); with nothing held, with
+    /// `Shift` (a capital, a symbol) or with `Ctrl` and `Alt` together (`AltGr`) it does type, and
+    /// is refused — see `types_a_character`.
+    Text,
+    /// A key section 7 has no name for, so it could not be written to the file and read back.
+    Nameless,
+}
+
+impl Refusal {
+    /// The interface string that says this to the user.
+    pub const fn string_id(self) -> u16 {
+        match self {
+            Self::Modifier => IDS_CAPTURE_MODIFIER,
+            Self::Emergency => IDS_CAPTURE_EMERGENCY,
+            Self::Reserved => IDS_CAPTURE_RESERVED,
+            // Task T-36-5: a sentence of its own — the key is not the system's, it is the
+            // typing's, and what the person loses by taking it is different.
+            Self::Editing => IDS_CAPTURE_TYPING,
+            // Task Т-23-5: the warning FR-92 already asks for, said at the moment of the
+            // press instead of after it.
+            Self::Text => IDS_NOTE_TEXT_KEY,
+            Self::Nameless => IDS_CAPTURE_NAMELESS,
+        }
+    }
+}
+
+/// What one press during a capture amounts to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Capture {
+    /// The press is the hotkey. The value is the `[hotkey]` section 7 stores — the key's name and,
+    /// since task T-93-2, the modifiers held with it in the canonical order — and
+    /// [`Hotkey::binding`] reads it back to the very code and set it came from.
+    Taken(Hotkey),
+    /// **A `Shift` on its own — the beginning of a double press**, task T-95-2, вопрос 159: not a
+    /// refusal any more (157.17 — the double press is `Shift`'s). What it becomes is decided by
+    /// what follows, and that is the memory of [`CapturePair`]: a second tap — the double press; a
+    /// key with the `Shift` held — a combination, as in stage 1; nothing — the invitation again.
+    Shift,
+    /// The press cannot be the hotkey. The capture stays armed and the reason is shown.
+    Refused(Refusal),
+}
+
+/// One thing that can happen to an armed capture — task Т-23-5, решение 82.6.
+///
+/// The events the window procedures of the dialog can see, named apart from the Win32 messages
+/// that carry them so that the machine below can be exercised without a window. Task T-95-2
+/// added two, for the double press of `Shift`: the release of a key and the end of the window of
+/// the pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureEvent {
+    /// A key went down while the field held the focus — the virtual code and the modifiers
+    /// held with it.
+    KeyDown(u16, Modifiers),
+    /// **A key went up while the field held the focus** — task T-95-2: the release of `Shift`
+    /// ends a tap of the double press; the release of any other key changes nothing.
+    KeyUp(u16),
+    /// **The window of the double press ran out** — task T-95-2: the one-shot timer
+    /// [`CAPTURE_PAIR_TIMER`] of the dialog, armed by a press of `Shift`, has fired.
+    PairTimeout,
+    /// The field lost the keyboard focus. The flag says whether it went to the capture button
+    /// itself, which is the one window that may take it without ending the capture: that
+    /// button is about to report a click, and ending here would turn the click into a fresh
+    /// arming.
+    FocusLost { to_capture_button: bool },
+    /// A press landed on the dialog's own ground — not on the field, not on the button, and
+    /// not on any control that takes the focus (those arrive as [`Self::FocusLost`]).
+    ClickBeside,
+}
+
+/// What one event does to the capture — task Т-23-5, решение 82.6.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureStep {
+    /// Nothing at all: no capture is armed, or the event is one the machine deliberately
+    /// lets pass.
+    Ignore,
+    /// The capture ends and the name that stood in the field before it comes back.
+    Cancel,
+    /// The press is the hotkey; the value is the `[hotkey]` section 7 stores — the key and,
+    /// since task T-93-2, its modifiers.
+    Take(Hotkey),
+    /// The press cannot be the hotkey. **The capture stays armed** — a refusal is «not that
+    /// one», not an end to the question — and the note says which of the six reasons it was.
+    Refuse(Refusal),
+    /// **A `Shift` went down on its own — the first tap of a double press or its second** (task
+    /// T-95-2, the moment 3 of the mock-up of 157.18): the field says «Shift…», the line under it
+    /// [`IDS_CAPTURE_SHIFT_AGAIN`], and the one-shot timer of the pair runs for
+    /// `hook::DOUBLE_TAP_MS`. The capture stays armed.
+    AwaitShift,
+    /// **The second `Shift` did not come in time, or a tap was held too long** — the moment 4: the
+    /// field says the invitation again, the line under it stays until the next press, and the timer
+    /// is dead. The capture stays armed.
+    ShiftLapsed,
+}
+
+/// **The double press of `Shift` as a capture waits for it** — task T-95-2, вопрос 159, the moments
+/// of the mock-up of 157.18.
+///
+/// The memory the capture gained: [`capture_step`] decides one press at a time and cannot tell a
+/// second tap from a first. The rule of times is the hook's own, [`crate::hook::Taps`] — one body
+/// for the window that assigns the double press and the callback that answers to it, so the field
+/// takes exactly the pair the hook will act on. What only a window can know is here: a `Shift` is
+/// down (its auto-repeat is no new press), and what the window shows while a pair is open.
+///
+/// The times are the times of the window messages (`GetMessageTime`), as the hook's are the times of
+/// its events; the modifiers held are the queue's (`GetKeyState`, [`Modifiers::held_now`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CapturePair {
+    /// A `Shift` is down, as the field saw it go down — what tells its auto-repeat from a new press.
+    held: bool,
+    /// The taps made so far, and the rule they are counted by.
+    taps: crate::hook::Taps,
+}
+
+impl CapturePair {
+    /// One event of an armed capture, with the memory of the pair — task T-95-2. `time` is the
+    /// time of the message the event came in.
+    ///
+    /// * A press of `Shift` on its own ([`capture_step`] answers [`CaptureStep::AwaitShift`]) is a
+    ///   tap begun — the first or the second — unless it is the auto-repeat of the `Shift` already
+    ///   down, which is nothing.
+    /// * The release of `Shift` ends the tap: the second tap within the window — the double press,
+    ///   taken; the first — the pair waits, nothing changes on the screen; a tap held too long —
+    ///   [`CaptureStep::ShiftLapsed`].
+    /// * The end of the window ([`CaptureEvent::PairTimeout`]) with a pair open —
+    ///   [`CaptureStep::ShiftLapsed`]; with none, a stale tick, nothing.
+    /// * Any other press ends the pair and is decided as [`capture_step`] decides it: a key with
+    ///   `Shift` held is a combination (stage 1), `Ctrl` or `Alt` on their own are refused, `Esc`
+    ///   cancels. A focus lost or a click beside cancel the capture, the pair with it.
+    pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
+        match event {
+            CaptureEvent::KeyDown(vk, _) if SHIFT_KEYS.contains(&vk) => {
+                let repeat = std::mem::replace(&mut self.held, true);
+
+                match capture_step(true, event) {
+                    CaptureStep::AwaitShift if repeat => CaptureStep::Ignore,
+                    CaptureStep::AwaitShift => {
+                        self.taps.press(time, true);
+                        CaptureStep::AwaitShift
+                    }
+                    // A `Shift` under `Ctrl` or `Alt`: refused, and no tap.
+                    other => {
+                        self.taps.interrupt();
+                        other
+                    }
+                }
+            }
+
+            CaptureEvent::KeyUp(vk) if SHIFT_KEYS.contains(&vk) => {
+                if !std::mem::replace(&mut self.held, false) {
+                    // The release of a `Shift` this capture never saw go down.
+                    return CaptureStep::Ignore;
+                }
+
+                let pressing = self.taps.pressing();
+
+                if self.taps.release(time, true) {
+                    return CaptureStep::Take(Hotkey::double_shift());
+                }
+
+                if pressing && !self.taps.waiting() {
+                    // The press was no tap — held longer than the window.
+                    return CaptureStep::ShiftLapsed;
+                }
+
+                CaptureStep::Ignore
+            }
+
+            CaptureEvent::KeyUp(_) => CaptureStep::Ignore,
+
+            CaptureEvent::PairTimeout => {
+                if !self.open() {
+                    return CaptureStep::Ignore;
+                }
+
+                self.taps.interrupt();
+                CaptureStep::ShiftLapsed
+            }
+
+            CaptureEvent::KeyDown(..)
+            | CaptureEvent::FocusLost { .. }
+            | CaptureEvent::ClickBeside => {
+                if matches!(event, CaptureEvent::KeyDown(..)) {
+                    self.taps.interrupt();
+                }
+
+                capture_step(true, event)
+            }
+        }
+    }
+
+    /// Whether a pair is open — a tap made, or a press that may be one: the field says «Shift…»
+    /// and the timer of the pair runs.
+    pub fn open(&self) -> bool {
+        self.taps.pressing() || self.taps.waiting()
+    }
+}
+
+/// The whole decision of the capture, as a function of the state and one event — task Т-23-5.
+///
+/// Split out of the window procedures for the reason [`capture`] itself is split out of them:
+/// what a program does is worth closing without a window, and a machine spread over a
+/// `WM_KEYDOWN` arm, a `WM_KILLFOCUS` arm and a `WM_LBUTTONDOWN` arm is a machine no test can
+/// see whole. The procedures keep exactly two jobs — turning a message into a
+/// [`CaptureEvent`], and carrying out the [`CaptureStep`] this function answers.
+///
+/// ⚠ **Escape is the way out and is therefore the one key a capture cannot assign.** It stays
+/// assignable by hand: `hook::vk_from_name` still reads `Escape` and `Esc` out of the file, and
+/// the dialog shows whatever it finds there.
+pub fn capture_step(armed: bool, event: CaptureEvent) -> CaptureStep {
+    if !armed {
+        return CaptureStep::Ignore;
+    }
+
+    match event {
+        CaptureEvent::KeyDown(vk, _) if vk == VK_ESCAPE.0 => CaptureStep::Cancel,
+
+        CaptureEvent::KeyDown(vk, modifiers) => match capture(vk, modifiers) {
+            Capture::Taken(hotkey) => CaptureStep::Take(hotkey),
+            // Task T-95-2: one press at a time, a `Shift` on its own is the beginning of a pair —
+            // what it becomes, [`CapturePair::step`] decides.
+            Capture::Shift => CaptureStep::AwaitShift,
+            Capture::Refused(refusal) => CaptureStep::Refuse(refusal),
+        },
+
+        // Task T-95-2: a release, and the end of the window of a pair, mean something only to the
+        // memory of a pair ([`CapturePair::step`]); one press at a time, they are nothing.
+        CaptureEvent::KeyUp(_) | CaptureEvent::PairTimeout => CaptureStep::Ignore,
+
+        CaptureEvent::FocusLost { to_capture_button } => {
+            if to_capture_button {
+                CaptureStep::Ignore
+            } else {
+                CaptureStep::Cancel
+            }
+        }
+
+        CaptureEvent::ClickBeside => CaptureStep::Cancel,
+    }
+}
+
+/// The keys an application never receives as a plain key, because the shell takes them first.
+///
+/// Only the two `Windows` keys are here, and they are here because the shell acts on their
+/// *release* whatever anybody else does with the press. Everything else the system reserves —
+/// `Ctrl+Alt+Del`, `Win+L` — is taken below the level any window can see, so it never arrives
+/// at the capture at all: nothing to refuse, and the dialog simply goes on waiting.
+const SYSTEM_RESERVED: &[u16] = &[VK_LWIN.0, VK_RWIN.0];
+
+/// The three modifiers, in all their forms — the neutral code the queue reports and the two
+/// sided ones a keyboard can send.
+const MODIFIER_KEYS: &[u16] = &[
+    VK_CONTROL.0,
+    VK_LCONTROL.0,
+    VK_RCONTROL.0,
+    VK_MENU.0,
+    VK_LMENU.0,
+    VK_RMENU.0,
+    VK_SHIFT.0,
+    VK_LSHIFT.0,
+    VK_RSHIFT.0,
+];
+
+/// The whole capture decision, as a function of the key and of what was held with it.
+///
+/// The order of the tests is not free:
+///
+/// * **FR-96 first**, exactly as `hook::keyboard_hook_proc` puts it first, and for the same
+///   reason: the emergency combination is not a candidate hotkey under any circumstance. In
+///   practice the callback has already ended the process by the time this could run — this is
+///   the answer for the case where the hook is not installed at all;
+/// * then the `Windows` key — pressed, or held under another key — which is neither a modifier
+///   of this program's vocabulary nor a key an application ever gets;
+/// * then a modifier on its own, which is a press the user has not finished making — except a
+///   `Shift` with nothing else held, which since task T-95-2 begins a double press
+///   ([`Capture::Shift`]);
+/// * then a key that would type a character with what is held ([`Refusal::Text`]) and a key
+///   typing itself needs ([`Refusal::Editing`]);
+/// * and last the vocabulary of section 7, because a name that cannot be written to the file
+///   is a hotkey that would not survive a restart.
+///
+/// ⭐ **A combination is taken since task T-93-2 — вопрос 157, устройство А.** `Ctrl`, `Alt` and
+/// `Shift` held with a key make a hotkey of the key *and* the set (`Ctrl + F12`): the capture
+/// understands what was pressed, with no switch to choose a way first (157.6).
+///
+/// **SEC-01, SEC-07.** The value that comes out is a *name of a key* — `F8`, `Pause`, `A` — and
+/// the names of the modifiers held with it, built from the virtual-key code and the set and from
+/// nothing else. No character is produced, nothing is translated through a keyboard layout, and
+/// nothing here reaches the journal: the caller shows the name in the field and writes it to
+/// `[hotkey]`, which is where section 7 keeps it anyway.
+pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
+    if vk == crate::hook::EMERGENCY_VK && modifiers.emergency() {
+        return Capture::Refused(Refusal::Emergency);
+    }
+
+    if SYSTEM_RESERVED.contains(&vk) || modifiers.win {
+        return Capture::Refused(Refusal::Reserved);
+    }
+
+    if MODIFIER_KEYS.contains(&vk) {
+        // ⭐ Task T-95-2, вопрос 159: a `Shift` with nothing but itself held is the beginning of
+        // a double press — 157.17 gives the double press to `Shift` alone. `Ctrl` and `Alt` on
+        // their own, and a `Shift` pressed under either (`Ctrl+Shift`, `Alt+Shift` — the switches
+        // of the layout), stay the refusal they were; its line names the way that is left
+        // («дважды — только Shift»).
+        if SHIFT_KEYS.contains(&vk) && !modifiers.ctrl && !modifiers.alt {
+            return Capture::Shift;
+        }
+
+        return Capture::Refused(Refusal::Modifier);
+    }
+
+    let set = modifiers.set();
+
+    // ⭐ Task Т-23-5, решение 82.6. Before this line a letter, a digit or an OEM key was taken
+    // and the warning of FR-95 followed the assignment; the user asked for the warning to come
+    // *instead* of it, so that a stray press cannot quietly become the hotkey. See
+    // [`Refusal::Text`] for what did **not** change: a text key written into the file by hand
+    // is still a hotkey, and FR-95 still suppresses it. Since task T-93-2 the set decides with
+    // the key — `Ctrl+K` types nothing and is taken, `Shift+K` types a capital and is not
+    // (157.10, вариант 1 until the owner's word).
+    if types_a_character(vk, set) {
+        return Capture::Refused(Refusal::Text);
+    }
+
+    // ⭐ Task T-36-5, finding Н9, решение 123.3 — the keys typing itself needs. `Delete` and
+    // `Home` were taken until this line, and taking one cost the person that key in every
+    // application (FR-95) with no warning anywhere. The list is the FR-10 table and is read from
+    // where that table lives; see [`Refusal::Editing`].
+    //
+    // Below `is_text_key` because the two never overlap and the order of the two answers does
+    // not matter — and above `key_name`, because six of these keys **do** have names and would
+    // otherwise be accepted, while the four arrows would be refused as nameless, which is true
+    // and useless.
+    if crate::buffer::is_editing_key(vk) {
+        return Capture::Refused(Refusal::Editing);
+    }
+
+    // The key under its name, and the set in the canonical order whatever order it was pressed
+    // in — task T-93-2. No `Win` reaches this line, so the set always has a name.
+    match Hotkey::from_binding(vk, set) {
+        Some(hotkey) => Capture::Taken(hotkey),
+        None => Capture::Refused(Refusal::Nameless),
+    }
+}
+
+/// The named keys of section 7, in the spelling this program *writes*.
+///
+/// ⚠ The mirror of `hook::NAMED_KEYS`, narrowed to one spelling per code: that table accepts
+/// `Break`, `PgUp` and `Esc` because a person writes them by hand, and this one has to choose
+/// which of them a capture puts in the file. Kept honest by a test that runs every code this
+/// function names back through `hook::vk_from_name` and demands the same code out — the reverse
+/// direction of the one function that reads the file.
+const NAMED_KEYS: &[(&str, VIRTUAL_KEY)] = &[
+    ("Pause", VK_PAUSE),
+    ("Escape", VK_ESCAPE),
+    ("Insert", VK_INSERT),
+    ("Delete", VK_DELETE),
+    ("Home", VK_HOME),
+    ("End", VK_END),
+    ("PageUp", VK_PRIOR),
+    ("PageDown", VK_NEXT),
+    ("ScrollLock", VK_SCROLL),
+    ("NumLock", VK_NUMLOCK),
+    ("CapsLock", VK_CAPITAL),
+    ("PrintScreen", VK_SNAPSHOT),
+    ("Apps", VK_APPS),
+];
+
+/// Highest function key Windows has a virtual-key code for — `hook::HIGHEST_FUNCTION_KEY`.
+const HIGHEST_FUNCTION_KEY: u16 = 24;
+
+/// The name section 7 stores for a virtual-key code, or `None` when it has none.
+///
+/// The inverse of `hook::vk_from_name`, and it has to be written here rather than there:
+/// `src\hook.rs` is the accepted code of the hot path and this task does not touch it. What
+/// keeps the two from drifting is not discipline but a test — see [`NAMED_KEYS`].
+pub fn key_name(vk: u16) -> Option<String> {
+    // A single ASCII letter or digit is its own virtual-key code, which is the documented
+    // property `hook::vk_from_name` reads in the other direction.
+    if let Ok(byte) = u8::try_from(vk)
+        && (byte.is_ascii_uppercase() || byte.is_ascii_digit())
+    {
+        return Some(char::from(byte).to_string());
+    }
+
+    if (VK_F1.0..VK_F1.0 + HIGHEST_FUNCTION_KEY).contains(&vk) {
+        return Some(format!("F{}", vk - VK_F1.0 + 1));
+    }
+
+    NAMED_KEYS
+        .iter()
+        .find(|(_, code)| code.0 == vk)
+        .map(|(name, _)| (*name).to_owned())
+}
+
+/// The virtual-key code a capture publishes while it is armed.
+///
+/// Zero is not a key: `KBDLLHOOKSTRUCT::vkCode` is documented to be in 1..=254, so no stroke can
+/// ever equal it and `hook::classify` takes the "ordinary key" branch for every press. That is
+/// exactly the state a capture needs — see [`CaptureSession`].
+const NO_HOTKEY_VK: u16 = 0;
+
+/// A capture in progress — and, for as long as it lives, the hotkey of FR-02 suspended.
+///
+/// # Why the ordinary work has to stop
+///
+/// The keys the user presses to *choose* a hotkey travel through the same global low-level hook
+/// as every other key on the machine. Two things would otherwise happen at once: pressing the
+/// current hotkey would run a conversion nobody asked for (FR-02), and it would be **suppressed
+/// by FR-95 before reaching this window**, so the one key the user is most likely to press
+/// first could never be captured at all.
+///
+/// # What is suspended, and why by two different switches
+///
+/// **The one that matters is the hotkey code.** Arming publishes [`NO_HOTKEY_VK`] through
+/// [`crate::hook::set_hotkey`] — the interface this task is given for the hotkey — and
+/// dropping publishes back exactly what stood there before, the key and its modifiers in one
+/// store (task T-93-1). No press can equal a code no keyboard produces, so nothing is converted
+/// and nothing is suppressed for as long as the capture is armed.
+///
+/// `hook::set_active(false)` is published as well, and it is deliberately **not** what the
+/// suspension rests on.
+///
+/// ⛔ **What it does not do — task T-36-6, finding Н116, решение 123.1.** This paragraph used to
+/// promise a second effect: that the flag «additionally stops the stroke reaching the typing
+/// buffer», so nothing typed while a hotkey is being chosen goes into the buffer of FR-10. **The
+/// program does not keep that promise, and the knowledge is worth more than the sentence was.**
+/// `app::window_proc` re-publishes `tray.enabled()` into `hook::set_active` **after every message
+/// the UI thread sees** (FR-90, FR-91 — a program the user has just suspended must stop swallowing
+/// the hotkey at once), so the flag is back to `true` within one message of being cleared: moving
+/// the mouse over the tray icon is enough. Nothing here can hold it down, and this task does not
+/// try — the repair would need a flag of the capture's own inside `hook`, read by the callback,
+/// which is a new branch on the path NFR-01…NFR-05 governs. The promise is therefore struck out
+/// rather than rewritten; the second effect is in `DEFERRED.md`.
+///
+/// The hotkey code, by contrast, is published from `app::publish_configuration` alone, which runs
+/// on «Применить» and at start-up and from no message, so it stays where a capture puts it. That
+/// is why the suspension rests on it.
+///
+/// **FR-96 is not affected and cannot be.** The emergency combination is handled at the top of
+/// the callback, before either of these values is so much as read — see
+/// `hook::keyboard_hook_proc` — so `Ctrl+Alt+Shift+F12` ends the process during a capture
+/// exactly as it does at any other moment. That is the condition the decision on question 18
+/// puts on running a debug build at all, and nothing in this file weakens it.
+///
+/// The restoration is in `Drop` and not in a method on purpose: the program stays up after a
+/// panic (FR-98, FR-99), and a capture that swallowed a panic would leave the program with no
+/// hotkey at all and no way back short of a restart.
+pub struct CaptureSession {
+    /// `[hotkey]` as it stood when the capture was armed — what «отмена» puts back: the key and,
+    /// since task T-93-1, the modifiers held with it.
+    previous: Hotkey,
+    /// The double press this capture is waiting for, if it is — task T-95-2. Born empty with the
+    /// capture and gone with it, so a pair never outlives the capture it was begun in.
+    pair: CapturePair,
+    /// The hotkey the callback was comparing against when the capture was armed — the code and
+    /// its modifier set, which `hook` publishes as one word (task T-93-1).
+    ///
+    /// ⚠ The only value this session remembers since task T-36-6. There used to be a second —
+    /// `hook::is_active()` as it stood at arming — and it was put back in `Drop`; both halves went
+    /// out with the promise above. Remembering it was worse than not: `app::window_proc`
+    /// re-publishes `tray.enabled()` after every message, so the saved copy was stale within a
+    /// message of being taken, and putting it back at the end of a capture wrote a value older
+    /// than the one the program already had. What the flag must equal after a capture is
+    /// `tray.enabled()`, and that is published by the procedure itself.
+    published: (u16, u16),
+}
+
+impl CaptureSession {
+    /// Arms a capture and suspends the hotkey for its duration.
+    pub fn arm(previous: Hotkey) -> Self {
+        let published = crate::hook::hotkey();
+
+        crate::hook::set_hotkey(NO_HOTKEY_VK, 0);
+
+        // ⚠ Task T-36-6 left this call exactly where it was and took away only the belief about
+        // it: the flag is cleared, and `app::window_proc` publishes `tray.enabled()` back over it
+        // at the next message it sees. Removing the call would be a change of behaviour, and this
+        // task is the striking out of a promise, not a repair of one.
+        crate::hook::set_active(false);
+
+        Self {
+            previous,
+            pair: CapturePair::default(),
+            published,
+        }
+    }
+
+    /// The hotkey to go back to if the capture is cancelled — the key and its modifiers.
+    pub fn previous(&self) -> &Hotkey {
+        &self.previous
+    }
+
+    /// One event of this capture, decided with the memory of its pair — [`CapturePair::step`],
+    /// task T-95-2.
+    pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
+        self.pair.step(event, time)
+    }
+
+    /// Whether this capture has a pair open — the field says «Shift…» and the timer of the pair
+    /// runs (task T-95-2).
+    pub fn pair_open(&self) -> bool {
+        self.pair.open()
+    }
+
+    /// The hotkey the callback will be given back when this capture ends — the code and its
+    /// modifier set.
+    pub fn published(&self) -> (u16, u16) {
+        self.published
+    }
+}
+
+impl Drop for CaptureSession {
+    /// Gives the hotkey back — and **only** it, since task T-36-6: the code and its modifiers, in
+    /// one store (task T-93-1).
+    ///
+    /// `hook::set_active` is not touched here: the value it must hold after a capture is
+    /// `tray.enabled()`, which `app::window_proc` publishes after every message the UI thread
+    /// sees, and writing back a copy taken at arming would put a staler value than the one the
+    /// program already has.
+    fn drop(&mut self) {
+        let (vk, modifiers) = self.published;
+
+        crate::hook::set_hotkey(vk, modifiers);
+    }
+}

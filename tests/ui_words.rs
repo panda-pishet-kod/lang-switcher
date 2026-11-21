@@ -64,10 +64,11 @@ fn strings_of(tag: &str) -> BTreeMap<String, String> {
 }
 
 /// The words the main action is no longer called, as roots matched in lower case. «чини» catches
-/// «чинит», «чинить» and «починить»; «перекодир» — «перекодирует», «перекодировка»; `convert` —
+/// «чинит», «чинить» and «починить»; «перекодир» — «перекодирует», «перекодировка»; «переводит» —
+/// «переводить» for the action (the noun «перевод» of a translation does not match); `convert` —
 /// `converts`, `converted`; `conversion` does not contain `convert` and stands on its own.
 const OLD_ACTION_ROOTS: [(&str, &[&str]); 2] = [
-    ("ru", &["перекодир", "конверт", "чини"]),
+    ("ru", &["перекодир", "конверт", "чини", "переводит"]),
     ("en", &["convert", "conversion"]),
 ];
 

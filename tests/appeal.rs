@@ -211,6 +211,23 @@ fn the_body_of_the_stand_files_the_appeal_under_test() {
     assert!(appeal::body(&sample("")).ends_with(",\"test\":true}"));
 }
 
+/// The module `letters` as it was before T-120-23 — `src\letters.rs` and the three files it was
+/// divided into, in the order they stood in it, `links.rs`, `feed.rs` and `appeal.rs`: the appeal is declared in `links.rs` and
+/// sent by `appeal.rs`, and a guard of the module looks at all of it.
+fn module_source() -> String {
+    ["letters.rs", "links.rs", "feed.rs", "appeal.rs"]
+        .iter()
+        .map(|file| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join(file);
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// **The line that writes `test` is compiled only under the feature of the stand** — read out of
 /// the source, because the shipped build cannot show a line it does not have: the push of
 /// `,"test":true` stands directly under `#[cfg(feature = "testing")]`, and it stands once.
@@ -235,8 +252,7 @@ fn the_test_field_is_written_only_under_the_feature_of_the_stand() {
         }
     }
 
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/letters.rs");
-    let source = std::fs::read_to_string(&path).expect("src/letters.rs must be readable");
+    let source = module_source();
 
     assert_eq!(gated(&source), Ok(()));
     assert!(
@@ -259,8 +275,7 @@ fn the_test_field_is_written_only_under_the_feature_of_the_stand() {
 /// the shell away from the address is that no code hands it there — which is what is read here.
 #[test]
 fn the_appeal_goes_to_the_site_and_the_letter_to_the_box_of_the_appeals() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/letters.rs");
-    let source = std::fs::read_to_string(&path).expect("src/letters.rs must be readable");
+    let source = module_source();
     let naming: Vec<&str> = source
         .lines()
         .map(str::trim)

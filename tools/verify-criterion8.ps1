@@ -17,18 +17,18 @@
        "release without testing" measurement found the channel name, because what lay on disk
        was the build WITH the feature. Fact 8 of section 9 of STATE.md.
 
-    2. It runs a POSITIVE CONTROL over every one of the seven strings. Absence on its own
+    2. It runs a POSITIVE CONTROL over every one of the strings. Absence on its own
        proves nothing at all: the Release profile has `strip = true`, and a single typo in a
        search pattern gives the same answer as a string that is genuinely not there. Each
        string must be MISSING from the shipping build and FOUND in the build that is supposed
        to carry it. Decision R-25, question 29.
 
-       There are TWO such builds, because the seven strings are switched off by two different
+       There are TWO such builds, because the strings are switched off by two different
        mechanisms. Five are behind the `testing` feature and are controlled by measurement B.
-       The sixth and the seventh, LANGSW_DEBUG_TIMEOUT_SEC and LANGSW_DEBUG_FONT_STEP, are
-       behind `#[cfg(debug_assertions)]` and are controlled by measurement B2 -- a release
-       built with debug assertions forced on. Giving them the feature's control would have been
-       a control that cannot fail: the strings are rightly absent from the `testing` build too.
+       The sixth, LANGSW_DEBUG_TIMEOUT_SEC, is behind `#[cfg(debug_assertions)]` and is
+       controlled by measurement B2 -- a release built with debug assertions forced on. Giving
+       it the feature's control would have been a control that cannot fail: the string is
+       rightly absent from the `testing` build too.
 
     3. It searches in UTF-8 AND in UTF-16LE. Rust puts string literals in the binary as UTF-8,
        but a literal that went into a Win32 call through PCWSTR can be sitting there wide. A
@@ -56,21 +56,18 @@
     instrument would have noticed, because the acceptance read the mechanism out of the SOURCE
     rather than out of the built file. It is read out of the built file now.
 
-    The SEVENTH entry was added by the owner's word of 2026-09-25 (decision 143d, debt E83-B-2
-    of stage E83). LANGSW_DEBUG_FONT_STEP is the debug substitution of the step of the windows'
-    font (task T-83-3, 6 to 15 points), built the way FR-97's deadline is: behind
-    `#[cfg(debug_assertions)]`, absent from the Release build rather than disabled in it. The
-    deliveries e83 and e84 measured it with a separate instrument of their own, because this
-    list was closed; the list carries it now, so every delivery measures it without anybody
-    having to remember a second script.
+    The SEVENTH entry, LANGSW_DEBUG_FONT_STEP (decision 143d, debt E83-B-2), left with task
+    T-120-19: the debug substitution of the font step was a mechanism of the dialog templates,
+    and the last of them, the wizard, became a window of the interface shell. The list keeps
+    the strings of the mechanisms that exist.
 
     Written without a single Cyrillic character on purpose. The tooling that writes files here
     puts them in UTF-8 with NO byte order mark, Windows PowerShell 5.1 then reads such a .ps1
     in the system ANSI code page, and the parse dies on the first Russian word. Decision R-05.
     Windows PowerShell 5.1, not 7.x: no `&&`, no `??`, no ternary operator, no -AsHashtable.
 
-    Exit code: 0 only if all seven strings are absent from the shipping build, the five of the
-    `testing` feature are present in the build with it, the sixth and the seventh are present in
+    Exit code: 0 only if all the strings are absent from the shipping build, those of the
+    `testing` feature are present in the build with it, the sixth is present in
     the build with debug assertions on, and the dependency sets agree. Otherwise non-zero,
     reasons listed.
 
@@ -123,11 +120,9 @@ $ReleaseExe = Join-Path $TargetDir 'release\LangSwitcher.exe'
 # assertions off, and the string is rightly missing there too. Its control is measurement B2
 # instead: a release built with debug assertions forced ON, where it MUST be present.
 #
-# --- The seventh string, under the same control ------------------------------------------
-# Added by the owner's word of 2026-09-25 (decision 143d, debt E83-B-2). LANGSW_DEBUG_FONT_STEP
-# is the environment variable of the debug substitution of the font step (task T-83-3), in
-# `mod debug_font_step` of src\settings.rs -- behind `#[cfg(debug_assertions)]` exactly like the
-# sixth, so its control is measurement B2 as well.
+# --- The seventh string left with task T-120-19 -----------------------------------------
+# LANGSW_DEBUG_FONT_STEP (decision 143d) named the debug substitution of the font step of the
+# dialog templates; no template is left, and the mechanism went with them.
 #
 # The `Control` field says which of the two halves proves the absence measured in A.
 $Strings = @(
@@ -137,7 +132,26 @@ $Strings = @(
     @{ Name = 'LANGSW_TESTING_PANIC_ON_VK';      Value = 'LANGSW_TESTING_PANIC_ON_VK';      Source = 'src\hook.rs';     Control = 'testing' },
     @{ Name = 'LANGSW_TESTING_DROP_HOOK_MS';     Value = 'LANGSW_TESTING_DROP_HOOK_MS';     Source = 'src\watchdog.rs'; Control = 'testing' },
     @{ Name = 'LANGSW_DEBUG_TIMEOUT_SEC';        Value = 'LANGSW_DEBUG_TIMEOUT_SEC';        Source = 'src\app.rs, mod debug_timeout'; Control = 'debug-assertions' },
-    @{ Name = 'LANGSW_DEBUG_FONT_STEP';          Value = 'LANGSW_DEBUG_FONT_STEP';          Source = 'src\settings.rs, mod debug_font_step'; Control = 'debug-assertions' }
+    # Stage E120: the switches of the interface shell and of its probe, all under the testing feature.
+    @{ Name = 'LANGSW_TESTING_UI_GDI';             Value = 'LANGSW_TESTING_UI_GDI';             Source = 'src\ui\canvas.rs';         Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_HARDWARE';        Value = 'LANGSW_TESTING_UI_HARDWARE';        Source = 'src\ui\canvas.rs';         Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE';           Value = 'LANGSW_TESTING_UI_PROBE';           Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Value = 'LANGSW_TESTING_UI_PROBE_CLOSE_MS';  Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Value = 'LANGSW_TESTING_UI_PROBE_LINGER_MS'; Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Value = 'LANGSW_TESTING_UI_PROBE_WAIT_MS';   Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_TWICE';     Value = 'LANGSW_TESTING_UI_PROBE_TWICE';     Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_RTL';       Value = 'LANGSW_TESTING_UI_PROBE_RTL';       Source = 'src\ui\probe.rs';          Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-about';     Value = '--ui-probe-about';                  Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-fields';    Value = '--ui-probe-fields';                 Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-popup';     Value = '--ui-probe-popup';                  Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'probe switch --ui-probe-corner';    Value = '--ui-probe-corner';                 Source = 'src\main.rs';              Control = 'testing' },
+    # T-120-16: the stand of the letters.
+    @{ Name = 'probe switch --ui-probe-letters';   Value = '--ui-probe-letters';                Source = 'src\main.rs';              Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LETTER';    Value = 'LANGSW_TESTING_UI_PROBE_LETTER';    Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_LANG';      Value = 'LANGSW_TESTING_UI_PROBE_LANG';      Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_THEME';     Value = 'LANGSW_TESTING_UI_PROBE_THEME';     Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_PROBE_BY_ITSELF'; Value = 'LANGSW_TESTING_UI_PROBE_BY_ITSELF'; Source = 'src\letters.rs, mod testing'; Control = 'testing' },
+    @{ Name = 'LANGSW_TESTING_UI_TICK_HIDDEN';     Value = 'LANGSW_TESTING_UI_TICK_HIDDEN';     Source = 'src\ui\host.rs';           Control = 'testing' }
 )
 
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -204,7 +218,7 @@ Write-Host ("Target dir     {0}" -f $TargetDir)
 Write-Host ("Release binary {0}" -f $ReleaseExe)
 
 # ==========================================================================================
-# Measurement A -- the shipping configuration. All seven strings must be ABSENT.
+# Measurement A -- the shipping configuration. All the strings must be ABSENT.
 # ==========================================================================================
 Write-Host ''
 Write-Host '--- A. Release WITHOUT the `testing` feature ---------------------------'
@@ -269,11 +283,9 @@ if ($hashShipping -eq $hashTesting) {
 }
 
 # ==========================================================================================
-# Measurement B2 -- the positive control of the sixth and the seventh strings. Task T-41-12,
-# finding H134; the seventh by decision 143d.
+# Measurement B2 -- the positive control of the sixth string. Task T-41-12, finding H134.
 #
-# The self-termination of FR-97 is behind `#[cfg(debug_assertions)]`, and so is the debug
-# substitution of the font step (task T-83-3); the Release profile
+# The self-termination of FR-97 is behind `#[cfg(debug_assertions)]`; the Release profile
 # now says `debug-assertions = false` out loud. A mechanism switched off by a default nobody
 # wrote down was the finding; a mechanism switched off by a line in the profile is a decision.
 #
@@ -405,7 +417,7 @@ if ($SkipFinalRebuild) {
     } else {
         Write-Host ''
         Write-Host '  Same SHA-256 as measurement A: the shipping binary is byte for byte the one'
-        Write-Host '  the seven strings were measured against.'
+        Write-Host '  the strings were measured against.'
     }
     if ($hashFinal -eq $hashTesting) {
         $Failures.Add('after the final rebuild the binary on disk is still the one with the `testing` feature')
@@ -417,8 +429,8 @@ Write-Host ''
 Write-Host '======================================================================'
 if ($Failures.Count -eq 0) {
     Write-Host ' RESULT: PASS'
-    Write-Host ' All seven strings are absent from the shipping build; the five of the `testing`'
-    Write-Host ' feature are present in the build with it, the sixth and the seventh are present in'
+    Write-Host ' All the strings are absent from the shipping build; those of the `testing`'
+    Write-Host ' feature are present in the build with it, the sixth is present in'
     Write-Host ' the build with debug assertions on, and the dependency sets agree.'
     Write-Host '======================================================================'
     exit 0

@@ -10,6 +10,8 @@
 //! test that can pass on a Tuesday and fail on a Wednesday, and this whole module is arithmetic
 //! over the calendar.
 
+#[path = "support/excused.rs"]
+mod excused;
 use lang_switcher::letters::{
     self, Date, FeedItem, FeedView, Letter, REMINDERS_PER_NEWS, Thanks, links,
 };
@@ -37,9 +39,17 @@ use windows::core::PCWSTR;
 /// lifetime, and the tests of one binary run on parallel threads.
 static PRODUCT: OnceLock<usize> = OnceLock::new();
 
-/// Points the string tables at the product binary. Every test that reads a word of a letter
-/// calls this first; calling it twice is calling it once.
-fn with_product_strings() {
+/// The language of the interface is one for the whole process, and a test that moves it must not
+/// move it under another: every test that reads a word of a letter holds this lock.
+static LOCALE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Points the string tables at the product binary and the language at Russian, and answers the
+/// lock of the language. Every test that reads a word of a letter calls this first and keeps the
+/// guard to its end.
+fn with_product_strings() -> std::sync::MutexGuard<'static, ()> {
+    let guard = LOCALE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let raw = *PRODUCT.get_or_init(|| {
         // `cargo test` puts the test executables in `<target>\debug\deps` and the binary
         // target one level up.
@@ -74,6 +84,7 @@ fn with_product_strings() {
 
     settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
     settings::set_ui_language(settings::Language::Ru);
+    guard
 }
 
 /// The day the stage was built, and the «today» of most of the tests below.
@@ -1367,7 +1378,7 @@ fn no_placeholder_address_is_left_in_the_program() {
     }
 
     assert!(
-        found.len() == 1 && found[0].starts_with("letters.rs:") && found[0].ends_with(DEFINITION),
+        found.len() == 1 && found[0].starts_with("links.rs:") && found[0].ends_with(DEFINITION),
         "in {read} files of src the reserved domain must be named by one line of code, its \
          definition, and by no address: {found:#?}"
     );
@@ -1926,21 +1937,27 @@ fn all_sixty_six_languages_open_what_the_decisions_give_them() {
 }
 
 /// **Задача T-103-9, сторож (3), решение 181.33 — every road to the two pages opens the page of its
-/// own language.** `perform` hands the shell what its window answers by [`letters::links`] for the
-/// language of the window; «О программе» asks the rule with the language of the interface; and no
-/// code line opens either Russian constant straight any more — the shape of the third build.
+/// own language.** `act` — the one body of the buttons of the letters, of «Последние письма» and
+/// of «От автора» (T-120-16) — hands the shell what [`letters::links`] answers for the language of
+/// the window it is handed; «О программе» — a window of the shell since FR-92а moved it, whose
+/// address under the panda is the road (208.172, as its name was, 139.2 п. 4) — asks the rule with
+/// the language of its window, which is the language of the interface; and no code line opens
+/// either Russian constant straight any more — the shape of the third build.
 ///
-/// ⚠ Control: the same predicate refuses the two lines of `perform` and the one of «О программе»
-/// as the third build carried them.
+/// ⚠ Control: the same predicate refuses the two lines of `act` and the one of «О программе» as
+/// the third build carried them.
 #[test]
 fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
-    fn opens_by_the_window(perform: &str) -> bool {
-        perform.contains("state.download_url(), state.program_url(),")
-            && perform.contains("Action::OpenDownload => open_link(download),")
-            && perform.contains("Action::OpenProgram => open_link(program),")
+    fn opens_by_the_window(act: &str) -> bool {
+        act.contains("Action::OpenDownload => open_link(links::download_url(deed.language)),")
+            && act.contains("Action::OpenProgram => open_link(links::program_url(deed.language)),")
     }
     fn opens_by_the_interface(about: &str) -> bool {
-        about.contains("open_link(crate::letters::links::program_url(ui_language()));")
+        about.contains("language: settings::ui_language(),")
+            && about.contains(
+                "Event::Pressed(Id::Site) => { \
+                 crate::letters::open_link(crate::letters::links::program_url(self.language));",
+            )
     }
     fn opens_a_constant_straight(code: &str) -> bool {
         code.contains("open_link(links::DOWNLOAD_URL)")
@@ -1949,17 +1966,19 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
     }
 
     let source = letters_source();
-    let settings_source = std::fs::read_to_string(
+    let about_source = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("settings.rs"),
+            .join("ui")
+            .join("windows")
+            .join("about.rs"),
     )
-    .expect("src\\settings.rs must be readable");
+    .expect("src\\ui\\windows\\about.rs must be readable");
     let perform = squeezed_code(
-        letters_function_body(&source, "fn perform(")
-            .expect("src\\letters.rs must still declare `perform`"),
+        letters_function_body(&source, "fn act(")
+            .expect("src\\letters.rs must still declare `act`"),
     );
-    let about = squeezed_code(&settings_source);
+    let about = squeezed_code(&about_source);
 
     assert!(
         opens_by_the_window(&perform),
@@ -1968,7 +1987,8 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
     );
     assert!(
         opens_by_the_interface(&about),
-        "181.33: the name in «О программе» must open the page of the language of the interface"
+        "181.33, 208.172: the address under the panda of «О программе» must open the page of the \
+         language of the interface"
     );
     assert!(
         !opens_a_constant_straight(&squeezed_code(&source)) && !opens_a_constant_straight(&about),
@@ -1978,17 +1998,17 @@ fn every_road_to_the_two_pages_opens_the_page_of_its_language() {
     // The controls: the three lines as the third build carried them.
     let third_build = perform
         .replace(
-            "Action::OpenDownload => open_link(download),",
+            "Action::OpenDownload => open_link(links::download_url(deed.language)),",
             "Action::OpenDownload => open_link(links::DOWNLOAD_URL),",
         )
         .replace(
-            "Action::OpenProgram => open_link(program),",
+            "Action::OpenProgram => open_link(links::program_url(deed.language)),",
             "Action::OpenProgram => open_link(links::PROGRAM_URL),",
         );
     assert_ne!(third_build, perform, "the control must change the body");
     assert!(
         !opens_by_the_window(&third_build) && opens_a_constant_straight(&third_build),
-        "the control: `perform` of the third build must be refused"
+        "the control: `act` in the shape of the third build must be refused"
     );
 
     let third_about = "open_link(crate::letters::links::PROGRAM_URL);";
@@ -2016,7 +2036,7 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
     let code = squeezed_code(arm);
 
     code.contains("text(IDS_FEEDBACK_OPEN), Action::OpenFeedback,")
-        && code.contains("Action::OpenFeedback, links::feedback_url(settings::ui_language()),")
+        && code.contains("Action::OpenFeedback, links::feedback_url(language),")
         && !code.contains("CHANNEL_URL")
         && !code.contains("Action::OpenChannel")
         && !code.contains("IDS_CHANNEL_OPEN")
@@ -2028,7 +2048,7 @@ fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
 /// The half a pure function cannot show: which address the window's own code hands the shell. So
 /// the bodies are read — the arm of «Спасибо» in [`letters::plan_for`] must name
 /// [`links::feedback_url`] and not `CHANNEL_URL`; the action of «Спасибо» must open the address of
-/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`IDC_WZ_CHANNEL`) are
+/// its window; and the «От автора» of FR-103 and the thanks of the wizard (`Id::Channel`) are
 /// on the channel as before.
 ///
 /// ⭐ Until stage E107 the wizard's «Скопировать и открыть…» was the second of the two; решение
@@ -2046,18 +2066,17 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         "Letter::Update | Letter::News(_) =>",
     );
     let perform = squeezed_code(
-        letters_function_body(&source, "fn perform(")
-            .expect("src\\letters.rs must still declare `perform`"),
+        letters_function_body(&source, "fn act(")
+            .expect("src\\letters.rs must still declare `act`"),
     );
-    let wizard_thanks = plan_arm(&source, "IDC_WZ_CHANNEL => {", "return true;");
+    let wizard_thanks = wizard_events();
 
     assert!(
         the_thanks_sends_a_person_to_write(thanks),
         "181.1: the button of «Спасибо» must send a person where they can write:\n{thanks}"
     );
     assert!(
-        perform.contains("Action::OpenFeedback => open_link(feedback)")
-            && perform.contains("state.feedback_url(),"),
+        perform.contains("Action::OpenFeedback => open_link(links::feedback_url(deed.language)),"),
         "the action of «Спасибо» must open the address of its window:\n{perform}"
     );
 
@@ -2067,12 +2086,14 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
         perform.contains("Action::OpenChannel => open_link(links::CHANNEL_URL)"),
         "«Открыть канал» opens the channel as before"
     );
-    assert!(
-        source.contains("IDC_AUTHOR_CHANNEL => Some(Action::OpenChannel),"),
+    assert_eq!(
+        lang_switcher::ui::windows::author::Id::Channel.action(),
+        Some(letters::Action::OpenChannel),
         "«Открыть канал» of «От автора» (FR-103) is the channel as before"
     );
     assert!(
-        squeezed_code(wizard_thanks).contains("open_link(links::CHANNEL_URL);"),
+        squeezed_code(&wizard_thanks).contains("Event::Pressed(Id::Channel) => {")
+            && squeezed_code(&wizard_thanks).contains("Action::OpenChannel"),
         "the thanks of the wizard opens the channel as before:\n{wizard_thanks}"
     );
 
@@ -2099,15 +2120,43 @@ fn copies_and_opens_nothing(body: &str) -> bool {
 }
 
 /// Whether the code of the wizard's buttons hands the shell nothing but the channel of its thanks —
-/// no group, no GitHub Issues, no page of the site (решение 199.3).
+/// no group, no GitHub Issues, no page of the site (решение 199.3). Since T-120-19 the buttons are
+/// the events of `ui::windows::wizard::Product`, and what they open is an action of `letters`.
 fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
     let code = squeezed_code(body);
-
-    code.matches("open_link(").count() == 1
-        && code.contains("open_link(links::CHANNEL_URL)")
+    code.matches("Action::Open").count() == 1
+        && code.contains("Action::OpenChannel")
+        && !code.contains("open_link(")
         && !code.contains("feedback_url")
         && !code.contains("GROUP_URL")
         && !code.contains("ISSUES_URL")
+}
+
+/// The body of a method of an `impl` — from its signature to the brace of its indentation.
+fn method_body<'a>(source: &'a str, signature: &str) -> Option<&'a str> {
+    let (_, after) = source.split_once(signature)?;
+
+    after.split_once("\n    }\n").map(|(body, _)| body)
+}
+
+/// What the window of the wizard does with an event — `Product::event` of `ui::windows::wizard`,
+/// a window of the shell since T-120-19.
+fn wizard_events() -> String {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("ui")
+            .join("windows")
+            .join("wizard.rs"),
+    )
+    .expect("src\\ui\\windows\\wizard.rs must be readable")
+    .replace("\r\n", "\n");
+    let (_, product) = source
+        .split_once("impl Content for Product {")
+        .expect("the window of the wizard is a content of the shell");
+    method_body(product, "fn event(")
+        .expect("the window of the wizard answers its events")
+        .to_owned()
 }
 
 /// **Задача T-107-3, решение 199.3 (until 1.2.0 — задача T-103-7, сторож (2), решение 181.6) — the
@@ -2123,13 +2172,13 @@ fn the_wizard_opens_no_page_but_its_channel(body: &str) -> bool {
 #[test]
 fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     let source = letters_module_source();
-    let text = letters_function_body(&source, "fn wizard_copy_text(")
-        .expect("src\\letters.rs must declare `wizard_copy_text`");
-    let address = letters_function_body(&source, "fn wizard_copy_address(")
-        .expect("src\\letters.rs must declare `wizard_copy_address`");
-    let command = letters_function_body(&source, "fn wizard_command(")
-        .expect("src\\letters.rs must declare `wizard_command`");
-    let button = squeezed_code(plan_arm(&source, "IDC_WZ_COPY => {", "return true;"));
+    let text = method_body(&source, "    pub fn copy_appeal(")
+        .expect("src\\letters.rs must declare `Wizard::copy_appeal`");
+    let address = method_body(&source, "    pub fn copy_address(")
+        .expect("src\\letters.rs must declare `Wizard::copy_address`");
+    let command = wizard_events();
+    let command = command.as_str();
+    let button = squeezed_code(command);
 
     assert!(
         copies_and_opens_nothing(text),
@@ -2144,7 +2193,7 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
         "199.3: «Скопировать и открыть группу» left the wizard"
     );
     assert!(
-        button.contains("wizard_copy_text(hwnd, links::MAIL_ADDRESS);"),
+        button.contains("Event::Pressed(Id::CopyText) => wizard.copy_appeal(self.owner),"),
         "the one button copies the text of the letter for every appeal:\n{button}"
     );
     assert!(
@@ -2153,8 +2202,8 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let issues = command.replace(
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);",
-        "wizard_copy_text(hwnd, links::MAIL_ADDRESS);\n            open_link(links::ISSUES_URL);",
+        "letters::act(&deed, Action::OpenChannel);",
+        "letters::act(&deed, Action::OpenChannel);\n                letters::act(&deed, Action::OpenFeedback);",
     );
     assert_ne!(issues, command, "the control must change the body");
     assert!(
@@ -2167,14 +2216,158 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
     );
 
     let opening = text.replace(
-        "wizard_say(hwnd, said);",
-        "open_link(links::GROUP_URL);\n    wizard_say(hwnd, said);",
+        "self.status = if",
+        "open_link(links::GROUP_URL);\n        self.status = if",
     );
     assert_ne!(opening, text, "the control must change the body");
     assert!(
         !copies_and_opens_nothing(&opening),
         "the sweep does not see «Скопировать текст» that opens a page as well"
     );
+}
+
+/// **T-120-22 Б — a report about the translation is the appeal of an idea under the mark of its
+/// language.** Its first line is the mark with the code of the language, «Ошибка в переводе: de»;
+/// under it, word for word, the appeal of the same idea, its two labels those of the translation —
+/// «Что написано сейчас», «Как правильно». The labels are the Russian table's, out of the built
+/// binary.
+///
+/// ⚠ Control: the idea without the mark begins with the name, as before; a trouble carrying the
+/// mark — the person came for the translation and chose another card — is written as without it.
+#[test]
+fn a_report_about_the_translation_is_the_idea_under_the_mark_of_its_language() {
+    use letters::report::{Draft, Facts, Trouble, build};
+    use settings::{
+        IDS_WIZARD_IDEA_HELPS, IDS_WIZARD_IDEA_WHAT, IDS_WIZARD_TRANSLATION_LINE,
+        IDS_WIZARD_TRANSLATION_NOW, IDS_WIZARD_TRANSLATION_RIGHT,
+    };
+
+    let _guard = with_product_strings();
+    let ru = |id| settings::text_in(Language::Ru, id);
+    // A label as the appeal writes it: without its own colon or question mark, then «: ».
+    let label = |id| format!("{}: ", ru(id).trim_end_matches([':', '?']));
+    let idea = Draft {
+        trouble: Trouble::Idea,
+        idea: "Kopieren".to_owned(),
+        helps: "Копировать".to_owned(),
+        ..Draft::default()
+    };
+    let marked = Draft {
+        translation: Some(Language::De),
+        ..idea.clone()
+    };
+    let facts = Facts {
+        version: "1.8.0".to_owned(),
+        ..Facts::default()
+    };
+
+    let plain = build(&idea, &facts);
+    let built = build(&marked, &facts);
+    let (first, rest) = built
+        .split_once("\r\n")
+        .expect("the appeal has more than one line");
+    println!("{built}");
+
+    assert!(
+        ru(IDS_WIZARD_TRANSLATION_LINE).contains("{0}"),
+        "the mark has its place for the code"
+    );
+    assert_eq!(
+        first,
+        ru(IDS_WIZARD_TRANSLATION_LINE).replace("{0}", "de"),
+        "the first line is the mark and the code of the language"
+    );
+    assert_eq!(
+        rest,
+        plain
+            .replace(
+                &label(IDS_WIZARD_IDEA_WHAT),
+                &label(IDS_WIZARD_TRANSLATION_NOW)
+            )
+            .replace(
+                &label(IDS_WIZARD_IDEA_HELPS),
+                &label(IDS_WIZARD_TRANSLATION_RIGHT)
+            ),
+        "under the mark, the appeal of the idea with the labels of the translation"
+    );
+    assert!(
+        rest.contains(&format!("{}Kopieren", label(IDS_WIZARD_TRANSLATION_NOW)))
+            && rest.contains(&format!(
+                "{}Копировать",
+                label(IDS_WIZARD_TRANSLATION_RIGHT)
+            )),
+        "the control: the labels did change"
+    );
+    assert!(
+        plain.starts_with("Lang Switcher 1.8.0\r\n"),
+        "an idea without the mark begins with the name: {plain:?}"
+    );
+    let trouble = Draft {
+        trouble: Trouble::WrongResult,
+        ..marked.clone()
+    };
+    assert_eq!(
+        build(&trouble, &facts),
+        build(
+            &Draft {
+                translation: None,
+                ..trouble.clone()
+            },
+            &facts
+        ),
+        "a trouble is written without the mark"
+    );
+}
+
+/// **T-120-22 Б, C3 of the controller — the page of a report about the translation is headed with
+/// the words of its button, «Нашли ошибку в переводе?»;** the explanation under the heading stays the
+/// idea's, and the page of an ordinary idea keeps «Опишите идею». Out of the Russian table of the
+/// built binary, in the window the page is described for.
+#[test]
+fn the_page_of_a_report_about_the_translation_is_headed_with_the_words_of_its_button() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::wizard;
+    use settings::{IDS_TRANSLATION_REPORT, IDS_WIZARD_IDEA_NOTE, IDS_WIZARD_IDEA_TITLE};
+
+    let _guard = with_product_strings();
+    let ru = |id| format!("{:?}", settings::text_in(Language::Ru, id));
+    let header = |name: &str| {
+        let wizard = letters::wizard_pages()
+            .into_iter()
+            .find(|(page, _)| *page == name)
+            .map(|(_, wizard)| wizard)
+            .unwrap_or_else(|| panic!("the page {name}"));
+        let body = format!(
+            "{:?}",
+            wizard::Page {
+                wizard,
+                language: Language::Ru,
+                theme: lang_switcher::theme::ThemeSetting::Light,
+            }
+            .describe()
+            .body
+        );
+        let at = body.find("Header {").expect("the page has its header");
+        let end = body[at..].find("}").map_or(body.len(), |end| at + end);
+        body[at..end].to_owned()
+    };
+    let (idea, translation) = (header("wizard idea"), header("wizard translation"));
+    println!("idea: {idea}\ntranslation: {translation}");
+
+    assert!(
+        translation.contains(&format!("title: {}", ru(IDS_TRANSLATION_REPORT))),
+        "a report about the translation is headed «Нашли ошибку в переводе?»: {translation}"
+    );
+    assert!(
+        idea.contains(&format!("title: {}", ru(IDS_WIZARD_IDEA_TITLE))),
+        "an ordinary idea keeps «Опишите идею»: {idea}"
+    );
+    for header in [&idea, &translation] {
+        assert!(
+            header.contains(&ru(IDS_WIZARD_IDEA_NOTE)),
+            "the explanation stays: {header}"
+        );
+    }
 }
 
 /// **Stage E107, task T-107-3, решение 199.10 — the line of the contact follows the field.**
@@ -2188,7 +2381,7 @@ fn the_letter_copies_its_text_and_opens_nothing_and_the_wizard_opens_no_page() {
 fn the_line_of_the_contact_follows_the_field() {
     use letters::report::{Draft, Facts, build, contact_line, with_contact};
 
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let built = build(
         &Draft {
@@ -2340,6 +2533,29 @@ fn the_demonstration_types_a_word_fixes_it_and_starts_over() {
                 "{language:?}: the turn must repeat exactly at frame {frame}"
             );
         }
+    }
+}
+
+/// **The frame without a tick is the final one — T-120-25: «анимация отключена — стоит итоговый
+/// кадр».** Windows with its animation off gives the window no tick, and a window not shown has
+/// none either; the example then stands at `letters::DEMO_STILL` and must show what it is for:
+/// the word fixed, whole, the layout switched, the key up. Frame 0, where it stood before, is the
+/// first typed letter of the wrong word.
+#[test]
+fn the_demonstration_without_a_tick_stands_at_the_fixed_word() {
+    for language in Language::shipped() {
+        let pair = letters::demo_pair(language);
+        let still = letters::demo_frame(letters::DEMO_STILL, pair);
+
+        assert_eq!(
+            still.word_shown(),
+            pair.fixed,
+            "{language:?}: the still frame shows the fixed word, whole"
+        );
+        assert!(
+            still.converted && !still.pressed,
+            "{language:?}: the layout switched and the key up"
+        );
     }
 }
 
@@ -2551,57 +2767,6 @@ fn the_demonstration_types_as_many_frames_as_the_word_has_letters() {
     }
 }
 
-/// **Решение 178.6 — the demonstration draws the pair of its plan.** `plan_for` chooses the pair for
-/// the language the plan is built in and puts it into the plan; `draw_demo` takes it from there,
-/// so a plan rebuilt in another language (`refresh_plan`) brings its pair along with its caption.
-/// The constants of the one pair of `e101` are gone from the module.
-///
-/// ⚠ Controls: a body that asks the language for itself, and a body that draws without the plan's
-/// pair, are caught.
-#[test]
-fn the_demonstration_draws_the_pair_of_its_plan() {
-    let source = letters_module_source();
-    let body = letters_function_body(&source, "unsafe fn draw_demo(")
-        .expect("src\\letters.rs must still declare `draw_demo`");
-    let takes_the_plan = |body: &str| {
-        let code = squeezed_code(body);
-
-        code.contains("let pair = state.plan.demo_pair;")
-            && code.contains("demo_frame(state.tick, pair)")
-            && code.contains("pair.badge[usize::from(frame.converted)]")
-            && !code.contains("demo_pair(")
-    };
-
-    assert!(
-        takes_the_plan(body),
-        "178.6: draw_demo must take the pair out of its plan:\n{body}"
-    );
-
-    for gone in ["const DEMO_TYPED", "const DEMO_FIXED", "const DEMO_BADGE"] {
-        assert!(
-            !source.contains(gone),
-            "the one pair of e101 is gone from the module: `{gone}`"
-        );
-    }
-
-    let asks_itself = body.replace(
-        "let pair = state.plan.demo_pair;",
-        "let pair = demo_pair(settings::ui_language());",
-    );
-    assert_ne!(asks_itself, body, "the control must change the body");
-    assert!(
-        !takes_the_plan(&asks_itself),
-        "the sweep does not see a body that asks the language for itself"
-    );
-
-    let unpaired = body.replace("pair.badge[", "DEMO_BADGE[");
-    assert_ne!(unpaired, body, "the control must change the body");
-    assert!(
-        !takes_the_plan(&unpaired),
-        "the sweep does not see a badge drawn past the plan"
-    );
-}
-
 // =========================================================================================
 // What a letter says — FR-101, and what «От автора» says — FR-103
 // =========================================================================================
@@ -2614,7 +2779,7 @@ fn the_demonstration_draws_the_pair_of_its_plan() {
 /// letters out of the feed refuse to be built without an entry behind them.
 #[test]
 fn each_letter_fills_the_slots_of_its_own_shape() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let context = letters::PlanContext {
         version: "0.39.0".to_owned(),
@@ -2631,23 +2796,36 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
     assert_eq!(hello.rows.len(), 3, "and three things for the first day");
     assert!(hello.left.is_some(), "«Открыть настройки»");
     assert!(hello.accent.is_some(), "«Понятно»");
-    assert!(hello.panel_buttons.is_empty(), "and nothing on the panel");
-    assert!(hello.foot.is_empty(), "and no line under the buttons");
+    assert!(hello.cards.is_empty(), "and no cards");
+    assert_eq!(
+        hello.foot,
+        settings::text(settings::IDS_HELLO_FOOT),
+        "and the line about the tray icon under the body — 208.106 п. 3"
+    );
 
     let thanks = letters::plan_for(Letter::Thanks, &context);
     assert!(!thanks.demo);
     assert_eq!(
-        thanks.panel_buttons.len(),
-        2,
-        "«Спасибо» carries the support page and the channel"
+        thanks
+            .cards
+            .iter()
+            .map(|card| card.button.action)
+            .collect::<Vec<_>>(),
+        [letters::Action::OpenSupport, letters::Action::OpenWizard],
+        "«Спасибо» carries the pair of cards: the support page and the wizard (T-120-16)"
+    );
+    assert_eq!(
+        thanks.link.as_ref().map(|link| link.action),
+        Some(letters::Action::OpenFeedback),
+        "and the link to where a person can tell about it — решение 181.1"
     );
     // ⭐ Task T-78-1 ended the «while» this line used to carry: until then both addresses were
     // placeholders and both buttons were drawn dead. They are the author's own now (139.2), and
     // the assertion says the same rule from the other side — which is the half worth guarding,
     // because a button that silently went back to grey is the failure a person would see.
     assert!(
-        thanks.panel_buttons.iter().all(|button| button.enabled),
-        "«Открыть страницу поддержки» and «Открыть канал» are live once their addresses are real \
+        thanks.all_buttons().all(|button| button.enabled),
+        "the support page, the wizard and the group are live once their addresses are real \
          (П7, П8; решение 139.2)"
     );
     assert!(thanks.left.is_some(), "«Напомнить позже» is offered");
@@ -2681,7 +2859,7 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
 /// carried.
 #[test]
 fn a_letter_out_of_the_feed_says_what_the_entry_said() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut item = news(12);
     // ⚠ **Task T-41-1: this address used to be `https://example.com/post`**, and task T-88-1
@@ -2709,12 +2887,15 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert!(!plan.title.is_empty(), "and it says whose news this is");
     assert_eq!(plan.panel_title, item.title, "the heading is the author's");
     assert_eq!(plan.panel_text, item.text, "and so is the text");
-    assert_eq!(plan.panel_buttons.len(), 1, "and the link it carried");
+    let link = plan
+        .right
+        .as_ref()
+        .expect("and the link it carried, beside «Прочитано»");
     assert!(
-        plan.panel_buttons[0].enabled,
+        link.enabled,
         "an address of this program leaves the button drawn and live"
     );
-    assert_eq!(plan.panel_buttons[0].action, letters::Action::OpenLink);
+    assert_eq!(link.action, letters::Action::OpenLink);
     assert!(
         plan.accent
             .as_ref()
@@ -2744,7 +2925,7 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     assert_eq!(plan.panel_title, foreign.title, "the entry is still shown");
     assert_eq!(plan.panel_text, foreign.text, "with all of its text");
     assert!(
-        plan.panel_buttons.is_empty(),
+        plan.right.is_none(),
         "and no button at all for an address this build will not open — С52"
     );
 
@@ -2764,7 +2945,7 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 
     assert_eq!(plan.panel_text, reserved.text, "the entry is still shown");
     assert!(
-        plan.panel_buttons.is_empty(),
+        plan.right.is_none(),
         "and no button for the reserved domain either — 148.7"
     );
 
@@ -2791,7 +2972,11 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
             .is_some_and(|button| button.action == letters::Action::OpenDownload),
         "«Открыть страницу загрузки» is the accented button of an update — the mock-up"
     );
-    assert!(plan.left.is_some(), "and it closes with the plain button");
+    assert_eq!(
+        plan.right.as_ref().map(|button| button.action),
+        Some(letters::Action::Close),
+        "and it closes with the plain button"
+    );
     assert_eq!(
         plan.title,
         settings::text(settings::IDS_FALLBACK_TITLE),
@@ -2815,12 +3000,16 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
     let whats_new = settings::format_text(settings::IDS_FALLBACK_WHATS_NEW, &["0.41.0"]);
 
     assert_eq!(
-        plan.para,
-        format!("{notice}\n\n{whats_new}\n{}", update.text),
-        "the notice with the date, then «Что нового в X» over what the author says changed"
+        plan.note, notice,
+        "the notice with the date, in its own block"
+    );
+    assert_eq!(
+        (plan.whats_new.as_str(), plan.panel_text.as_str()),
+        (whats_new.as_str(), update.text.as_str()),
+        "then «Что нового в X» over what the author says changed"
     );
     assert!(
-        plan.para.contains(&released) && !released.chars().all(|c| c.is_ascii_digit()),
+        plan.note.contains(&released) && !released.chars().all(|c| c.is_ascii_digit()),
         "the notice carries the date of the release — решение 208.99 п. 3"
     );
     assert_eq!(
@@ -2840,17 +3029,13 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
         plan.rows[3].text,
         settings::text(settings::IDS_FALLBACK_REPEATS)
     );
-    assert_eq!(
-        plan.panel_buttons.len(),
-        1,
-        "one button in the panel — решение 208.97 п. 2"
-    );
-    assert_eq!(plan.panel_buttons[0].action, letters::Action::OpenWizard);
-    assert_eq!(
-        plan.panel_buttons[0].label,
-        settings::text(settings::IDS_WRITE_TO_AUTHOR)
-    );
-    assert!(plan.panel_buttons[0].enabled, "and it can be pressed");
+    let wizard = plan
+        .left
+        .as_ref()
+        .expect("«Написать автору…» first in the row — решение 208.97 п. 2");
+    assert_eq!(wizard.action, letters::Action::OpenWizard);
+    assert_eq!(wizard.label, settings::text(settings::IDS_WRITE_TO_AUTHOR));
+    assert!(wizard.enabled, "and it can be pressed");
     assert!(
         plan.rows.iter().all(|row| !row.text.trim().is_empty()),
         "every step is written in all fourteen tables"
@@ -2871,7 +3056,7 @@ fn a_letter_out_of_the_feed_says_what_the_entry_said() {
 /// the file stays off, and the panel says so under the switch.**
 #[test]
 fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let today = day(2027, 1, 1);
     let mut state = settled("0.39.0");
@@ -2918,7 +3103,7 @@ fn the_author_window_has_two_states_and_the_switch_is_the_difference() {
 /// click the copy has to be the one the window would build afresh on the setting now in force.
 #[test]
 fn the_switch_follows_the_setting_a_click_has_written() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let today = day(2027, 1, 1);
     let mut state = settled("0.39.0");
@@ -2960,70 +3145,82 @@ fn the_switch_follows_the_setting_a_click_has_written() {
 
 /// The source of `src\letters.rs`, line endings normalised — the sweep below matches on it.
 fn letters_module_source() -> String {
+    // The module, not the file alone: `letters.rs` and the three files of T-120-23.
+    letters_source()
+}
+
+/// The source of «От автора», a window of the shell since T-120-17.
+fn author_module_source() -> String {
     std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
-            .join("letters.rs"),
+            .join("ui")
+            .join("windows")
+            .join("author.rs"),
     )
-    .expect("src\\letters.rs must be readable")
+    .expect("src\\ui\\windows\\author.rs must be readable")
     .replace("\r\n", "\n")
 }
 
-/// The branch of the window procedure that answers the feed switch — from the test of the
-/// control to the `return 0;` that ends it — or `None` unless there is exactly one.
-fn switch_branch(source: &str) -> Option<&str> {
-    let mut heads = source.match_indices("if control == IDC_NEWS_SWITCH\n");
+/// The arm of «От автора» that answers its switch — from the event to the reply that ends it — or
+/// `None` unless there is exactly one.
+fn switch_arm(source: &str) -> Option<&str> {
+    let mut heads = source.match_indices("Event::Toggled(Id::Switch, on) => {");
     let (start, _) = heads.next()?;
 
     if heads.next().is_some() {
         return None;
     }
 
-    let length = source[start..].find("return 0;")?;
+    let length = source[start..].find("Reply::Stay")?;
 
     Some(&source[start..start + length])
 }
 
 /// Whether a branch writes the setting, reads the configuration again, and only then hands what
 /// it read to the copy the switch is drawn from.
+///
+/// The reading stands after the write — as a statement before the call (the dialog until
+/// T-120-17) or as its argument (`.follow_feed(&letters::state_now())`, the arm of the shell).
 fn follows_what_was_written(branch: &str) -> bool {
     let (Some(write), Some(follow)) = (branch.find("update_state("), branch.find(".follow_feed("))
     else {
         return false;
     };
+    let call = &branch[follow..];
+    let argument = call[..call.find(';').unwrap_or(call.len())].contains("state_now()");
 
-    write < follow && branch[write..follow].contains("state_now()")
+    write < follow && (branch[write..follow].contains("state_now()") || argument)
 }
 
-/// **Task T-70-1, finding Э69-Б-1 — the click moves the copy the switch is drawn from.**
+/// **Task T-70-1, finding Э69-Б-1 — the click moves the copy the switch is drawn from**, in the
+/// shell since T-120-17.
 ///
-/// The half of the repair a pure function cannot show: that the window procedure calls it. A
-/// letters window cannot be built in a test — `open_window` takes its template out of the
-/// running executable, and `embed-resource` links `app.rc` into the product and not into the
-/// test binaries. So the branch of `IDC_NEWS_SWITCH` is read instead: it has to write the setting
-/// (FR-102), read the configuration again, hand what it read to `AuthorView::follow_feed` and
-/// repaint the switch.
+/// The half of the repair a pure function cannot show: that the window calls it. The click goes
+/// through the configuration, which only the tray writes, and a test binary has no tray — so the
+/// arm of `Event::Toggled(Id::Switch, …)` of «От автора» (`ui::windows::author`) is read instead:
+/// it has to write the setting (FR-102; `release_window` since T-119-10), read the configuration
+/// again and hand what it read to `AuthorView::follow_feed`. The host describes the window again
+/// after every event (`deliver`: `rebuild`, `invalidate`), so the repaint is the host's and not
+/// the arm's.
 ///
-/// ⚠ Controls: the branch is found exactly once and is the one that writes the file and repaints;
-/// the same branch without the call — the shape of `e69` — is caught, and so are a call fed with
-/// the reading made before the write and a call put before the write.
+/// ⚠ Controls: the arm is found exactly once and is the one that writes the setting; the same arm
+/// without the call — the shape of `e69` — is caught, and so are a call fed with the reading made
+/// before the write and a call put before the write.
 #[test]
 fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
-    let source = letters_module_source();
-    let branch = switch_branch(&source).expect(
-        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
-    );
+    let source = author_module_source();
+    let branch = switch_arm(&source)
+        .expect("the sweep must find exactly one arm of «От автора» for its switch");
 
     assert!(
-        // Since task T-119-10 the switch writes `release_window` — the windows of updates.
-        branch.contains("update_state(|state| state.release_window = wanted)")
-            && branch.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)"),
-        "the branch found is not the one that writes the setting and repaints the switch:\n{branch}"
+        branch.contains("update_state(|state| state.release_window = on)"),
+        "the arm found is not the one that writes the setting:\n{branch}"
     );
 
     assert!(
         follows_what_was_written(branch),
-        "Э69-Б-1: the click writes the setting but does not move the copy `draw_switch` paints \
+        "Э69-Б-1: the click writes the setting but does not move the copy the switch is drawn \
          from:\n{branch}"
     );
 
@@ -3039,10 +3236,21 @@ fn a_click_on_the_switch_moves_the_copy_the_switch_is_drawn_from() {
 
     assert!(
         !follows_what_was_written(&without(".follow_feed(")),
-        "the sweep does not see a branch without the call — it cannot fail"
+        "the sweep does not see an arm without the call — it cannot fail"
+    );
+    let read_before = format!(
+        "let state = letters::state_now();\n{}",
+        branch.replace(
+            ".follow_feed(&letters::state_now())",
+            ".follow_feed(&state)"
+        )
     );
     assert!(
-        !follows_what_was_written(&without("state_now()")),
+        read_before.contains(".follow_feed(&state)"),
+        "the control must change the arm it is made of"
+    );
+    assert!(
+        !follows_what_was_written(&read_before),
         "the sweep does not see a call fed with the reading made before the write"
     );
 
@@ -3078,1284 +3286,11 @@ fn squeezed_code(text: &str) -> String {
         .replace(" )", ")")
 }
 
-/// Whether a branch repaints the switch through the door without the erase, and not through the
-/// one with it.
-fn repaints_without_an_erase(branch: &str) -> bool {
-    let code = squeezed_code(branch);
-
-    code.contains("widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)")
-        && !code.contains("repaint::control(hwnd, IDC_NEWS_SWITCH)")
-}
-
-/// The calls that put pixels into a DC — the ones a glyph body makes, and the GDI calls a later
-/// hand could put in front of them.
-const PAINT_CALLS: [&str; 9] = [
-    "FillRect(",
-    "paint_rounded(",
-    "paint_ellipse(",
-    "draw_check_mark(",
-    "paint_label(",
-    "DrawTextW(",
-    "RoundRect(",
-    "Polyline(",
-    "BitBlt(",
-];
-
-/// Whether the first thing a body paints is its whole rectangle in the colour of the ground the
-/// element lies on — the condition on which the door of task Т-45-3 may be taken.
-///
-/// ⚠ Since task T-71-5 the fill stands in the one glyph body `draw_glyph`, drawn into its buffer
-/// with the ground the door names (the switch names the panel — the sentry of that task asserts
-/// it); until then it stood in `draw_switch` as `FillRect(dc, &rect, brushes.panel_bg())`.
-fn paints_its_whole_rectangle_first(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let Some(fill) = code.find("FillRect(target, &rect, ground)") else {
-        return false;
-    };
-
-    PAINT_CALLS
-        .iter()
-        .filter_map(|call| code.find(call))
-        .all(|at| at >= fill)
-}
-
-/// **Task T-71-2, finding Э70-Б-2 — the switch is repainted without an erase frame.**
-///
-/// The owner's word of 2026-09-14: «при снятии и проставлении галки строка моргает». The branch of
-/// `IDC_NEWS_SWITCH` asked for the repaint **with** the erase: `WM_ERASEBKGND` fills the switch
-/// with the brush `on_ctl_color` answers `WM_CTLCOLORBTN` with — the brush of the **window** — and
-/// only the next frame brings `WM_DRAWITEM`, where `draw_switch` paints the rectangle in the colour
-/// of the **panel** the switch lies on. The frame between the two is the blink, and it is the very
-/// frame the door `widgets::repaint::control_no_erase` of task Т-45-3 was made to take away.
-///
-/// Two halves, because a letters window cannot be built here (see the test above): the branch goes
-/// through the door, and the condition of the door holds — the body the switch is drawn by paints
-/// its whole rectangle before anything else, so the erase is needed for nothing. Since task T-71-5
-/// that body is `draw_glyph`, the one the wizard's glyphs share.
-///
-/// ⚠ Controls: the same branch with the call of `e70` is caught, and so are a branch that repaints
-/// nothing and a branch that keeps the erase beside the door; a body whose fill comes after the
-/// figure and a body that fills the glyph cell instead of the rectangle are caught too.
-#[test]
-fn the_switch_is_repainted_without_an_erase_frame() {
-    let source = letters_module_source();
-    let branch = switch_branch(&source).expect(
-        "the sweep must find exactly one branch of the window procedure for IDC_NEWS_SWITCH",
-    );
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        paints_its_whole_rectangle_first(body),
-        "the door of Т-45-3 is for an element that paints its whole rectangle itself, and the \
-         glyph body the switch is drawn by no longer fills its rectangle before anything else:\n\
-         {body}"
-    );
-
-    assert!(
-        repaints_without_an_erase(branch),
-        "Э70-Б-2: the click repaints the switch with the erase — a frame of the window's brush \
-         over a switch that stands on a panel:\n{branch}"
-    );
-
-    let door = "widgets::repaint::control_no_erase(hwnd, IDC_NEWS_SWITCH)";
-    let erase = "widgets::repaint::control(hwnd, IDC_NEWS_SWITCH)";
-
-    let of_e70 = branch.replace(door, erase);
-    assert_ne!(
-        of_e70, branch,
-        "the control must change the branch it is made of"
-    );
-    assert!(
-        !repaints_without_an_erase(&of_e70),
-        "the sweep does not see the call of e70 — it cannot fail"
-    );
-
-    let without_repaint = branch
-        .lines()
-        .filter(|line| !line.contains(door))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !repaints_without_an_erase(&without_repaint),
-        "the sweep does not see a branch that repaints nothing"
-    );
-
-    assert!(
-        !repaints_without_an_erase(&format!("{branch}\n{erase};")),
-        "the sweep does not see the erase kept beside the door"
-    );
-
-    let fill = "FillRect(target, &rect, ground)";
-
-    let moved = body
-        .lines()
-        .filter(|line| !line.contains(fill))
-        .chain([fill])
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        !paints_its_whole_rectangle_first(&moved),
-        "the sweep does not see the fill put after the figure"
-    );
-
-    let of_the_cell = body.replace(fill, "FillRect(target, &cell, ground)");
-    assert_ne!(
-        of_the_cell, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !paints_its_whole_rectangle_first(&of_the_cell),
-        "the sweep does not see a fill of the glyph cell instead of the rectangle"
-    );
-}
-
-/// Whether a body paints nothing itself and hands its element to the one glyph body.
-fn hands_its_glyph_to_the_one_body(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    code.contains("draw_glyph(dc, rect, state, glyph, label)")
-        && PAINT_CALLS.iter().all(|call| !code.contains(call))
-}
-
-/// Whether a glyph body draws in one frame: into the buffer of `theme::PaintBuffer`, every paint
-/// call aimed at the buffer and none at the DC of the message, and one blit at the end.
-fn draws_in_one_frame(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let buffered = code
-        .contains("let buffer = unsafe { theme::PaintBuffer::for_rect(dc, &rect) };")
-        && code.contains("let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);")
-        && code.contains("buffer.blit(dc)");
-
-    let aimed_at_the_message = PAINT_CALLS
-        .iter()
-        .filter(|call| **call != "BitBlt(")
-        .any(|call| code.contains(&format!("{call}dc,")));
-
-    buffered && !aimed_at_the_message
-}
-
-/// **Task T-71-5, decision 132.3 — the switch is drawn by the one glyph body, in one frame.**
-///
-/// After task T-71-2 the owner still saw the switch blink on the live 0.71.0. The erase was gone;
-/// what was left was the body: `draw_switch` laid its fill, its figure, its tick and its caption
-/// **straight into the DC of the message**, call by call, and a click brings at least four
-/// `WM_DRAWITEM` (the press, the focus, the release, the repaint of the branch) — DWM sampled the
-/// window between the calls and the row stood blank for a frame. Its twin in the wizard blinked the
-/// same way until task Т-33-5 gave it `theme::PaintBuffer`. The owner's word: the ready solution
-/// the wizard's check boxes already have, not a copy of the repair — so both elements go through
-/// one body, and what tells them apart is what does: where «checked» is read and what they lie on.
-///
-/// ⚠ Controls: a door that paints something itself, a body whose paint goes to the DC of the
-/// message, and a body without the buffer are caught.
-#[test]
-fn the_switch_is_drawn_by_the_one_glyph_body_in_one_frame() {
-    let source = letters_module_source();
-    let switch = letters_function_body(&source, "unsafe fn draw_switch(")
-        .expect("src\\letters.rs must still declare `draw_switch`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(switch),
-        "решение 132.3: draw_switch paints on its own instead of going through the one glyph body \
-         the wizard's check boxes are drawn by:\n{switch}"
-    );
-
-    let wizard = letters_function_body(&source, "unsafe fn draw_wizard_glyph(")
-        .expect("src\\letters.rs must still declare `draw_wizard_glyph`");
-
-    assert!(
-        hands_its_glyph_to_the_one_body(wizard),
-        "the wizard's glyphs must go through the same body:\n{wizard}"
-    );
-
-    assert!(
-        squeezed_code(switch).contains("ground: Ground::Panel")
-            && squeezed_code(wizard).contains("ground: Ground::Window"),
-        "the switch lies on a panel and the wizard's glyphs on the window"
-    );
-
-    let body = letters_function_body(&source, "unsafe fn draw_glyph(")
-        .expect("src\\letters.rs must declare the one glyph body `draw_glyph`");
-
-    assert!(
-        draws_in_one_frame(body),
-        "the one glyph body must draw into theme::PaintBuffer and blit once:\n{body}"
-    );
-
-    // Controls of the doors.
-    assert!(
-        !hands_its_glyph_to_the_one_body(&format!(
-            "{switch}\n    unsafe {{ FillRect(dc, &rect, brushes.panel_bg()) }};"
-        )),
-        "the sweep does not see a door that paints something itself"
-    );
-
-    // Controls of the body.
-    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
-    assert_ne!(
-        at_the_message, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&at_the_message),
-        "the sweep does not see a paint call aimed at the DC of the message"
-    );
-
-    let unbuffered = body.replace(
-        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
-        "let target = dc;",
-    );
-    assert_ne!(
-        unbuffered, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !draws_in_one_frame(&unbuffered),
-        "the sweep does not see a body that draws past the buffer"
-    );
-}
-
-/// The branch of the window procedure that answers a tick of the demonstration — from the
-/// `WM_TIMER` arm of `DEMO_TIMER` to the arm of the wizard's timer — or `None` unless there is
-/// exactly one.
-fn demo_tick_branch(source: &str) -> Option<&str> {
-    let mut heads = source.match_indices("WM_TIMER if wparam.0 == DEMO_TIMER =>");
-    let (start, _) = heads.next()?;
-
-    if heads.next().is_some() {
-        return None;
-    }
-
-    let length = source[start..].find("WM_TIMER if wparam.0 == CAPTURE_TIMER =>")?;
-
-    Some(&source[start..start + length])
-}
-
-/// Whether the tick repaints the demonstration through the door without the erase, and not
-/// through the one with it.
-fn ticks_without_an_erase(branch: &str) -> bool {
-    let code = squeezed_code(branch);
-
-    code.contains("widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO)")
-        && !code.contains("repaint::control(hwnd, IDC_LETTER_DEMO)")
-}
-
-/// **Task T-92-1, decision 156.10 — a tick of the demonstration repaints it without the erase.**
-///
-/// The half of the repair the stage's premise expected to be the whole of it, and the measurement
-/// said otherwise: the erase of this `SS_OWNERDRAW` static paints not a pixel (46 of 46,
-/// `scratchpad-E92\probe-e92-demo-base.log`), so the door neither cures nor changes anything on
-/// the screen — the buffer of [`the_demonstration_is_drawn_in_one_frame`] does. What the door
-/// takes away is 7.7 needless `WM_ERASEBKGND` a second, and the sentry keeps the branch on the door
-/// the switch of «От автора» already takes.
-///
-/// ⚠ Controls: the branch with the call of `e91` is caught, and so are a branch that repaints
-/// nothing and a branch that keeps the erase beside the door.
-#[test]
-fn a_tick_of_the_demonstration_repaints_it_without_an_erase() {
-    let source = letters_module_source();
-    let branch = demo_tick_branch(&source)
-        .expect("the sweep must find exactly one arm of the window procedure for DEMO_TIMER");
-
-    assert!(
-        ticks_without_an_erase(branch),
-        "156.10: a tick of the demonstration repaints it with the erase:\n{branch}"
-    );
-
-    let door = "widgets::repaint::control_no_erase(hwnd, IDC_LETTER_DEMO)";
-    let erase = "widgets::repaint::control(hwnd, IDC_LETTER_DEMO)";
-
-    let of_e91 = branch.replace(door, erase);
-    assert_ne!(
-        of_e91, branch,
-        "the control must change the branch it is made of"
-    );
-    assert!(
-        !ticks_without_an_erase(&of_e91),
-        "the sweep does not see the call of e91 — it cannot fail"
-    );
-
-    let nothing = branch.replace(door, "{}");
-    assert!(
-        !ticks_without_an_erase(&nothing),
-        "the sweep does not see a branch that repaints nothing"
-    );
-
-    assert!(
-        !ticks_without_an_erase(&format!("{branch}\n{erase};")),
-        "the sweep does not see the erase kept beside the door"
-    );
-}
-
-/// Whether the body of the demonstration draws in one frame: grounded first, every paint call
-/// into the buffer of `theme::PaintBuffer` and none into the DC of the message, one blit at the
-/// end — the glyph body's rule of [`draws_in_one_frame`] plus the chip row, which only this body
-/// draws.
-fn the_demonstration_draws_in_one_frame(body: &str) -> bool {
-    let code = squeezed_code(body);
-
-    let Some(ground) = code.find("FillRect(target, &rect, brushes.window_bg())") else {
-        return false;
-    };
-
-    let grounded_first = PAINT_CALLS
-        .iter()
-        .chain(["paint_chip_row("].iter())
-        .filter(|call| **call != "BitBlt(")
-        .filter_map(|call| code.find(call))
-        .all(|at| at >= ground);
-
-    draws_in_one_frame(body) && grounded_first && !code.contains("paint_chip_row(dc,")
-}
-
-/// **Task T-92-1, decision 156.10 — the demonstration of «Привет» is drawn in one frame.**
-///
-/// The owner's finding Д2 on a clean machine: «в приветственном окне после установки мигает текст».
-/// `draw_demo` laid its fill, its field and its row with the chip **straight into the DC of the
-/// message**, call by call, for 2.3…8.2 ms a frame, 7.7 frames a second, and the compositor
-/// sampled the window in between: on the owner's screen 63 transient frames of 780 over two turns,
-/// 19 of them a field without a single letter; through the buffer — none
-/// (`scratchpad-E92\probe-e92-screen-*.log`). The cure the wizard's cards got in task Т-33-5 and the
-/// switch in T-71-5, by the owner's word «пусть будет буфер… типовой механизм» (156.10).
-///
-/// ⚠ Controls: a body that paints into the DC of the message, a body without the buffer, a chip row
-/// aimed at the message, and a body whose ground comes after the figure are caught.
-#[test]
-fn the_demonstration_is_drawn_in_one_frame() {
-    let source = letters_module_source();
-    let body = letters_function_body(&source, "unsafe fn draw_demo(")
-        .expect("src\\letters.rs must still declare `draw_demo`");
-
-    assert!(
-        the_demonstration_draws_in_one_frame(body),
-        "156.10: the demonstration must be drawn into theme::PaintBuffer, grounded first, and \
-         blitted once:\n{body}"
-    );
-
-    let at_the_message = body.replacen("FillRect(target,", "FillRect(dc,", 1);
-    assert_ne!(
-        at_the_message, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !the_demonstration_draws_in_one_frame(&at_the_message),
-        "the sweep does not see a paint call aimed at the DC of the message"
-    );
-
-    let unbuffered = body.replace(
-        "let target = buffer.as_ref().map_or(dc, theme::PaintBuffer::dc);",
-        "let target = dc;",
-    );
-    assert_ne!(
-        unbuffered, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !the_demonstration_draws_in_one_frame(&unbuffered),
-        "the sweep does not see a body that draws past the buffer"
-    );
-
-    let chips_at_the_message = body.replacen(
-        "paint_chip_row(\n            target,",
-        "paint_chip_row(\n            dc,",
-        1,
-    );
-    assert_ne!(
-        chips_at_the_message, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !the_demonstration_draws_in_one_frame(&chips_at_the_message),
-        "the sweep does not see the chip row aimed at the DC of the message"
-    );
-
-    let fill = "unsafe { FillRect(target, &rect, brushes.window_bg()) };";
-    let ground_last = body
-        .lines()
-        .filter(|line| !line.contains(fill))
-        .chain(["    let _late = 0;", fill])
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_ne!(
-        ground_last, body,
-        "the control must change the body it is made of"
-    );
-    assert!(
-        !the_demonstration_draws_in_one_frame(&ground_last),
-        "the sweep does not see the ground laid after the figure"
-    );
-}
-
-/// **Task T-92-1, (г) of TZ-E92 — the second instrument of П3 made a sentry: no erase reaches the
-/// demonstration on a tick, and the counter can see one.**
-///
-/// The Welcome letter is opened by the product's own `letters::show_letter` through the door
-/// `letters::testing::show_letter_from`, **on a desktop of its own** (`CreateDesktopW` +
-/// `SetThreadDesktop`, the road of stage Э85: nothing reaches the screen of the person at the
-/// machine), and a hook of the thread counts the `WM_ERASEBKGND` of the static `IDC_LETTER_DEMO`.
-/// Twelve forged ticks (SEC-05: a forged `WM_TIMER` buys one frame) must bring twelve drawings and
-/// no erase; the positive control — twelve repaints through the door **with** the erase — must
-/// bring twelve erases, so the zero above is the counter's answer and not its blindness.
-#[cfg(feature = "testing")]
-mod the_demonstration_on_a_desktop_of_its_own {
-    use super::{PRODUCT, with_product_strings};
-    use lang_switcher::letters::{self, Letter};
-    use lang_switcher::widgets;
-    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
-    use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::System::Threading::GetCurrentThreadId;
-    use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CWPSTRUCT, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GetDlgItem,
-        MSG, PM_REMOVE, PeekMessageW, PostMessageW, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, WH_CALLWNDPROC, WM_DRAWITEM, WM_ERASEBKGND, WM_TIMER,
-        WS_EX_TOOLWINDOW, WS_POPUP,
-    };
-    use windows::core::{PCWSTR, w};
-
-    #[link(name = "user32", kind = "raw-dylib")]
-    unsafe extern "system" {
-        fn CreateDesktopW(
-            name: *const u16,
-            device: *const u16,
-            devmode: *const core::ffi::c_void,
-            flags: u32,
-            access: u32,
-            attributes: *const core::ffi::c_void,
-        ) -> isize;
-        fn SetThreadDesktop(desktop: isize) -> i32;
-    }
-
-    const GENERIC_ALL: u32 = 0x1000_0000;
-    /// `IDC_LETTER_DEMO` of `app.rc` and `src\letters.rs`.
-    const IDC_LETTER_DEMO: i32 = 1205;
-    /// `DEMO_TIMER` of `src\letters.rs`.
-    const DEMO_TIMER: usize = 1;
-    const TICKS: u32 = 12;
-
-    static DIALOG: AtomicIsize = AtomicIsize::new(0);
-    static DEMO: AtomicIsize = AtomicIsize::new(0);
-    static ERASES: AtomicU32 = AtomicU32::new(0);
-    static DRAWS: AtomicU32 = AtomicU32::new(0);
-
-    unsafe extern "system" fn count(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-        if code >= 0 {
-            // SAFETY: the documented payload of the hook, read only.
-            let m = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
-            let demo = DEMO.load(Ordering::SeqCst);
-
-            if demo != 0 && m.hwnd.0 as isize == demo && m.message == WM_ERASEBKGND {
-                ERASES.fetch_add(1, Ordering::SeqCst);
-            }
-
-            if m.hwnd.0 as isize == DIALOG.load(Ordering::SeqCst)
-                && m.message == WM_DRAWITEM
-                && m.lParam.0 != 0
-            {
-                // SAFETY: the sender owns the struct for the length of the send; read only.
-                let item = unsafe { &*(m.lParam.0 as *const DRAWITEMSTRUCT) };
-
-                if item.CtlID as i32 == IDC_LETTER_DEMO {
-                    DRAWS.fetch_add(1, Ordering::SeqCst);
-                }
-            }
-        }
-
-        // SAFETY: forwards the call unchanged.
-        unsafe { CallNextHookEx(None, code, wparam, lparam) }
-    }
-
-    /// Serves every message of this thread that is waiting, the paints included.
-    fn pump() {
-        let mut msg = MSG::default();
-
-        // SAFETY: the ordinary pump of this thread, over its own messages.
-        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
-            // SAFETY: the live message just taken.
-            if unsafe { letters::filter_message(&msg) } {
-                continue;
-            }
-
-            // SAFETY: as above.
-            unsafe {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
-    }
-
-    /// (erases and drawings over the forged ticks, erases over the repaints with the erase)
-    fn measure(module: usize) -> Result<(u32, u32, u32), String> {
-        let name: Vec<u16> = format!("LangSwT921Sentry{}\0", std::process::id())
-            .encode_utf16()
-            .collect();
-
-        // SAFETY: plain values and a NUL-terminated name alive for the call.
-        let desktop = unsafe {
-            CreateDesktopW(
-                name.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                0,
-                GENERIC_ALL,
-                std::ptr::null(),
-            )
-        };
-
-        if desktop == 0 {
-            return Err(
-                "CreateDesktopW refused — the sentry cannot keep the window off the \
-                        screen, so it does not open it"
-                    .to_owned(),
-            );
-        }
-
-        // SAFETY: this fresh thread owns no window and no hook yet.
-        if unsafe { SetThreadDesktop(desktop) } == 0 {
-            return Err("SetThreadDesktop refused".to_owned());
-        }
-
-        // SAFETY: a hook of this thread, removed below on every path that follows.
-        let hook =
-            unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(count), None, GetCurrentThreadId()) }
-                .map_err(|e| format!("the hook of the thread: {e}"))?;
-
-        // SAFETY: a system class, no parent; destroyed below.
-        let owner = unsafe {
-            CreateWindowExW(
-                WS_EX_TOOLWINDOW,
-                w!("STATIC"),
-                PCWSTR::null(),
-                WS_POPUP,
-                0,
-                0,
-                0,
-                0,
-                None,
-                None,
-                None,
-                None,
-            )
-        }
-        .map_err(|e| format!("a hidden owner: {e}"))?;
-
-        let module = HMODULE(std::ptr::without_provenance_mut(module));
-        let outcome = (|| {
-            let dialog = letters::testing::show_letter_from(owner, module, Letter::Welcome)
-                .ok_or("the Welcome letter did not open")?;
-            // SAFETY: a live window of this thread.
-            let demo = unsafe { GetDlgItem(Some(dialog), IDC_LETTER_DEMO) }
-                .map_err(|_| "the letter has no IDC_LETTER_DEMO")?;
-
-            DIALOG.store(dialog.0 as isize, Ordering::SeqCst);
-            DEMO.store(demo.0 as isize, Ordering::SeqCst);
-
-            // The first paint of a fresh window erases everything once — that is the window
-            // being shown and not a tick, so it is served before the count starts.
-            pump();
-            ERASES.store(0, Ordering::SeqCst);
-            DRAWS.store(0, Ordering::SeqCst);
-
-            for _ in 0..TICKS {
-                // SAFETY: a posted message carrying plain values, to a window of this thread.
-                let _ =
-                    unsafe { PostMessageW(Some(dialog), WM_TIMER, WPARAM(DEMO_TIMER), LPARAM(0)) };
-                pump();
-            }
-
-            let ticked = (ERASES.load(Ordering::SeqCst), DRAWS.load(Ordering::SeqCst));
-
-            ERASES.store(0, Ordering::SeqCst);
-
-            for _ in 0..TICKS {
-                widgets::repaint::control(dialog, IDC_LETTER_DEMO);
-                pump();
-            }
-
-            let control = ERASES.load(Ordering::SeqCst);
-
-            DEMO.store(0, Ordering::SeqCst);
-            DIALOG.store(0, Ordering::SeqCst);
-            // SAFETY: the letter is a window of this thread, destroyed once.
-            let _ = unsafe { DestroyWindow(dialog) };
-
-            Ok::<_, String>((ticked.0, ticked.1, control))
-        })();
-
-        // SAFETY: made above on this thread, each released once.
-        unsafe {
-            let _ = UnhookWindowsHookEx(hook);
-            let _ = DestroyWindow(owner);
-        }
-
-        outcome
-    }
-
-    #[test]
-    fn a_tick_of_the_demonstration_reaches_it_without_a_single_erase() {
-        with_product_strings();
-        let module = *PRODUCT
-            .get()
-            .expect("with_product_strings maps the product image");
-
-        let (erases, draws, control) = std::thread::spawn(move || measure(module))
-            .join()
-            .expect("the measuring thread must not panic")
-            .unwrap_or_else(|why| panic!("{why}"));
-
-        println!(
-            "{TICKS} forged ticks: {erases} erases, {draws} drawings; {TICKS} repaints through the \
-             door with the erase: {control} erases"
-        );
-
-        assert!(
-            draws >= TICKS,
-            "every forged tick must repaint the demonstration — {draws} drawings for {TICKS} ticks, \
-             so the count below would be the count of nothing"
-        );
-        assert_eq!(
-            control, TICKS,
-            "the positive control: the door with the erase erases the static once a repaint — the \
-             counter cannot see erases otherwise"
-        );
-        assert_eq!(
-            erases, 0,
-            "156.10: a tick of the demonstration must not erase the static ({erases} erases over \
-             {TICKS} ticks)"
-        );
-    }
-}
-
-/// **Task T-94-1, решение 158.3 — a letter that opens by itself shows no focus cue until the first
-/// Tab, and the focus stays where Windows put it.**
-///
-/// Находка 158 (чистая машина, 0.92.0): the Welcome letter came up with the dotted focus frame on
-/// «Открыть настройки», as if the button had been chosen in advance. The dialog manager gives the
-/// focus to the first tab stop, and Windows shows the keyboard cues when the last input came from
-/// the keyboard — the person was typing in another program (158.2). The repair hides the focus
-/// cue of a window that opens **without the activation**, between its creation and its showing.
-///
-/// Every letter here is opened by the product's own `letters::show_letter` through a door of
-/// `letters::testing`, **on a desktop of its own** (the road of stages Э85 and Э92: nothing reaches
-/// the screen of the person at the machine). A hook of the thread writes down every
-/// `WM_CHANGEUISTATE` the letter is sent and every `WM_DRAWITEM` of its push buttons; a subclass of
-/// the test, put on the letter the moment the hook meets its `WM_INITDIALOG`, swallows the
-/// `WM_COMMAND` of the buttons (no action of the letter runs) and answers the system's
-/// `UIS_INITIALIZE` the way Windows answers it after a key — `UIS_CLEAR` of both cues. That is the
-/// owner's case of 158, and the one a machine nobody types on never shows by itself. Keys are
-/// `WM_KEYDOWN` / `WM_KEYUP` posted to the control holding the focus and pumped through the
-/// product's own `letters::filter_message` — the probe of 158.2 (`scratchpad-Q158`), made
-/// sentries.
-///
-/// ⛔ The red «before» is the **order** of the messages, not the state they leave behind: on a
-/// machine with no keyboard input Windows hides the cues by itself, on the base as well.
-#[cfg(feature = "testing")]
-mod the_focus_cue_of_a_letter_on_a_desktop_of_its_own {
-    use super::{PRODUCT, with_product_strings};
-    use lang_switcher::letters::{self, Letter};
-    use std::cell::RefCell;
-    use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::System::Threading::GetCurrentThreadId;
-    use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_FOCUS, ODS_NOFOCUSRECT, ODT_BUTTON};
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
-    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CWPSTRUCT, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GetDlgCtrlID,
-        MSG, PM_REMOVE, PeekMessageW, PostMessageW, SPI_GETKEYBOARDCUES,
-        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetWindowsHookExW,
-        SystemParametersInfoW, TranslateMessage, UIS_CLEAR, UIS_INITIALIZE, UIS_SET,
-        UISF_HIDEACCEL, UISF_HIDEFOCUS, UnhookWindowsHookEx, WH_CALLWNDPROC, WM_CHANGEUISTATE,
-        WM_COMMAND, WM_DRAWITEM, WM_INITDIALOG, WM_KEYDOWN, WM_KEYUP, WM_QUERYUISTATE,
-        WS_EX_TOOLWINDOW, WS_POPUP,
-    };
-    use windows::core::{PCWSTR, w};
-
-    #[link(name = "user32", kind = "raw-dylib")]
-    unsafe extern "system" {
-        fn CreateDesktopW(
-            name: *const u16,
-            device: *const u16,
-            devmode: *const core::ffi::c_void,
-            flags: u32,
-            access: u32,
-            attributes: *const core::ffi::c_void,
-        ) -> isize;
-        fn SetThreadDesktop(desktop: isize) -> i32;
-    }
-
-    const GENERIC_ALL: u32 = 0x1000_0000;
-    /// `IDC_LETTER_PANEL_BTN_1` … `IDC_LETTER_ACCENT` of `app.rc` and `src\letters.rs` — every
-    /// push button of a letter.
-    const BUTTONS: [i32; 5] = [1218, 1219, 1220, 1221, 1222];
-    /// `IDC_LETTER_LEFT` — «Открыть настройки» in the Welcome letter, its first tab stop.
-    const LEFT: i32 = 1220;
-    /// `IDC_LETTER_ACCENT` — «Понятно», the default button (`DM_SETDEFID`).
-    const ACCENT: i32 = 1222;
-    /// `IDOK` and `IDCANCEL` — what the dialog manager makes of Enter and Esc when no button is
-    /// the default one.
-    const IDOK: i32 = 1;
-    const IDCANCEL: i32 = 2;
-    /// The identifier of the test's subclass on the letter.
-    const STAND_IN: usize = 0x0941;
-    /// Virtual keys and their scan codes, as a keyboard sends them.
-    const TAB: (usize, usize) = (0x09, 0x0F);
-    const ENTER: (usize, usize) = (0x0D, 0x1C);
-    const SPACE: (usize, usize) = (0x20, 0x39);
-
-    /// What the hook and the subclass of this thread saw. One letter per thread, one thread per
-    /// test, so nothing here is shared between the tests running side by side.
-    #[derive(Clone, Debug, Default)]
-    struct Seen {
-        /// The letter, as the hook met it on `WM_INITDIALOG` — the one dialog this thread makes.
-        dialog: isize,
-        /// Whether the subclass was put on the letter in its `WM_INITDIALOG`.
-        subclassed: bool,
-        /// How many of the system's `UIS_INITIALIZE` the subclass answered as after a key.
-        answered: u32,
-        /// The `wParam` of every `WM_CHANGEUISTATE` the letter was sent, in order.
-        changes: Vec<usize>,
-        /// (control, `itemState`) of every `WM_DRAWITEM` of a push button of the letter, in order.
-        draws: Vec<(i32, u32)>,
-        /// The control of every `WM_COMMAND` of a button the subclass swallowed, in order.
-        commands: Vec<i32>,
-    }
-
-    thread_local! {
-        static SEEN: RefCell<Seen> = RefCell::new(Seen::default());
-    }
-
-    /// One look at the letter: what was seen since the last [`forget`], and the state now.
-    #[derive(Clone, Debug)]
-    struct Look {
-        seen: Seen,
-        /// The answer of `WM_QUERYUISTATE`.
-        cues: usize,
-        /// The control holding the focus of this thread, or 0.
-        focus: i32,
-    }
-
-    fn make_wparam(low: u32, high: u32) -> usize {
-        (low as usize) | ((high as usize) << 16)
-    }
-
-    /// The product's own predicate of the frame — `focused` in `src\letters.rs`, the argument
-    /// `settings::paint_push_button` draws the dotted `DrawFocusRect` by.
-    fn frame(state: u32) -> bool {
-        state & ODS_FOCUS.0 != 0 && state & ODS_NOFOCUSRECT.0 == 0
-    }
-
-    fn hides_the_focus_cue(change: usize) -> bool {
-        change & 0xFFFF == UIS_SET as usize && (change >> 16) & UISF_HIDEFOCUS as usize != 0
-    }
-
-    fn shows_the_focus_cue(change: usize) -> bool {
-        change & 0xFFFF == UIS_CLEAR as usize && (change >> 16) & UISF_HIDEFOCUS as usize != 0
-    }
-
-    fn is_the_systems_decision(change: usize) -> bool {
-        change & 0xFFFF == UIS_INITIALIZE as usize
-    }
-
-    unsafe extern "system" fn watch(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-        if code >= 0 {
-            // SAFETY: the documented payload of the hook, read only.
-            let m = unsafe { &*(lparam.0 as *const CWPSTRUCT) };
-            let hwnd = m.hwnd.0 as isize;
-
-            if m.message == WM_INITDIALOG {
-                SEEN.with_borrow_mut(|seen| seen.dialog = hwnd);
-
-                // SAFETY: the letter of this thread, in its `WM_INITDIALOG`; the procedure lives
-                // for the whole program, and the pair is removed before the letter is destroyed.
-                let subclassed =
-                    unsafe { SetWindowSubclass(m.hwnd, Some(stand_in), STAND_IN, 0) }.as_bool();
-
-                SEEN.with_borrow_mut(|seen| seen.subclassed = subclassed);
-            } else if hwnd != 0 && hwnd == SEEN.with_borrow(|seen| seen.dialog) {
-                if m.message == WM_CHANGEUISTATE {
-                    SEEN.with_borrow_mut(|seen| seen.changes.push(m.wParam.0));
-                } else if m.message == WM_DRAWITEM && m.lParam.0 != 0 {
-                    // SAFETY: the sender owns the struct for the length of the send; read only.
-                    let item = unsafe { &*(m.lParam.0 as *const DRAWITEMSTRUCT) };
-                    let control = item.CtlID as i32;
-
-                    if item.CtlType == ODT_BUTTON && BUTTONS.contains(&control) {
-                        SEEN.with_borrow_mut(|seen| seen.draws.push((control, item.itemState.0)));
-                    }
-                }
-            }
-        }
-
-        // SAFETY: forwards the call unchanged.
-        unsafe { CallNextHookEx(None, code, wparam, lparam) }
-    }
-
-    /// The test's subclass on the letter: the keyboard's answer to the system's decision, and the
-    /// commands of the buttons swallowed.
-    unsafe extern "system" fn stand_in(
-        hwnd: HWND,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-        _id: usize,
-        _data: usize,
-    ) -> LRESULT {
-        if message == WM_CHANGEUISTATE && is_the_systems_decision(wparam.0) {
-            SEEN.with_borrow_mut(|seen| seen.answered += 1);
-
-            // 158.2: after a key Windows answers `UIS_INITIALIZE` by clearing both cues.
-            //
-            // SAFETY: forwards a message of this window carrying two plain integers.
-            return unsafe {
-                DefSubclassProc(
-                    hwnd,
-                    message,
-                    WPARAM(make_wparam(UIS_CLEAR, UISF_HIDEFOCUS | UISF_HIDEACCEL)),
-                    lparam,
-                )
-            };
-        }
-
-        if message == WM_COMMAND {
-            let control = (wparam.0 & 0xFFFF) as i32;
-
-            if BUTTONS.contains(&control) || control == IDOK || control == IDCANCEL {
-                SEEN.with_borrow_mut(|seen| seen.commands.push(control));
-
-                return LRESULT(0);
-            }
-        }
-
-        // SAFETY: forwards the four arguments unchanged.
-        unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
-    }
-
-    /// Serves every message of this thread that is waiting, the paints included — the product's
-    /// pump: the letters' filter first, then the dispatch.
-    fn pump() {
-        let mut msg = MSG::default();
-
-        // SAFETY: the ordinary pump of this thread, over its own messages.
-        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
-            // SAFETY: the live message just taken.
-            if unsafe { letters::filter_message(&msg) } {
-                continue;
-            }
-
-            // SAFETY: as above.
-            unsafe {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
-    }
-
-    /// One key, down and up, posted to the control holding the focus (or to the letter), and
-    /// pumped.
-    fn press(dialog: HWND, (key, scan): (usize, usize)) {
-        // SAFETY: the focus of this thread's queue — the letter lives on this thread.
-        let focus = unsafe { GetFocus() };
-        let target = if focus.is_invalid() { dialog } else { focus };
-        let down = LPARAM((1 | (scan << 16)) as isize);
-        let up = LPARAM((1 | (scan << 16) | (1 << 30) | (1 << 31)) as isize);
-
-        // SAFETY: posted messages carrying plain values, to a window of this thread.
-        unsafe {
-            let _ = PostMessageW(Some(target), WM_KEYDOWN, WPARAM(key), down);
-            let _ = PostMessageW(Some(target), WM_KEYUP, WPARAM(key), up);
-        }
-
-        pump();
-    }
-
-    /// Starts a new chapter of the record: the messages, the drawings and the commands seen so far
-    /// are dropped.
-    fn forget() {
-        SEEN.with_borrow_mut(|seen| {
-            seen.changes.clear();
-            seen.draws.clear();
-            seen.commands.clear();
-        });
-    }
-
-    fn look(dialog: HWND) -> Look {
-        // SAFETY: a live window of this thread; the query carries no pointer.
-        let cues = unsafe { SendMessageW(dialog, WM_QUERYUISTATE, None, None) }.0 as usize;
-        // SAFETY: the focus of this thread's queue, and a plain query of a window field.
-        let focus = unsafe { GetDlgCtrlID(GetFocus()) };
-
-        Look {
-            seen: SEEN.with_borrow(Seen::clone),
-            cues,
-            focus,
-        }
-    }
-
-    /// Opens one letter by `open` on a desktop of its own, runs `steps` on it, and releases
-    /// everything on every path.
-    fn on_a_desktop_of_its_own<T: Send + 'static>(
-        tag: &'static str,
-        open: fn(HWND, HMODULE) -> Option<HWND>,
-        steps: fn(HWND) -> T,
-    ) -> T {
-        with_product_strings();
-
-        // §0 п. 5 of TZ-E94: under «always underline access keys» Windows keeps every cue shown
-        // whatever a window asks, and nothing here could be measured.
-        let mut always: i32 = 0;
-
-        // SAFETY: a read of one system parameter into a live local; nothing is written.
-        unsafe {
-            SystemParametersInfoW(
-                SPI_GETKEYBOARDCUES,
-                0,
-                Some(std::ptr::from_mut(&mut always).cast()),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            )
-        }
-        .expect("SPI_GETKEYBOARDCUES must be readable");
-        assert_eq!(
-            always, 0,
-            "«always underline access keys» is on at this machine: Windows keeps the cues shown \
-             whatever a window asks, and these sentries cannot measure the hiding here"
-        );
-
-        let module = *PRODUCT
-            .get()
-            .expect("with_product_strings maps the product image");
-
-        std::thread::spawn(move || run(tag, module, open, steps))
-            .join()
-            .expect("the measuring thread must not panic")
-            .unwrap_or_else(|why| panic!("{why}"))
-    }
-
-    fn run<T>(
-        tag: &str,
-        module: usize,
-        open: fn(HWND, HMODULE) -> Option<HWND>,
-        steps: fn(HWND) -> T,
-    ) -> Result<T, String> {
-        let name: Vec<u16> = format!("LangSwT941{tag}{}\0", std::process::id())
-            .encode_utf16()
-            .collect();
-
-        // SAFETY: plain values and a NUL-terminated name alive for the call.
-        let desktop = unsafe {
-            CreateDesktopW(
-                name.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                0,
-                GENERIC_ALL,
-                std::ptr::null(),
-            )
-        };
-
-        if desktop == 0 {
-            return Err(
-                "CreateDesktopW refused — the sentry cannot keep the letter off the screen, so \
-                 it does not open it"
-                    .to_owned(),
-            );
-        }
-
-        // SAFETY: this fresh thread owns no window and no hook yet.
-        if unsafe { SetThreadDesktop(desktop) } == 0 {
-            return Err("SetThreadDesktop refused".to_owned());
-        }
-
-        // SAFETY: a hook of this thread, removed below on every path that follows.
-        let hook =
-            unsafe { SetWindowsHookExW(WH_CALLWNDPROC, Some(watch), None, GetCurrentThreadId()) }
-                .map_err(|e| format!("the hook of the thread: {e}"))?;
-
-        // SAFETY: a system class, no parent; destroyed below.
-        let owner = unsafe {
-            CreateWindowExW(
-                WS_EX_TOOLWINDOW,
-                w!("STATIC"),
-                PCWSTR::null(),
-                WS_POPUP,
-                0,
-                0,
-                0,
-                0,
-                None,
-                None,
-                None,
-                None,
-            )
-        }
-        .map_err(|e| format!("a hidden owner: {e}"))?;
-
-        let module = HMODULE(std::ptr::without_provenance_mut(module));
-        let outcome = (|| {
-            let dialog = open(owner, module).ok_or("the letter did not open")?;
-            let answer = steps(dialog);
-
-            // SAFETY: the pair the hook put on the letter, and the letter itself — a window of
-            // this thread, destroyed once.
-            unsafe {
-                let _ = RemoveWindowSubclass(dialog, Some(stand_in), STAND_IN);
-                let _ = DestroyWindow(dialog);
-            }
-
-            pump();
-
-            Ok::<_, String>(answer)
-        })();
-
-        // SAFETY: made above on this thread, each released once.
-        unsafe {
-            let _ = UnhookWindowsHookEx(hook);
-            let _ = DestroyWindow(owner);
-        }
-
-        outcome
-    }
-
-    /// The letter FR-101 opens by itself — the Welcome, without the activation.
-    fn by_itself(owner: HWND, module: HMODULE) -> Option<HWND> {
-        letters::testing::show_letter_from(owner, module, Letter::Welcome)
-    }
-
-    /// The letter the person asked for — the Welcome, with the activation, kept hidden.
-    fn asked_for(owner: HWND, module: HMODULE) -> Option<HWND> {
-        letters::testing::open_letter_activated_hidden(owner, module, Letter::Welcome)
-    }
-
-    /// The sentry (а) — the red «before» of T-94-1.
-    #[test]
-    fn a_letter_opening_by_itself_hides_the_focus_cue_after_windows_has_decided() {
-        let (opened, control) = on_a_desktop_of_its_own("A", by_itself, |dialog| {
-            // The first paint: the letter is shown by now and has not been touched.
-            pump();
-            let opened = look(dialog);
-
-            // The control: the cue shown by hand must bring the frame, or «no frame» below would
-            // be the hook's blindness and not the letter's answer.
-            forget();
-            // SAFETY: a live window of this thread; two plain integers.
-            unsafe {
-                SendMessageW(
-                    dialog,
-                    WM_CHANGEUISTATE,
-                    Some(WPARAM(make_wparam(UIS_CLEAR, UISF_HIDEFOCUS))),
-                    None,
-                )
-            };
-            pump();
-
-            (opened, look(dialog))
-        });
-
-        println!("opened: {opened:x?}");
-        println!("control: {control:x?}");
-
-        assert!(
-            opened.seen.subclassed && opened.seen.answered == 1,
-            "the stand-in must stand on the letter before the system decides the cues: \
-             subclassed {}, decisions answered as after a key {}",
-            opened.seen.subclassed,
-            opened.seen.answered
-        );
-
-        let changes = &opened.seen.changes;
-        let decided = changes
-            .iter()
-            .rposition(|&change| is_the_systems_decision(change));
-        let hidden = decided.and_then(|at| {
-            changes[at + 1..]
-                .iter()
-                .position(|&change| hides_the_focus_cue(change))
-        });
-
-        assert!(
-            decided.is_some() && hidden.is_some(),
-            "158.3: after Windows decides the cues (UIS_INITIALIZE) the letter that opened by \
-             itself is sent UIS_SET with UISF_HIDEFOCUS — the WM_CHANGEUISTATE it was sent: \
-             {changes:x?}"
-        );
-        assert_ne!(
-            opened.cues & UISF_HIDEFOCUS as usize,
-            0,
-            "158.3: the focus cue of the letter is hidden after it opened (WM_QUERYUISTATE {:#x})",
-            opened.cues
-        );
-        assert!(
-            opened
-                .seen
-                .draws
-                .iter()
-                .any(|&(control, state)| control == LEFT && state & ODS_FOCUS.0 != 0),
-            "the first paint must draw «Открыть настройки» holding the focus — drawings {:x?}",
-            opened.seen.draws
-        );
-        assert!(
-            !opened.seen.draws.iter().any(|&(_, state)| frame(state)),
-            "158: no button of a letter that opened by itself is drawn with the focus frame \
-             before the first Tab — drawings (control, itemState) {:x?}",
-            opened.seen.draws
-        );
-        assert_eq!(
-            opened.focus, LEFT,
-            "158.3: the focus stays where Windows put it, on «Открыть настройки»"
-        );
-        assert!(
-            control
-                .seen
-                .draws
-                .iter()
-                .any(|&(control, state)| control == LEFT && frame(state)),
-            "the control: the cue shown by hand must draw the frame on «Открыть настройки» — \
-             drawings {:x?}",
-            control.seen.draws
-        );
-    }
-
-    /// The sentry (б): the first Tab lifts the ban — the dialog manager does it — and the frame
-    /// moves with the focus as it does in a window opened by the mouse.
-    #[test]
-    fn the_first_tab_brings_the_focus_cue_back_and_moves_it_to_the_default_button() {
-        let (first, second) = on_a_desktop_of_its_own("B", by_itself, |dialog| {
-            pump();
-            forget();
-            press(dialog, TAB);
-            let first = look(dialog);
-
-            forget();
-            press(dialog, TAB);
-
-            (first, look(dialog))
-        });
-
-        println!("after the first Tab: {first:x?}");
-        println!("after the second Tab: {second:x?}");
-
-        assert!(
-            first
-                .seen
-                .changes
-                .iter()
-                .any(|&change| shows_the_focus_cue(change)),
-            "158.3: the first Tab lifts the ban — UIS_CLEAR with UISF_HIDEFOCUS from the dialog \
-             manager; the WM_CHANGEUISTATE the letter was sent: {:x?}",
-            first.seen.changes
-        );
-        assert_eq!(
-            first.cues & UISF_HIDEFOCUS as usize,
-            0,
-            "the focus cue is shown after the first Tab (WM_QUERYUISTATE {:#x})",
-            first.cues
-        );
-        assert_eq!(
-            first.focus, ACCENT,
-            "the first Tab moves the focus to «Понятно»"
-        );
-        assert!(
-            first
-                .seen
-                .draws
-                .iter()
-                .any(|&(control, state)| control == ACCENT && frame(state)),
-            "158.3: «Понятно» is drawn with the frame after the first Tab — drawings {:x?}",
-            first.seen.draws
-        );
-        assert_eq!(
-            second.focus, LEFT,
-            "the second Tab brings the focus back to «Открыть настройки»"
-        );
-        assert!(
-            second
-                .seen
-                .draws
-                .iter()
-                .any(|&(control, state)| control == LEFT && frame(state)),
-            "the frame goes on moving with the focus — drawings {:x?}",
-            second.seen.draws
-        );
-    }
-
-    /// The sentry (в): the keys do what they did — Enter presses the default button, Space the
-    /// one holding the focus (158.3: the focus stays on «Открыть настройки»).
-    #[test]
-    fn enter_presses_the_default_button_and_space_the_one_holding_the_focus() {
-        let (enter, space) = on_a_desktop_of_its_own("C", by_itself, |dialog| {
-            pump();
-            forget();
-            press(dialog, ENTER);
-            let enter = look(dialog);
-
-            forget();
-            press(dialog, SPACE);
-
-            (enter, look(dialog))
-        });
-
-        println!("after Enter: {enter:x?}");
-        println!("after Space: {space:x?}");
-
-        assert_eq!(
-            enter.seen.commands,
-            [ACCENT],
-            "Enter presses «Понятно», the default button, as it did"
-        );
-        assert_eq!(
-            space.seen.commands,
-            [LEFT],
-            "158.3: Space presses the button holding the focus — «Открыть настройки»"
-        );
-        assert_eq!(
-            enter.focus, LEFT,
-            "158.3: the focus stays on «Открыть настройки»"
-        );
-    }
-
-    /// The sentry (г), the negative control of the condition: a letter the person asked for — the
-    /// activation — is not sent the ban, and the cues are what Windows chose by the last input.
-    #[test]
-    fn a_letter_opened_with_the_activation_keeps_the_cues_windows_chose() {
-        let opened = on_a_desktop_of_its_own("D", asked_for, |dialog| {
-            pump();
-            look(dialog)
-        });
-
-        println!("opened with the activation: {opened:x?}");
-
-        assert!(
-            opened.seen.subclassed && opened.seen.answered == 1,
-            "the system decides the cues of this letter too, and the stand-in answers as after a \
-             key: subclassed {}, decisions answered {}",
-            opened.seen.subclassed,
-            opened.seen.answered
-        );
-        assert!(
-            !opened
-                .seen
-                .changes
-                .iter()
-                .any(|&change| hides_the_focus_cue(change)),
-            "158.3: a window opened with the activation is not sent UIS_SET with UISF_HIDEFOCUS — \
-             the WM_CHANGEUISTATE it was sent: {:x?}",
-            opened.seen.changes
-        );
-        assert_eq!(
-            opened.cues & UISF_HIDEFOCUS as usize,
-            0,
-            "as today: after a key the cues stay shown (WM_QUERYUISTATE {:#x})",
-            opened.cues
-        );
-    }
-}
-
 /// The version line of «От автора» says what is installed, and what is available when the feed
 /// names something newer.
 #[test]
 fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let state = settled("0.39.0");
     let today = day(2026, 9, 3);
@@ -4383,16 +3318,21 @@ fn the_author_window_names_the_version_and_the_one_that_is_waiting() {
 // settled on
 // ---------------------------------------------------------------------------------------
 
-/// `src\letters.rs` read as text with line endings normalised.
+/// The module `letters` read as text with line endings normalised — since T-120-23 the file
+/// `src\letters.rs` and the three it was divided into, `links.rs`, `feed.rs` and `appeal.rs` — the order
+/// they stood in the file: a guard that looked for something in the module, or for its absence, looks where it
+/// went, and an emptied file cannot make it green.
 fn letters_source() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("letters.rs");
-
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()));
-
-    text.replace("\r\n", "\n")
+    ["letters.rs", "links.rs", "feed.rs", "appeal.rs"]
+        .iter()
+        .map(|file| {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} must be readable: {error}", path.display()))
+                .replace("\r\n", "\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The body of the item whose signature line starts with `signature` — from that line to the
@@ -4430,90 +3370,76 @@ fn code_lines(text: &str) -> impl Iterator<Item = &str> {
         .filter(|line| !line.starts_with("//"))
 }
 
-/// Whether this body decides «Открыть страницу загрузки» **without asking the feed** — the shape
-/// task T-78-2 put in place of the one `e77` carried.
-///
-/// ⚠ Two halves, and the first is not decoration: a body that stopped naming the button at all
-/// would satisfy the second half by saying nothing, and the sweep would be green for the one
-/// reason that must never make it green.
-///
-/// ⚠⚠ The second half looks at **every** code line of the body and not only at the lines that
-/// name the button. Written the other way it could not have failed on the enabling body at all:
-/// `e77` spelt that one over five lines, with `IDC_NEWS_DOWNLOAD,` on one and `view.download` on
-/// another, so a line-by-line look would have found no line carrying both and called it clean.
-fn download_is_free_of_the_feed(body: &str) -> bool {
-    code_lines(body).any(|line| line.contains("IDC_NEWS_DOWNLOAD"))
-        && code_lines(body).all(|line| !line.contains("view.download"))
-}
-
 /// **«Открыть страницу загрузки» stands there whatever the feed says** — task T-78-2, решение
-/// 139.2 п. 3 и п. 6.
+/// 139.2 п. 3 и п. 6, in the shell since T-120-17.
 ///
 /// Until `e77` the button was put into the row only when an `update` entry of the feed existed,
 /// and enabled only when that entry's own `link` was not a placeholder. There is no feed
 /// (138.4), so the button was translated into fourteen languages and shown to nobody.
 ///
-/// The sweep is over the two bodies that decide it, because neither is a pure function: one
-/// lays controls out in a window and the other enables them. What it asserts is the absence of
-/// the feed from both — that `view.download` is gone from the decision — and the presence of
-/// the build's own address in the enabling one.
+/// The description of «От автора» is pure now, so the window itself is asked: with no feed, with
+/// news only, with an update, the switch off and on — the button stands there every time, and it
+/// is disabled by the address of this build (`links::DOWNLOAD_URL` a placeholder) and never by the
+/// feed.
 #[test]
 fn the_download_button_stands_there_whatever_the_feed_says() {
-    let source = letters_source();
+    use lang_switcher::letters::{FeedView, author_view_in, sample_entry};
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::author::{Author, Id};
 
-    for (signature, what) in [
-        ("unsafe fn layout_author(", "lays the button out"),
-        ("fn fill_author(", "enables it"),
-    ] {
-        assert!(
-            download_is_free_of_the_feed(body_of(&source, signature)),
-            "the body that {what} must name IDC_NEWS_DOWNLOAD and ask the feed nothing about it"
-        );
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let today = item.date.expect("the sample entry carries its day");
+    let news = [sample_entry()];
+    let feeds = [
+        ("no feed", None, &news[..0]),
+        ("news only", None, &news[..]),
+        ("an update", Some(&item), &news[..]),
+    ];
+    let placeholder = links::is_placeholder(links::DOWNLOAD_URL);
+
+    for (what, update, news) in feeds {
+        for switch in [false, true] {
+            let state = Letters {
+                feed: switch,
+                release_window: switch,
+                ..Letters::default()
+            };
+            let view = author_view_in(
+                Language::Ru,
+                &state,
+                today,
+                "1.7.0",
+                FeedView { update, news },
+            );
+            let window = Author {
+                view,
+                language: Language::Ru,
+                theme: ThemeSetting::Light,
+            }
+            .describe();
+
+            assert!(
+                format!("{:?}", window.body).contains("Button { id: Download,"),
+                "{what}, switch {switch}: «Открыть страницу загрузки» must stand in «От автора»"
+            );
+            assert_eq!(
+                window.disabled.contains(&Id::Download),
+                placeholder,
+                "{what}, switch {switch}: the button is disabled by the address of this build, \
+                 not by the feed"
+            );
+        }
     }
-
-    // The enabling body judges the button by the address this build carries, and by nothing
-    // else — the same question «Открыть канал» and «Открыть страницу поддержки» stand behind.
-    assert!(
-        body_of(&source, "fn fill_author(").contains("links::DOWNLOAD_URL"),
-        "the button is enabled by the build's own download address"
-    );
-
-    // ⚠ Отрицательный контроль — **the same predicate**, run over the two shapes `e77`
-    // carried. A control that asserted something else about them would leave the sweep above
-    // unproven.
-    for (what, sample) in [
-        (
-            "the row of e77",
-            "                (IDC_NEWS_DOWNLOAD, view.download.is_some()),",
-        ),
-        (
-            "the enabling of e77",
-            "    enable(\n        hwnd,\n        IDC_NEWS_DOWNLOAD,\n        view.download\n            \
-             .as_deref()\n            .is_some_and(|url| !links::is_placeholder(url)),\n    );",
-        ),
-    ] {
-        assert!(
-            !download_is_free_of_the_feed(sample),
-            "the sweep must refuse {what}, which is the shape it is written against"
-        );
-    }
-
-    // ⚠ And the first half of the predicate is load-bearing: a body that stopped naming the
-    // button would otherwise pass by saying nothing at all.
-    assert!(
-        !download_is_free_of_the_feed("    enable(hwnd, IDC_NEWS_LETTERS, true);"),
-        "a body that never names the button is not a body that lays it out"
-    );
-
-    // And «включена» is a fact rather than a hope: the address behind it is real.
-    assert!(!links::is_placeholder(links::DOWNLOAD_URL));
 }
 
 /// **«Последние письма»** — the update first, then the news newest first, each marked read or
 /// not.
 #[test]
 fn the_list_shows_the_update_and_the_three_news_newest_first() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut state = settled("0.39.0");
     let announced = update("0.40.0");
@@ -4590,7 +3516,7 @@ fn the_list_shows_the_update_and_the_three_news_newest_first() {
 /// walks the same road the rebuild does: publish a feed, then ask for the entry by letter.
 #[test]
 fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let announced = update("0.41.0");
     let items = [news(11), news(12), news(13)];
@@ -4641,7 +3567,7 @@ fn a_letter_out_of_the_feed_finds_its_entry_again_by_name() {
 /// feed rather than out of the build — полномочия П5.
 #[test]
 fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
-    with_product_strings();
+    let _guard = with_product_strings();
 
     let mut announced = update("0.41.0");
     announced.link = "https://example.invalid/download".to_owned();
@@ -4688,163 +3614,6 @@ fn a_download_address_on_the_reserved_domain_is_a_dead_button() {
 // =========================================================================================
 // The colours and the grounds of the windows — FR-92а's vocabulary, reused
 // =========================================================================================
-
-/// The quiet labels are quiet and the rest are not — the closed vocabulary of
-/// `theme::StaticColorRole`, reused rather than widened.
-#[test]
-fn the_colour_roles_of_the_letter_windows_follow_their_table() {
-    use lang_switcher::theme::StaticColorRole;
-
-    // The two quiet lines of the mock-up and the markers of the panel rows.
-    for control in [1202, 1223, 1206, 1210, 1211, 1212, 1213] {
-        assert_eq!(
-            letters::label_color_role(control),
-            StaticColorRole::Muted,
-            "control {control} is one of the quiet ones"
-        );
-    }
-
-    // The demonstration is a field of its own.
-    assert_eq!(letters::label_color_role(1205), StaticColorRole::Field);
-
-    // And everything else is the full-strength ink.
-    for control in [1201, 1203, 1204, 1208, 1209, 1214, 1215, 1216, 1217] {
-        assert_eq!(
-            letters::label_color_role(control),
-            StaticColorRole::Label,
-            "control {control} is ordinary text"
-        );
-    }
-}
-
-/// **Every label that stands on a block is filled with the block's colour**, and the runs are
-/// whole.
-///
-/// ⚠ The test exists because the twin of this rule was written short once: the gate of
-/// `WM_DRAWITEM` named `IDC_LETTER_ROW_1` and not the four rows, and «Привет» came up with
-/// three markers and one sentence. A run written short is the defect this file is watching for.
-#[test]
-fn every_row_of_every_run_stands_on_its_panel() {
-    // The four rows of a letter and their four markers.
-    for control in 1210..1218 {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} is a row of a letter's panel"
-        );
-    }
-
-    // The three labels of each of the four entries of «Последние письма».
-    for control in (1231..1235).chain(1235..1239).chain(1239..1243) {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} is a label of an entry"
-        );
-    }
-
-    // The paragraphs of the three panels of «От автора».
-    for control in [1264, 1268, 1275, 1269, 1270, 1273, 1277] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} stands on a panel of «От автора»"
-        );
-    }
-
-    // And what does **not**: the head of a letter, the demonstration, the line under the
-    // buttons, the name and version of «От автора», the footnote of the list.
-    for control in [1201, 1202, 1203, 1204, 1205, 1206, 1223, 1261, 1262, 1252] {
-        assert!(
-            !letters::stands_on_a_panel(control),
-            "control {control} stands on the window's own ground"
-        );
-    }
-}
-
-/// **⭐⭐ A BUTTON asks the same question as a label, and until task T-80-1 it did not** —
-/// finding of the live acceptance of `e79`.
-///
-/// The drawing cuts a rounded figure out of the button's rectangle and fills what it cuts away
-/// with **the ground the button stands on**. The buttons of these windows were handed
-/// `window_bg` unconditionally, and five of the buttons of «От автора» stand **on panels**. So
-/// the corners came out in the colour of the window over a panel of another colour — measured
-/// 18/16/13 in «Туман» and 7/8/9 in «Графит» — and what the eye saw was four square corners round
-/// a button whose own face, in «Туман», is the panel's colour exactly. Word of the user: «видны
-/// углы по краям кнопок… в темной теме также видны углы кнопок».
-///
-/// ⛔ The answer is **the function the labels already use**, not a second one beside it. That is
-/// the whole of what «привести все кнопки к типизированному механизму, который у нас уже
-/// существует» asks for.
-#[test]
-fn a_button_on_a_panel_says_so_by_the_same_question_a_label_does() {
-    // «От автора»: five buttons stand on the three panels — two on «Автор», two on «Новости и
-    // обновления», one on «Обратная связь».
-    for (control, what) in [
-        (1265, "«Поддержать автора» on the Author panel"),
-        (1266, "«Открыть канал» on the Author panel"),
-        (1271, "«Открыть страницу загрузки» on the News panel"),
-        (1272, "«Последние письма» on the News panel"),
-        (1278, "«Написать автору…» on the Feedback panel"),
-    ] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "{what} ({control}) stands on a panel and must be told so"
-        );
-    }
-
-    // The two panel buttons of a letter stand on its one panel.
-    for control in [1218, 1219] {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} is a panel button of a letter"
-        );
-    }
-
-    // And the two buttons of each of the four entries of «Последние письма» — the run a list
-    // would have written short. They are laid by the very call that lays the three labels above
-    // them, at the same inner corner of the same block.
-    for control in (1243..1247).chain(1247..1251) {
-        assert!(
-            letters::stands_on_a_panel(control),
-            "control {control} is a button of an entry and stands on the block"
-        );
-    }
-
-    // And the buttons that stand on the window's own ground do **not** — «Закрыть» of «От
-    // автора», the three buttons under a letter, and the close of the list. A list that said
-    // «panel» for these would paint their corners in the panel's colour over the window, which
-    // is the same defect facing the other way.
-    for (control, what) in [
-        (1279, "«Закрыть» of «От автора», below every panel"),
-        (1220, "the left button of a letter"),
-        (1221, "the right button of a letter"),
-        (1222, "the accented button of a letter"),
-        (1251, "«Закрыть» of «Последние письма»"),
-    ] {
-        assert!(
-            !letters::stands_on_a_panel(control),
-            "{what} ({control}) stands on the window's own ground"
-        );
-    }
-
-    // ⚠⚠ **And the drawing must ASK.** A list that answers right while nobody consults it is a
-    // guard that cannot fail — measured: with the question put back to a flat `window_bg()`, every
-    // assertion above stayed green and the defect was whole. So the body that chooses the button's
-    // ground is read, and it has to name this function.
-    let source = letters_source();
-    let body = body_of(&source, "unsafe fn on_draw_item(");
-
-    assert!(
-        body.contains("stands_on_a_panel(control)"),
-        "the button branch of on_draw_item must ask stands_on_a_panel for its ground"
-    );
-
-    // Отрицательный контроль — the shape of `e79`, which the reading must refuse.
-    assert!(
-        !body
-            .replace("stands_on_a_panel(control)", "false")
-            .contains("stands_on_a_panel(control)"),
-        "the reading must refuse the body that asked nothing"
-    );
-}
 
 // =========================================================================================
 // The mark of the first run — stage E116, task T-116-12, решение 208.59
@@ -4921,21 +3690,6 @@ fn the_mark_is_first_one_on_the_path_of_the_feed_and_nothing_else() {
     );
 }
 
-/// The body of a function **nested in a module** (indented by four): from its signature line to
-/// the first `    }` closing it — `body_of` stops at a brace in column 0, which inside `pub mod
-/// feed` would be the end of the module.
-fn nested_body_of<'a>(source: &'a str, signature: &str) -> &'a str {
-    let start = source
-        .find(signature)
-        .unwrap_or_else(|| panic!("src/letters.rs must contain \"{signature}\""));
-    let rest = &source[start..];
-    let end = rest
-        .find("\n    }\n")
-        .expect("a nested item ends at `    }`");
-
-    &rest[..end]
-}
-
 /// ⭐ **The wiring of the mark** — the roads the automaton above is fed by:
 /// * `tick` asks for the marked read by `first_query(stored.first_mark)`;
 /// * the feed thread reads through `feed::read_now_marked` and raises `FIRST_ANSWERED` only when
@@ -4977,7 +3731,7 @@ fn the_mark_of_the_first_run_is_wired_from_the_tick_to_the_answer() {
         "take_feed writes the mark as sent before it asks the mailbox:\n{take}"
     );
 
-    let read_over = nested_body_of(&source, "    fn read_over(");
+    let read_over = body_of(&source, "fn read_over(");
     let lines: Vec<&str> = code_lines(read_over).collect();
     let at = |needle: &str| lines.iter().position(|line| line.contains(needle));
     assert!(
@@ -5164,7 +3918,7 @@ fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() 
         ),
         "read again through the keys of the feed, every time:\n{kept}"
     );
-    let sources = nested_body_of(&source, "    pub fn sources(");
+    let sources = body_of(&source, "pub fn sources(");
     assert!(
         code_lines(sources).any(|line| line.contains("FEED_KEYS,")),
         "and those keys are the author's unless the stand's doors say otherwise:\n{sources}"
@@ -5204,4 +3958,1030 @@ fn the_good_feed_is_kept_beside_the_configuration_and_comes_back_at_the_start() 
             .any(|line| line.contains("restore_feed")),
         "and the start the tests use does not"
     );
+}
+
+// =========================================================================================
+// The letters and «Последние письма» on the shell — task T-120-16
+// =========================================================================================
+
+/// A hidden owner for a window of `letters` opened by a test, destroyed with what it owns.
+#[cfg(feature = "testing")]
+struct HiddenOwner(windows::Win32::Foundation::HWND);
+
+#[cfg(feature = "testing")]
+impl HiddenOwner {
+    fn new() -> Self {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, WS_EX_TOOLWINDOW, WS_POPUP,
+        };
+        use windows::core::w;
+
+        // SAFETY: a system class, no parent, no pointer of ours; destroyed in `Drop`.
+        let owner = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                w!("STATIC"),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+        .expect("a hidden owner must be creatable");
+        Self(owner)
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Drop for HiddenOwner {
+    fn drop(&mut self) {
+        // SAFETY: the window this value made; destroying it destroys the windows it owns.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.0) };
+    }
+}
+
+/// **T-120-16, the red «before»: a letter opens as a window of the shell, and the template of the
+/// old one is gone.** «Привет» and «Спасибо» are opened by the product's own `letters::show_letter`
+/// through the door of the tests; each must be of the class of an ordinary window of the shell and
+/// answer `ui::host::probe`; `app.rc` carries neither `IDD_LETTER` nor `IDD_LETTERS_LIST`.
+///
+/// The class is asked first, by `GetClassNameW`, which any window answers: `probe` reads the data
+/// of a window of the shell, and asked of a dialog it would read the dialog's state as the host's.
+/// Before the task the door made a dialog out of `IDD_LETTER` — the class `#32770` — and the
+/// script declared both templates.
+#[cfg(feature = "testing")]
+#[test]
+fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
+    let _guard = with_product_strings();
+
+    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
+        .expect("app.rc must be readable");
+    let declared: Vec<&str> = ["IDD_LETTER DIALOGEX", "IDD_LETTERS_LIST DIALOGEX"]
+        .into_iter()
+        .filter(|template| script.contains(template))
+        .collect();
+
+    let mut not_shell = Vec::new();
+    for letter in [Letter::Welcome, Letter::Thanks] {
+        let owner = HiddenOwner::new();
+        let window = letters::testing::open_letter_hidden(owner.0, letter, None)
+            .unwrap_or_else(|| panic!("{letter:?} must open"));
+        let mut class = [0u16; 64];
+        // SAFETY: a live window this test opened; the buffer is a local of this frame.
+        let length =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
+        let class = String::from_utf16_lossy(&class[..usize::try_from(length).unwrap_or(0)]);
+        let shell =
+            class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
+        if !shell {
+            not_shell.push(format!("{letter:?} ({class})"));
+        }
+    }
+
+    assert!(
+        declared.is_empty() && not_shell.is_empty(),
+        "app.rc declares {declared:?}; not windows of the shell: {not_shell:?}"
+    );
+}
+
+/// **T-120-19, the red «before»: the wizard opens as a window of the shell, and «Закрыть» of the
+/// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
+/// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
+/// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
+/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
+/// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
+///
+/// Before the task the door made a dialog out of `IDD_WIZARD` — the class `#32770`.
+#[cfg(feature = "testing")]
+#[test]
+fn the_wizard_is_a_window_of_the_shell_and_its_row_stands_still() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::windows::wizard;
+
+    let _guard = with_product_strings();
+
+    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("app.rc"))
+        .expect("app.rc must be readable");
+    let owner = HiddenOwner::new();
+    let window = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let mut class = [0u16; 64];
+    // SAFETY: a live window this test opened; the buffer is a local of this frame.
+    let length =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) };
+    let class = String::from_utf16_lossy(&class[..usize::try_from(length).unwrap_or(0)]);
+    let shell = class == "LangSwitcher.Shell" && lang_switcher::ui::host::probe(window).is_some();
+    assert!(
+        shell && !script.contains("IDD_WIZARD DIALOGEX"),
+        "the wizard must be a window of the shell ({class}) and app.rc must carry no IDD_WIZARD"
+    );
+
+    let text = Text::new(Language::Ru.tag(), Direction::LeftToRight).expect("DirectWrite");
+    let next = wizard::Id::Next.number();
+    for (class, w, h) in [(Class::Narrow, 620.0, 500.0), (Class::Large, 1280.0, 720.0)] {
+        let k = fit::k_for(Language::Ru.tag(), class);
+        let mut places = Vec::new();
+        for (name, page) in wizard::states(Language::Ru) {
+            let page = page.map(&wizard::Id::number);
+            let layout = lay_out(&page, client_size(w, h), k, false, &text);
+            let rect = layout
+                .items
+                .iter()
+                .find(|item| item.id == Some(next))
+                .map(|item| item.rect)
+                .unwrap_or_else(|| panic!("{name}: the main button must be laid out"));
+            println!(
+                "{w} × {h}, {name}: right {:.1}, top {:.1}",
+                rect.x + rect.w,
+                rect.y
+            );
+            places.push((name, rect.x + rect.w, rect.y));
+        }
+        let (first, right, top) = &places[0];
+        for (name, other_right, other_top) in &places {
+            assert!(
+                (other_right - right).abs() < 0.5 && (other_top - top).abs() < 0.5,
+                "{w} × {h}: the main button of «{name}» stands at ({other_right:.1}, \
+                 {other_top:.1}), of «{first}» at ({right:.1}, {top:.1})"
+            );
+        }
+    }
+}
+
+/// Every button of a description, the cards' and the row's, with what it says about the browser.
+fn buttons_of<I: Copy>(window: &lang_switcher::ui::scene::Window<I>) -> Vec<(I, String, bool)> {
+    use lang_switcher::ui::scene::Node;
+
+    fn walk<I: Copy>(node: &Node<I>, found: &mut Vec<(I, String, bool)>) {
+        match node {
+            Node::Column(nodes)
+            | Node::Rows(nodes)
+            | Node::Row(nodes)
+            | Node::Steps(_, nodes)
+            | Node::Buttons(nodes) => nodes.iter().for_each(|node| walk(node, found)),
+            Node::Pair(a, b) => {
+                walk(a, found);
+                walk(b, found);
+            }
+            Node::Triple(a, b, c) => {
+                walk(a, found);
+                walk(b, found);
+                walk(c, found);
+            }
+            Node::Fill(node) | Node::Surface(_, node) => walk(node, found),
+            Node::Action { buttons, .. } => buttons.iter().for_each(|node| walk(node, found)),
+            Node::Button {
+                id, label, browser, ..
+            } => found.push((*id, label.clone(), *browser)),
+            _ => {}
+        }
+    }
+
+    let mut found = Vec::new();
+    walk(&window.body, &mut found);
+    window
+        .buttons
+        .iter()
+        .for_each(|node| walk(node, &mut found));
+    found
+}
+
+/// **T-120-16: every button that opens the browser carries ↗, and no button that opens a window of
+/// the program does** (passport §6) — over the descriptions of the four letters and of «Последние
+/// письма». What opens the browser is written out here, apart from `Action::opens_browser`, by what
+/// each action does in `letters::act`.
+#[test]
+fn a_button_carries_the_arrow_exactly_when_it_opens_the_browser() {
+    use lang_switcher::letters::Action;
+    use lang_switcher::ui::windows::{letter, letters_list};
+
+    let _guard = with_product_strings();
+
+    let to_the_browser = |action: Action| {
+        matches!(
+            action,
+            Action::OpenChannel
+                | Action::OpenFeedback
+                | Action::OpenSupport
+                | Action::OpenDownload
+                | Action::OpenProgram
+                | Action::OpenLink
+        )
+    };
+
+    let mut faults = Vec::new();
+    let mut seen = 0;
+    for language in [Language::Ru, Language::En, Language::He] {
+        for (name, window) in letter::states(language) {
+            for (id, label, browser) in buttons_of(&window) {
+                let letter::Id::Do(action) = id else {
+                    faults.push(format!("{name}: «{label}» is a button without an action"));
+                    continue;
+                };
+                if browser != to_the_browser(action) {
+                    faults.push(format!(
+                        "{name} ({language:?}): «{label}» ({action:?}) ↗ = {browser}"
+                    ));
+                }
+                seen += 1;
+            }
+        }
+        for (name, window) in letters_list::states(language) {
+            for (_, label, browser) in buttons_of(&window) {
+                if browser {
+                    faults.push(format!(
+                        "{name} ({language:?}): «{label}» opens no browser and carries ↗"
+                    ));
+                }
+                seen += 1;
+            }
+        }
+    }
+    assert!(
+        seen > 30,
+        "the descriptions must have been walked: {seen} buttons"
+    );
+    assert!(
+        faults.is_empty(),
+        "↗ exactly on the buttons that open the browser:\n{}",
+        faults.join("\n")
+    );
+
+    // Both kinds of button that carry the sign are met: the main button of «Обновление» (the page
+    // of downloads) and the card of «Спасибо» (the page of support).
+    let all: Vec<_> = letter::states(Language::Ru)
+        .iter()
+        .flat_map(|(_, window)| buttons_of(window))
+        .filter(|(_, _, browser)| *browser)
+        .map(|(id, _, _)| id)
+        .collect();
+    for action in [Action::OpenDownload, Action::OpenSupport] {
+        assert!(
+            all.contains(&letter::Id::Do(action)),
+            "{action:?} is a button with ↗"
+        );
+    }
+}
+
+/// **T-120-16: «Спасибо» keeps its pair of cards side by side in the narrowest window, 620 × 500,
+/// and does not scroll** (the rule of the pair; 208.166) — in every language, at the factor of the
+/// table, laid out by the layout of the shell and measured by DirectWrite.
+#[test]
+fn thanks_keeps_its_pair_side_by_side_in_the_narrowest_window() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, Part, client_size, lay_out};
+    use lang_switcher::ui::scene::Role;
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::windows::letter;
+
+    let _guard = with_product_strings();
+
+    let mut faults = Vec::new();
+    for language in Language::ALL {
+        // A language excused from fitting «Спасибо» at 620 × 500 (208.175): printed, not tested.
+        if let Some(excuse) = excused::excused("letter thanks", Class::Narrow, language.tag()) {
+            println!("{language:?}: excused — {}", excused::excuse_line(excuse));
+            continue;
+        }
+        let window = letter::states(language)
+            .into_iter()
+            .find(|(name, _)| name == "letter thanks")
+            .expect("the catalogue has «Спасибо»")
+            .1;
+        let cards = [settings::IDS_SUPPORT_PANEL, settings::IDS_FEEDBACK_PANEL]
+            .map(|id| settings::text_in(language, id));
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        let k = fit::k_for(language.tag(), Class::Narrow);
+        let layout = lay_out(&window, client_size(620.0, 500.0), k, rtl, &text);
+
+        let heads: Vec<_> = layout
+            .items
+            .iter()
+            .filter_map(|item| match &item.part {
+                Part::Text {
+                    role: Role::Strong,
+                    text,
+                    ..
+                } if cards.contains(text) => Some(item.rect),
+                _ => None,
+            })
+            .collect();
+        let side_by_side = heads.len() == 2
+            && (heads[0].y - heads[1].y).abs() < 0.5
+            && (heads[0].x - heads[1].x).abs() > 1.0;
+        if !side_by_side {
+            faults.push(format!(
+                "{language:?}: the pair stands one under another {heads:?}"
+            ));
+        }
+        if !layout.shortfall.fits() {
+            faults.push(format!(
+                "{language:?}: does not fit, {:.1} down",
+                layout.shortfall.h
+            ));
+        }
+    }
+    assert!(
+        faults.is_empty(),
+        "«Спасибо» at 620 × 500:\n{}",
+        faults.join("\n")
+    );
+}
+
+/// **T-120-16: the knock of a letter is the window in the corner** (T-120-14): «Спасибо» and
+/// «Новость» knock with «LANG SWITCHER · ПИСЬМО», their heading, the words of the old balloon and
+/// one button, «Открыть письмо»; «Привет» and «Обновление» do not knock. The balloon of
+/// the icon is no longer asked by `letters.rs`.
+#[test]
+fn the_knock_of_a_letter_is_the_window_in_the_corner() {
+    let _guard = with_product_strings();
+
+    for (letter, title) in [
+        (Letter::Thanks, settings::IDS_THANKS_TITLE),
+        (Letter::News(7), settings::IDS_NEWS_LETTER_TITLE),
+    ] {
+        let content = letters::notice_content_in(Language::Ru, letter)
+            .unwrap_or_else(|| panic!("{letter:?} knocks"));
+        let (_, words) = letters::toast_strings(letter).expect("its two strings");
+        assert_eq!(
+            content.about,
+            settings::text(settings::IDS_CORNER_LETTER),
+            "{letter:?}: whose window — one short word, as the hint's and «Обновлено»'s"
+        );
+        assert_eq!(
+            content.title,
+            settings::text(title),
+            "{letter:?}: the heading"
+        );
+        assert_eq!(content.text, settings::text(words), "{letter:?}: the words");
+        assert_eq!(
+            content.main.0,
+            settings::text(settings::IDS_LETTERS_OPEN),
+            "{letter:?}: «Открыть письмо»"
+        );
+        assert!(
+            content.second.is_none() && content.check.is_none() && !content.picture,
+            "{letter:?}: one button and the ✕ — the letter comes by itself later, as after an \
+             unnoticed knock"
+        );
+    }
+    for letter in [Letter::Welcome, Letter::Update] {
+        assert!(
+            letters::notice_content_in(Language::Ru, letter).is_none(),
+            "{letter:?} does not knock"
+        );
+    }
+
+    let code = squeezed_code(&letters_source());
+    assert!(
+        code.contains("crate::corner::show(content, true, notice_ended);"),
+        "the knock is shown by the window in the corner, with the sound of a notification"
+    );
+    assert!(
+        !code.contains("announce_letter("),
+        "and the balloon of the icon is not asked any more"
+    );
+}
+
+/// **T-120-16 п. 4: no number over the heading of a letter** — the only window with a version over
+/// its title is «О программе». The line over the heading of each of the four is whose letter it is.
+#[test]
+fn the_line_over_the_heading_of_a_letter_has_no_version() {
+    use lang_switcher::ui::scene::Node;
+    use lang_switcher::ui::windows::letter;
+
+    let _guard = with_product_strings();
+
+    for language in [Language::Ru, Language::En, Language::Ar] {
+        for (name, window) in letter::states(language) {
+            let Node::Column(parts) = &window.body else {
+                panic!("{name}: the body is a column");
+            };
+            let Some(Node::Header { eyebrow, .. }) = parts.first() else {
+                panic!("{name}: the head comes first");
+            };
+            assert_eq!(
+                eyebrow.as_deref(),
+                Some(settings::text_in(language, settings::IDS_LETTER_CAPTION).as_str()),
+                "{name} ({language:?}): the line over the heading says whose letter it is"
+            );
+            assert!(
+                !eyebrow
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains(env!("CARGO_PKG_VERSION")),
+                "{name}: and carries no version"
+            );
+        }
+    }
+}
+
+/// **Задача T-103-2, сторож (4), решение 181.1 — «Спасибо» sends a person to write in the language of
+/// its window, and a change of language on the fly moves it** (moved here from `tests\settings.rs`
+/// with the window, T-120-16). «Спасибо» opened hidden by the product's own `letters::show_letter`
+/// and asked by the door where its link «Открыть группу» would take them — the very language
+/// `letters::act` reads the address by. Built in Russian, the group; the language moved and
+/// `letters::language_changed` told the windows — the letter is built again in English, a new window
+/// whose caption is English — GitHub Issues; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn thanks_sends_a_person_to_write_in_the_language_of_its_window() {
+    let _guard = with_product_strings();
+
+    let caption = |window| {
+        let mut buffer = [0u16; 128];
+        // SAFETY: a live window of this thread; the buffer is a local of this frame.
+        let length =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(window, &mut buffer) };
+        String::from_utf16_lossy(&buffer[..usize::try_from(length).unwrap_or(0)])
+    };
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_letter_hidden(owner.0, Letter::Thanks, None)
+        .expect("«Спасибо» must open");
+    let now = || {
+        let window = letters::testing::letter_window().expect("«Спасибо» is open");
+        let address = letters::testing::feedback_url(window).expect("a window of `letters`");
+        (window, address)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    // The road of FR-94.
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, address) = now();
+    seen.push(("En, told", address));
+    let english_caption = caption(english);
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    let group = links::GROUP_URL;
+    let issues = links::ISSUES_URL;
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "the letter is built again in the new language"
+    );
+    assert_eq!(
+        english_caption,
+        settings::text_in(Language::En, settings::IDS_LETTER_CAPTION),
+        "and the new window speaks English"
+    );
+}
+
+/// **Задача T-103-2, сторож (4), решение 181.1 — a change of language on the fly moves where a
+/// person is sent to write**, the wizard a window of the shell since T-120-19 (moved here from
+/// `tests\settings.rs`, where it opened the dialog `IDD_WIZARD`). Opened hidden and asked by the
+/// door of the task where its address would take them: built in Russian, the group; the language
+/// moved and [`letters::language_changed`] told the window — which opens again in the new
+/// language — GitHub Issues; Ukrainian, the group again.
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the address stays with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_where_a_person_is_sent_to_write() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_wizard_hidden(owner.0, HMODULE::default())
+        .expect("the wizard must open");
+    let now = || {
+        let window = letters::wizard_window().expect("the wizard is open");
+        let address = letters::testing::feedback_url(window).expect("a window of `letters`");
+        (window, address)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, address) = now();
+    seen.push(("En, told", address));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let group = links::GROUP_URL;
+    let issues = links::ISSUES_URL;
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", group),
+            ("En, not told", group),
+            ("En, told", issues),
+            ("Uk, told", group),
+        ],
+        "181.1: the address follows the language of the window, and moves when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "the wizard is built again in the new language"
+    );
+}
+
+/// **Задача T-103-9, сторож (2), решение 181.33 — a change of language on the fly moves the two
+/// pages of the site too.** «От автора», a window of the shell since T-120-17 (the test moved here
+/// from `tests\settings.rs`, where it opened the dialog `IDD_AUTHOR`), opened hidden and asked by
+/// the door of the task which pages «Открыть страницу загрузки» and the address under the panda
+/// would open — by the language `letters::act` chooses them by. Built in Russian, the Russian
+/// pages; English after [`letters::language_changed`], the pages under `/en/`; Ukrainian, its own
+/// under `/uk/` (Q-206-1); Kazakh, the Russian ones again (181.33 п. 2, 202.6).
+///
+/// ⚠ Control: the language moved and **nobody told the window** — the pages stay with the words
+/// the window shows.
+#[cfg(feature = "testing")]
+#[test]
+fn a_change_of_language_on_the_fly_moves_the_pages_of_the_site_too() {
+    let _guard = with_product_strings();
+
+    let owner = HiddenOwner::new();
+    let first = letters::testing::open_author_hidden(owner.0, HMODULE::default(), "0.83.0")
+        .expect("«От автора» must open");
+    let now = || {
+        let window = letters::testing::author_window().expect("«От автора» is open");
+        let pages = letters::testing::site_pages(window).expect("a window of `letters`");
+        (window, pages)
+    };
+
+    let mut seen = Vec::new();
+    seen.push(("built in Ru", now().1));
+
+    // The control: the language moved and nobody told the window.
+    settings::set_ui_language(Language::En);
+    seen.push(("En, not told", now().1));
+
+    letters::testing::language_changed_hidden(owner.0);
+    let (english, pages) = now();
+    seen.push(("En, told", pages));
+
+    settings::set_ui_language(Language::Uk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Uk, told", now().1));
+
+    settings::set_ui_language(Language::Kk);
+    letters::testing::language_changed_hidden(owner.0);
+    seen.push(("Kk, told", now().1));
+
+    settings::set_ui_language(Language::Ru);
+
+    println!("{seen:#?}");
+
+    let russian = (links::DOWNLOAD_URL, links::PROGRAM_URL);
+    let english_pages = (links::DOWNLOAD_URL_EN, links::PROGRAM_URL_EN);
+    let ukrainian = (
+        "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk",
+        "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk",
+    );
+
+    assert_eq!(
+        seen,
+        [
+            ("built in Ru", russian),
+            ("En, not told", russian),
+            ("En, told", english_pages),
+            ("Uk, told", ukrainian),
+            ("Kk, told", russian),
+        ],
+        "181.33: the pages follow the language of the window, and move when it moves"
+    );
+    assert_ne!(
+        english, first,
+        "«От автора» is built again in the new language"
+    );
+}
+
+/// **The pictures of C3 of T-120-16 and T-120-17** — the four letters, «Последние письма» and «От
+/// автора» drawn in memory by the drawing of the shell itself (the layout and `elements::draw`, as a
+/// live window draws them): Russian and German straight and Hebrew mirrored, both themes, the window of two thirds of a 1920 × 1080
+/// screen (1280 × 720) and the narrowest one (620 × 500), at the factor of the table. Printed only
+/// when `LANGSW_LETTERS_DIR` names a folder.
+#[cfg(feature = "testing")]
+#[test]
+fn print_the_letters() {
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::{Color, Theme};
+    use lang_switcher::ui::windows::{author, letter, letters_list, wizard};
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    let Some(folder) = std::env::var_os("LANGSW_LETTERS_DIR") else {
+        return;
+    };
+    let _guard = with_product_strings();
+    // SAFETY: the apartment of this test's thread, for the whole test (`Art` outlives each canvas).
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut art = lang_switcher::ui::art::Art::new();
+    let folder = Path::new(&folder);
+    std::fs::create_dir_all(folder).expect("the folder of the pictures");
+
+    for language in [Language::Ru, Language::De, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("the text of the language");
+        let windows: Vec<(String, lang_switcher::ui::scene::Window<u16>)> =
+            letter::states(language)
+                .into_iter()
+                .map(|(name, window)| (name, window.map(&letter::Id::number)))
+                .chain(
+                    letters_list::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&letters_list::Id::number))),
+                )
+                .chain(
+                    author::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&author::Id::number))),
+                )
+                .chain(
+                    wizard::states(language)
+                        .into_iter()
+                        .map(|(name, window)| (name, window.map(&wizard::Id::number))),
+                )
+                .collect();
+        for (name, window) in &windows {
+            for (w, h) in [(1280.0_f32, 720.0_f32), (620.0, 500.0)] {
+                let size = client_size(w, h);
+                let k = fit::k_for(language.tag(), size.class);
+                let layout = lay_out(window, size, k, rtl, &text);
+                for theme in [Theme::Light, Theme::Dark] {
+                    let look = Look {
+                        theme,
+                        rtl,
+                        b: layout.b,
+                        h: size.h,
+                        text: &text,
+                    };
+                    let mut canvas =
+                        Canvas::in_memory(size.w, size.h, 1.0, Mode::Direct2D).expect("a canvas");
+                    canvas.frame_with(Some(&mut art), |painter| {
+                        painter.clear(Color::Bg.get(theme));
+                        for item in &layout.items {
+                            elements::draw(painter, &look, &item.part, item.rect, State::NORMAL);
+                        }
+                    });
+                    let file = folder.join(format!(
+                        "{}-{}-{}x{}-{}.png",
+                        name.replace(' ', "-"),
+                        language.tag(),
+                        w as u32,
+                        h as u32,
+                        if theme == Theme::Dark {
+                            "dark"
+                        } else {
+                            "light"
+                        },
+                    ));
+                    canvas.save_png(&file).expect("the picture is written");
+                }
+            }
+        }
+    }
+}
+
+/// What the demonstration of a description shows: the word on the screen of the laptop and whether
+/// the key is lit — the node over the picture of «Привет», or none.
+fn shown_on_the_picture<I>(window: &lang_switcher::ui::scene::Window<I>) -> Option<(String, bool)> {
+    use lang_switcher::ui::scene::{Node, OnPicture};
+
+    fn find<I>(node: &Node<I>) -> Option<(String, bool)> {
+        match node {
+            Node::OverPicture { over, .. } => {
+                let word = over.iter().find_map(|(anchor, on)| match (anchor, on) {
+                    (&"screen", OnPicture::Word { word, .. }) => Some(word.clone()),
+                    _ => None,
+                })?;
+                let pressed = over.iter().find_map(|(anchor, on)| match (anchor, on) {
+                    (&"key", OnPicture::Keys { pressed, .. }) => Some(*pressed),
+                    _ => None,
+                })?;
+                Some((word, pressed))
+            }
+            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) => {
+                nodes.iter().find_map(find)
+            }
+            _ => None,
+        }
+    }
+
+    find(&window.body)
+}
+
+/// **T-120-25 п. 4, the red «before»: in «Привет» on the shell, after three ticks the frame shown
+/// is `demo_frame(3, pair)`** — the word typed so far on the screen of the laptop and the key —
+/// and after the turn of 48 it is the first frame again. «Привет» asks the window for the tick of
+/// the demonstration (`DEMO_TICK_MS`); the other letters ask none («в покое — ноль»).
+///
+/// Before the task the letter had no tick: the example stood still and there was nothing over the
+/// picture.
+#[test]
+fn hello_shows_the_frame_of_its_tick() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Event;
+    use lang_switcher::ui::windows::letter::{Id, LetterView};
+
+    let _guard = with_product_strings();
+
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    let view = |letter| LetterView {
+        letter,
+        plan: letters::plan_in(Language::Ru, letter, &context),
+        key: "Pause".to_owned(),
+        tick: 0,
+        language: Language::Ru,
+        theme: lang_switcher::theme::ThemeSetting::Light,
+    };
+
+    let mut hello = view(Letter::Welcome);
+    let pair = hello.plan.demo_pair;
+    let expected = |tick| {
+        let frame = letters::demo_frame(tick, pair);
+        (
+            frame.text.chars().take(frame.shown).collect::<String>(),
+            frame.pressed,
+        )
+    };
+
+    for _ in 0..3 {
+        hello.event(Event::<Id>::Tick);
+    }
+    let after_three = shown_on_the_picture(&hello.describe());
+    for _ in 3..letters::DEMO_FRAMES {
+        hello.event(Event::<Id>::Tick);
+    }
+    let after_the_turn = shown_on_the_picture(&hello.describe());
+
+    assert_eq!(
+        after_three,
+        Some(expected(3)),
+        "after three ticks «Привет» shows the frame demo_frame(3, pair)"
+    );
+    assert_eq!(
+        after_the_turn,
+        Some(expected(0)),
+        "and after the turn of {} the first one again",
+        letters::DEMO_FRAMES
+    );
+    assert_ne!(
+        expected(3),
+        expected(0),
+        "the control: the third frame differs from the first"
+    );
+    assert_eq!(hello.tick(), Some(letters::DEMO_TICK_MS), "«Привет» ticks");
+    for letter in [Letter::Thanks, Letter::Update, Letter::News(7)] {
+        assert_eq!(view(letter).tick(), None, "{letter:?} stands still");
+    }
+}
+
+/// **«Обновление» dates the release in the language of its window** — the same as «От автора»
+/// below (T-120-17): `plan_in` speaks `language`, and the day of the release came out in the
+/// program's («Version 1.7.1 came out on 16 ноября» in Tamil, the list of the wave of T-120-24).
+#[test]
+fn the_update_letter_dates_the_release_in_the_language_of_its_window() {
+    use lang_switcher::letters::{format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let day = item.date.expect("the sample entry carries its day");
+    let context = letters::PlanContext {
+        version: "1.7.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: false,
+        item: Some(&item),
+    };
+    let plan = letters::plan_in(Language::De, Letter::Update, &context);
+    let german = format_date_in(Language::De, day);
+    let russian = format_date_in(Language::Ru, day);
+
+    println!("De: {} (the program speaks Russian)", plan.note);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        plan.note.contains(&german) && !plan.note.contains(&russian),
+        "the notice of «Обновление» must carry «{german}», the day in the language of the window: {}",
+        plan.note
+    );
+}
+
+/// **T-120-17: «От автора» dates the reading of the feed in the language of its window**, not in
+/// the program's. The two are one in the running program; a description built for another language
+/// — the pictures of C3, the instrument of fitting, the window built again after a change — printed
+/// the day with the Russian month of the program («16 ноября» in Hebrew).
+#[test]
+fn the_author_window_dates_the_feed_in_the_language_of_its_window() {
+    use lang_switcher::letters::{FeedView, author_view_in, format_date_in, sample_entry};
+
+    let _guard = with_product_strings();
+
+    let item = sample_entry();
+    let today = item.date.expect("the sample entry carries its day");
+    let state = Letters {
+        feed_last_read: Some(today),
+        ..Letters::default()
+    };
+    let view = author_view_in(
+        Language::De,
+        &state,
+        today,
+        "1.7.0",
+        FeedView {
+            update: None,
+            news: &[],
+        },
+    );
+    let german = format_date_in(Language::De, today);
+    let russian = format_date_in(Language::Ru, today);
+
+    println!("De: {} (the program speaks Russian)", view.feed_state);
+
+    assert_ne!(
+        german, russian,
+        "the control: the two languages name the month apart"
+    );
+    assert!(
+        view.feed_state.contains(&german) && !view.feed_state.contains(&russian),
+        "the line of the feed must carry «{german}», the day in the language of the window: {}",
+        view.feed_state
+    );
+}
+
+/// **T-120-17: the two lines of the state of «От автора» are the element `Status` of the shell, and
+/// its dot says whether the line is good** (passport §6): the feed read — the accent, never read —
+/// the quiet dot; the version the latest — the accent, a newer one announced — the warning. Both
+/// ways, so that a window that put one dot on every line is caught; and through `author_view_in`,
+/// so that the view says it from the state and not the test.
+#[test]
+fn the_lines_of_the_state_of_the_author_window_say_by_their_dot_whether_they_are_good() {
+    use lang_switcher::letters::{FeedView, author_view_in, sample_entry};
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{MenuState, Node};
+    use lang_switcher::ui::windows::author::{Author, Id};
+
+    let _guard = with_product_strings();
+
+    let newer = sample_entry();
+    let today = newer.date.expect("the sample entry carries its day");
+    let cases = [
+        (
+            Some(today),
+            Some(&newer),
+            MenuState::Working,
+            MenuState::Restart,
+        ),
+        (None, None, MenuState::Paused, MenuState::Working),
+    ];
+
+    for (read, update, feed, version) in cases {
+        let state = Letters {
+            feed_last_read: read,
+            ..Letters::default()
+        };
+        let view = author_view_in(
+            Language::Ru,
+            &state,
+            today,
+            "1.7.0",
+            FeedView { update, news: &[] },
+        );
+        let lines = [
+            Node::<Id>::Status {
+                state: feed,
+                words: view.feed_state.clone(),
+            },
+            Node::<Id>::Status {
+                state: version,
+                words: view.version_state.clone(),
+            },
+        ];
+        let window = Author {
+            view,
+            language: Language::Ru,
+            theme: ThemeSetting::Light,
+        }
+        .describe();
+        let body = format!("{:?}", window.body);
+
+        for line in lines {
+            println!("read {read:?}, update {}: {line:?}", update.is_some());
+            assert!(
+                body.contains(&format!("{line:?}")),
+                "read {read:?}, update {}: the window must carry {line:?}",
+                update.is_some()
+            );
+        }
+    }
+}
+
+/// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
+/// window, 620 × 500, at a type not under 12 points** — in every language, at the factor of the
+/// table, laid out by the layout of the shell and measured by DirectWrite; the pair of its cards
+/// stands side by side there (the rule of the pair). A language that needs more than the pair gives
+/// way to is named by the instrument of fitting (`tests\ui_fit.rs`) and the common list of what is
+/// excused.
+///
+/// Before the task «От автора» was the dialog `IDD_AUTHOR`: there was no description to lay out, and
+/// its template did not fit 620 × 500 (the mock-up's measure: 84 points short).
+#[test]
+fn the_author_window_fits_the_narrowest_window() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Class, client_size, lay_out};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::TYPE_FLOOR;
+    use lang_switcher::ui::windows::catalogue;
+
+    let _guard = with_product_strings();
+
+    let mut faults = Vec::new();
+    for language in [Language::Ru, Language::De, Language::En, Language::He] {
+        let Some((_, window)) = catalogue(language)
+            .into_iter()
+            .find(|(name, _)| name == "author")
+        else {
+            faults.push(format!(
+                "{language:?}: «От автора» is not a window of the shell"
+            ));
+            continue;
+        };
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        let k = fit::k_for(language.tag(), Class::Narrow);
+        let layout = lay_out(&window, client_size(620.0, 500.0), k, rtl, &text);
+        if !layout.shortfall.fits() {
+            faults.push(format!(
+                "{language:?}: does not fit 620 × 500, {:.1} down",
+                layout.shortfall.h
+            ));
+        }
+        if layout.b < TYPE_FLOOR.0 {
+            faults.push(format!("{language:?}: type {:.2} under 12", layout.b));
+        }
+    }
+    assert!(faults.is_empty(), "«От автора»:\n{}", faults.join("\n"));
 }

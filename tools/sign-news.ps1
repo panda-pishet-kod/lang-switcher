@@ -18,6 +18,16 @@
       * a sha256 that is not 64 hexadecimal digits; a size that is not 1 byte to 16 MB
       * a field of [download] or [stop] missing, given twice or unknown; [[download]], [[stop]]
       * a [stop] in a file not signed with -Reserve -- the updater honours it only from the reserve
+    and since stage E120 (decision 208.194), about the length of a text:
+      * a text longer than the cap of its language and of the kind of its entry in
+        tools\feed-caps.tsv (tag, update, news) -- the whole text, in code points, line breaks not
+        counted; the caps are printed by the instrument of fitting (tests\ui_fit.rs,
+        print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE), and an update at its cap fits the
+        letter "Obnovlenie", a news item at its cap the letter "Novost", without lowering the type
+        size of the program
+      * a language whose cap of that kind is 0 -- the letter does not fit even without a text: a
+        person of that language sees the en table instead
+      * a language the caps file does not name
 
     A refusal writes nothing: the file on disk is left exactly as it was, and the exit code is
     non-zero.
@@ -84,6 +94,72 @@ function Test-FirstLine($entry, [string]$tag, [string]$line) {
     }
 }
 
+# STAGE E120 (decision 208.194; word of the owner on the kinds, 2026-11-20): the cap of the WHOLE text
+# of an entry, by language AND by the kind of the entry. The instrument of fitting prints it into
+# tools\feed-caps.tsv ("tag<TAB>update<TAB>news", '#' lines explain): an update at its cap still fits
+# the letter "Obnovlenie" of its language, a news item at its cap the letter "Novost" -- narrow and
+# ordinary, at the type size of the table. Those two letters are the only windows that show the whole
+# text ("Recent letters" shows the first line, held to $EXCERPT_CAP above). The feed is ours, and a
+# letter must not lower the type size of the whole program. The file is never edited by hand; a
+# missing file or a malformed line is a refusal.
+$CapsFile = Join-Path $PSScriptRoot 'feed-caps.tsv'
+$Caps = @{}
+
+function Read-Caps {
+    if (-not (Test-Path -LiteralPath $CapsFile)) {
+        $why = "no caps of the feed at {0} -- they are printed by tests\ui_fit.rs " +
+            "(print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE)"
+        Fail ($why -f $CapsFile)
+    }
+    $number = 0
+    foreach ($raw in [System.IO.File]::ReadAllLines($CapsFile, [System.Text.UTF8Encoding]::new($false))) {
+        $number++
+        $row = $raw.Trim()
+        if ($row -eq '' -or $row.StartsWith('#')) { continue }
+        if ($row -notmatch '^([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\t(\d+)\t(\d+)$') {
+            Fail ("{0}, line {1}: not 'tag<TAB>update<TAB>news': {2}" -f $CapsFile, $number, $raw)
+        }
+        $Caps[$Matches[1]] = [pscustomobject]@{ update = [int]$Matches[2]; news = [int]$Matches[3]; Line = $number }
+    }
+}
+
+# The cap of the kind of `entry` in `tag`: an entry of another type has no cap and is refused.
+function Cap-Of($entry, [string]$tag) {
+    if (@('update', 'news') -notcontains $entry.Type) {
+        Fail ("entry {0} [{1}]: the type must come before the languages and be news or update, found '{2}'" -f $entry.Id, $tag, $entry.Type)
+    }
+    return $Caps[$tag].($entry.Type)
+}
+
+# A language table of an entry: its language must be in the caps file, with a cap of its kind above 0.
+function Test-Language($entry, [string]$tag) {
+    if (-not $Caps.ContainsKey($tag)) {
+        $why = "entry {0} [{1}]: the language has no cap in {2} -- print the caps again with the " +
+            "instrument of fitting; nothing is signed with a text nobody measured"
+        Fail ($why -f $entry.Id, $tag, $CapsFile)
+    }
+    if ((Cap-Of $entry $tag) -eq 0) {
+        $why = "entry {0} ({1}) [{2}]: the letter does not fit even without a text in this language " +
+            "(cap 0, {3}, line {4}) -- remove this language from the entry; a person of it will see en"
+        Fail ($why -f $entry.Id, $entry.Type, $tag, $CapsFile, $Caps[$tag].Line)
+    }
+}
+
+# A whole text: its code points, line breaks not counted and the ends trimmed, against the cap of
+# its kind.
+function Test-Text($entry, [string]$tag, [string]$body) {
+    $points = @((($body -replace "[`r`n]", '').Trim()).EnumerateRunes()).Count
+    $cap = Cap-Of $entry $tag
+    if ($points -gt $cap) {
+        $letter = if ($entry.Type -eq 'update') { 'Obnovlenie' } else { 'Novost' }
+        $why = "entry {0} ({1}) [{2}]: the text is {3} characters (code points, line breaks not counted), " +
+            "the cap of {1} is {4} ({5}, line {6}) -- a longer text makes the letter '{7}' lower the " +
+            "type size of the program; shorten the text"
+        Fail ($why -f $entry.Id, $entry.Type, $tag, $points, $cap, $CapsFile, $Caps[$tag].Line, $letter)
+    }
+    $script:TextsChecked++
+}
+
 Write-Host '======================================================================'
 Write-Host ' Lang_Switcher -- check and sign the author feed (FR-102)'
 Write-Host '======================================================================'
@@ -139,7 +215,34 @@ $stops = 0
 $download = [ordered]@{}
 $stop = [ordered]@{}
 
+Read-Caps
+$TextsChecked = 0
+$collecting = $false
+$awaitFirst = $false
+$gathered = New-Object System.Collections.Generic.List[string]
+
 foreach ($line in $lines) {
+    # STAGE E120 (decision 208.194): a text of several lines is gathered WHOLE before anything else
+    # reads the line -- inside it a blank line, a '#' or a '[' is text, not a comment or a table --
+    # and measured against the cap of its language when its closing quotes come. Until E120 only
+    # its first line was read (the excerpt below) and the rest was skipped line by line.
+    if ($collecting) {
+        $close = $line.IndexOf('"""')
+        $part = if ($close -ge 0) { $line.Substring(0, $close) } else { $line }
+        if ($awaitFirst) {
+            $awaitFirst = $false
+            if ($close -lt 0 -or $part.Trim() -ne '') { Test-FirstLine $current $language $part.Trim() }
+        }
+        if ($close -ge 0) {
+            if ($part -ne '') { $gathered.Add($part) }
+            $collecting = $false
+            Test-Text $current $language ($gathered -join "`n")
+        } else {
+            $gathered.Add($line)
+        }
+        continue
+    }
+
     $trimmed = $line.Trim()
 
     if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
@@ -161,6 +264,7 @@ foreach ($line in $lines) {
         $language = $Matches[1]
         $current.Languages += $language
         $section = 'language'
+        Test-Language $current $language
         continue
     }
 
@@ -198,18 +302,29 @@ foreach ($line in $lines) {
     # is and one of 160 makes it grow; an Urdu one of 150 does not. Published entries of 1.2.0 are
     # 116 at most.
     if ($section -eq 'language') {
-        if ($awaitFirst) {
-            $awaitFirst = $false
-            if ($trimmed -ne '"""') { Test-FirstLine $current $language $trimmed }
-            continue
-        }
         if ($trimmed -match '^text\s*=\s*"""(.*)$') {
-            $rest = $Matches[1].Trim()
-            if ($rest -eq '') { $awaitFirst = $true }
-            elseif ($rest -ne '"""') { Test-FirstLine $current $language ($rest -replace '"""$', '') }
+            $rest = $Matches[1]
+            $close = $rest.IndexOf('"""')
+            if ($close -ge 0) {
+                # The whole text on the line of its key.
+                $one = $rest.Substring(0, $close)
+                Test-FirstLine $current $language $one.Trim()
+                Test-Text $current $language $one
+            } else {
+                # TOML trims the line break right after the opening quotes: the text starts on the
+                # next line, and that line is the excerpt; otherwise the rest of this one is.
+                $gathered.Clear()
+                $collecting = $true
+                if ($rest.Trim() -eq '') { $awaitFirst = $true }
+                else { $awaitFirst = $false; Test-FirstLine $current $language $rest.Trim(); $gathered.Add($rest) }
+            }
             continue
         }
-        if ($trimmed -match '^text\s*=\s*"(.*)"$') { Test-FirstLine $current $language $Matches[1]; continue }
+        if ($trimmed -match '^text\s*=\s*"(.*)"$') {
+            Test-FirstLine $current $language $Matches[1]
+            Test-Text $current $language $Matches[1]
+            continue
+        }
     }
 
     if ($section -eq 'language' -or $section -eq 'other') { continue }
@@ -223,8 +338,11 @@ foreach ($line in $lines) {
 
 if ($current) { $items += $current }
 
+if ($collecting) { Fail ("entry {0} [{1}]: a text opened with three quotes is never closed" -f $current.Id, $language) }
+
 if ($schema -ne 1) { Fail ("schema must be 1, found {0}" -f $schema) }
 Write-Host ("  schema = 1                    ok")
+Write-Host ("  {0} texts within the caps of {1}  ok" -f $TextsChecked, $CapsFile)
 
 $news = @($items | Where-Object { $_.Type -eq 'news' })
 $updates = @($items | Where-Object { $_.Type -eq 'update' })
