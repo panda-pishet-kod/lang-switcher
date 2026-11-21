@@ -2579,7 +2579,7 @@ pub fn handle_ui_message(message: u32, wparam: WPARAM, lparam: LPARAM) -> Option
 }
 
 // ---------------------------------------------------------------------------------------
-// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164
+// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164, 208.204
 // ---------------------------------------------------------------------------------------
 
 /// The window the person was in when the flag was clicked — the first window of the Z-order that is
@@ -2666,7 +2666,8 @@ fn arm_list_timer(hwnd: HWND, which: usize) {
 
 /// A left click on the flag: the list of layouts of Windows — решение 208.88, «как если бы нажали по
 /// стандартному значку rus/eng». Windows 10 — `WM_LBUTTONDOWN`/`UP` posted to `InputIndicatorButton`
-/// on this thread (решение 208.123); Windows 11 — UI Automation `Invoke` on the watcher thread. The
+/// on this thread (решение 208.123), then the watcher puts the cursor on the selected row of the list
+/// once it is up (решение 208.204); Windows 11 — UI Automation `Invoke` on the watcher thread. The
 /// session remembers the window the person typed in and the layout the flag showed; whether the list
 /// opened at all is looked at once, 1.5 s after the press.
 fn open_list() {
@@ -2693,9 +2694,17 @@ fn open_list() {
         return;
     };
 
-    if !crate::flags::press_indicator_button()
-        && !app::post_to_watcher_thread(crate::flags::WM_APP_LIST_OPEN)
-    {
+    let asked = if crate::flags::press_indicator_button() {
+        // Windows 10, решение 208.204: the cursor onto the selected row of the list once it is
+        // up — the list of a pressed button takes the arrows only then. A watcher that cannot be
+        // asked leaves the cursor where it is; the list is open all the same.
+        let _ = app::post_to_watcher_thread(crate::flags::WM_APP_LIST_CURSOR);
+        true
+    } else {
+        app::post_to_watcher_thread(crate::flags::WM_APP_LIST_OPEN)
+    };
+
+    if !asked {
         list_missing();
         return;
     }

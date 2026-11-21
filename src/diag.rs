@@ -862,6 +862,15 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // and no value — not a window, not a layout; appended at the end.
     ("list gift skipped", Kind::Tray),
     ("list gift given up", Kind::Tray),
+    // Stage E119, решение 208.204: Windows 10, after the program pressed РУС/ENG the cursor goes
+    // onto the selected row of the list (`flags::list_cursor_tick`) — «no list» when the list was
+    // not up within the looks, «no row» when it was and no row answered selected; the cursor then
+    // stays where it was. Facts and no value — not a window, not a point; appended at the end.
+    ("list cursor: no list", Kind::Tray),
+    ("list cursor: no row", Kind::Tray),
+    // The same: the system refused to put the cursor on the row it was found at — the call, as the
+    // other refusals of a call are named; the code is the system's.
+    ("SetCursorPos", Kind::Tray),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

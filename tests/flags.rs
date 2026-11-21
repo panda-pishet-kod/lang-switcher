@@ -901,6 +901,259 @@ fn the_gift_of_the_list_waits_for_the_window_and_is_given_once() {
     );
 }
 
+/// The text of `src\<file>`, with the line ends of the repository.
+fn source(file: &str) -> String {
+    std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join(file),
+    )
+    .unwrap_or_else(|error| panic!(r"src\{file} reads: {error}"))
+    .replace("\r\n", "\n")
+}
+
+/// The body of `fn <name>(` in `text`, up to the first line that is a lone `}`.
+fn body_of<'a>(text: &'a str, name: &str) -> &'a str {
+    let start = text
+        .find(&format!("fn {name}("))
+        .unwrap_or_else(|| panic!("fn {name} is there"));
+    let end = text[start..]
+        .find("\n}\n")
+        .unwrap_or_else(|| panic!("fn {name} ends"));
+
+    &text[start..start + end]
+}
+
+/// ⭐ **The cursor waits for the list of Windows 10, and is put once** — решение 208.204. The list
+/// coming up at every look of the wait, and never: its row is looked for at the first look that
+/// finds the list and at no other, and the looks end within `1 + LIST_CURSOR_LOOKS` — the 1.5 s the
+/// stand waited with, the same as the look of `LIST_MS` at whether the list opened at all.
+#[test]
+fn the_cursor_waits_for_the_list_and_is_put_once() {
+    use flags::CursorStep;
+
+    assert_eq!(
+        flags::cursor_step(true, flags::LIST_CURSOR_LOOKS),
+        CursorStep::Row
+    );
+    assert_eq!(flags::cursor_step(true, 0), CursorStep::Row);
+    assert_eq!(
+        flags::cursor_step(false, flags::LIST_CURSOR_LOOKS),
+        CursorStep::Wait {
+            left: flags::LIST_CURSOR_LOOKS - 1
+        }
+    );
+    assert_eq!(flags::cursor_step(false, 0), CursorStep::GiveUp);
+    assert_eq!(
+        u32::from(flags::LIST_CURSOR_LOOKS) * flags::LIST_CURSOR_MS,
+        flags::LIST_MS[0],
+        "the wait for the row is the look at whether the list opened"
+    );
+
+    let looks = usize::from(flags::LIST_CURSOR_LOOKS) + 1;
+
+    // `Some(k)` — the list is up from the look `k` on; `None` — it never comes.
+    for up_from in (0..=looks).map(|k| (k < looks).then_some(k)) {
+        let mut left = flags::LIST_CURSOR_LOOKS;
+        let mut rows = 0;
+        let mut taken = 0;
+
+        loop {
+            let up = up_from.is_some_and(|k| taken >= k);
+            taken += 1;
+
+            match flags::cursor_step(up, left) {
+                CursorStep::Row => {
+                    assert!(up, "{up_from:?}: a row looked for with no list");
+                    rows += 1;
+                    break;
+                }
+                CursorStep::Wait { left: next } => left = next,
+                CursorStep::GiveUp => break,
+            }
+
+            assert!(taken < looks, "{up_from:?}: the looks did not end");
+        }
+
+        assert_eq!(rows, usize::from(up_from.is_some()), "{up_from:?}");
+        assert_eq!(
+            taken,
+            up_from.map_or(looks, |k| k + 1),
+            "{up_from:?}: the row at the first look that finds the list, the end after the last"
+        );
+    }
+
+    // The wiring of `list_cursor_tick`: the row only on the look «row», the flag gone off ends the
+    // looks before anything is looked at.
+    let flags_rs = source("flags.rs");
+    let tick = body_of(&flags_rs, "list_cursor_tick");
+    let off = tick
+        .find("if !is_on()")
+        .expect("the flag off ends the looks");
+    let row = tick.find("CursorStep::Row =>").expect("the look «row»");
+    let wait = tick.find("CursorStep::Wait").expect("the look «wait»");
+
+    assert!(off < row && row < wait);
+    assert!(
+        tick[row..wait].contains("cursor_to_selected_row(")
+            && tick.matches("cursor_to_selected_row(").count() == 1,
+        "the row is looked for on the look «row» and nowhere else"
+    );
+    assert!(tick[wait..].contains("\"list cursor: no list\""));
+}
+
+/// ⭐ **No row — the cursor stays where it is** — решение 208.204. The point is the middle of the
+/// selected row, on any monitor; no row or a rectangle with no area gives no point — and the
+/// program moves the cursor in one place only, with that point and no other.
+#[test]
+fn the_cursor_goes_to_the_middle_of_the_row_and_nowhere_without_one() {
+    use windows::Win32::Foundation::RECT;
+
+    let rect = |left, top, right, bottom| RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
+
+    assert_eq!(flags::cursor_on_row(None), None);
+    assert_eq!(flags::cursor_on_row(Some(rect(0, 0, 0, 0))), None);
+    assert_eq!(flags::cursor_on_row(Some(rect(100, 200, 100, 240))), None);
+    assert_eq!(flags::cursor_on_row(Some(rect(100, 200, 300, 200))), None);
+    assert_eq!(flags::cursor_on_row(Some(rect(300, 240, 100, 200))), None);
+    assert_eq!(
+        flags::cursor_on_row(Some(rect(1500, 800, 1800, 840))),
+        Some((1650, 820))
+    );
+    // A monitor to the left of the main one: the coordinates are negative.
+    assert_eq!(
+        flags::cursor_on_row(Some(rect(-1800, 700, -1500, 741))),
+        Some((-1650, 720))
+    );
+
+    // The wiring: one move of the cursor in the program, inside `cursor_to_selected_row`, with the
+    // point of `cursor_on_row` — and none on the way of «no row».
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut moves = Vec::new();
+
+    for entry in std::fs::read_dir(&root).expect(r"src\ lists") {
+        let path = entry.expect("an entry").path();
+
+        if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path).expect("a source reads");
+
+            for _ in text.matches("SetCursorPos(") {
+                moves.push(path.file_name().unwrap_or_default().to_owned());
+            }
+        }
+    }
+
+    assert_eq!(
+        moves,
+        ["flags.rs"],
+        "one move of the cursor, in module flags"
+    );
+
+    let flags_rs = source("flags.rs");
+    let body = body_of(&flags_rs, "cursor_to_selected_row");
+    let point = body
+        .find("cursor_on_row(selected_row(list))")
+        .expect("the point is of the selected row");
+    let some = body.find("Some((x, y)) =>").expect("a point");
+    let moved = body.find("SetCursorPos(x, y)").expect("the move");
+    let none = body.find("None =>").expect("no point");
+
+    assert!(point < some && some < moved && moved < none);
+    assert!(body[none..].contains("\"list cursor: no row\""));
+}
+
+/// ⭐ **The cursor follows the press of Windows 10, and only it** — решение 208.204. The message
+/// is posted in one place — `tray::open_list`, in the branch where `press_indicator_button` pressed
+/// РУС/ENG; the branch of Windows 11 (`WM_APP_LIST_OPEN`, UI Automation `Invoke`) and the list of
+/// the program's own never ask for it. Its number and its timer collide with no other.
+#[test]
+fn the_cursor_follows_only_the_press_of_windows_10() {
+    assert_eq!(flags::WM_APP_LIST_CURSOR, 0x8000 + 32);
+
+    for occupied in [
+        flags::WM_APP_FLAG_NOW,
+        flags::WM_APP_FLAG_LATER,
+        flags::WM_APP_FLAG_CONSOLE,
+        flags::WM_APP_LIST_CLOSED,
+        flags::WM_APP_LIST_OPEN,
+        flags::WM_APP_LIST_MISSING,
+        lang_switcher::app::WM_APP_SHOW_SETTINGS,
+    ] {
+        assert_ne!(
+            flags::WM_APP_LIST_CURSOR,
+            occupied,
+            "two messages share a number"
+        );
+    }
+
+    // The watcher's window has the re-check of the window in front; the input window's timers share
+    // the procedure.
+    for occupied in [
+        lang_switcher::watchdog::FOREGROUND_RECHECK_TIMER_ID,
+        lang_switcher::watchdog::LIVENESS_TIMER_ID,
+        2,
+        lang_switcher::app::LATE_VERDICT_TIMER_ID,
+    ] {
+        assert_ne!(
+            flags::LIST_CURSOR_TIMER_ID,
+            occupied,
+            "two timers share an id"
+        );
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut posts = Vec::new();
+
+    for entry in std::fs::read_dir(&root).expect(r"src\ lists") {
+        let path = entry.expect("an entry").path();
+
+        if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path).expect("a source reads");
+
+            for _ in text.matches("(crate::flags::WM_APP_LIST_CURSOR)") {
+                posts.push(path.file_name().unwrap_or_default().to_owned());
+            }
+        }
+    }
+
+    assert_eq!(posts, ["tray.rs"], "the cursor is asked for in one place");
+
+    let tray = source("tray.rs");
+    let open = body_of(&tray, "open_list");
+    let pressed = open
+        .find("if crate::flags::press_indicator_button() {")
+        .expect("the branch of Windows 10");
+    let cursor = open
+        .find("post_to_watcher_thread(crate::flags::WM_APP_LIST_CURSOR)")
+        .expect("the cursor asked for");
+    let other = open.find("} else {").expect("the branch of Windows 11");
+    let invoke = open
+        .find("post_to_watcher_thread(crate::flags::WM_APP_LIST_OPEN)")
+        .expect("Invoke asked for");
+
+    assert!(pressed < cursor && cursor < other && other < invoke);
+
+    let flags_rs = source("flags.rs");
+
+    for name in [
+        "answer_list_open",
+        "show_own_list",
+        "press_indicator_button",
+    ] {
+        let body = body_of(&flags_rs, name);
+
+        assert!(
+            !body.contains("WM_APP_LIST_CURSOR") && !body.contains("SetCursorPos"),
+            "{name} does not move the cursor"
+        );
+    }
+}
+
 /// **The geometry of the own list — the mock-up's numbers at 96 DPI, scaled with the monitor.**
 #[test]
 fn the_own_list_has_the_size_of_the_mock_up_and_scales() {

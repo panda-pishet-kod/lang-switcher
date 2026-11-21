@@ -4012,6 +4012,44 @@ unsafe extern "system" fn window_proc(
                 return LRESULT(0);
             }
 
+            // Решение 208.204: Windows 10 — the UI thread pressed РУС/ENG for a click on the flag;
+            // the watcher looks for the list every `LIST_CURSOR_MS` and puts the cursor on its
+            // selected row (UI Automation is this thread's, its STA). The watcher window only
+            // (SEC-05); the message carries nothing.
+            if message == crate::flags::WM_APP_LIST_CURSOR && is_watcher_window(hwnd) {
+                crate::flags::start_list_cursor();
+
+                // SAFETY: the window is this thread's own (checked above) and the timer is
+                // replaced, not doubled, when it is set again; `None` asks for `WM_TIMER`.
+                let set = unsafe {
+                    SetTimer(
+                        Some(hwnd),
+                        crate::flags::LIST_CURSOR_TIMER_ID,
+                        crate::flags::LIST_CURSOR_MS,
+                        None,
+                    )
+                };
+
+                if set == 0 {
+                    report_non_critical("SetTimer", &WinError::from_thread());
+                }
+
+                return LRESULT(0);
+            }
+
+            if message == WM_TIMER
+                && wparam.0 == crate::flags::LIST_CURSOR_TIMER_ID
+                && is_watcher_window(hwnd)
+            {
+                if !crate::flags::list_cursor_tick() {
+                    // SAFETY: the timer of this window set by the arm above; a timer already gone
+                    // makes the call fail, which changes nothing.
+                    let _ = unsafe { KillTimer(Some(hwnd), crate::flags::LIST_CURSOR_TIMER_ID) };
+                }
+
+                return LRESULT(0);
+            }
+
             if message == crate::watchdog::WM_APP_RECHECK_FOREGROUND && is_watcher_window(hwnd) {
                 crate::watchdog::arm_foreground_recheck();
 

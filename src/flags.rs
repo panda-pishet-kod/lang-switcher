@@ -2121,7 +2121,7 @@ fn indicator_element(
 }
 
 // -----------------------------------------------------------------------------------------
-// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164
+// A click on the flag — task T-119-3, решения 208.88, 208.123, 208.164, 208.204
 // -----------------------------------------------------------------------------------------
 
 /// `WM_APP + 28`, posted to the UI window by the callback of [`ListWatch`] beside
@@ -2252,7 +2252,9 @@ pub fn flag_shows_the_given(
 /// Windows 10: presses the input indicator the way the probe measured 80 of 80 (решение 208.123) —
 /// `WM_LBUTTONDOWN` and `WM_LBUTTONUP` posted to the middle of `InputIndicatorButton`. UI Automation
 /// `Invoke` races the focus there (9 of 31), MSAA needs `VARIANT`, outside the closed feature list.
-/// `false` when there is no such button or it is hidden — Windows 11, or РУС/ENG turned off.
+/// `false` when there is no such button or it is hidden — Windows 11, or РУС/ENG turned off. The
+/// list it opens takes the arrows only with the cursor on it: the caller asks the watcher for that
+/// next ([`WM_APP_LIST_CURSOR`], решение 208.204).
 pub fn press_indicator_button() -> bool {
     use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -2285,6 +2287,194 @@ pub fn press_indicator_button() -> bool {
     let up = unsafe { PostMessageW(Some(button), WM_LBUTTONUP, WPARAM(0), point) };
 
     down.is_ok() && up.is_ok()
+}
+
+/// `WM_APP + 32`, posted by the UI thread to the **watcher** window right after
+/// [`press_indicator_button`] pressed РУС/ENG of Windows 10 — решение 208.204: the watcher waits
+/// for the list of layouts and puts the mouse cursor on the middle of its selected row. The list
+/// that Windows 10 opens for a pressed button does not take the arrows while the cursor is still
+/// out of it: the stand of 2026-11-21 (Блокнот, a real click on the flag and real keys, 10 rounds
+/// each, interleaved) — the press alone 0 of 10, a click of the job on РУС/ENG 6 of 10, the cursor
+/// on the selected row 10 of 10; the focus of UI Automation on that row 2 of 10, the cursor on
+/// РУС/ENG before the press 0 of 10. The first free number after `app::WM_APP_SHOW_SETTINGS`
+/// (`+ 31`). SEC-05: carries nothing; a forged one puts the cursor on the selected row of a list of
+/// layouts already open, and only within [`LIST_CURSOR_LOOKS`] looks.
+pub const WM_APP_LIST_CURSOR: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 32;
+
+/// The timer of the watcher window that looks for the list after [`WM_APP_LIST_CURSOR`]. `3` is
+/// `watchdog::FOREGROUND_RECHECK_TIMER_ID` on the same window; `1`, `2` and `4` are the input
+/// window's.
+pub const LIST_CURSOR_TIMER_ID: usize = 5;
+
+/// The look of [`LIST_CURSOR_TIMER_ID`], in milliseconds, and how many looks: 30 × 50 ms = 1.5 s,
+/// the wait the stand measured with (the list was up in time 10 of 10) and the look of
+/// [`LIST_MS`] at whether the list opened at all.
+pub const LIST_CURSOR_MS: u32 = 50;
+
+/// See [`LIST_CURSOR_MS`].
+pub const LIST_CURSOR_LOOKS: u8 = 30;
+
+/// One look of the watcher for the list of Windows 10 after the program pressed РУС/ENG — what
+/// [`cursor_step`] decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorStep {
+    /// The list is up: its selected row is looked for now, once, and the looks end — whether the
+    /// row was found or not.
+    Row,
+    /// No list yet, a look is left: nothing is touched, the watcher looks again in
+    /// [`LIST_CURSOR_MS`] with `left` looks after that one.
+    Wait {
+        /// The looks left after the coming one.
+        left: u8,
+    },
+    /// No list and no look left: the looks end, the cursor stays where the person left it.
+    GiveUp,
+}
+
+/// ⭐ **The cursor waits for the list, and is put once** — решение 208.204. `list_up` — the window
+/// of [`LIST_WINDOW_CLASS`] is visible; `looks_left` — the looks after this one. Pure.
+pub fn cursor_step(list_up: bool, looks_left: u8) -> CursorStep {
+    match (list_up, looks_left) {
+        (true, _) => CursorStep::Row,
+        (false, 0) => CursorStep::GiveUp,
+        (false, left) => CursorStep::Wait { left: left - 1 },
+    }
+}
+
+/// ⭐ **Where the cursor goes — the middle of the selected row, or nowhere** — решение 208.204.
+/// `row` — the bounding rectangle of the row UI Automation answered selected, on the screen; no row,
+/// or a rectangle with no area, leaves the cursor where it is: the behaviour before 208.204. Pure.
+pub fn cursor_on_row(row: Option<windows::Win32::Foundation::RECT>) -> Option<(i32, i32)> {
+    let row = row?;
+
+    (row.right > row.left && row.bottom > row.top).then(|| {
+        (
+            row.left + (row.right - row.left) / 2,
+            row.top + (row.bottom - row.top) / 2,
+        )
+    })
+}
+
+/// The looks left for [`list_cursor_tick`] — written by [`start_list_cursor`] and the ticks, both
+/// on the watcher thread.
+static LIST_CURSOR_LEFT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The watcher's answer to [`WM_APP_LIST_CURSOR`], before it arms [`LIST_CURSOR_TIMER_ID`]: the
+/// looks start again from [`LIST_CURSOR_LOOKS`].
+pub(crate) fn start_list_cursor() {
+    LIST_CURSOR_LEFT.store(LIST_CURSOR_LOOKS, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// One tick of [`LIST_CURSOR_TIMER_ID`] on the watcher thread — answers whether to look again.
+/// The flag gone off ends the looks; the list up → [`cursor_to_selected_row`], once.
+pub(crate) fn list_cursor_tick() -> bool {
+    use std::sync::atomic::Ordering;
+
+    if !is_on() {
+        return false;
+    }
+
+    let list = list_window_up();
+
+    match cursor_step(list.is_some(), LIST_CURSOR_LEFT.load(Ordering::Relaxed)) {
+        CursorStep::Row => {
+            if let Some(list) = list {
+                cursor_to_selected_row(list);
+            }
+
+            false
+        }
+        CursorStep::Wait { left } => {
+            LIST_CURSOR_LEFT.store(left, Ordering::Relaxed);
+            true
+        }
+        CursorStep::GiveUp => {
+            crate::diag::record(
+                crate::diag::Operation::from_name("list cursor: no list"),
+                crate::diag::OsCode::NONE,
+            );
+
+            false
+        }
+    }
+}
+
+/// The list of layouts of Windows 10 when its window is visible — [`LIST_WINDOW_CLASS`] of
+/// explorer, as the stand found it.
+fn list_window_up() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible};
+    use windows::core::w;
+
+    // SAFETY: a constant class name; a null answer is checked.
+    let list = unsafe { FindWindowW(w!("Shell_InputSwitchTopLevelWindow"), None) }.ok()?;
+
+    // SAFETY: a window handle by value; the answer is a plain BOOL.
+    unsafe { IsWindowVisible(list) }.as_bool().then_some(list)
+}
+
+/// The cursor on the middle of the selected row of the list — UI Automation of the watcher's STA
+/// finds the row (`SelectionItem.IsSelected`), [`cursor_on_row`] the point. No row found — the
+/// cursor is not touched, and the journal says so.
+fn cursor_to_selected_row(list: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+
+    match cursor_on_row(selected_row(list)) {
+        Some((x, y)) => {
+            // SAFETY: two integers; the answer is examined.
+            if unsafe { SetCursorPos(x, y) }.is_err() {
+                crate::app::report_non_critical(
+                    "SetCursorPos",
+                    &windows::core::Error::from_thread(),
+                );
+            }
+        }
+        None => crate::diag::record(
+            crate::diag::Operation::from_name("list cursor: no row"),
+            crate::diag::OsCode::NONE,
+        ),
+    }
+}
+
+/// The bounding rectangle of the selected row of the list of Windows 10, on the screen — the first
+/// element under the list's window whose `SelectionItem` answers selected. On the watcher's STA.
+fn selected_row(
+    list: windows::Win32::Foundation::HWND,
+) -> Option<windows::Win32::Foundation::RECT> {
+    use windows::Win32::UI::Accessibility::{
+        IUIAutomationSelectionItemPattern, TreeScope_Descendants, UIA_SelectionItemPatternId,
+    };
+
+    let client = crate::guard::automation_client()?;
+    // SAFETY: a live window handle by value; the true condition needs no VARIANT (the feature list
+    // is closed).
+    let root = unsafe { client.ElementFromHandle(list) }.ok()?;
+    let condition = unsafe { client.CreateTrueCondition() }.ok()?;
+    let all = unsafe { root.FindAll(TreeScope_Descendants, &condition) }.ok()?;
+    let count = unsafe { all.Length() }.ok()?;
+
+    for index in 0..count {
+        // SAFETY: an index inside the length the array answered.
+        let Ok(element) = (unsafe { all.GetElement(index) }) else {
+            continue;
+        };
+        // SAFETY: a live element of this STA; the pattern is asked by its own identifier.
+        let selected = unsafe {
+            element.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                UIA_SelectionItemPatternId,
+            )
+        }
+        .ok()
+        // SAFETY: a live pattern of this STA; the call crosses into explorer and returns.
+        .and_then(|pattern| unsafe { pattern.CurrentIsSelected() }.ok())
+        .is_some_and(|selected| selected.as_bool());
+
+        if selected {
+            // SAFETY: a live element of this STA.
+            return unsafe { element.CurrentBoundingRectangle() }.ok();
+        }
+    }
+
+    None
 }
 
 /// The watcher's answer to [`WM_APP_LIST_OPEN`] — Windows 11: the input indicator pressed by UI
