@@ -21,9 +21,7 @@ use crate::ui::windows::about::About;
 pub fn run_about() -> std::process::ExitCode {
     use ::windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use ::windows::Win32::System::Memory::{GetProcessHeap, HEAP_NONE, HeapCompact};
-    use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetMessageW, IsWindow, MSG, PostMessageW, TranslateMessage, WM_CLOSE,
-    };
+    use ::windows::Win32::UI::WindowsAndMessaging::{IsWindow, PostMessageW, WM_CLOSE};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     let now = || {
@@ -74,17 +72,9 @@ pub fn run_about() -> std::process::ExitCode {
                 };
             });
         }
-        let mut message = MSG::default();
-        // SAFETY: the message loop of this thread; it ends when the window is gone.
-        while unsafe { IsWindow(Some(window)) }.as_bool()
-            && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
-        {
-            // SAFETY: a message just taken from the queue.
-            unsafe {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
+        // The loop of the program; it ends when the window is gone.
+        // SAFETY: a handle by value.
+        let _ = crate::app::pump_while(|_| false, || unsafe { IsWindow(Some(window)) }.as_bool());
         mark(format!("closed{suffix}_unix_ms={}", now()));
         true
     };
@@ -361,8 +351,7 @@ impl crate::ui::host::Content for FieldsProbe {
 pub fn run_fields() -> std::process::ExitCode {
     use ::windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetMessageW, IsWindow, MSG, SetTimer,
-        TranslateMessage, WM_TIMER,
+        GetForegroundWindow, IsWindow, SetTimer, WM_TIMER,
     };
 
     let state = std::rc::Rc::new(std::cell::RefCell::new(FieldsState {
@@ -385,14 +374,11 @@ pub fn run_fields() -> std::process::ExitCode {
 
     // SAFETY: a timer of this thread, without a window: its ticks come to the loop below.
     let tick = unsafe { SetTimer(None, 0, 100, None) };
-    let mut message = MSG::default();
-    // SAFETY: the message loop of this thread; it ends when the window is gone.
-    while unsafe { IsWindow(Some(window)) }.as_bool()
-        && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
-    {
+    // The loop of the program, the probe's timer taken before it; it ends when the window is gone.
+    let report = |message: &::windows::Win32::UI::WindowsAndMessaging::MSG| {
         if message.message == WM_TIMER && message.hwnd.is_invalid() && message.wParam.0 == tick {
             let Some(probe) = crate::ui::host::probe(window) else {
-                continue;
+                return true;
             };
             let state = state.borrow();
             // SAFETY: reads the layout of this thread and the foreground window.
@@ -431,14 +417,12 @@ pub fn run_fields() -> std::process::ExitCode {
                 format!("fields={}", fields.join(",")),
             ];
             report_to(&(lines.join("\r\n") + "\r\n"));
-            continue;
+            return true;
         }
-        // SAFETY: a message just taken from the queue.
-        unsafe {
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
+        false
+    };
+    // SAFETY: a handle by value.
+    let _ = crate::app::pump_while(report, || unsafe { IsWindow(Some(window)) }.as_bool());
     std::process::ExitCode::SUCCESS
 }
 
@@ -505,10 +489,9 @@ impl crate::ui::host::Content for NoticeProbe {
 pub fn run_popup() -> std::process::ExitCode {
     use ::windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowRect, IsWindow, MSG,
-        PostMessageW, SPI_GETCLIENTAREAANIMATION, SPI_GETWORKAREA,
-        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer, SystemParametersInfoW, TranslateMessage,
-        WM_CLOSE, WM_TIMER,
+        GetForegroundWindow, GetWindowRect, IsWindow, MSG, PostMessageW,
+        SPI_GETCLIENTAREAANIMATION, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer,
+        SystemParametersInfoW, WM_CLOSE, WM_TIMER,
     };
 
     let mut lines = String::new();
@@ -578,24 +561,22 @@ pub fn run_popup() -> std::process::ExitCode {
 
     // SAFETY: a timer of this thread, without a window: its ticks come to the loop below.
     let tick = unsafe { SetTimer(None, 0, 20, None) };
-    let mut message = MSG::default();
-    // SAFETY: the message loop of this thread; it ends when the popup is gone.
-    while unsafe { IsWindow(Some(popup)) }.as_bool()
-        && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
-    {
-        if message.message == WM_TIMER && message.hwnd.is_invalid() && message.wParam.0 == tick {
-            let ms = shown.elapsed().as_millis();
-            if ms <= 700 {
-                mark(format!("x_{ms}={}", rect_of(popup)));
+    // The loop of the program, the probe's timer taken before it; it ends when the popup is gone.
+    let _ = crate::app::pump_while(
+        |message: &MSG| {
+            if message.message == WM_TIMER && message.hwnd.is_invalid() && message.wParam.0 == tick
+            {
+                let ms = shown.elapsed().as_millis();
+                if ms <= 700 {
+                    mark(format!("x_{ms}={}", rect_of(popup)));
+                }
+                return true;
             }
-            continue;
-        }
-        // SAFETY: a message just taken from the queue.
-        unsafe {
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
+            false
+        },
+        // SAFETY: a handle by value.
+        || unsafe { IsWindow(Some(popup)) }.as_bool(),
+    );
     // SAFETY: reads the foreground window.
     let end = unsafe { GetForegroundWindow() };
     mark(format!("foreground_at_end={}", end.0 as usize));
@@ -610,8 +591,7 @@ pub fn run_popup() -> std::process::ExitCode {
 pub fn run_corner() -> std::process::ExitCode {
     use ::windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, FindWindowW, GetForegroundWindow, GetMessageW, GetWindowRect, IsWindow,
-        MSG, PostMessageW, TranslateMessage, WM_CLOSE,
+        FindWindowW, GetForegroundWindow, GetWindowRect, IsWindow, PostMessageW, WM_CLOSE,
     };
 
     let mut lines = String::new();
@@ -662,17 +642,9 @@ pub fn run_corner() -> std::process::ExitCode {
             };
         });
     }
-    let mut message = MSG::default();
-    // SAFETY: the message loop of this thread; it ends when the window is gone.
-    while unsafe { IsWindow(Some(popup)) }.as_bool()
-        && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
-    {
-        // SAFETY: a message just taken from the queue.
-        unsafe {
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
+    // The loop of the program; it ends when the window is gone.
+    // SAFETY: a handle by value.
+    let _ = crate::app::pump_while(|_| false, || unsafe { IsWindow(Some(popup)) }.as_bool());
     // SAFETY: reads the foreground window.
     let end = unsafe { GetForegroundWindow() };
     mark(format!("foreground_at_end={}", end.0 as usize));

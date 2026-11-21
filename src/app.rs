@@ -136,8 +136,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, HWND_MESSAGE,
     KillTimer, MB_ICONINFORMATION, MB_OK, MB_RIGHT, MB_RTLREADING, MB_SETFOREGROUND,
     MESSAGEBOX_STYLE, MSG, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassExW, SetTimer,
-    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_ENDSESSION, WM_TIMER,
-    WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
+    TranslateMessage, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE,
+    WM_ENDSESSION, WM_TIMER, WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 // FR-100, task Т-21-5 and the tuning after the acceptance by ear. `PlaySoundW` is exported by
 // `winmm.dll`; the `windows` crate puts it under `Win32::Media::Audio` — hence the import
@@ -3288,9 +3288,24 @@ fn publish_buffer_section(buffer: &settings::Buffer) {
 /// The message loop. Returns when [`PostQuitMessage`] has been reached, that is, when this
 /// thread decided on its own flag that it is leaving.
 fn pump() -> WinResult<()> {
+    pump_while(|_| false, || true)
+}
+
+/// **The one message loop of the program** — of its three threads and of the probes of the
+/// stands alike, so that a key reaches the windows of the shell by one road in both (blocker of
+/// 1.8.0, stand of 21.11: the probes ran a loop of their own with `TranslateMessage`, the program
+/// one without, and in the program no field of the shell took a character).
+///
+/// Before each message `more` says whether to go on; `keep` takes a message before the common
+/// road — a probe's own timer — and `true` means it is handled. Returns at `WM_QUIT`, or when
+/// `more` says no.
+pub fn pump_while(
+    mut keep: impl FnMut(&MSG) -> bool,
+    mut more: impl FnMut() -> bool,
+) -> WinResult<()> {
     let mut message = MSG::default();
 
-    loop {
+    while more() {
         // SAFETY: `message` is a live, properly aligned `MSG` owned by this frame for the
         // whole call, which is the only buffer the call writes to. `None` for the window
         // filter asks for every message of this thread, which is what a loop that must also
@@ -3305,6 +3320,10 @@ fn pump() -> WinResult<()> {
             -1 => return Err(WinError::from_thread()),
             0 => return Ok(()),
             _ => {
+                if keep(&message) {
+                    continue;
+                }
+
                 // **FR-101, task Т-32-3 — the modeless windows of the letters.** A modal
                 // dialog runs its own loop and gets `IsDialogMessageW` for free; the windows
                 // of the letters are modeless and run in *this* loop, so without this line
@@ -3321,14 +3340,21 @@ fn pump() -> WinResult<()> {
                     continue;
                 }
 
+                // `WM_CHAR` of a key — and the dead keys, and the input methods (IME) — for
+                // the fields of the shell: a field of Windows types what this makes of
+                // `WM_KEYDOWN`. The keys a window of the shell acts on at `WM_KEYDOWN` (Enter,
+                // space, Esc, Tab) are not acted on twice: the field eats their characters,
+                // the window passes them to `DefWindowProcW`, which does nothing with them,
+                // and the menu and the open list take only letters. The two message-only
+                // windows of the other threads never have the keyboard: nothing to translate.
+                // Until the shell (T-120-19) the dialogs did this in `IsDialogMessageW`.
+                //
+                // SAFETY: `message` was filled by the `GetMessageW` above and is read, not
+                // written; the answer says only whether a character was made.
+                let _ = unsafe { TranslateMessage(&message) };
+
                 // SAFETY: `message` was filled by the GetMessageW above and is read, not
                 // written, by DispatchMessageW.
-                //
-                // `TranslateMessage` is deliberately absent: it exists to synthesise
-                // `WM_CHAR` from key messages, and none of these three windows is ever
-                // visible, focusable or a keyboard target, so it would have nothing to
-                // translate. Task T-08-1 adds the dialog message filtering the settings
-                // window needs, in the UI thread's loop, where it belongs.
                 //
                 // The `LRESULT` returned is the window procedure's own result forwarded
                 // back; it is neither a `BOOL` nor a handle nor a pointer and carries no
@@ -3337,6 +3363,7 @@ fn pump() -> WinResult<()> {
             }
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------

@@ -309,8 +309,18 @@ fn shell_root() -> PathBuf {
 /// Every `.rs` file under `src\ui\`, by its path relative to it with forward slashes, and its
 /// tokens.
 fn shell_files() -> Vec<(String, Vec<Token>)> {
+    files_under(&shell_root())
+}
+
+/// Every `.rs` file under `src\` — the shell and the rest of the program.
+fn program_files() -> Vec<(String, Vec<Token>)> {
+    files_under(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
+}
+
+/// Every `.rs` file under `root`, by its path relative to it with forward slashes, and its tokens.
+fn files_under(root: &Path) -> Vec<(String, Vec<Token>)> {
     fn walk(folder: &Path, out: &mut Vec<PathBuf>) {
-        for entry in fs::read_dir(folder).expect("src\\ui\\ must be readable") {
+        for entry in fs::read_dir(folder).expect("the folder of the sources must be readable") {
             let path = entry.expect("a readable directory entry").path();
             if path.is_dir() {
                 walk(&path, out);
@@ -320,17 +330,16 @@ fn shell_files() -> Vec<(String, Vec<Token>)> {
         }
     }
 
-    let root = shell_root();
     let mut paths = Vec::new();
-    walk(&root, &mut paths);
+    walk(root, &mut paths);
     paths.sort();
 
     paths
         .into_iter()
         .map(|path| {
             let name = path
-                .strip_prefix(&root)
-                .expect("a file under src\\ui\\")
+                .strip_prefix(root)
+                .expect("a file under the root")
                 .to_string_lossy()
                 .replace('\\', "/");
             let text = fs::read_to_string(&path)
@@ -742,5 +751,66 @@ fn rule_5_the_shell_sends_no_bare_message() {
                 })
                 .collect()
         },
+    );
+}
+
+/// The calls that make a message loop: taking a message, making characters of it, giving it to
+/// its window — each as `file:line: name`.
+fn loop_calls_in(file: &str, tokens: &[Token]) -> Vec<(String, String)> {
+    tokens
+        .windows(2)
+        .filter_map(|pair| match &pair[0].tok {
+            Tok::Ident(word)
+                if matches!(
+                    word.as_str(),
+                    "GetMessageW" | "TranslateMessage" | "DispatchMessageW"
+                ) && is_punct(pair.get(1), '(') =>
+            {
+                Some((word.clone(), format!("{file}:{}", pair[0].line)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Rule 6, one message loop (blocker of 1.8.0, stand of 21.11): the program and the probes of the
+/// stands go through `app::pump_while`, so a key reaches the fields of the shell by one road. The
+/// probes had loops of their own with `TranslateMessage` while the program's had none, and the
+/// stands on the probes passed while no field of the program took a character. Each call that
+/// makes a loop is in `src\` once, in `app.rs`.
+#[test]
+fn rule_6_the_program_and_the_probes_have_one_message_loop() {
+    let found: Vec<(String, String)> = program_files()
+        .iter()
+        .flat_map(|(file, tokens)| loop_calls_in(file, tokens))
+        .collect();
+    let mut faults = Vec::new();
+    for name in ["GetMessageW", "TranslateMessage", "DispatchMessageW"] {
+        let at: Vec<&str> = found
+            .iter()
+            .filter(|(call, _)| call == name)
+            .map(|(_, place)| place.as_str())
+            .collect();
+        if at.len() != 1 || !at[0].starts_with("app.rs:") {
+            faults.push(format!("{name}: {at:?}"));
+        }
+    }
+    assert!(
+        faults.is_empty(),
+        "rule 6: a message loop besides app::pump_while (each call once, in app.rs):\n{}",
+        faults.join("\n")
+    );
+}
+
+/// Rule 6 finds a call in code and not in a comment or a string, and not a name without a call.
+#[test]
+fn rule_6_finds_a_loop_in_code_and_not_in_a_comment() {
+    let source = lex(
+        "// GetMessageW(&mut m, None, 0, 0)\nlet s = \"TranslateMessage(&m)\";\n\
+         use x::DispatchMessageW;\nwhile GetMessageW(&mut m, None, 0, 0).as_bool() {}",
+    );
+    assert_eq!(
+        loop_calls_in("probe.rs", &source),
+        [("GetMessageW".to_owned(), "probe.rs:4".to_owned())]
     );
 }

@@ -22,12 +22,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_RETURN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, ES_MULTILINE, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, IsWindow,
-    MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetWindowTextW, WM_CLOSE, WM_CTLCOLOREDIT,
-    WM_GETFONT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT,
+    DispatchMessageW, ES_MULTILINE, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW,
+    GetWindowTextW, IsWindow, MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetWindowTextW, WM_CLOSE,
+    WM_CTLCOLOREDIT, WM_GETFONT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT,
     WS_EX_RTLREADING,
 };
 use windows::core::HSTRING;
+
+#[path = "support/pressed.rs"]
+mod pressed;
+use pressed::press_through_the_loop_of_the_program;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Id {
@@ -476,6 +480,37 @@ fn a_field_tells_the_window_what_is_typed_and_passes_enter_and_esc() {
     open.key(VK_ESCAPE.0);
     open.pump();
     assert!(!open.alive(), "Esc in the field did not close the window");
+}
+
+fn text_of(field: HWND) -> String {
+    let mut buffer = [0_u16; 64];
+    // SAFETY: a field of this thread, into a local of the length given.
+    let length = unsafe { GetWindowTextW(field, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..usize::try_from(length).unwrap_or(0)])
+}
+
+/// The road of the program (blocker of 1.8.0, stand of 21.11): a key in a field of the shell goes
+/// through the one loop of the program and is typed — its character comes of `TranslateMessage`
+/// there. Enter in a field of one line presses the main button once, and its character is eaten.
+#[test]
+fn a_key_in_a_field_is_typed_through_the_loop_of_the_program() {
+    let open = Open::new();
+    let name = open.field(Id::Name);
+
+    press_through_the_loop_of_the_program(name, VK_SPACE.0, 0x39);
+    assert_eq!(
+        text_of(name),
+        " ",
+        "space in the field, through the loop of the program"
+    );
+    assert_eq!(open.events(), [Event::Edited(Id::Name, " ".to_owned())]);
+
+    press_through_the_loop_of_the_program(name, VK_RETURN.0, 0x1C);
+    assert_eq!(
+        open.events(),
+        [Event::Pressed(Id::Close)],
+        "Enter in the field, through the loop of the program: the main button, once"
+    );
 }
 
 /// The field takes its colours from the table — in the dark theme too — and the direction of a

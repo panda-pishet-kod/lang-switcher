@@ -292,11 +292,15 @@ impl DropState {
     }
 
     /// A letter typed into the open list: the first row whose option begins with the letters typed
-    /// so far — a pause of `TYPE_AHEAD_MS` starts a new word.
+    /// so far — a pause of `TYPE_AHEAD_MS` starts a new word. A space does not start one: it is
+    /// the character of the space bar that opened the list (`WM_CHAR` after `WM_KEYDOWN`).
     fn type_letter(&mut self, letter: char) {
         let fresh = self
             .typed_at
             .is_none_or(|at| at.elapsed() >= Duration::from_millis(TYPE_AHEAD_MS));
+        if fresh && letter.is_whitespace() {
+            return;
+        }
         if fresh {
             self.typed.clear();
         }

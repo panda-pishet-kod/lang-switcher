@@ -18,6 +18,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
 };
 
+#[path = "support/pressed.rs"]
+mod pressed;
+use pressed::press_through_the_loop_of_the_program;
+
 /// The languages of the interface by their own names, as the list of the settings shows them.
 const LANGUAGES: [&str; 8] = [
     "English",
@@ -242,6 +246,29 @@ fn typing_the_first_letters_chooses_the_row_and_enter_takes_it() {
     assert_eq!(open.events(), [Event::Selected(Id::Language, 4)]);
     assert_eq!(open.probe().dropdown, None, "Enter left the list open");
     assert!(!alive(list), "the list's window outlived Enter");
+}
+
+/// The space bar that opens the list, taken the way the program takes it — its `WM_CHAR` comes
+/// after the key down (blocker of 1.8.0, stand of 21.11): the list opens and the space is not
+/// typed into it, so «ру» typed at once still reaches «Русский».
+#[test]
+fn the_space_bar_that_opens_the_list_types_nothing_into_it() {
+    let open = Open::new();
+    if open.probe().focus.as_deref() != Some("Language") {
+        open.key(VK_TAB.0);
+    }
+    assert_eq!(open.probe().focus.as_deref(), Some("Language"));
+
+    press_through_the_loop_of_the_program(open.hwnd, VK_SPACE.0, 0x39);
+    let list = open
+        .probe()
+        .dropdown
+        .expect("the space bar did not open the list");
+    open.type_text("ру");
+    assert!(
+        !items(list, "ListRow { selected: true, index: 4").is_empty(),
+        "«ру» after the space bar did not reach «Русский»"
+    );
 }
 
 /// Esc closes the list without a choice, though the keys moved in it.

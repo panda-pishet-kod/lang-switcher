@@ -3863,9 +3863,8 @@ pub mod testing {
     pub fn run_probe() -> std::process::ExitCode {
         use windows::Win32::Foundation::{LPARAM, RECT, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DispatchMessageW, FindWindowW, GetForegroundWindow, GetMessageW,
-            GetWindowRect, IsWindow, MSG, PostMessageW, TranslateMessage, WM_CLOSE,
-            WS_EX_TOOLWINDOW, WS_POPUP,
+            CreateWindowExW, FindWindowW, GetForegroundWindow, GetWindowRect, IsWindow,
+            PostMessageW, WM_CLOSE, WS_EX_TOOLWINDOW, WS_POPUP,
         };
         use windows::core::{PCWSTR, w};
 
@@ -3981,17 +3980,9 @@ pub mod testing {
                 };
             });
         }
-        let mut message = MSG::default();
-        // SAFETY: the message loop of this thread; it ends when the window is gone.
-        while unsafe { IsWindow(Some(window)) }.as_bool()
-            && unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool()
-        {
-            // SAFETY: a message just taken from the queue.
-            unsafe {
-                let _ = TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
+        // The loop of the program; it ends when the window is gone.
+        // SAFETY: a handle by value.
+        let _ = crate::app::pump_while(|_| false, || unsafe { IsWindow(Some(window)) }.as_bool());
         mark("closed=true".to_owned());
         std::process::ExitCode::SUCCESS
     }
