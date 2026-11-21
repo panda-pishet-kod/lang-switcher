@@ -15,8 +15,9 @@ page. Dates are the days the releases were published (UTC).
   gets a plate with the letters of the language; pause greys the flag, an unread letter puts its dot on it. With the tick
   off the program is what it was.
 - A click on the flag opens the list of layouts of Windows, as a click on ENG/РУС at the clock does; after the choice the
-  window you typed in gets the focus and the layout back, Edge included. When ENG/РУС is hidden at the clock, the flag
-  shows a list of its own in the look of the list of Windows 11. The right click keeps the menu.
+  window you typed in gets the focus and the layout back, Edge included. On Windows 10 the mouse pointer moves onto the
+  selected row of that list, so that the arrows work in it. When ENG/РУС is hidden at the clock, the flag shows a list
+  of its own in the look of the list of Windows 11. The right click keeps the menu.
 - Starting Lang Switcher while it is already running opens its settings window instead of the message «already running».
 - After an important update a small window by the notification area says what is new, once, when you are not typing;
   it does not take the focus. «Do not show update windows again» turns it off.
@@ -34,8 +35,6 @@ page. Dates are the days the releases were published (UTC).
 
 Known issues:
 
-- Windows 10: after a click on the flag the arrows do not work in the list of layouts of Windows; a choice with the
-  mouse does.
 - When ENG/РУС at the clock is hidden and Lang Switcher shows a list of its own, Microsoft Edge sometimes does not get
   the chosen layout: Windows counts it as on, and Edge types in the previous one.
 

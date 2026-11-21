@@ -232,8 +232,6 @@ There is no other network activity. The details are in section 9 of the specific
 
 ## Known issues
 
-- Windows 10: after a click on the layout flag in the tray the arrows do not work in the list of layouts of Windows;
-  a choice with the mouse does.
 - When the language indicator (ENG/РУС) at the clock is hidden and Lang Switcher shows a list of layouts of its own,
   Microsoft Edge sometimes does not get the chosen layout: Windows counts it as on, and Edge types in the previous one.
 
