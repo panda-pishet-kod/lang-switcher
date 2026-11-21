@@ -13,7 +13,9 @@ use lang_switcher::ui::host::{self, Content, Reply};
 use lang_switcher::ui::scene::{Event, Taskbar, Window};
 use lang_switcher::ui::windows::corner;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_CLOSE, WM_PAINT};
+use windows::Win32::UI::WindowsAndMessaging::{
+    DispatchMessageW, IsWindow, MSG, PM_REMOVE, PeekMessageW, SendMessageW, WM_CLOSE, WM_PAINT,
+};
 
 /// «Обновлено» with its picture of the taskbar: the flags of two layouts.
 struct Updated;
@@ -70,4 +72,35 @@ fn the_flags_of_the_picture_are_drawn_on_a_thread_without_com() {
 
     assert_eq!(refused, 0, "WIC refused the icons on a thread without COM");
     assert!(made >= 2, "the flags of both layouts: {made}");
+}
+
+/// Д4 (stand of 21.11, a crash at «Выход», 3 of 3): the bitmaps kept for a render target — the flags
+/// here, the program's icon of the menu's head on the stand (a test binary has no icon resource) —
+/// are let go with the target. A bitmap kept after its window holds the device of Direct3D to the
+/// end of the thread, where it is let go under the loader lock, and `ExitProcess` fell in DXGI.
+#[test]
+fn the_bitmaps_of_a_window_go_with_it() {
+    let hwnd = host::create(Updated, None).expect("the window of the shell");
+    send(hwnd, WM_PAINT);
+    let kept = canvas::kept_bitmaps();
+    send(hwnd, WM_CLOSE);
+    let mut message = MSG::default();
+    // SAFETY: the message queue of this thread; each message goes to its window.
+    while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+        // SAFETY: a message just taken from the queue.
+        unsafe { DispatchMessageW(&message) };
+    }
+    // SAFETY: a handle by value.
+    let gone = !unsafe { IsWindow(Some(hwnd)) }.as_bool();
+
+    assert!(
+        kept >= 2,
+        "the picture kept the flags of both layouts: {kept}"
+    );
+    assert!(gone, "the window did not close");
+    assert_eq!(
+        canvas::kept_bitmaps(),
+        0,
+        "bitmaps of the window's render target outlived the window"
+    );
 }

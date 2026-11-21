@@ -457,6 +457,12 @@ struct Target {
     brush: ID2D1SolidColorBrush,
 }
 
+impl Drop for Target {
+    fn drop(&mut self) {
+        forget_bitmaps_of(self.render.as_raw() as usize);
+    }
+}
+
 enum Surface {
     Direct2D {
         factory: ID2D1Factory,
@@ -1778,6 +1784,33 @@ thread_local! {
 
 /// The flags kept for a frame: (target, layout, side, dark taskbar) and the bitmap.
 type FlagBitmaps = Vec<((usize, crate::layouts::LayoutId, i32, bool), ID2D1Bitmap)>;
+
+/// ⭐ The bitmaps kept for the render target at `target` — the program's icon, the flags — let go
+/// with it (Д4, stand of 21.11: a crash at «Выход», 3 of 3). A bitmap belongs to the device of its
+/// target: the menu of the icon drew the program's icon, closed, and the bitmap kept the device of
+/// a window that was gone to the end of the thread, where the destructors of the thread run under
+/// the loader lock and Direct3D cannot come down — `ExitProcess` then fell in DXGI (`0x87A`, its
+/// facility). Nor may a new target made at the same address take a bitmap of the old one.
+fn forget_bitmaps_of(target: usize) {
+    // `try_with`: a target let go while the thread ends finds its keepers gone, and nothing to do.
+    let _ = APP_ICON.try_with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if kept
+            .as_ref()
+            .is_some_and(|((known, _), _)| *known == target)
+        {
+            *kept = None;
+        }
+    });
+    let _ = FLAGS.try_with(|kept| kept.borrow_mut().retain(|(key, _)| key.0 != target));
+}
+
+/// How many bitmaps the thread keeps for render targets (the testing build).
+#[cfg(feature = "testing")]
+pub fn kept_bitmaps() -> usize {
+    APP_ICON.with(|kept| usize::from(kept.borrow().is_some()))
+        + FLAGS.with(|kept| kept.borrow().len())
+}
 
 /// The program's icon at `side` pixels, made by Windows from its resource; the caller destroys it.
 fn program_icon(side: i32) -> Option<HICON> {
