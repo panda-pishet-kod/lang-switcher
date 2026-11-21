@@ -11,8 +11,12 @@ use std::rc::Rc;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_DOWN, VK_END, VK_ESCAPE, VK_RETURN, VK_RIGHT, VK_TAB,
+    VK_DOWN, VK_END, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
 };
+
+#[path = "support/pressed.rs"]
+mod pressed;
+use pressed::press_through_the_loop_of_the_program;
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GetClientRect, GetWindowRect, IsWindow, MINMAXINFO, MSG,
     PM_REMOVE, PeekMessageW, SendMessageW, WM_CLOSE, WM_DPICHANGED, WM_GETMINMAXINFO, WM_KEYDOWN,
@@ -672,4 +676,156 @@ fn tab_to_an_element_the_scroll_hid_brings_it_into_view() {
         shown.y >= 0.0 && shown.bottom() <= close.y,
         "the link shows in the room: {shown:?}, the button {close:?}"
     );
+}
+
+/// The elements of [`Choices`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pick {
+    Card(usize),
+    Radio(usize),
+}
+
+/// Three choice cards and two radio buttons, the chosen ones kept; in a language read right to left
+/// when `rtl`.
+struct Choices {
+    card: Rc<Cell<usize>>,
+    radio: Rc<Cell<usize>>,
+    rtl: bool,
+}
+
+impl Content for Choices {
+    type Id = Pick;
+
+    fn describe(&self) -> Window<Pick> {
+        let mut body = vec![Node::Header {
+            eyebrow: None,
+            title: "Choices".to_owned(),
+            subtitle: None,
+        }];
+        body.extend((0..3).map(|n| Node::ChoiceCard {
+            id: Pick::Card(n),
+            title: format!("Card {n}"),
+            words: "The words of the card".to_owned(),
+            selected: self.card.get() == n,
+        }));
+        body.extend((0..2).map(|n| Node::Radio {
+            id: Pick::Radio(n),
+            label: format!("Radio {n}"),
+            on: self.radio.get() == n,
+        }));
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(body),
+            buttons: Vec::new(),
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<Pick>) -> Reply {
+        match event {
+            Event::Pressed(Pick::Card(n)) => self.card.set(n),
+            Event::Toggled(Pick::Radio(n), true) => self.radio.set(n),
+            _ => {}
+        }
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Choices".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        if self.rtl {
+            ("he-IL".to_owned(), true)
+        } else {
+            ("en-US".to_owned(), false)
+        }
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Light
+    }
+}
+
+/// Д2 (stand of 21.11, the wizard): the arrows go inside a group of choice cards, and of radio
+/// buttons — the next is focused and chosen, through the loop of the program; at an end of the group
+/// they stop and do not cross into the next group; mirrored, Left goes forward (T-120-7 п. 4).
+#[test]
+fn the_arrows_choose_inside_a_group_of_cards_and_of_radio_buttons() {
+    const SCAN_TAB: u32 = 0x0F;
+    const SCAN_UP: u32 = 0x48;
+    const SCAN_LEFT: u32 = 0x4B;
+    const SCAN_RIGHT: u32 = 0x4D;
+    const SCAN_DOWN: u32 = 0x50;
+
+    for rtl in [false, true] {
+        let (card, radio) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let content = Choices {
+            card: card.clone(),
+            radio: radio.clone(),
+            rtl,
+        };
+        let hwnd = host::create(content, None).expect("the window of the shell");
+        // SAFETY: a window of this thread; the message goes straight to its procedure.
+        unsafe { SendMessageW(hwnd, WM_PAINT, Some(WPARAM(0)), Some(LPARAM(0))) };
+        let press = |key: u16, scan: u32| press_through_the_loop_of_the_program(hwnd, key, scan);
+        let state = || {
+            let focus = host::probe(hwnd).expect("alive").focus.unwrap_or_default();
+            (focus, card.get(), radio.get())
+        };
+        let (forward, back) = if rtl {
+            ((VK_LEFT.0, SCAN_LEFT), (VK_RIGHT.0, SCAN_RIGHT))
+        } else {
+            ((VK_RIGHT.0, SCAN_RIGHT), (VK_LEFT.0, SCAN_LEFT))
+        };
+
+        press(VK_TAB.0, SCAN_TAB);
+        assert_eq!(state(), ("Card(0)".to_owned(), 0, 0), "rtl {rtl}: Tab");
+        press(VK_DOWN.0, SCAN_DOWN);
+        assert_eq!(state(), ("Card(1)".to_owned(), 1, 0), "rtl {rtl}: Down");
+        press(forward.0, forward.1);
+        assert_eq!(state(), ("Card(2)".to_owned(), 2, 0), "rtl {rtl}: forward");
+        press(VK_DOWN.0, SCAN_DOWN);
+        assert_eq!(
+            state(),
+            ("Card(2)".to_owned(), 2, 0),
+            "rtl {rtl}: Down at the end of the cards"
+        );
+        press(VK_UP.0, SCAN_UP);
+        assert_eq!(state(), ("Card(1)".to_owned(), 1, 0), "rtl {rtl}: Up");
+        press(back.0, back.1);
+        assert_eq!(state(), ("Card(0)".to_owned(), 0, 0), "rtl {rtl}: back");
+
+        for _ in 0..3 {
+            press(VK_TAB.0, SCAN_TAB);
+        }
+        assert_eq!(
+            state(),
+            ("Radio(0)".to_owned(), 0, 0),
+            "rtl {rtl}: Tab to the radio buttons"
+        );
+        press(VK_DOWN.0, SCAN_DOWN);
+        assert_eq!(
+            state(),
+            ("Radio(1)".to_owned(), 0, 1),
+            "rtl {rtl}: Down in the radio buttons"
+        );
+        press(VK_UP.0, SCAN_UP);
+        assert_eq!(
+            state(),
+            ("Radio(0)".to_owned(), 0, 0),
+            "rtl {rtl}: Up in the radio buttons"
+        );
+        press(VK_UP.0, SCAN_UP);
+        assert_eq!(
+            state(),
+            ("Radio(0)".to_owned(), 0, 0),
+            "rtl {rtl}: Up at the start of the radio buttons, not into the cards"
+        );
+
+        // SAFETY: a window of this thread.
+        unsafe { SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0))) };
+    }
 }

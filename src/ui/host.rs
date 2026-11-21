@@ -2292,6 +2292,24 @@ impl<C: Content> Host<C> {
                     self.deliver(hwnd, event);
                     return true;
                 }
+                // Д2 (stand of 21.11): the choice cards and the radio buttons, each an element of
+                // its own — the arrows take the next of the group, and it is chosen.
+                if let Some(next) = self
+                    .focus
+                    .and_then(|focus| self.group_neighbour(focus, forward))
+                {
+                    let chosen = self.index_of(next).and_then(|index| self.activation(index));
+                    self.focus = Some(next);
+                    self.reveal(hwnd, next);
+                    self.give_keyboard(hwnd);
+                    match chosen {
+                        Some(event) => {
+                            self.deliver(hwnd, event);
+                        }
+                        None => invalidate(hwnd),
+                    }
+                    return true;
+                }
             }
             k if k == VK_SPACE.0 => {
                 if let Some(event) = self
@@ -2364,6 +2382,32 @@ impl<C: Content> Host<C> {
         }
         invalidate(hwnd);
         true
+    }
+
+    /// What kind of choice of a group the element `id` is: a choice card, a radio button, or none.
+    fn choice_kind(&self, id: C::Id) -> Option<bool> {
+        let layout = self.layout.as_ref()?;
+        layout
+            .items
+            .iter()
+            .filter(|item| item.id == Some(id))
+            .find_map(|item| match item.part {
+                Part::Card { .. } => Some(true),
+                Part::Radio { .. } => Some(false),
+                _ => None,
+            })
+    }
+
+    /// The neighbour of `id`, forward or back, in its group of choice cards or radio buttons: the
+    /// run of elements of its kind next to each other in the order of Tab (T-120-7 п. 4, the arrows
+    /// go inside a group; passport: radio buttons and choice cards). None at either end.
+    fn group_neighbour(&self, id: C::Id, forward: bool) -> Option<C::Id> {
+        let kind = self.choice_kind(id)?;
+        let order = self.order();
+        let at = order.iter().position(|known| *known == id)?;
+        let next = if forward { at + 1 } else { at.checked_sub(1)? };
+        let neighbour = *order.get(next)?;
+        (self.choice_kind(neighbour) == Some(kind)).then_some(neighbour)
     }
 
     /// The next option of the group `id`, forward or back: a segment or a section.
