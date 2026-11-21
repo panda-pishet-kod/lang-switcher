@@ -2960,8 +2960,9 @@ pub fn menu_now() -> Option<MenuNow> {
     })
 }
 
-/// The menu has chosen a command — task T-120-15. `WM_APP + 32`, the next free number of the
-/// program-wide row (see [`settings::WM_APP_SYSTEM_THEME`] for the row).
+/// The menu has chosen a command — task T-120-15. `WM_APP + 33`, the next free number of the
+/// program-wide row (see [`settings::WM_APP_SYSTEM_THEME`] for the row): `+ 32` is the cursor of
+/// the list of Windows 10 ([`crate::flags::WM_APP_LIST_CURSOR`]), which the two stages took at once.
 ///
 /// The menu of the shell runs no loop of its own, so the command it chose cannot run inside the
 /// menu's own message: «Настройки…» would open a modal window while the host of the menu is
@@ -2972,7 +2973,7 @@ pub fn menu_now() -> Option<MenuNow> {
 /// SEC-05: the message carries nothing. A forged one finds the record empty and does nothing; the
 /// command is a number this thread wrote, and [`dispatch_command`] asks the lock of the windows
 /// again.
-pub const WM_APP_MENU_CHOSEN: u32 = WM_APP + 32;
+pub const WM_APP_MENU_CHOSEN: u32 = WM_APP + 33;
 
 /// How soon after the menu went without a choice a press on the icon is the press that closed it:
 /// the click on the icon takes the foreground from the menu, the menu closes, and the callback of
