@@ -304,6 +304,35 @@ fn a_change_of_theme_draws_the_new_background_in_the_same_window() {
     assert!(after.frames > before.frames);
 }
 
+/// A scale changed while the program runs reaches the windows opened after it (stand of the wizard,
+/// 21.11): the DPI is asked of Windows at each opening, not kept from the start of the process.
+#[cfg(feature = "testing")]
+#[test]
+fn a_window_opened_after_a_change_of_scale_is_at_the_new_scale() {
+    let at = |dpi: u32| {
+        host::answer_dpi(Some(dpi));
+        let open = Open::new();
+        let scale = host::probe(open.hwnd).expect("alive").scale;
+        let mut client = RECT::default();
+        // SAFETY: the out parameter is a local.
+        unsafe { GetClientRect(open.hwnd, &mut client) }.expect("the client rectangle");
+        (scale, client.right, client.bottom)
+    };
+    let before = at(96);
+    let after = at(144);
+    host::answer_dpi(None);
+
+    assert_eq!(
+        (before.0, after.0),
+        (1.0, 1.5),
+        "the scale of a window opened at 96 DPI, then of one opened at 144"
+    );
+    assert!(
+        after.1 > before.1 && after.2 > before.2,
+        "the window opened after the change is larger: {before:?} → {after:?}"
+    );
+}
+
 /// The frame is dragged between 900 × 540 and 1280 × 720 points: at 100 % and twice that at 200 %.
 /// 900 × 540 is the least frame of a window of the shell since 208.198 — the reference it opens in;
 /// until then it was 620 × 500.

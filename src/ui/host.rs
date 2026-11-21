@@ -76,9 +76,8 @@ use ::windows::Win32::Graphics::Dwm::{
 };
 use ::windows::Win32::Graphics::Gdi::ClientToScreen;
 use ::windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetDC, GetDeviceCaps, GetMonitorInfoW, HDC, InvalidateRect, LOGPIXELSY,
-    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, MonitorFromRect, PAINTSTRUCT,
-    ReleaseDC, ScreenToClient,
+    BeginPaint, EndPaint, GetMonitorInfoW, HDC, InvalidateRect, MONITOR_DEFAULTTONEAREST,
+    MONITORINFO, MonitorFromPoint, MonitorFromRect, PAINTSTRUCT, ScreenToClient,
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use ::windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -880,16 +879,44 @@ fn cloak(hwnd: HWND, on: bool) {
     };
 }
 
-/// The scale of the screen the window stands on: the DPI of its DC over a point's.
+/// The scale of the screen the window stands on, at the moment asked: its DPI over a point's.
 fn scale_of(hwnd: HWND) -> f32 {
-    // SAFETY: the window's DC, released below; the call reads a property of the device.
-    let dpi = unsafe {
-        let dc = GetDC(Some(hwnd));
-        let dpi = GetDeviceCaps(Some(dc), LOGPIXELSY);
-        ReleaseDC(Some(hwnd), dc);
-        dpi
-    };
+    let dpi = dpi_of(hwnd);
     if dpi > 0 { dpi as f32 / POINT_DPI } else { 1.0 }
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    /// `GetDpiForWindow` of `winuser.h` (Windows 10 1607, the oldest system of the program),
+    /// declared by hand: its module of the crate (`UI_HiDpi`) is not among the features of SEC-03.
+    fn GetDpiForWindow(hwnd: HWND) -> u32;
+}
+
+#[cfg(feature = "testing")]
+thread_local! {
+    /// Testing: what Windows answers for the DPI of the windows of this thread, in place of the
+    /// monitor's — a change of scale between two openings with one monitor of one scale.
+    static DPI_ANSWER: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Testing: the DPI the next windows of this thread are made at (`None` — the monitor's).
+#[cfg(feature = "testing")]
+pub fn answer_dpi(dpi: Option<u32>) {
+    DPI_ANSWER.with(|answer| answer.set(dpi));
+}
+
+/// The DPI of `hwnd` as Windows answers it now: that of the monitor the window stands on, the
+/// process being aware of each monitor (PerMonitorV2). Not `GetDeviceCaps(LOGPIXELSY)`: that is
+/// the DPI of the system as it was when the process started, and a window opened after the scale
+/// was changed while the program runs came out at the old one (stand of the wizard, 21.11).
+fn dpi_of(hwnd: HWND) -> u32 {
+    #[cfg(feature = "testing")]
+    if let Some(dpi) = DPI_ANSWER.with(std::cell::Cell::get) {
+        return dpi;
+    }
+    // SAFETY: a window of this process by value; the call reads a property of it, 0 when the
+    // handle is not a window.
+    unsafe { GetDpiForWindow(hwnd) }
 }
 
 /// The frame of the window around its client area, in pixels: what is added to a client size.
