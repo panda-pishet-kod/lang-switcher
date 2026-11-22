@@ -1229,6 +1229,7 @@ fn the_pictures_of_the_windows_are_drawings_of_res_art() {
         Art::News,
         Art::Update,
         Art::Wizard,
+        Art::Settings,
     ] {
         assert!(
             names.contains(&art.name()),

@@ -53,6 +53,9 @@ pub enum Art {
     News,
     Update,
     Wizard,
+    /// The scene of the window of the settings — the panda, a switch and gears (`settings.svg` of
+    /// the site window, S-95, variant А of the mock-up; 208.163, AUDIT-180 Н1).
+    Settings,
 }
 
 impl Art {
@@ -66,6 +69,7 @@ impl Art {
             Art::News => "news",
             Art::Update => "update",
             Art::Wizard => "wizard",
+            Art::Settings => "settings",
         }
     }
 }

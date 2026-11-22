@@ -7256,10 +7256,17 @@ mod window_of_the_settings {
             words.contains(&format!("badge: Some({:?})", ru(settings::IDS_NEW_BADGE))),
             "the badge «новое» stands by a toggle"
         );
+        // The scene of its own (208.163, AUDIT-180 Н1), not the panda of «О программе», and the name
+        // and the address under the sections (Н2).
         assert_eq!(
             described.art,
-            Some(lang_switcher::ui::scene::Art::About),
-            "and the picture is in the panel"
+            Some(lang_switcher::ui::scene::Art::Settings),
+            "and the scene of the settings is in the panel"
+        );
+        assert_eq!(
+            described.brand.as_ref().map(|brand| brand.name.as_str()),
+            Some("Panda Koder"),
+            "and the name of the author under the sections"
         );
     }
 }

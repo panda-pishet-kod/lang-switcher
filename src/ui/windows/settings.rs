@@ -34,7 +34,7 @@ use crate::settings::{
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
 use crate::ui::scene::{
-    Art, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
+    Art, Brand, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
 };
 use crate::ui::windows::tray_menu;
 use ::windows::Win32::Foundation::HWND;
@@ -72,6 +72,16 @@ pub enum Id {
     Write,
     Details,
     Close,
+    /// The address under the sections, in the panel (AUDIT-180 Н2).
+    Site,
+}
+
+/// The name of the author's site under the sections, as in «О программе» and «От автора»: the host
+/// of the program's page, read out of `letters::links`.
+fn site() -> String {
+    let page = crate::letters::links::PROGRAM_URL;
+    let rest = page.strip_prefix("https://").unwrap_or(page);
+    rest.split('/').next().unwrap_or(rest).to_owned()
 }
 
 /// The sections, in their order.
@@ -871,8 +881,14 @@ impl Content for Settings {
 
         Window {
             kind: WindowKind::Settings,
-            art: Some(Art::About),
-            brand: None,
+            // The scene of its own (208.163, AUDIT-180 Н1) and the name and the address under the
+            // sections, as under the picture of the other windows (Н2).
+            art: Some(Art::Settings),
+            brand: Some(Brand {
+                name: "Panda Koder".to_owned(),
+                address: site(),
+                link: Id::Site,
+            }),
             body: Node::Column(body),
             buttons: vec![Node::Button {
                 id: Id::Close,
@@ -1120,6 +1136,14 @@ impl Content for Product {
         let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
+                Reply::Stay
+            }
+            // The address under the sections opens the page of the program in the language of the
+            // window, through the gate of `letters::open_link`, as in «О программе».
+            Event::Pressed(Id::Site) => {
+                crate::letters::open_link(crate::letters::links::program_url(
+                    self.settings.language,
+                ));
                 Reply::Stay
             }
             // T-120-22: the wizard on the page of the idea, marked with the language read here.
