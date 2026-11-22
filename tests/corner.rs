@@ -198,3 +198,48 @@ fn the_path_of_notify_icon_settings_is_opened_from_its_known_folder() {
         r"{not a guid}\LangSwitcher.exe"
     );
 }
+
+/// ⭐ **Z10 (решение 208.209): «Открыть Параметры Windows» leaves the hint of the flag up** — the
+/// owner's word: «должна дождаться пока я нажму понятно или пункт будет выставлен». Until 1.8.0 every
+/// button of a window in the corner closed it, the hint's main button too (Б2 of AUDIT-180). Now the
+/// press of the hint's main button opens the page of the taskbar and the window stays; «Понятно» and
+/// the ✕ end it (the flag on the taskbar ends it too — `hint_tick`); every other window in the corner
+/// still ends on its main button.
+#[test]
+fn the_hint_of_the_flag_stays_after_its_main_button() {
+    use lang_switcher::corner::{Action, EndBy, Press, on_press};
+    use lang_switcher::letters::{self, Letter};
+    use lang_switcher::settings::Language;
+    use lang_switcher::ui::windows::corner::Id;
+
+    for language in [Language::Ru, Language::En, Language::He] {
+        let hint = corner::hint_content_in(language);
+        assert_eq!(
+            on_press(&hint, Id::Main),
+            Press::Open(corner::TASKBAR_SETTINGS),
+            "{language:?}: the main button of the hint opens the page of the taskbar and stays"
+        );
+        assert_eq!(
+            on_press(&hint, Id::Second),
+            Press::End(Action::Close, EndBy::Second),
+            "{language:?}: «Понятно» ends the hint"
+        );
+        assert_eq!(
+            on_press(&hint, Id::Close),
+            Press::End(Action::Close, EndBy::Close),
+            "{language:?}: the ✕ ends the hint"
+        );
+
+        let updated = corner::release_content_in(language, "1.7.0");
+        assert!(
+            matches!(on_press(&updated, Id::Main), Press::End(_, EndBy::Main)),
+            "{language:?}: «Обновлено» still ends on its main button"
+        );
+        let notice =
+            letters::notice_content_in(language, Letter::Thanks).expect("«Спасибо» knocks");
+        assert!(
+            matches!(on_press(&notice, Id::Main), Press::End(_, EndBy::Main)),
+            "{language:?}: the knock of a letter still ends on «Открыть письмо»"
+        );
+    }
+}

@@ -26,6 +26,48 @@ pub enum Action {
     /// Opens an address of the program's own pages (through `settings::open_in_the_shell`) and
     /// closes the window.
     Open(&'static str),
+    /// Opens an address and **leaves the window up** — the main button of the hint of the flag
+    /// (Z10, решение 208.209): the hint waits for «Понятно», the ✕ or the flag on the taskbar
+    /// ([`hint_tick`]); the person goes to the settings of Windows with it still in sight.
+    Show(&'static str),
+}
+
+/// What a press on an element of the window does — [`on_press`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    /// Nothing; the window stays.
+    Stay,
+    /// The address opens and the window stays.
+    Open(&'static str),
+    /// The action is done and the window ends this way.
+    End(Action, EndBy),
+}
+
+/// What a press on `id` does in a window that says `content` — the one rule the window follows,
+/// pure so that a test reads it (Z10): the ✕ ends the window; a button ends it with its action,
+/// but for [`Action::Show`], which opens its address and leaves the window up; the link opens its
+/// address; the rest does nothing here.
+pub fn on_press(content: &Content, id: crate::ui::windows::corner::Id) -> Press {
+    use crate::ui::windows::corner::Id;
+
+    let button = |action: Action, by: EndBy| match action {
+        Action::Show(address) => Press::Open(address),
+        action => Press::End(action, by),
+    };
+
+    match id {
+        Id::Close => Press::End(Action::Close, EndBy::Close),
+        Id::Main => button(content.main.1, EndBy::Main),
+        Id::Second => content
+            .second
+            .as_ref()
+            .map_or(Press::Stay, |(_, action)| button(*action, EndBy::Second)),
+        Id::Link => content
+            .link
+            .as_ref()
+            .map_or(Press::Stay, |(_, address)| Press::Open(address)),
+        _ => Press::Stay,
+    }
 }
 
 /// What the window in the corner says — the parts in the order of the mock-up. The words are the
@@ -230,27 +272,18 @@ impl crate::ui::host::Content for CornerWindow {
         use crate::ui::windows::corner::Id;
 
         match event {
-            Event::Pressed(Id::Close) => {
-                end(EndBy::Close);
-                Reply::Close
-            }
-            Event::Pressed(Id::Main) => {
-                act(self.content.main.1, EndBy::Main);
-                Reply::Close
-            }
-            Event::Pressed(Id::Second) => match self.content.second.as_ref() {
-                Some((_, action)) => {
-                    act(*action, EndBy::Second);
+            // Z10: one rule for every press, `on_press`, which a test reads.
+            Event::Pressed(id) => match on_press(&self.content, id) {
+                Press::Stay => Reply::Stay,
+                Press::Open(address) => {
+                    let _ = crate::settings::open_in_the_shell(address);
+                    Reply::Stay
+                }
+                Press::End(action, by) => {
+                    act(action, by);
                     Reply::Close
                 }
-                None => Reply::Stay,
             },
-            Event::Pressed(Id::Link) => {
-                if let Some((_, address)) = self.content.link.as_ref() {
-                    let _ = crate::settings::open_in_the_shell(address);
-                }
-                Reply::Stay
-            }
             Event::Toggled(Id::Check, on) => {
                 self.checked = on;
                 SHOWN.with(|shown| {
@@ -544,8 +577,10 @@ fn release_ended(end: End) {
 // -----------------------------------------------------------------------------------------
 
 /// What the hint says: the flag is on and stands under ^; «Открыть Параметры Windows» opens the
-/// page of the taskbar, «Понятно» and ✕ close it. Not a word about dragging the icon — the drag did
-/// not move it (208.113 п. 7).
+/// page of the taskbar and **leaves the hint up** (Z10, решение 208.209 — the owner's word: «должна
+/// дождаться пока я нажму понятно или пункт будет выставлен»); «Понятно» and ✕ close it, and so does
+/// the flag put on the taskbar ([`hint_tick`]). Not a word about dragging the icon — the drag did not
+/// move it (208.113 п. 7).
 pub fn hint_content() -> Content {
     hint_content_in(crate::settings::ui_language())
 }
@@ -562,7 +597,7 @@ pub fn hint_content_in(language: crate::settings::Language) -> Content {
         link: None,
         main: (
             text(settings::IDS_HINT_OPEN),
-            Action::Open(TASKBAR_SETTINGS),
+            Action::Show(TASKBAR_SETTINGS),
         ),
         second: Some((text(settings::IDS_CORNER_OK), Action::Close)),
         picture: false,
@@ -598,7 +633,7 @@ pub fn hint_tick(owner: HWND, icon_id: u32) {
         shown
             .borrow()
             .as_ref()
-            .is_some_and(|state| state.main == Action::Open(TASKBAR_SETTINGS))
+            .is_some_and(|state| state.main == Action::Show(TASKBAR_SETTINGS))
     });
 
     if !hint_up {
