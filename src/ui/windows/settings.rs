@@ -16,12 +16,12 @@ use crate::settings::{
     IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_NOT_PICKED, IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_COUNT,
     IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE, IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS,
     IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY, IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET,
-    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_OPEN,
-    IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
-    IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
-    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRANSLATION_REPORT,
-    IDS_TRAY_FLAG, IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode,
-    LayoutRow, Modifiers, Refusal,
+    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_HINT,
+    IDS_LOG_OPEN, IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR,
+    IDS_NEW_BADGE, IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED,
+    IDS_SOUND, IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM,
+    IDS_TRANSLATION_REPORT, IDS_TRAY_FLAG, IDS_TRAY_FLAG_HINT, IDS_UPDATES_SWITCH,
+    IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow, Modifiers, Refusal,
 };
 use crate::settings::{
     IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
@@ -286,7 +286,8 @@ impl Settings {
 
     fn general(&self) -> Vec<Node<Id>> {
         let language = self.config.general.language.in_force();
-        let mut nodes = vec![
+        // The switches in one group of rows (208.209, AUDIT-180 Н3), a line between two of them.
+        let mut nodes = vec![Node::Group(vec![
             toggle(
                 Id::Autostart,
                 self.line(IDS_AUTOSTART),
@@ -301,7 +302,8 @@ impl Settings {
             Node::Toggle {
                 id: Id::TrayFlag,
                 label: self.line(IDS_TRAY_FLAG),
-                hint: None,
+                // What the flag is, under its label (Н4, the mock-up of the window).
+                hint: Some(self.line(IDS_TRAY_FLAG_HINT)),
                 on: self.config.general.tray_flag,
                 // The setting came with 1.7.0 (T-119-2); the badge «новое» stays while the
                 // window is the window of 1.8.0 (T-120-20, passport §6).
@@ -314,7 +316,7 @@ impl Settings {
                 self.line(IDS_UPDATES_SWITCH),
                 self.config.letters.release_window,
             ),
-        ];
+        ])];
         let mut language_column = vec![Node::Choice {
             id: Id::Language,
             label: self.line(IDS_LANGUAGE_LABEL),
@@ -518,11 +520,14 @@ impl Settings {
             IDS_LOG_SAVE
         };
         let mut nodes = vec![
-            toggle(
-                Id::Log,
-                self.line(IDS_LOG_ENABLED),
-                self.config.diagnostics.log_enabled,
-            ),
+            // «Вести журнал» in a frame, what the journal holds under it (208.209, AUDIT-180 Н10).
+            Node::Group(vec![Node::Toggle {
+                id: Id::Log,
+                label: self.line(IDS_LOG_ENABLED),
+                hint: Some(self.line(IDS_LOG_HINT)),
+                on: self.config.diagnostics.log_enabled,
+                badge: None,
+            }]),
             Node::Line(Role::FieldLabel, self.line(IDS_LOG_DIR_LABEL)),
             Node::Line(Role::Code, folder),
             Node::Buttons(vec![

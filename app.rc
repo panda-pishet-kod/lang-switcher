@@ -354,6 +354,9 @@ END
 #define IDS_SETTINGS_EYEBROW    3312
 // Stage E120, task T-120-19: the line of the state of «Обращение отправлено».
 #define IDS_WIZARD_RECEIVED     3313
+// AUDIT-180, Z6 (decision 208.209): the hints of the flag and of the journal in the settings.
+#define IDS_TRAY_FLAG_HINT      3314
+#define IDS_LOG_HINT            3315
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291

@@ -124,6 +124,10 @@ pub enum Node<I> {
     Fill(Box<Node<I>>),
     /// A surface with the padding of its kind around what it holds.
     Surface(Surface, Box<Node<I>>),
+    /// A group of rows (passport §3 «Группа строк», 208.209, AUDIT-180 О3): the rows in one frame of
+    /// a block, a line `line` between two of them — the switches of a section of the settings, the
+    /// list of what goes into an appeal.
+    Group(Vec<Node<I>>),
     /// The steps of a wizard: the current one is shown, the height is the tallest one's.
     Steps(usize, Vec<Node<I>>),
     /// The head of a window: the line over the title, the title, the line under it. In a narrow
@@ -322,6 +326,7 @@ impl<I> Node<I> {
         match self {
             Node::Column(nodes) => Node::Column(all(nodes)),
             Node::Rows(nodes) => Node::Rows(all(nodes)),
+            Node::Group(nodes) => Node::Group(all(nodes)),
             Node::Row(nodes) => Node::Row(all(nodes)),
             Node::Pair(a, b) => Node::Pair(one(a), one(b)),
             Node::Triple(a, b, c) => Node::Triple(one(a), one(b), one(c)),
@@ -506,6 +511,7 @@ impl<I> Node<I> {
         match self {
             Node::Column(nodes)
             | Node::Rows(nodes)
+            | Node::Group(nodes)
             | Node::Row(nodes)
             | Node::Steps(_, nodes)
             | Node::Buttons(nodes) => {
@@ -764,9 +770,11 @@ impl<I: PartialEq> Node<I> {
                 selected,
                 ..
             } if own == id => Some((options, *selected)),
-            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) | Node::Steps(_, nodes) => {
-                nodes.iter().find_map(|node| node.options(id))
-            }
+            Node::Column(nodes)
+            | Node::Rows(nodes)
+            | Node::Group(nodes)
+            | Node::Row(nodes)
+            | Node::Steps(_, nodes) => nodes.iter().find_map(|node| node.options(id)),
             Node::Pair(a, b) => a.options(id).or_else(|| b.options(id)),
             Node::Triple(a, b, c) => a
                 .options(id)

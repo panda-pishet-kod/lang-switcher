@@ -504,3 +504,53 @@ fn the_note_of_a_refused_write_takes_the_place_of_the_translation_button() {
         "with the note, the button is not"
     );
 }
+
+/// **208.209, AUDIT-180 Н3, Н4, Н10 — the switches in a group of rows, with their hints.** In
+/// «Общие» the five switches stand in one group of rows (passport §3), the flag with its hint under
+/// its label; in «Диагностика» «Вести журнал» stands in a group of its own with the hint of what the
+/// journal holds.
+#[test]
+fn the_switches_of_the_settings_stand_in_groups_of_rows_with_their_hints() {
+    with_product_strings();
+    let states = window_of_settings::states(Language::Ru);
+    let body = |name: &str| {
+        let (_, window) = states
+            .iter()
+            .find(|(state, _)| state == name)
+            .unwrap_or_else(|| panic!("the window has the state {name}"));
+        format!("{:?}", window.body)
+    };
+    let quoted = |id| format!("{:?}", settings::text_in(Language::Ru, id));
+
+    let general = body("settings General");
+    let group = general.find("Group([").expect("«Общие»: a group of rows");
+    let end = general
+        .find("Pair(")
+        .expect("«Общие»: the pair of the language and the theme");
+    let rows = &general[group..end];
+    for id in [
+        "id: Autostart",
+        "id: Sound",
+        "id: Selection",
+        "id: TrayFlag",
+        "id: Updates",
+    ] {
+        assert!(rows.contains(id), "«Общие»: {id} in the group: {rows}");
+    }
+    assert!(
+        rows.contains(&format!(
+            "hint: Some({})",
+            quoted(settings::IDS_TRAY_FLAG_HINT)
+        )),
+        "«Общие»: the hint of the flag: {rows}"
+    );
+
+    let diagnostics = body("settings Diagnostics");
+    let at = diagnostics
+        .find("Group([Toggle { id: Log")
+        .expect("«Диагностика»: «Вести журнал» in a group of its own");
+    assert!(
+        diagnostics[at..].contains(&format!("hint: Some({})", quoted(settings::IDS_LOG_HINT))),
+        "«Диагностика»: the hint of the journal"
+    );
+}

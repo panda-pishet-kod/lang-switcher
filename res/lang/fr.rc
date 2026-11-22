@@ -53,6 +53,7 @@ BEGIN
     IDS_EXCLUSION_NOT_PICKED "Aucune fenêtre choisie"
     IDS_GROUP_DIAGNOSTICS   "Diagnostic"
     IDS_LOG_ENABLED         "Tenir un journal"
+    IDS_LOG_HINT            "Only operation names and error codes, not a single keystroke"
     // ⚠ Т-28-4: «Ouvrir le dossier du journal» demandait 160 px sur les 151 du bouton, et
     // «Dossier du journal :» 114 px sur les 105 de l'étiquette. Raccourcis, pas remis en page.
     IDS_LOG_OPEN            "Ouvrir le dossier"
@@ -264,6 +265,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Message envoyé"
     IDS_WIZARD_SENT_TEXT    "Merci d'avoir envoyé ce message ! Je suis content que vous participiez à la vie du projet, et je lirai tout sans faute pendant mon temps libre."
     IDS_TRAY_FLAG           "Drapeau de la disposition dans la zone de notification"
+    IDS_TRAY_FLAG_HINT      "The icon of the program shows the flag of the current layout"
     IDS_NEW_BADGE           "nouveau"
     IDS_AUTHOR_SUPPORT      "Soutenir"
     IDS_AUTHOR_CHANNEL      "Chaîne"

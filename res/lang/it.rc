@@ -53,6 +53,7 @@ BEGIN
     IDS_EXCLUSION_NOT_PICKED "Nessuna finestra scelta"
     IDS_GROUP_DIAGNOSTICS   "Diagnostica"
     IDS_LOG_ENABLED         "Tenere un registro"
+    IDS_LOG_HINT            "Only operation names and error codes, not a single keystroke"
     // ⚠ Т-28-4: «Apri la cartella del registro» chiedeva 156 px sui 151 del pulsante, e
     // «Cartella del registro:» 119 px sui 105 dell'etichetta. Accorciati, non rimpaginati.
     IDS_LOG_OPEN            "Apri la cartella"
@@ -264,6 +265,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "Messaggio inviato"
     IDS_WIZARD_SENT_TEXT    "Grazie per aver inviato il messaggio! Sono contento che partecipi alla vita del progetto, e leggerò sicuramente tutto nel mio tempo libero."
     IDS_TRAY_FLAG           "Bandiera del layout nell'area di notifica"
+    IDS_TRAY_FLAG_HINT      "The icon of the program shows the flag of the current layout"
     IDS_NEW_BADGE           "nuova"
     IDS_AUTHOR_SUPPORT      "Sostieni"
     IDS_AUTHOR_CHANNEL      "Canale"

@@ -46,6 +46,7 @@ BEGIN
     IDS_EXCLUSION_NOT_PICKED "לא נבחר חלון"
     IDS_GROUP_DIAGNOSTICS   "אבחון"
     IDS_LOG_ENABLED         "ניהול יומן"
+    IDS_LOG_HINT            "Only operation names and error codes, not a single keystroke"
     // ⚠ Э28 §4 и глоссарий Э30 §3.2: «פתיחת תיקיית היומן» длиннее кнопки. Какой именно папки —
     // сказано подписью прямо под кнопкой.
     IDS_LOG_OPEN            "פתיחת התיקייה"
@@ -260,6 +261,7 @@ BEGIN
     IDS_WIZARD_SENT_TITLE   "הפנייה נשלחה"
     IDS_WIZARD_SENT_TEXT    "תודה ששלחתם את הפנייה! אני שמח על המעורבות שלכם בחיי הפרויקט, ובוודאי אקרא הכול בזמני הפנוי."
     IDS_TRAY_FLAG           "דגל הפריסה באזור ההודעות"
+    IDS_TRAY_FLAG_HINT      "The icon of the program shows the flag of the current layout"
     IDS_NEW_BADGE           "חדש"
     IDS_AUTHOR_SUPPORT      "תמיכה"
     IDS_AUTHOR_CHANNEL      "ערוץ"

@@ -6560,7 +6560,9 @@ impl Drop for ProductImage {
 /// (слово владельца 208.178), keys of their own — 272 + 2 = 274 since the merge of the shell after Б.
 ///
 /// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
-const FR_94_STRINGS: [(u16, &str, &str); 275] = [
+///
+/// ⚠ **277 since AUDIT-180 Z6** — the hints of the flag and of the journal (3314, 3315).
+const FR_94_STRINGS: [(u16, &str, &str); 277] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7663,6 +7665,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
         settings::IDS_WIZARD_RECEIVED,
         "Получено сайтом автора",
         "Received by the author’s site",
+    ),
+    // AUDIT-180 Z6 (208.209): the hints of the flag and of the journal in the settings.
+    (
+        settings::IDS_TRAY_FLAG_HINT,
+        "Значок программы показывает флаг текущей раскладки",
+        "The icon of the program shows the flag of the current layout",
+    ),
+    (
+        settings::IDS_LOG_HINT,
+        "Только имена операций и коды ошибок, ни одной клавиши",
+        "Only operation names and error codes, not a single keystroke",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -12203,8 +12216,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        275,
-        "two hundred and SEVENTY-FIVE identifiers in use since task T-120-19: the line of the state \
+        277,
+        "two hundred and SEVENTY-SEVEN identifiers in use since AUDIT-180 Z6: the hints of the flag \
+         and of the journal (3314, 3315). Two hundred and seventy-five since task T-120-19: the line \
+         of the state \
          of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
          after Б: \
          the two buttons of the card «Поддержать автора» of «От автора» (3305, 3306, task \

@@ -1693,6 +1693,12 @@ pub const IDS_AUTHOR_CHANNEL: u16 = 3306;
 /// «Получено сайтом автора» — the line of the state of the page «Обращение отправлено» of the
 /// wizard (T-120-19); shown only when the site answered with success.
 pub const IDS_WIZARD_RECEIVED: u16 = 3313;
+/// The hint under «Флаг раскладки в трее» in «Общие» — AUDIT-180 Н4 (решение 208.209), the line of
+/// the mock-up of the window.
+pub const IDS_TRAY_FLAG_HINT: u16 = 3314;
+/// The hint under «Вести журнал» in «Диагностика» — AUDIT-180 Н10 (решение 208.209), the line of the
+/// mock-up: what the journal holds.
+pub const IDS_LOG_HINT: u16 = 3315;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2336,7 +2342,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and seventy-five since task T-120-19** — the line of the state of the
 /// thanks of the wizard, [`IDS_WIZARD_RECEIVED`] (3313). 274 + 1.
-pub const INTERFACE_STRINGS: [u16; 275] = [
+///
+/// ⚠ **Two hundred and seventy-seven since AUDIT-180 Z6** — the hints of the flag and of the
+/// journal, [`IDS_TRAY_FLAG_HINT`] (3314) and [`IDS_LOG_HINT`] (3315). 275 + 2.
+pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2600,6 +2609,8 @@ pub const INTERFACE_STRINGS: [u16; 275] = [
     IDS_AUTHOR_SUPPORT,
     IDS_AUTHOR_CHANNEL,
     IDS_WIZARD_RECEIVED,
+    IDS_TRAY_FLAG_HINT,
+    IDS_LOG_HINT,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

@@ -29,9 +29,10 @@ use crate::ui::tokens::{
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
     FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
     LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
-    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP,
-    SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX,
-    WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
+    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, ROW_GROUP_PAD,
+    ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
+    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
+    WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{ART_RING, BADGE_GAP, TYPE_FLOOR};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
@@ -970,6 +971,7 @@ impl<I: Copy> Placer<'_, I> {
                 slot.map_or(h, |slot| slot.max(h))
             }
             Node::Surface(kind, child) => self.surface(*kind, child, x, y, w, slot),
+            Node::Group(rows) => self.group(rows, x, y, w, slot),
             Node::Steps(current, steps) => {
                 let tallest = steps
                     .iter()
@@ -1926,6 +1928,28 @@ impl<I: Copy> Placer<'_, I> {
         let inner = self.node(child, x + h, y + v, w - h * 2.0, None);
         let height = (inner + v * 2.0).max(slot.unwrap_or(0.0));
         self.out[index].rect.h = height;
+        height
+    }
+
+    /// A group of rows (passport §3 «Группа строк»): the frame of a block with the paddings of the
+    /// group, each row padded above and below, a line across between two rows; the frame takes its
+    /// `slot` when it has one.
+    fn group(&mut self, rows: &[Node<I>], x: f32, y: f32, w: f32, slot: Option<f32>) -> f32 {
+        let (v, h) = (self.em(ROW_GROUP_PAD.v), self.em(ROW_GROUP_PAD.h));
+        let row_pad = self.em(ROW_GROUP_ROW);
+        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (inner_x, inner_w) = (x + h, (w - h * 2.0).max(0.0));
+        let mut top = y + v;
+        for (index, row) in rows.iter().enumerate() {
+            if index > 0 {
+                self.push(Part::Divider, Rect::new(x, top, w, LINE.0), None);
+            }
+            top += row_pad;
+            top += self.node(row, inner_x, top, inner_w, None);
+            top += row_pad;
+        }
+        let height = (top + v - y).max(slot.unwrap_or(0.0));
+        self.out[frame].rect.h = height;
         height
     }
 

@@ -1855,3 +1855,51 @@ fn the_body_of_a_small_screen_scrolls_under_a_head_and_over_buttons_that_stand_s
         reference.shortfall
     );
 }
+
+/// **208.209, AUDIT-180 О3 — a group of rows** (passport §3 «Группа строк»): the rows stand in one
+/// frame of a block, a line across the frame between two of them and none before the first or after
+/// the last; each row inside the frame.
+#[test]
+fn a_group_of_rows_stands_in_one_frame_with_a_line_between_two_rows() {
+    let toggle = |id, label: &str| Node::Toggle {
+        id,
+        label: label.to_owned(),
+        hint: None,
+        on: true,
+        badge: None,
+    };
+    let window = bare(Node::Group(vec![
+        toggle(Id::Autostart, "Autostart"),
+        toggle(Id::Sound, "Sound"),
+        toggle(Id::Theme, "Theme"),
+    ]));
+    let layout = lay(&window, usual());
+    let frames = rects_of(&layout, |part| {
+        matches!(part, Part::Surface(Surface::Block))
+    });
+    let lines = rects_of(&layout, |part| matches!(part, Part::Divider));
+    let rows = rects_of(&layout, |part| matches!(part, Part::Toggle { .. }));
+
+    assert_eq!(frames.len(), 1, "one frame: {frames:?}");
+    let frame = frames[0];
+    assert_eq!(lines.len(), 2, "a line between two rows: {lines:?}");
+    for line in &lines {
+        assert!(
+            close(line.x, frame.x) && close(line.w, frame.w),
+            "the line across the frame: {line:?} {frame:?}"
+        );
+    }
+    for (index, row) in rows.iter().enumerate() {
+        assert!(
+            row.y > frame.y && row.bottom() < frame.bottom(),
+            "row {index} inside the frame: {row:?} {frame:?}"
+        );
+    }
+    assert!(
+        rows[0].bottom() < lines[0].y
+            && lines[0].y < rows[1].y
+            && rows[1].bottom() < lines[1].y
+            && lines[1].y < rows[2].y,
+        "the lines between the rows: {rows:?} {lines:?}"
+    );
+}
