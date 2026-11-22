@@ -365,18 +365,32 @@ fn play_notification_sound() {
 /// Ends the window: it goes, its state goes, and its caller is told — outside the borrow.
 /// Ends the window: its state goes, the window is asked to close, and its caller is told — once.
 fn end(by: EndBy) {
-    use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-
-    let Some(state) = SHOWN.with(|shown| shown.borrow_mut().take()) else {
+    let Some(state) = take_shown() else {
         return;
     };
-    // SAFETY: a message to a window of this thread; one already gone ignores it.
-    let _ = unsafe { PostMessageW(Some(state.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
     (state.on_end)(End {
         by,
         checked: state.checked.get(),
     });
+}
+
+/// The state of the window in the corner taken, and the window asked to close; none when no window
+/// is up. Once taken, a later press or `WM_CLOSE` of the window finds nothing to end.
+fn take_shown() -> Option<Shown> {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+
+    let state = SHOWN.with(|shown| shown.borrow_mut().take())?;
+    // SAFETY: a message to a window of this thread; one already gone ignores it.
+    let _ = unsafe { PostMessageW(Some(state.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+    Some(state)
+}
+
+/// Takes the window in the corner away **without telling its caller** — nobody pressed anything:
+/// what it announced is on the screen by now (Z17 of the stand of 208.207, решение 208.210: the knock
+/// of a letter goes when its letter opens, and is not taken for «Через неделю»).
+pub fn withdraw() {
+    let _ = take_shown();
 }
 
 /// Does what a button asks.

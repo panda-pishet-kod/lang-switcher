@@ -3598,6 +3598,9 @@ fn show_letter_in(
 
     if let Some(hwnd) = window_of(Kind::Letter) {
         raise(hwnd, activate);
+        if open_letter() == Some(letter) {
+            withdraw_knock_of(letter);
+        }
         return true;
     }
 
@@ -3620,7 +3623,7 @@ fn show_letter_in(
         _record: ShellRecord(Kind::Letter),
     };
 
-    open_shell(
+    let shown = open_shell(
         Kind::Letter,
         Some(letter),
         language,
@@ -3628,7 +3631,14 @@ fn show_letter_in(
         product,
         activate,
     )
-    .is_some()
+    .is_some();
+
+    // Z17: the letter is on the screen — its knock in the corner goes.
+    if shown {
+        withdraw_knock_of(letter);
+    }
+
+    shown
 }
 
 /// **Shows «От автора»** — FR-103.
@@ -4699,6 +4709,40 @@ thread_local! {
 
     /// Whether the last knock offered «Через неделю» (Z13).
     static NOTICE_WEEK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
+    /// The letter the knock in the corner stands for while it is up (Z17): none once it ended or
+    /// was taken away.
+    static NOTICE_FOR: std::cell::Cell<Option<Letter>> = const { std::cell::Cell::new(None) };
+}
+
+/// Whether `letter` may knock while the window of letters shows `open` — Z17 (the stand of
+/// 208.207, решение 208.210): not for the letter already on the screen. Pure.
+pub fn knock_is_owed(open: Option<Letter>, letter: Letter) -> bool {
+    open != Some(letter)
+}
+
+/// Whether the knock that stands for `knock` goes when the window of `opened` comes up — Z17: the
+/// knock of «Спасибо» stood over the letter that had opened by itself and covered «Напомнить…».
+/// Pure.
+pub fn knock_goes_with(knock: Option<Letter>, opened: Letter) -> bool {
+    knock == Some(opened)
+}
+
+/// The letter the window of letters shows now, if one is open.
+fn open_letter() -> Option<Letter> {
+    SHELL.with_borrow(|open| {
+        open.iter()
+            .find(|window| window.kind == Kind::Letter)
+            .and_then(|window| window.letter)
+    })
+}
+
+/// The window of `opened` is on the screen: the knock for it goes, untold — Z17.
+fn withdraw_knock_of(opened: Letter) {
+    if knock_goes_with(NOTICE_FOR.with(std::cell::Cell::get), opened) {
+        NOTICE_FOR.with(|slot| slot.set(None));
+        crate::corner::withdraw();
+    }
 }
 
 /// Knocks once with the window in the corner — FR-101, every letter but «Привет» and
@@ -4709,6 +4753,11 @@ fn announce(owner: HWND, letter: Letter) {
     // «Привет» is never announced: FR-101 shows it at once, and this function is not reached
     // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks —
     // «Обновление» too, since task T-119-9 (it is not in the schedule at all).
+    // Z17: the letter already on the screen does not knock over itself.
+    if !knock_is_owed(open_letter(), letter) {
+        return;
+    }
+
     let Some(mut content) = notice_content_in(settings::ui_language(), letter) else {
         return;
     };
@@ -4721,13 +4770,16 @@ fn announce(owner: HWND, letter: Letter) {
 
     NOTICE_OWNER.with(|slot| slot.set(Some(owner)));
     NOTICE_WEEK.with(|slot| slot.set(content.second.is_some()));
-    crate::corner::show(content, true, notice_ended);
+    if crate::corner::show(content, true, notice_ended) {
+        NOTICE_FOR.with(|slot| slot.set(Some(letter)));
+    }
 }
 
 /// The knock ended — [`notice_end`]: «Открыть письмо» opens the letter, the person asked for it;
 /// «Через неделю» and the ✕ of the knock of «Спасибо» put it off by a week, by the body of the
 /// letter's own button; any other ✕ or `Esc` leaves the letter to the schedule.
 fn notice_ended(end: crate::corner::End) {
+    NOTICE_FOR.with(|slot| slot.set(None));
     let letter = ANNOUNCED.with_borrow(|announced| *announced);
     let week = NOTICE_WEEK.with(std::cell::Cell::get);
 

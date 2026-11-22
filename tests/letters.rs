@@ -4356,7 +4356,7 @@ fn the_knock_of_a_letter_is_the_window_in_the_corner() {
 
     let code = squeezed_code(&letters_source());
     assert!(
-        code.contains("crate::corner::show(content, true, notice_ended);"),
+        code.contains("crate::corner::show(content, true, notice_ended)"),
         "the knock is shown by the window in the corner, with the sound of a notification"
     );
     assert!(
@@ -5150,5 +5150,55 @@ fn how_to_use_opens_the_page_about_the_flag() {
         links::flag_url(Language::En),
         links::FLAG_URL_EN,
         "the English side"
+    );
+}
+
+/// ⭐ **Z17 (the stand of 208.207, решение 208.210): the knock of a letter does not stand over its
+/// letter.** On the stand the letter «Спасибо» opened by itself at the next quiet tick while its
+/// knock still stood in the corner and covered «Напомнить…» of the letter. Now the knock goes,
+/// untold — it is not taken for «Через неделю» — when the window of its letter comes up, and a
+/// letter already on the screen does not knock at all.
+#[test]
+fn the_knock_of_a_letter_goes_when_its_letter_opens() {
+    use lang_switcher::letters::{knock_goes_with, knock_is_owed};
+
+    assert!(
+        knock_goes_with(Some(Letter::Thanks), Letter::Thanks),
+        "its own letter takes it away"
+    );
+    assert!(
+        !knock_goes_with(Some(Letter::Thanks), Letter::News(7)),
+        "another letter leaves it"
+    );
+    assert!(
+        !knock_goes_with(None, Letter::Thanks),
+        "no knock, nothing to take"
+    );
+
+    assert!(
+        !knock_is_owed(Some(Letter::Thanks), Letter::Thanks),
+        "not over its own letter"
+    );
+    assert!(
+        knock_is_owed(None, Letter::Thanks),
+        "no letter on the screen: it knocks"
+    );
+    assert!(
+        knock_is_owed(Some(Letter::News(7)), Letter::Thanks),
+        "another letter on the screen does not silence it"
+    );
+
+    let code = squeezed_code(&letters_source());
+    assert!(
+        code.contains("if !knock_is_owed(open_letter(), letter) { return; }"),
+        "the knock asks whether its letter is on the screen"
+    );
+    assert!(
+        code.contains("if shown { withdraw_knock_of(letter); }"),
+        "the window of a letter takes its knock away"
+    );
+    assert!(
+        code.contains("crate::corner::withdraw();"),
+        "untold: the corner is not ended by a press"
     );
 }
