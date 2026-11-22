@@ -661,6 +661,14 @@ pub fn mirror<I>(items: &mut [Placed<I>], width: f32) {
     }
 }
 
+/// `label` without the colon at its end — the colon of every script the strings use, with the space
+/// some put before it (French, the no-break space) — for a label over a field (passport §6).
+pub fn without_colon(label: &str) -> &str {
+    label.trim_end_matches(|c: char| {
+        matches!(c, ':' | '：' | '׃' | '\u{00A0}' | '\u{202F}') || c.is_whitespace()
+    })
+}
+
 /// The dot of a line of status for the state of the program.
 fn status_of(state: MenuState) -> Status {
     match state {
@@ -2007,6 +2015,13 @@ impl<I: Copy> Placer<'_, I> {
     }
 
     fn text(&mut self, role: Role, text: &str, x: f32, y: f32, w: f32, wrap: Wrap) -> f32 {
+        // A label over a field takes no colon (passport §6, 208.209): the strings keep theirs — the
+        // appeal and the lines of «Диагностика» say «label: value» with the same words.
+        let text = if role == Role::FieldLabel {
+            without_colon(text)
+        } else {
+            text
+        };
         let style = self.style(role);
         let h = match wrap {
             Wrap::OneLine | Wrap::Ellipsis => style.line_height(),

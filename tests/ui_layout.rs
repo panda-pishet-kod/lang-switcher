@@ -1904,3 +1904,34 @@ fn a_group_of_rows_stands_in_one_frame_with_a_line_between_two_rows() {
         "the lines between the rows: {rows:?} {lines:?}"
     );
 }
+
+/// **Passport §6, 208.209 — a label over a field takes no colon.** The strings keep theirs (the
+/// appeal and the lines of «Диагностика» say «label: value»); over a field, a choice field or a
+/// segmented switch the layout drops it, with the space some languages put before it.
+#[test]
+fn a_label_over_a_field_takes_no_colon() {
+    let window = bare(Node::Column(vec![
+        Node::Choice {
+            id: Id::Language,
+            label: "Language:".to_owned(),
+            options: vec!["One".to_owned()],
+            selected: 0,
+        },
+        Node::Segments {
+            id: Id::Theme,
+            label: "Thème\u{00A0}:".to_owned(),
+            options: vec!["A".to_owned(), "B".to_owned()],
+            selected: 0,
+        },
+    ]));
+    let layout = lay(&window, usual());
+    let labels: Vec<String> = layout
+        .items
+        .iter()
+        .filter_map(|item| match &item.part {
+            Part::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(labels, ["Language", "Thème"], "the labels without colons");
+}

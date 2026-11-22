@@ -554,3 +554,51 @@ fn the_switches_of_the_settings_stand_in_groups_of_rows_with_their_hints() {
         "«Диагностика»: the hint of the journal"
     );
 }
+
+/// **The stand of 23.11 (208.209, AUDIT-180 О5, Н5) — «Оформление» stays a segmented switch.** In a
+/// half of a pair beside «Язык интерфейса» its three segments did not fit and turned into a choice
+/// field; on a line of its own across the column, under the language, they are segments — in the
+/// window of 900 × 540 and in the narrowest one, in Russian and German.
+#[test]
+fn the_theme_of_the_settings_stays_a_segmented_switch_under_the_language() {
+    use lang_switcher::ui::layout::Part;
+
+    with_product_strings();
+    for language in [Language::Ru, Language::De] {
+        let text = Text::new(language.tag(), Direction::LeftToRight).expect("DirectWrite");
+        let (_, window) = window_of_settings::states(language)
+            .into_iter()
+            .find(|(name, _)| name == "settings General")
+            .expect("the state of «Общие»");
+        for size in [client_size(900.0, 540.0), client_size(620.0, 500.0)] {
+            let layout = fit::emergency(
+                &window,
+                size,
+                fit::k_for(language.tag(), size.class),
+                false,
+                &text,
+            );
+            let track = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::Track))
+                .map(|item| item.rect);
+            let language_field = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::Field { .. }))
+                .map(|item| item.rect)
+                .expect("the choice field of the language");
+            let track = track.unwrap_or_else(|| {
+                panic!(
+                    "{language:?} {size:?}: «Оформление» is a segmented switch, not a choice field"
+                )
+            });
+            assert!(
+                track.y > language_field.bottom() && track.w >= language_field.w,
+                "{language:?} {size:?}: the segments under the language, across the column: \
+                 {track:?} {language_field:?}"
+            );
+        }
+    }
+}

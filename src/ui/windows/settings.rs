@@ -356,19 +356,19 @@ impl Settings {
                 browser: false,
             }]));
         }
-        // «Язык интерфейса» and «Оформление» as a pair, their labels over them (208.209, AUDIT-180
-        // Н5): one under the other where a half is too narrow — the rule of the pair.
-        nodes.push(Node::Pair(
-            Box::new(Node::Rows(language_column)),
-            Box::new(Node::Segments {
-                id: Id::Theme,
-                label: self.line(IDS_THEME_LABEL),
-                options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
-                    .map(|id| self.line(id))
-                    .to_vec(),
-                selected: settings::theme_combo_index(self.config.general.theme),
-            }),
-        ));
+        // «Язык интерфейса», then «Оформление» on a line of its own across the column, their labels
+        // over them (208.209, AUDIT-180 Н5, О5). Not a pair: three segments are wider than half the
+        // column at the type of the window, and in a half they turned into a choice field (the
+        // frame of the stand, 23.11) — the rule of the segments comes first.
+        nodes.extend(language_column);
+        nodes.push(Node::Segments {
+            id: Id::Theme,
+            label: self.line(IDS_THEME_LABEL),
+            options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
+                .map(|id| self.line(id))
+                .to_vec(),
+            selected: settings::theme_combo_index(self.config.general.theme),
+        });
         nodes
     }
 
