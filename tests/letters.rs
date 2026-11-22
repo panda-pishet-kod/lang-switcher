@@ -5107,3 +5107,48 @@ fn a_week_from_the_knock_puts_the_thanks_off_by_seven_days_once() {
         "the one snooze is spent: the next knock and the letter come without it"
     );
 }
+
+/// ⭐ **Z12 of AUDIT-180 (решение 208.209, слово владельца П-291 PandaKod): «Как пользоваться» of
+/// «Обновлено» opens the page about the flag in the reader's language** — not the page of the
+/// program. A language with pages of its own reads `/xx/langswitcher/docs/flag/?lang=xx`; the others
+/// read the side of решение 181.33, by the rule of the program's page. The page is a draft on the
+/// site until the day of the release (404): nothing here asks it to answer.
+#[test]
+fn how_to_use_opens_the_page_about_the_flag() {
+    use lang_switcher::corner::{self, Press, on_press};
+    use lang_switcher::ui::windows::corner::Id;
+
+    for language in Language::ALL {
+        let want = match THE_OWN_PAGES.iter().find(|(own, _)| *own == language) {
+            Some((_, code)) => {
+                format!("https://panda-pishet-kod.dev/{code}/langswitcher/docs/flag/?lang={code}")
+            }
+            None if THE_RUSSIAN_SIDE.contains(&language)
+                || THE_RUSSIAN_PAGES_TOO.contains(&language) =>
+            {
+                "https://panda-pishet-kod.dev/langswitcher/docs/flag/?lang=ru".to_owned()
+            }
+            None => "https://panda-pishet-kod.dev/en/langswitcher/docs/flag/?lang=en".to_owned(),
+        };
+        assert_eq!(links::flag_url(language), want, "{language:?}");
+
+        let updated = corner::release_content_in(language, "1.7.0");
+        assert!(
+            matches!(
+                on_press(&updated, Id::Main),
+                Press::End(corner::Action::Open(address), _) if address == want
+            ),
+            "{language:?}: «Как пользоваться» opens {want}"
+        );
+    }
+    assert_eq!(
+        links::flag_url(Language::Ru),
+        links::FLAG_URL,
+        "the Russian side"
+    );
+    assert_eq!(
+        links::flag_url(Language::En),
+        links::FLAG_URL_EN,
+        "the English side"
+    );
+}

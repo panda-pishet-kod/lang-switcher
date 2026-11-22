@@ -394,7 +394,8 @@ fn act(action: Action, by: EndBy) {
 
 /// The block «the last important release» — **exactly one in the build** (T-119-6): its version and
 /// whether it has the picture. Its words are strings under permanent names (`IDS_RELEASE_*`, no
-/// version in a name); «Как пользоваться» is the page of the program in the person's language. An
+/// version in a name); «Как пользоваться» is the page about the flag in the person's language
+/// (Z12 of AUDIT-180, `links::flag_url`). An
 /// important release replaces the block; a minor one leaves it (the order of a release).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Release {
@@ -554,9 +555,11 @@ pub fn release_content_in(language: crate::settings::Language, previous: &str) -
         )),
         // The main button is the passport's — on the right and wider (§10 (4)): «Как пользоваться»,
         // the action of the window; «Понятно» the second, as in the hint of the flag.
+        // Z12 of AUDIT-180 (решение 208.209): the page «Как пользоваться: флаг раскладки», not the
+        // page of the program.
         main: (
             text(settings::IDS_RELEASE_HOWTO),
-            Action::Open(crate::letters::links::program_url(language)),
+            Action::Open(crate::letters::links::flag_url(language)),
         ),
         second: Some((text(settings::IDS_CORNER_OK), Action::Close)),
         picture: LAST_IMPORTANT.picture,

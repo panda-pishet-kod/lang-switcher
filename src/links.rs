@@ -232,36 +232,41 @@ pub fn feedback_url(language: Language) -> &'static str {
     /// Swedish and Slovak, on the line of the controller of the languages of the site of 2026-11-12;
     /// all four addresses checked in Chrome before the rows were written (2026-11-14: 200,
     /// `lang=sv` and `lang=sk`).
-    const OWN_PAGES: [(Language, &str, &str); 21] = [
-        (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk"),
-        (Language::De, "https://panda-pishet-kod.dev/de/langswitcher/download/?lang=de", "https://panda-pishet-kod.dev/de/langswitcher/?lang=de"),
-        (Language::Fr, "https://panda-pishet-kod.dev/fr/langswitcher/download/?lang=fr", "https://panda-pishet-kod.dev/fr/langswitcher/?lang=fr"),
-        (Language::Pt, "https://panda-pishet-kod.dev/pt/langswitcher/download/?lang=pt", "https://panda-pishet-kod.dev/pt/langswitcher/?lang=pt"),
-        (Language::It, "https://panda-pishet-kod.dev/it/langswitcher/download/?lang=it", "https://panda-pishet-kod.dev/it/langswitcher/?lang=it"),
-        (Language::Pl, "https://panda-pishet-kod.dev/pl/langswitcher/download/?lang=pl", "https://panda-pishet-kod.dev/pl/langswitcher/?lang=pl"),
-        (Language::Cs, "https://panda-pishet-kod.dev/cs/langswitcher/download/?lang=cs", "https://panda-pishet-kod.dev/cs/langswitcher/?lang=cs"),
-        (Language::Tr, "https://panda-pishet-kod.dev/tr/langswitcher/download/?lang=tr", "https://panda-pishet-kod.dev/tr/langswitcher/?lang=tr"),
-        (Language::El, "https://panda-pishet-kod.dev/el/langswitcher/download/?lang=el", "https://panda-pishet-kod.dev/el/langswitcher/?lang=el"),
-        (Language::He, "https://panda-pishet-kod.dev/he/langswitcher/download/?lang=he", "https://panda-pishet-kod.dev/he/langswitcher/?lang=he"),
-        (Language::Ar, "https://panda-pishet-kod.dev/ar/langswitcher/download/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/?lang=ar"),
-        (Language::Fa, "https://panda-pishet-kod.dev/fa/langswitcher/download/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/?lang=fa"),
-        (Language::Th, "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th", "https://panda-pishet-kod.dev/th/langswitcher/?lang=th"),
-        (Language::Az, "https://panda-pishet-kod.dev/az/langswitcher/download/?lang=az", "https://panda-pishet-kod.dev/az/langswitcher/?lang=az"),
-        (Language::Sr, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr"),
-        (Language::SrLatn, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr"),
-        (Language::Bg, "https://panda-pishet-kod.dev/bg/langswitcher/download/?lang=bg", "https://panda-pishet-kod.dev/bg/langswitcher/?lang=bg"),
-        (Language::Nl, "https://panda-pishet-kod.dev/nl/langswitcher/download/?lang=nl", "https://panda-pishet-kod.dev/nl/langswitcher/?lang=nl"),
-        (Language::Hu, "https://panda-pishet-kod.dev/hu/langswitcher/download/?lang=hu", "https://panda-pishet-kod.dev/hu/langswitcher/?lang=hu"),
-        (Language::Sv, "https://panda-pishet-kod.dev/sv/langswitcher/download/?lang=sv", "https://panda-pishet-kod.dev/sv/langswitcher/?lang=sv"),
-        (Language::Sk, "https://panda-pishet-kod.dev/sk/langswitcher/download/?lang=sk", "https://panda-pishet-kod.dev/sk/langswitcher/?lang=sk"),
+    ///
+    /// ⭐ **Z12 of AUDIT-180 (решение 208.209, слово владельца П-291 PandaKod)** — the third address
+    /// of a row: the page «Как пользоваться: флаг раскладки», `/xx/langswitcher/docs/flag/?lang=xx`,
+    /// the target of «Как пользоваться» of «Обновлено» ([`flag_url`]). ⚠ Until the day of the
+    /// release the site keeps it as a draft and answers 404 — no test asks it to answer.
+    const OWN_PAGES: [(Language, &str, &str, &str); 21] = [
+        (Language::Uk, "https://panda-pishet-kod.dev/uk/langswitcher/download/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/?lang=uk", "https://panda-pishet-kod.dev/uk/langswitcher/docs/flag/?lang=uk"),
+        (Language::De, "https://panda-pishet-kod.dev/de/langswitcher/download/?lang=de", "https://panda-pishet-kod.dev/de/langswitcher/?lang=de", "https://panda-pishet-kod.dev/de/langswitcher/docs/flag/?lang=de"),
+        (Language::Fr, "https://panda-pishet-kod.dev/fr/langswitcher/download/?lang=fr", "https://panda-pishet-kod.dev/fr/langswitcher/?lang=fr", "https://panda-pishet-kod.dev/fr/langswitcher/docs/flag/?lang=fr"),
+        (Language::Pt, "https://panda-pishet-kod.dev/pt/langswitcher/download/?lang=pt", "https://panda-pishet-kod.dev/pt/langswitcher/?lang=pt", "https://panda-pishet-kod.dev/pt/langswitcher/docs/flag/?lang=pt"),
+        (Language::It, "https://panda-pishet-kod.dev/it/langswitcher/download/?lang=it", "https://panda-pishet-kod.dev/it/langswitcher/?lang=it", "https://panda-pishet-kod.dev/it/langswitcher/docs/flag/?lang=it"),
+        (Language::Pl, "https://panda-pishet-kod.dev/pl/langswitcher/download/?lang=pl", "https://panda-pishet-kod.dev/pl/langswitcher/?lang=pl", "https://panda-pishet-kod.dev/pl/langswitcher/docs/flag/?lang=pl"),
+        (Language::Cs, "https://panda-pishet-kod.dev/cs/langswitcher/download/?lang=cs", "https://panda-pishet-kod.dev/cs/langswitcher/?lang=cs", "https://panda-pishet-kod.dev/cs/langswitcher/docs/flag/?lang=cs"),
+        (Language::Tr, "https://panda-pishet-kod.dev/tr/langswitcher/download/?lang=tr", "https://panda-pishet-kod.dev/tr/langswitcher/?lang=tr", "https://panda-pishet-kod.dev/tr/langswitcher/docs/flag/?lang=tr"),
+        (Language::El, "https://panda-pishet-kod.dev/el/langswitcher/download/?lang=el", "https://panda-pishet-kod.dev/el/langswitcher/?lang=el", "https://panda-pishet-kod.dev/el/langswitcher/docs/flag/?lang=el"),
+        (Language::He, "https://panda-pishet-kod.dev/he/langswitcher/download/?lang=he", "https://panda-pishet-kod.dev/he/langswitcher/?lang=he", "https://panda-pishet-kod.dev/he/langswitcher/docs/flag/?lang=he"),
+        (Language::Ar, "https://panda-pishet-kod.dev/ar/langswitcher/download/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/?lang=ar", "https://panda-pishet-kod.dev/ar/langswitcher/docs/flag/?lang=ar"),
+        (Language::Fa, "https://panda-pishet-kod.dev/fa/langswitcher/download/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/?lang=fa", "https://panda-pishet-kod.dev/fa/langswitcher/docs/flag/?lang=fa"),
+        (Language::Th, "https://panda-pishet-kod.dev/th/langswitcher/download/?lang=th", "https://panda-pishet-kod.dev/th/langswitcher/?lang=th", "https://panda-pishet-kod.dev/th/langswitcher/docs/flag/?lang=th"),
+        (Language::Az, "https://panda-pishet-kod.dev/az/langswitcher/download/?lang=az", "https://panda-pishet-kod.dev/az/langswitcher/?lang=az", "https://panda-pishet-kod.dev/az/langswitcher/docs/flag/?lang=az"),
+        (Language::Sr, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/docs/flag/?lang=sr"),
+        (Language::SrLatn, "https://panda-pishet-kod.dev/sr/langswitcher/download/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/?lang=sr", "https://panda-pishet-kod.dev/sr/langswitcher/docs/flag/?lang=sr"),
+        (Language::Bg, "https://panda-pishet-kod.dev/bg/langswitcher/download/?lang=bg", "https://panda-pishet-kod.dev/bg/langswitcher/?lang=bg", "https://panda-pishet-kod.dev/bg/langswitcher/docs/flag/?lang=bg"),
+        (Language::Nl, "https://panda-pishet-kod.dev/nl/langswitcher/download/?lang=nl", "https://panda-pishet-kod.dev/nl/langswitcher/?lang=nl", "https://panda-pishet-kod.dev/nl/langswitcher/docs/flag/?lang=nl"),
+        (Language::Hu, "https://panda-pishet-kod.dev/hu/langswitcher/download/?lang=hu", "https://panda-pishet-kod.dev/hu/langswitcher/?lang=hu", "https://panda-pishet-kod.dev/hu/langswitcher/docs/flag/?lang=hu"),
+        (Language::Sv, "https://panda-pishet-kod.dev/sv/langswitcher/download/?lang=sv", "https://panda-pishet-kod.dev/sv/langswitcher/?lang=sv", "https://panda-pishet-kod.dev/sv/langswitcher/docs/flag/?lang=sv"),
+        (Language::Sk, "https://panda-pishet-kod.dev/sk/langswitcher/download/?lang=sk", "https://panda-pishet-kod.dev/sk/langswitcher/?lang=sk", "https://panda-pishet-kod.dev/sk/langswitcher/docs/flag/?lang=sk"),
     ];
 
 /// The row of [`OWN_PAGES`] for this language, if it has one.
-fn own_pages(language: Language) -> Option<(Language, &'static str, &'static str)> {
+fn own_pages(language: Language) -> Option<(Language, &'static str, &'static str, &'static str)> {
     OWN_PAGES
         .iter()
         .copied()
-        .find(|(own, _, _)| *own == language)
+        .find(|(own, _, _, _)| *own == language)
 }
 
 /// The support page — FR-103, one link and no payment details of any kind in the program
@@ -304,7 +309,7 @@ pub const DOWNLOAD_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/
 /// site that does not read the mark yet simply ignores it.
 pub fn download_url(language: Language) -> &'static str {
     match own_pages(language) {
-        Some((_, download, _)) => download,
+        Some((_, download, _, _)) => download,
         None if reads_the_russian_pages(language) => DOWNLOAD_URL,
         None => DOWNLOAD_URL_EN,
     }
@@ -330,9 +335,28 @@ pub const PROGRAM_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/?
 /// mark of the language is there for the reason [`download_url`] gives.
 pub fn program_url(language: Language) -> &'static str {
     match own_pages(language) {
-        Some((_, _, program)) => program,
+        Some((_, _, program, _)) => program,
         None if reads_the_russian_pages(language) => PROGRAM_URL,
         None => PROGRAM_URL_EN,
+    }
+}
+
+/// The page «Как пользоваться: флаг раскладки» — Z12 of AUDIT-180 (решения 208.92 п. 10, 208.209):
+/// the target of «Как пользоваться» of the window «Обновлено», the Russian side, marked `?lang=ru`.
+/// ⚠ A draft on the site until the day of the release (404 until then).
+pub const FLAG_URL: &str = "https://panda-pishet-kod.dev/langswitcher/docs/flag/?lang=ru";
+
+/// The English page about the flag — the pair of [`FLAG_URL`] under `/en/`, marked `?lang=en`.
+pub const FLAG_URL_EN: &str = "https://panda-pishet-kod.dev/en/langswitcher/docs/flag/?lang=en";
+
+/// **The page about the flag in the language a person reads the program in** — [`OWN_PAGES`], or
+/// else the side of решение 181.33, by the rule of [`program_url`]: «Как пользоваться» of
+/// «Обновлено» (Z12).
+pub fn flag_url(language: Language) -> &'static str {
+    match own_pages(language) {
+        Some((_, _, _, flag)) => flag,
+        None if reads_the_russian_pages(language) => FLAG_URL,
+        None => FLAG_URL_EN,
     }
 }
 
@@ -441,11 +465,13 @@ fn allowed_hosts() -> impl Iterator<Item = &'static str> {
             CHANGELOG_URL,
             CHANGELOG_URL_EN,
             CHANGELOG_URL_UNMARKED,
+            FLAG_URL,
+            FLAG_URL_EN,
         ])
         .chain(
             OWN_PAGES
                 .iter()
-                .flat_map(|(_, download, program)| [*download, *program]),
+                .flat_map(|(_, download, program, flag)| [*download, *program, *flag]),
         )
         .filter_map(host_of)
 }
