@@ -275,6 +275,7 @@ BEGIN
     IDS_RELEASE_NEVER       "ಅಪ್‌ಡೇಟ್ ವಿಂಡೋಗಳನ್ನು ಮತ್ತೆ ತೋರಿಸಬೇಡಿ"
     IDS_CORNER_FLAG         "ಲೇಔಟ್ ಧ್ವಜ"
     IDS_CORNER_LETTER       "ಪತ್ರ"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "ಲೇಔಟ್ ಧ್ವಜ ಆನ್ ಆಗಿದೆ"
     IDS_HINT_TEXT           "ಧ್ವಜ ಟಾಸ್ಕ್‌ಬಾರ್‌ನಲ್ಲಿ ಯಾವಾಗಲೂ ಕಾಣಲು, ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ Lang Switcher ಆನ್ ಮಾಡಿ: ಟಾಸ್ಕ್‌ಬಾರ್ → ಇತರ ಸಿಸ್ಟಂ ಟ್ರೇ ಐಕಾನ್‌ಗಳು. ಸದ್ಯಕ್ಕೆ ಇದು ^ ಬಾಣದ ಕೆಳಗಿದೆ."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

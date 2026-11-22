@@ -278,6 +278,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Güncelleme pencerelerini bir daha gösterme"
     IDS_CORNER_FLAG         "düzen bayrağı"
     IDS_CORNER_LETTER       "mektup"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Düzen bayrağı açık"
     IDS_HINT_TEXT           "Bayrağın görev çubuğunda hep görünmesi için Ayarlar'da Lang Switcher'ı açın: Görev çubuğu → Diğer sistem tepsisi simgeleri. Şimdilik ^ okunun altında."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

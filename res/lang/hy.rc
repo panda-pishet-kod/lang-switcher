@@ -278,6 +278,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Այլևս չցուցադրել թարմացման պատուհանները"
     IDS_CORNER_FLAG         "դասավորության դրոշ"
     IDS_CORNER_LETTER       "նամակ"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Դասավորության դրոշը միացված է"
     IDS_HINT_TEXT           "Որպեսզի դրոշը միշտ երևա առաջադրանքների վահանակում, միացրեք Lang Switcher-ը Կարգավորումներում՝ Առաջադրանքների վահանակ → Համակարգային սկուտեղի այլ պատկերակներ։ Առայժմ այն ^ սլաքի տակ է։"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

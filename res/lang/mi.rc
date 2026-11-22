@@ -271,6 +271,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Kaua e whakaatu anō i ngā matapihi whakahou"
     IDS_CORNER_FLAG         "haki papapātuhi"
     IDS_CORNER_LETTER       "reta"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Kua kā te haki whakatakotoranga"
     IDS_HINT_TEXT           "Kia kitea tonutia te haki i te pae mahi, whakakāngia a Lang Switcher i ngā Tautuhinga: Pae mahi → Ētahi atu tohu pae pūnaha. I tēnei wā kei raro ia i te pere ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

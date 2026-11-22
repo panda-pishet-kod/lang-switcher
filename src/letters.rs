@@ -841,6 +841,10 @@ pub fn after_shown(state: &mut Letters, letter: Letter, today: Date, version: &s
 /// what the closing of it means; this puts it back to [`Thanks::Snoozed`] and moves the day.
 /// The second showing has the button disabled ([`snooze_is_offered`]), so there is no second
 /// snooze to guard against here.
+///
+/// ⭐ Z13 of AUDIT-180: the same body answers «Через неделю» of the knock (and its ✕), before
+/// the letter was ever shown — [`Thanks::Pending`] becomes [`Thanks::Snoozed`], so the one snooze is
+/// spent and neither the next knock nor the letter offers another.
 pub fn snooze_thanks(state: &mut Letters, today: Date) {
     state.thanks = Thanks::Snoozed;
     state.thanks_due = Some(today.plus_days(SNOOZE_DAYS));
@@ -4626,15 +4630,18 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
 
 /// What the window in the corner says about a letter that has come, in `language` — the knock of
 /// FR-101 on the shell (T-120-14, T-120-16): «LANG SWITCHER · ПИСЬМО», the heading of the letter,
-/// the words of [`toast_strings`], and one button, «Открыть письмо». `None` for the
-/// letters that do not knock.
+/// the words of [`toast_strings`], «Открыть письмо», and for «Спасибо» a second button, «Через
+/// неделю». `None` for the letters that do not knock.
 ///
-/// One button and the ✕, not two: the ✕ does what an unnoticed knock always did — nothing, and
-/// the letter opens by itself at the next quiet moment (FR-101). A second button «позже» would
-/// promise a delay the schedule does not give.
+/// ⭐ **Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209):** «Через неделю» puts «Спасибо» off by
+/// [`SNOOZE_DAYS`] — the one snooze of FR-101, the same as the letter's own button
+/// ([`snooze_thanks`]) — and the ✕ does what the second button does ([`notice_end`]). A knock after
+/// the snooze is spent has no second button ([`announce`]); «Новость» knocks with one button and
+/// its ✕ leaves the letter to the schedule, as before.
 pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
     use crate::settings::{
-        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_TITLE,
+        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_NOTICE_WEEK,
+        IDS_THANKS_TITLE,
     };
 
     // The words of the old balloon; its title is not shown — the header of the window in the corner
@@ -4652,16 +4659,46 @@ pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::co
         text: text(words),
         link: None,
         main: (text(IDS_LETTERS_OPEN), crate::corner::Action::Close),
-        second: None,
+        second: (letter == Letter::Thanks)
+            .then(|| (text(IDS_NOTICE_WEEK), crate::corner::Action::Close)),
         picture: false,
         check: None,
     })
+}
+
+/// What the end of a knock does — [`notice_end`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeEnd {
+    /// «Открыть письмо»: the letter opens, the person asked for it.
+    Open,
+    /// «Через неделю», or the ✕ of a knock that offered it: «Спасибо» is put off by a week.
+    Week,
+    /// The ✕ of a knock without «Через неделю»: the letter is left to the schedule — it opens by
+    /// itself at the next quiet moment (FR-101).
+    Schedule,
+}
+
+/// What the end of the knock of `letter` means, ended `by` — Z13 of AUDIT-180 (решения 208.112 п. 1,
+/// 208.209): the main button opens the letter; the second button and the ✕ of a knock that
+/// offered «Через неделю» (`week`) put «Спасибо» off by a week; the ✕ of any other knock leaves the
+/// letter to the schedule. Pure.
+pub fn notice_end(letter: Option<Letter>, by: crate::corner::EndBy, week: bool) -> NoticeEnd {
+    use crate::corner::EndBy;
+
+    match by {
+        EndBy::Main => NoticeEnd::Open,
+        EndBy::Second | EndBy::Close if week && letter == Some(Letter::Thanks) => NoticeEnd::Week,
+        EndBy::Second | EndBy::Close => NoticeEnd::Schedule,
+    }
 }
 
 thread_local! {
     /// The program's window the last knock was made for — the owner of the letter «Открыть
     /// письмо» opens; the window in the corner tells its end through a plain `fn`.
     static NOTICE_OWNER: std::cell::Cell<Option<HWND>> = const { std::cell::Cell::new(None) };
+
+    /// Whether the last knock offered «Через неделю» (Z13).
+    static NOTICE_WEEK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Knocks once with the window in the corner — FR-101, every letter but «Привет» and
@@ -4672,22 +4709,42 @@ fn announce(owner: HWND, letter: Letter) {
     // «Привет» is never announced: FR-101 shows it at once, and this function is not reached
     // for it. NFR-13: a letter with no strings knocks with nothing rather than with blanks —
     // «Обновление» too, since task T-119-9 (it is not in the schedule at all).
-    let Some(content) = notice_content_in(settings::ui_language(), letter) else {
+    let Some(mut content) = notice_content_in(settings::ui_language(), letter) else {
         return;
     };
 
+    // Z13: «Через неделю» is the one snooze of «Спасибо» (FR-101); a knock after it is spent —
+    // by this button or by the letter's own — comes without it.
+    if !snooze_is_offered(&state_now()) {
+        content.second = None;
+    }
+
     NOTICE_OWNER.with(|slot| slot.set(Some(owner)));
+    NOTICE_WEEK.with(|slot| slot.set(content.second.is_some()));
     crate::corner::show(content, true, notice_ended);
 }
 
-/// The knock ended: «Открыть письмо» opens the letter, the person asked for it; the ✕ and `Esc`
-/// leave it to the schedule.
+/// The knock ended — [`notice_end`]: «Открыть письмо» opens the letter, the person asked for it;
+/// «Через неделю» and the ✕ of the knock of «Спасибо» put it off by a week, by the body of the
+/// letter's own button; any other ✕ or `Esc` leaves the letter to the schedule.
 fn notice_ended(end: crate::corner::End) {
-    if end.by != crate::corner::EndBy::Main {
-        return;
-    }
-    if let Some(owner) = NOTICE_OWNER.with(std::cell::Cell::get) {
-        open_announced(owner);
+    let letter = ANNOUNCED.with_borrow(|announced| *announced);
+    let week = NOTICE_WEEK.with(std::cell::Cell::get);
+
+    match notice_end(letter, end.by, week) {
+        NoticeEnd::Open => {
+            if let Some(owner) = NOTICE_OWNER.with(std::cell::Cell::get) {
+                open_announced(owner);
+            }
+        }
+        NoticeEnd::Week => {
+            if let Some(today) = today() {
+                update_state(|state| snooze_thanks(state, today));
+            }
+            // The knock is answered: the next tick does not show the letter by itself.
+            ANNOUNCED.with_borrow_mut(|announced| *announced = None);
+        }
+        NoticeEnd::Schedule => {}
     }
 }
 

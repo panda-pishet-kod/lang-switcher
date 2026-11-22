@@ -364,6 +364,9 @@ END
 // Stage E120, task T-120-16: the header of the window in the corner that knocks with a letter — the word
 // after «LANG SWITCHER · », as IDS_CORNER_UPDATE and IDS_CORNER_FLAG are.
 #define IDS_CORNER_LETTER       3293
+// Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): the second button of the knock of «Спасибо» —
+// the letter is put off by a week; the ✕ does the same.
+#define IDS_NOTICE_WEEK         3341
 // Stage E120, task T-120-16: the line under the body of «Привет» — the tray icon (208.106 п. 3).
 #define IDS_HELLO_FOOT          3294
 

@@ -6562,7 +6562,9 @@ impl Drop for ProductImage {
 /// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
 ///
 /// ⚠ **276 since Z11 of AUDIT-180** — the text of the hint of the flag on Windows 10 (3340).
-const FR_94_STRINGS: [(u16, &str, &str); 276] = [
+///
+/// ⚠ **277 since Z13 of AUDIT-180** — «Через неделю» of the knock of «Спасибо» (3341).
+const FR_94_STRINGS: [(u16, &str, &str); 277] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7194,8 +7196,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
     ),
     (
         settings::IDS_TOAST_THANKS,
-        "Прошёл месяц с установки. Панда хочет сказать пару слов. Нажмите, чтобы прочитать.",
-        "It has been a month since you installed it. Panda would like a word. Click to read it.",
+        "Привет, это снова Панда. Месяц назад вы поставили Lang Switcher — надеюсь, с ним удобно.",
+        "Hello, it is Panda again. You installed Lang Switcher a month ago — I hope it suits you.",
     ),
     // ⛔ Task T-119-9 (решение 208.99 п. 1): the balloon of «Обновление» (3137, 3138) is gone.
     (settings::IDS_ABOUT_AUTHOR, "От автора…", "From the author…"),
@@ -7738,6 +7740,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
          Personalization → Taskbar → “Select which icons appear on the taskbar”. For now it is \
          under the arrow ^.",
     ),
+    // Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): the second button of the knock of «Спасибо».
+    (settings::IDS_NOTICE_WEEK, "Через неделю", "In a week"),
     (
         settings::IDS_MENU_WHATSNEW,
         "Что нового в {0}…",
@@ -12217,8 +12221,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        276,
-        "two hundred and SEVENTY-SIX identifiers in use since Z11 of AUDIT-180: the text of the hint \
+        277,
+        "two hundred and SEVENTY-SEVEN identifiers in use since Z13 of AUDIT-180: «Через неделю» of \
+         the knock of «Спасибо» (3341). Two hundred and seventy-six since Z11: the text of the hint \
          of the flag on Windows 10 (3340). Two hundred and seventy-five since task T-120-19: the line \
          of the state of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
          after Б: \

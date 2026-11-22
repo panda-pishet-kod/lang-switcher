@@ -4334,10 +4334,17 @@ fn the_knock_of_a_letter_is_the_window_in_the_corner() {
             settings::text(settings::IDS_LETTERS_OPEN),
             "{letter:?}: «Открыть письмо»"
         );
+        // Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): «Спасибо» has «Через неделю» as well;
+        // «Новость» keeps one button and the ✕.
+        let second = (letter == Letter::Thanks).then(|| settings::text(settings::IDS_NOTICE_WEEK));
+        assert_eq!(
+            content.second.as_ref().map(|(label, _)| label.clone()),
+            second,
+            "{letter:?}: the second button"
+        );
         assert!(
-            content.second.is_none() && content.check.is_none() && !content.picture,
-            "{letter:?}: one button and the ✕ — the letter comes by itself later, as after an \
-             unnoticed knock"
+            content.check.is_none() && !content.picture,
+            "{letter:?}: no check box, no picture"
         );
     }
     for letter in [Letter::Welcome, Letter::Update] {
@@ -5025,5 +5032,78 @@ fn the_hint_says_the_path_of_its_windows() {
         corner::hint_content_in(Language::Ru).text,
         ru11,
         "the instruments measure the text of Windows 11"
+    );
+}
+
+/// ⭐ **Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): what the end of a knock does.** «Открыть
+/// письмо» opens the letter; «Через неделю» and the ✕ of the knock of «Спасибо» that offered it put
+/// the letter off by a week (the mock-up: «✕ and Esc do what the second one does»); the ✕ of a knock
+/// without it — «Новость», or «Спасибо» after the snooze is spent — leaves the letter to the
+/// schedule, as before 1.8.0.
+#[test]
+fn the_end_of_a_knock_opens_puts_off_or_leaves_to_the_schedule() {
+    use lang_switcher::corner::EndBy;
+    use lang_switcher::letters::{NoticeEnd, notice_end};
+
+    let thanks = Some(Letter::Thanks);
+    assert_eq!(notice_end(thanks, EndBy::Main, true), NoticeEnd::Open);
+    assert_eq!(notice_end(thanks, EndBy::Second, true), NoticeEnd::Week);
+    assert_eq!(
+        notice_end(thanks, EndBy::Close, true),
+        NoticeEnd::Week,
+        "the ✕ of the knock of «Спасибо» is «Через неделю»"
+    );
+    assert_eq!(
+        notice_end(thanks, EndBy::Close, false),
+        NoticeEnd::Schedule,
+        "after the one snooze the ✕ leaves the letter to the schedule"
+    );
+
+    let news = Some(Letter::News(7));
+    assert_eq!(notice_end(news, EndBy::Main, false), NoticeEnd::Open);
+    assert_eq!(notice_end(news, EndBy::Close, false), NoticeEnd::Schedule);
+    assert_eq!(
+        notice_end(news, EndBy::Close, true),
+        NoticeEnd::Schedule,
+        "a week is the snooze of «Спасибо» alone"
+    );
+    assert_eq!(notice_end(None, EndBy::Close, true), NoticeEnd::Schedule);
+}
+
+/// ⭐ **Z13: «Через неделю» of the knock puts «Спасибо» off by seven days and spends its one
+/// snooze** — the body of the letter's own button (`snooze_thanks`) on a letter never shown: due
+/// again on the seventh day, not before, and neither the next knock nor the letter offers a second
+/// snooze (FR-101).
+#[test]
+fn a_week_from_the_knock_puts_the_thanks_off_by_seven_days_once() {
+    let today = day(2026, 11, 22);
+    let mut state = Letters {
+        thanks_due: Some(today),
+        ..Letters::default()
+    };
+    assert!(
+        letters::thanks_is_due(&state, today),
+        "the knock came on the day it was due"
+    );
+    assert!(
+        letters::snooze_is_offered(&state),
+        "so far the one snooze is there"
+    );
+
+    letters::snooze_thanks(&mut state, today);
+
+    assert_eq!(state.thanks, Thanks::Snoozed);
+    assert_eq!(state.thanks_due, Some(day(2026, 11, 29)));
+    assert!(
+        !letters::thanks_is_due(&state, day(2026, 11, 28)),
+        "not before the seventh day"
+    );
+    assert!(
+        letters::thanks_is_due(&state, day(2026, 11, 29)),
+        "due again on the seventh day"
+    );
+    assert!(
+        !letters::snooze_is_offered(&state),
+        "the one snooze is spent: the next knock and the letter come without it"
     );
 }

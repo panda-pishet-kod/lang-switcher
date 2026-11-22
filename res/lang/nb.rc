@@ -275,6 +275,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Ikke vis oppdateringsvinduer igjen"
     IDS_CORNER_FLAG         "tastaturflagg"
     IDS_CORNER_LETTER       "brev"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Tastaturflagget er slått på"
     IDS_HINT_TEXT           "Hvis du vil at flagget alltid skal synes på oppgavelinjen, slår du på Lang Switcher i Innstillinger: Oppgavelinje → Andre ikoner i systemstatusfeltet. Foreløpig ligger det under pilen ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

@@ -273,6 +273,7 @@ BEGIN
     IDS_RELEASE_NEVER       "កុំបង្ហាញបង្អួចបច្ចុប្បន្នភាពទៀត"
     IDS_CORNER_FLAG         "ទង់ប្លង់"
     IDS_CORNER_LETTER       "សំបុត្រ"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "ទង់ប្លង់ត្រូវបានបើក"
     IDS_HINT_TEXT           "ដើម្បីឱ្យទង់មើលឃើញជានិច្ចលើរបារភារកិច្ច សូមបើក Lang Switcher ក្នុងការកំណត់: របារភារកិច្ច → រូបតំណាងថាសប្រព័ន្ធផ្សេងទៀត។ ឥឡូវវានៅក្រោមព្រួញ ^។"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

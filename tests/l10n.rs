@@ -685,7 +685,7 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        276,
+        277,
         "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
@@ -701,7 +701,8 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
          автора», and the C3 of task T-120-20: the subtitles of the sections and the eyebrow of \
          the settings, and task T-120-17: the two buttons of the card «Поддержать автора» of «От \
          автора», and task T-120-19: the line of the state of the thanks of the wizard, and Z11 \
-         of AUDIT-180: the text of the hint of the flag on Windows 10"
+         of AUDIT-180: the text of the hint of the flag on Windows 10, and Z13: «Через неделю» of \
+         the knock of «Спасибо»"
     );
 
     let mut refused = Vec::new();

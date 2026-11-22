@@ -274,6 +274,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Yangilanish oynalarini boshqa koʻrsatmaslik"
     IDS_CORNER_FLAG         "sxema bayrogʻi"
     IDS_CORNER_LETTER       "xat"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Sxema bayrogʻi yoqildi"
     IDS_HINT_TEXT           "Bayroq vazifalar panelida doim koʻrinib turishi uchun Sozlamalarda Lang Switcher dasturini yoqing: Vazifalar paneli → Boshqa tizim tokchasi belgilari. Hozircha u ^ strelkasi ostida."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

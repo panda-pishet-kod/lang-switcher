@@ -272,6 +272,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Яңарту тәрәзәләрен башка күрсәтмәскә"
     IDS_CORNER_FLAG         "урнашу байрагы"
     IDS_CORNER_LETTER       "хат"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Урнашу байрагы кабызылган"
     IDS_HINT_TEXT           "Байрак бурычлар панелендә һәрвакыт күренеп торсын өчен, Көйләүләрдә Lang Switcher программасын кабызыгыз: Бурычлар панеле → Башка система билгеләре. Әлегә ул ^ угы астында."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

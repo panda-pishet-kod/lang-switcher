@@ -277,6 +277,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Ne jelenjenek meg többé frissítési ablakok"
     IDS_CORNER_FLAG         "kiosztás zászlaja"
     IDS_CORNER_LETTER       "levél"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "A kiosztás zászlaja be van kapcsolva"
     IDS_HINT_TEXT           "Ha szeretné, hogy a zászló mindig látsszon a tálcán, kapcsolja be a Lang Switcher programot a Beállításokban: Tálca → Egyéb tálcaikonok. Most a ^ nyíl alatt van."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

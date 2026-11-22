@@ -273,6 +273,7 @@ BEGIN
     IDS_RELEASE_NEVER       "अपडेट की विंडो दोबारा न दिखाएँ"
     IDS_CORNER_FLAG         "लेआउट का झंडा"
     IDS_CORNER_LETTER       "पत्र"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "लेआउट का झंडा चालू है"
     IDS_HINT_TEXT           "झंडा टास्कबार पर हमेशा दिखे, इसके लिए सेटिंग्स में Lang Switcher चालू करें: टास्कबार → अन्य सिस्टम ट्रे आइकन। अभी यह तीर ^ के नीचे है।"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

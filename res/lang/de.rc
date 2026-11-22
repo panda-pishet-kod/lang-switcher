@@ -277,6 +277,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Keine Update-Fenster mehr anzeigen"
     IDS_CORNER_FLAG         "Layout-Flagge"
     IDS_CORNER_LETTER       "Brief"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Die Layout-Flagge ist eingeschaltet"
     IDS_HINT_TEXT           "Damit die Flagge in der Taskleiste immer zu sehen ist, schalten Sie Lang Switcher in den Einstellungen ein: Taskleiste → Andere Symbole der Taskleiste. Bis dahin steckt sie unter dem Pfeil ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

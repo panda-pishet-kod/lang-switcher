@@ -278,6 +278,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Ära näita enam värskendusaknaid"
     IDS_CORNER_FLAG         "paigutuse lipp"
     IDS_CORNER_LETTER       "kiri"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Paigutuse lipp on sisse lülitatud"
     IDS_HINT_TEXT           "Et lipp oleks tegumiribal alati näha, lülitage Lang Switcher sisse sätetes: Tegumiriba → Muud süsteemisalve ikoonid. Praegu on see noole ^ all."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

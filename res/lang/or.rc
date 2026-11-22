@@ -273,6 +273,7 @@ BEGIN
     IDS_RELEASE_NEVER       "ଅପଡେଟ୍ ୱିଣ୍ଡୋ ଆଉ ଦେଖାନ୍ତୁ ନାହିଁ"
     IDS_CORNER_FLAG         "ଲେଆଉଟର ପତାକା"
     IDS_CORNER_LETTER       "ଚିଠି"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "ଲେଆଉଟର ପତାକା ଚାଲୁ ଅଛି"
     IDS_HINT_TEXT           "ପତାକା ଟାସ୍କବାରରେ ସର୍ବଦା ଦେଖାଯିବା ପାଇଁ ସେଟିଂସରେ Lang Switcher ଚାଲୁ କରନ୍ତୁ: ଟାସ୍କବାର → ଅନ୍ୟ ସିଷ୍ଟମ ଟ୍ରେ ଆଇକନ। ବର୍ତ୍ତମାନ ଏହା ^ ତୀର ତଳେ ଅଛି।"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

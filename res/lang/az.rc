@@ -275,6 +275,7 @@ BEGIN
     IDS_RELEASE_NEVER       "Yeniləmə pəncərələrini bir daha göstərmə"
     IDS_CORNER_FLAG         "dil bayrağı"
     IDS_CORNER_LETTER       "məktub"
+    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Klaviatura dilinin bayrağı aktivdir"
     IDS_HINT_TEXT           "Bayrağın tapşırıqlar panelində həmişə görünməsi üçün Parametrlərdə Lang Switcher proqramını aktiv edin: Tapşırıqlar paneli → Digər sistem nişanları. Hələlik o, ^ oxunun altındadır."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
