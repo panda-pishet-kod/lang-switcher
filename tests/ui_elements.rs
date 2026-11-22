@@ -348,3 +348,66 @@ fn the_drawn_value_of_a_field_of_code_reads_in_its_own_direction() {
         "left to right from x {own}; the window's direction from x {window}"
     );
 }
+
+/// **Б6 of AUDIT-180 — the value of a choice field ends short of its corner mark.** A name longer
+/// than the field («English (United States)» in «Источник») ran into the mark; it is cut with an
+/// ellipsis a padding before it: nothing of the text in that gap.
+///
+/// ⚠ Control: the text is drawn left of the gap.
+#[test]
+fn a_long_value_of_a_choice_field_stops_short_of_its_corner_mark() {
+    use lang_switcher::ui::elements::draw as draw_part;
+    use lang_switcher::ui::tokens::shape::CHEVRON;
+    use lang_switcher::ui::tokens::{FIELD_PAD, Rgb};
+
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let look = Look {
+        theme: Theme::Light,
+        rtl: false,
+        b: b(),
+        h: 512.0,
+        text: &text,
+    };
+    let rect = Rect::new(MARGIN, MARGIN, 160.0, 34.0);
+    let mut canvas = Canvas::in_memory(
+        rect.w + MARGIN * 2.0,
+        rect.h + MARGIN * 2.0,
+        1.0,
+        Mode::Direct2D,
+    )
+    .expect("a canvas");
+    canvas.frame(|painter| {
+        painter.clear(Color::Bg.get(Theme::Light));
+        draw_part(
+            painter,
+            &look,
+            &Part::Field {
+                value: "English (United States) and some more".to_owned(),
+            },
+            rect,
+            State::NORMAL,
+        );
+    });
+    let image = canvas.image().expect("pixels");
+    let (pad, mark) = (FIELD_PAD.h.at(b()), CHEVRON.at(b()));
+    let mark_left = rect.x + rect.w - pad - mark;
+    let surface = Color::Surface.get(Theme::Light);
+    let light = u32::from(surface.r) + u32::from(surface.g) + u32::from(surface.b);
+    let dark = |p: Rgb| u32::from(p.r) + u32::from(p.g) + u32::from(p.b) + 150 < light;
+    let middle = (rect.y + rect.h / 2.0) as u32;
+    let inked = |from: f32, to: f32| -> Vec<u32> {
+        (from as u32..to as u32)
+            .filter(|x| (middle - 6..middle + 6).any(|y| dark(image.at(*x, y))))
+            .collect()
+    };
+
+    assert!(
+        !inked(rect.x + pad, mark_left - pad).is_empty(),
+        "control: the value is drawn"
+    );
+    let gap = inked(mark_left - pad + 1.0, mark_left - 1.0);
+    assert!(
+        gap.is_empty(),
+        "text in the padding before the corner mark, at x {gap:?} (mark at {mark_left})"
+    );
+}

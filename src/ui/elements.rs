@@ -397,9 +397,12 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             field(painter, look, rect, state);
             let pad = FIELD_PAD.h.at(look.b);
             let mark = CHEVRON.at(look.b);
-            let text = Rect::new(rect.x + pad, rect.y, rect.w - pad * 2.0 - mark, rect.h);
+            // The value ends a padding short of the corner mark, cut with an ellipsis: a long
+            // name ran into the mark (Б6 of AUDIT-180, «English (United States)» of «Источник»).
+            let room = (rect.w - pad * 3.0 - mark).max(0.0);
+            let text = Rect::new(rect.x + pad, rect.y, room, rect.h);
             let text = if look.rtl {
-                Rect::new(rect.x + pad + mark, rect.y, text.w, rect.h)
+                Rect::new(rect.x + pad * 2.0 + mark, rect.y, room, rect.h)
             } else {
                 text
             };
@@ -415,7 +418,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 None,
                 value,
                 text,
-                Wrap::OneLine,
+                Wrap::Ellipsis,
                 Align::Start,
                 true,
                 c(colour),
