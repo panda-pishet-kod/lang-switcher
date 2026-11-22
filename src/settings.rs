@@ -2669,8 +2669,9 @@ pub fn set_resource_module(module: HMODULE) {
     RESOURCE_MODULE.store(module.0 as usize, Ordering::Relaxed);
 }
 
-/// The module [`text`] reads from.
-fn resource_module() -> HMODULE {
+/// The module [`text`] reads from — and the icon on the caption of the windows of the shell
+/// (`ui::host`), which lives in the same resources.
+pub(crate) fn resource_module() -> HMODULE {
     let stored = RESOURCE_MODULE.load(Ordering::Relaxed);
 
     if stored != 0 {

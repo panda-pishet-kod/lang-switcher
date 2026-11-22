@@ -884,6 +884,10 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // (`ui::windows::about::open`). The name of the call and its code; appended at the end so that
     // no index above it moves.
     ("CreateWindowExW", Kind::Window),
+    // AUDIT-180, Z1 (Б1): the loader refused a frame of the icon on the caption of a window of the
+    // shell (`ui::host`); the window stands with the empty icon of Windows. The name of the call
+    // and its code; appended at the end so that no index above it moves.
+    ("LoadImageW(caption)", Kind::Window),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

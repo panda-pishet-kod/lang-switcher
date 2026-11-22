@@ -65,7 +65,7 @@ use crate::ui::tokens::{
     LIST_WHEEL_ROWS, MULTILINE_PAD, Rgb, Role, TYPE_AHEAD_MS, Theme, WINDOW_MAX, WINDOW_MIN,
     window_b,
 };
-use ::windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use ::windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use ::windows::Win32::Globalization::{
     GetLocaleInfoEx, GetUserDefaultUILanguage, LCIDToLocaleName, LOCALE_IREADINGLAYOUT,
     LOCALE_RETURN_NUMBER,
@@ -104,6 +104,10 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
     WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP,
     WS_SYSMENU, WS_THICKFRAME,
+};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    DestroyIcon, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsChild, LR_DEFAULTCOLOR, LoadImageW,
+    WM_SETICON, WindowFromPoint,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, IsWindow, IsWindowVisible, WA_INACTIVE, WM_ACTIVATE, WM_APP, WM_CHAR, WM_KILLFOCUS,
@@ -186,6 +190,9 @@ pub struct Probe {
     pub items: Vec<(String, Option<String>, Rect)>,
     /// The list of a choice field open under the window.
     pub dropdown: Option<HWND>,
+    /// The element drawn under the mouse and the one drawn pressed: indexes into `items`.
+    pub hover: Option<usize>,
+    pub pressed: Option<usize>,
     /// How many times the pictures of the window were drawn afresh.
     #[cfg(feature = "testing")]
     pub pictures_drawn: usize,
@@ -658,6 +665,12 @@ struct Host<C: Content> {
     scale: f32,
     hover: Option<usize>,
     pressed: Option<usize>,
+    /// The description changed and the marks of the mouse wait to be found again in the next
+    /// layout: `hover` and `pressed` are indexes of the layout that went (Б5 of AUDIT-180). What it
+    /// holds — the identifier of the element pressed then, if one was.
+    stale_marks: Option<Option<C::Id>>,
+    /// The icon on the caption, at the scale of the window; none for a popup.
+    icons: Option<CaptionIcons>,
     focus: Option<C::Id>,
     /// The keyboard ring shows: a key was pressed since the last click.
     cue: bool,
@@ -883,6 +896,71 @@ fn cloak(hwnd: HWND, on: bool) {
     };
 }
 
+/// The icon of the program on the caption of a window of the shell, in Alt+Tab and on the taskbar
+/// (Б1 of AUDIT-180): the two frames of `IDI_APP_ACTIVE` at the DPI of the window's screen, owned
+/// here and destroyed with the host — after the window is gone, or once the frames of a new scale
+/// replaced them. The class carries no icon, and the caption showed the empty one of Windows: the
+/// old windows set theirs (`WM_SETICON`, T-12-1) and the windows of the shell lost it with them.
+struct CaptionIcons {
+    small: HICON,
+    big: HICON,
+}
+
+impl CaptionIcons {
+    /// Both frames at `dpi`, or none: a caption without an icon is a smaller loss than a pair
+    /// half loaded, and the frame already loaded is freed by the drop of the half-built value.
+    fn load(dpi: u32) -> Option<Self> {
+        let instance = HINSTANCE(crate::settings::resource_module().0);
+        let frame = |(w, h): (i32, i32)| {
+            // SAFETY: the module whose resources carry the icon (the program, or the product binary
+            // a test opened as data); the name is an integer identifier, nothing is read as a
+            // string. Without `LR_SHARED` the handle is made for the caller, who destroys it.
+            let loaded = unsafe {
+                LoadImageW(
+                    Some(instance),
+                    crate::settings::resource_id(crate::tray::IDI_APP_ACTIVE),
+                    IMAGE_ICON,
+                    w,
+                    h,
+                    LR_DEFAULTCOLOR,
+                )
+            };
+            match loaded {
+                Ok(handle) => Some(HICON(handle.0)),
+                Err(error) => {
+                    crate::app::report_non_critical(CAPTION_ICON, &error);
+                    None
+                }
+            }
+        };
+        let [small, big] = crate::tray::caption_icon_sizes(dpi);
+        let mut icons = Self {
+            small: frame(small)?,
+            big: HICON::default(),
+        };
+        icons.big = frame(big)?;
+        Some(icons)
+    }
+}
+
+impl Drop for CaptionIcons {
+    fn drop(&mut self) {
+        for icon in [self.small, self.big] {
+            if icon.is_invalid() {
+                continue;
+            }
+            // SAFETY: a handle `load` made without `LR_SHARED`, destroyed once; no caption shows it
+            // any more (see the type).
+            if let Err(error) = unsafe { DestroyIcon(icon) } {
+                crate::app::report_non_critical("DestroyIcon", &error);
+            }
+        }
+    }
+}
+
+/// The journal's name for a frame of the caption's icon the loader refused.
+const CAPTION_ICON: &str = "LoadImageW(caption)";
+
 /// The scale of the screen the window stands on, at the moment asked: its DPI over a point's.
 fn scale_of(hwnd: HWND) -> f32 {
     let dpi = dpi_of(hwnd);
@@ -921,6 +999,40 @@ thread_local! {
 #[cfg(feature = "testing")]
 pub fn answer_mono_face(face: Option<&'static str>) {
     MONO_ANSWER.with(|answer| answer.set(face));
+}
+
+#[cfg(feature = "testing")]
+thread_local! {
+    /// Testing: where the mouse stands over the windows of this thread, in client pixels, in place
+    /// of where it is — the windows of the tests are never shown, and the mouse is the person's.
+    static MOUSE_ANSWER: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Testing: the point of the client area the mouse is over in the windows of this thread (`None` —
+/// where it really is: over no window of a test).
+#[cfg(feature = "testing")]
+pub fn answer_mouse(at: Option<(i32, i32)>) {
+    MOUSE_ANSWER.with(|answer| answer.set(at));
+}
+
+/// Where the mouse stands over `hwnd`, in client pixels; none when another window is under it.
+fn mouse_over(hwnd: HWND) -> Option<(f32, f32)> {
+    #[cfg(feature = "testing")]
+    if let Some((x, y)) = MOUSE_ANSWER.with(std::cell::Cell::get) {
+        return Some((x as f32, y as f32));
+    }
+    let mut point = POINT::default();
+    // SAFETY: the out parameter is a local.
+    unsafe { GetCursorPos(&mut point) }.ok()?;
+    // SAFETY: plain values; a field of Windows in the window is a child of it.
+    let under = unsafe { WindowFromPoint(point) };
+    // SAFETY: handles by value.
+    if under != hwnd && !unsafe { IsChild(hwnd, under) }.as_bool() {
+        return None;
+    }
+    // SAFETY: a live window; the point is a local.
+    let _ = unsafe { ScreenToClient(hwnd, &mut point) };
+    Some((point.x as f32, point.y as f32))
 }
 
 /// The DPI of `hwnd` as Windows answers it now: that of the monitor the window stands on, the
@@ -1068,6 +1180,8 @@ impl<C: Content> Host<C> {
             scale: 1.0,
             hover: None,
             pressed: None,
+            stale_marks: None,
+            icons: None,
             focus: None,
             cue: false,
             tracking: false,
@@ -1679,6 +1793,18 @@ impl<C: Content> Host<C> {
 
     /// The description again, from the content's state; the text again when the language changed.
     fn rebuild(&mut self) {
+        // The marks of the mouse are indexes of the layout that goes: kept, an element of the new
+        // description at the same index was drawn under the mouse — the field of the next step of
+        // the wizard grey with no mouse over it (Б5). They are found again under the mouse when the
+        // next layout is made; the element pressed, by its identifier.
+        if self.stale_marks.is_none() {
+            let pressed = self
+                .pressed
+                .and_then(|index| self.layout.as_ref()?.items.get(index)?.id);
+            self.stale_marks = Some(pressed);
+        }
+        self.hover = None;
+        self.pressed = None;
         self.window = self.content.describe();
         let (locale, rtl) = self.content.language();
         if locale != self.locale || rtl != self.rtl || self.text.is_none() {
@@ -1721,7 +1847,39 @@ impl<C: Content> Host<C> {
         };
         self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
         self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_most());
+        if let Some(pressed) = self.stale_marks.take() {
+            self.hover = mouse_over(hwnd).and_then(|(x, y)| self.hit(x, y));
+            self.pressed = self.hover.filter(|&index| {
+                pressed.is_some()
+                    && self.layout.as_ref().map(|layout| layout.items[index].id) == Some(pressed)
+            });
+        }
         self.sync_fields(hwnd);
+    }
+
+    /// Shows the icon of the program on the caption at `dpi` (Б1); a popup has no caption.
+    fn show_icons(&mut self, hwnd: HWND, dpi: u32) {
+        if self.popup.is_some() {
+            return;
+        }
+        let Some(icons) = CaptionIcons::load(dpi) else {
+            return;
+        };
+        for (which, icon) in [(ICON_SMALL, icons.small), (ICON_BIG, icons.big)] {
+            // SAFETY: a live window of this thread; the answer of Windows to `WM_SETICON`, asked of
+            // it directly — the message sent would come back to this host, borrowed now, and be
+            // answered by the same call. The icon is handed by value; `icons` keeps it.
+            let _ = unsafe {
+                DefWindowProcW(
+                    hwnd,
+                    WM_SETICON,
+                    WPARAM(which as usize),
+                    LPARAM(icon.0 as isize),
+                )
+            };
+        }
+        // The frames shown until now are on no caption any more: freed here.
+        self.icons = Some(icons);
     }
 
     /// How far the body can scroll, in points: 0 where nothing scrolls (208.198).
@@ -2606,6 +2764,7 @@ impl<C: Content> Handler for Host<C> {
                     invalidate(hwnd);
                     return Some(LRESULT(0));
                 }
+                self.show_icons(hwnd, u32::from(wparam.0 as u16));
                 // SAFETY: for this message `lparam` is the rectangle the system offers.
                 let offer = unsafe { *(lparam.0 as *const RECT) };
                 // SAFETY: a live window of this thread; plain values.
@@ -2908,6 +3067,8 @@ impl<C: Content> Handler for Host<C> {
             self.place_popup(hwnd);
         } else {
             place(hwnd, self.content.least());
+            // At the DPI of the screen the window was placed on.
+            self.show_icons(hwnd, dpi_of(hwnd));
         }
     }
 
@@ -2949,6 +3110,8 @@ impl<C: Content> Handler for Host<C> {
                 .map(|(id, hwnd)| (format!("{id:?}"), hwnd))
                 .collect(),
             dropdown: self.drop.as_ref().map(|drop| drop.hwnd),
+            hover: self.hover,
+            pressed: self.pressed,
             #[cfg(feature = "testing")]
             pictures_drawn: self
                 .pictures
