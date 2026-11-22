@@ -7,7 +7,27 @@ page. Dates are the days the releases were published (UTC).
 ## 1.8.0 — не выпущено
 
 - 1.7.0 was not released on its own: what it was to bring — the flag of the layout on the tray icon and the window
-  «Updated» — comes in 1.8.0 together with the new look of the letters.
+  «Updated» — comes in 1.8.0 together with the new look of every window of the program.
+- Every window of the program has a new look, one for all of them: the settings, the menu of the icon, «About», the
+  letters and «Recent letters», «From the author», the wizard «Write to the author» and the small window by the
+  notification area. Light, dark or as in Windows — the choice in «General», as before.
+- The settings window shows its sections in a column on the left — General, Hotkey, Layouts, Exclusions,
+  Diagnostics — each with a line on what it holds. A change in it takes effect at once and is saved: «OK», «Cancel»
+  and «Apply» gave way to one «Close».
+- The menu of the icon starts with a line of the program's state; its items have icons, «Suspend» shows the hotkey
+  and «Start when I sign in» is a switch that leaves the menu open. The items and their order are the same.
+- The windows open at two thirds of the work area of the screen, from 900 × 540 to 1280 × 720, and cannot be made
+  smaller than 900 × 540. On a screen with less room the window takes all of it and its content scrolls; the title
+  and the buttons stay in place.
+- A new scale of the screen is taken at once: the open windows redraw at it, and a window opened after the change
+  opens at it.
+- The section «State» gave way to four lines at the bottom of «Diagnostics», in plain words: whether the program
+  works, which layouts it fixes between, which key does it and whether it starts when you sign in. «Details for the
+  author» opens the technical lines «State» showed; they still go into a message to the author.
+- With any interface language but Russian, «Found a mistake in the translation?» under the language in «General»
+  opens the wizard at the page of an idea, with the language already named in the message.
+- In the wizard the text of the message is shown in a monospace font; when it has letters that font lacks — Hebrew
+  and Arabic on Windows 10 — the whole field is in the main font of the window, at the same size.
 - After an update the balloon «Lang Switcher has been updated to X» no longer appears; the window «Updated» takes its place
   after an important release.
 - The tray icon can be the flag of the current keyboard layout: the tick «Layout flag in the tray» in «General» of the
@@ -24,7 +44,8 @@ page. Dates are the days the releases were published (UTC).
 - When the flag is turned on but stands under the arrow ^ of the taskbar, a hint tells where to pin it.
 - For a week after an update the menu of the icon has «What's new in X…».
 - In «From the author» the switch «Tell me about the author’s updates and news» gave way to «Tell me about updates
-  of the program»: it turns the window «Updated» on and off, the same setting as its tick. Letters and news are turned
+  of the program»: it turns the window «Updated» on and off, the same setting as its tick and as the switch of the
+  same name in «General» of the settings — turned in one window, it shows so in the other. Letters and news are turned
   off in the settings file (`[letters] feed = false`); whoever has done that keeps it, and the window says so in a line.
 - When the program could not install a new version by itself, it no longer says so on its own: no notification and no
   window. From the seventh day (it was the third) the menu of the icon has «Version X is available…» and «Recent
