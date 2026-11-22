@@ -277,6 +277,7 @@ BEGIN
     IDS_CORNER_LETTER       "scrisoare"
     IDS_HINT_TITLE          "Steagul aranjamentului este activat"
     IDS_HINT_TEXT           "Ca steagul să fie mereu vizibil pe bara de activități, activați Lang Switcher în Setări: Bară de activități → Alte pictograme din tava de sistem. Deocamdată este sub săgeata ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Deschidere Setări Windows"
     IDS_MENU_WHATSNEW       "Noutăți în {0}…"
     IDS_UPDATES_SWITCH      "Anunțarea actualizărilor programului"

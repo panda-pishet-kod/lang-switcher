@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "សំបុត្រ"
     IDS_HINT_TITLE          "ទង់ប្លង់ត្រូវបានបើក"
     IDS_HINT_TEXT           "ដើម្បីឱ្យទង់មើលឃើញជានិច្ចលើរបារភារកិច្ច សូមបើក Lang Switcher ក្នុងការកំណត់: របារភារកិច្ច → រូបតំណាងថាសប្រព័ន្ធផ្សេងទៀត។ ឥឡូវវានៅក្រោមព្រួញ ^។"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "បើកការកំណត់ Windows"
     IDS_MENU_WHATSNEW       "អ្វីថ្មីក្នុង {0}…"
     IDS_UPDATES_SWITCH      "ជូនដំណឹងអំពីបច្ចុប្បន្នភាពកម្មវិធី"

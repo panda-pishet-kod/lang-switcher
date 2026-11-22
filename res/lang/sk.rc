@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "list"
     IDS_HINT_TITLE          "Vlajka rozloženia je zapnutá"
     IDS_HINT_TEXT           "Aby bola vlajka na paneli úloh vždy vidieť, zapnite Lang Switcher v Nastaveniach: Panel úloh → Ďalšie ikony oblasti oznámení. Zatiaľ je pod šípkou ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Otvoriť Nastavenia Windows"
     IDS_MENU_WHATSNEW       "Novinky vo verzii {0}…"
     IDS_UPDATES_SWITCH      "Informovať o aktualizáciách programu"

@@ -277,6 +277,7 @@ BEGIN
     IDS_CORNER_LETTER       "წერილი"
     IDS_HINT_TITLE          "განლაგების დროშა ჩართულია"
     IDS_HINT_TEXT           "რომ დროშა ამოცანების ზოლზე ყოველთვის ჩანდეს, ჩართეთ Lang Switcher პარამეტრებში: ამოცანების ზოლი → სისტემური უჯრის სხვა ხატულები. ჯერჯერობით ის ^ ისრის ქვეშაა."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows-ის პარამეტრების გახსნა"
     IDS_MENU_WHATSNEW       "რა არის ახალი {0}-ში…"
     IDS_UPDATES_SWITCH      "პროგრამის განახლებების შეტყობინება"

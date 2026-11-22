@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "thư"
     IDS_HINT_TITLE          "Cờ bố cục đã bật"
     IDS_HINT_TEXT           "Để cờ luôn hiện trên thanh tác vụ, hãy bật Lang Switcher trong Cài đặt: Thanh tác vụ → Biểu tượng khay hệ thống khác. Hiện tại nó nằm dưới mũi tên ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Mở Cài đặt Windows"
     IDS_MENU_WHATSNEW       "Có gì mới trong {0}…"
     IDS_UPDATES_SWITCH      "Thông báo khi có bản cập nhật"

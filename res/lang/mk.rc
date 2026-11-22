@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "писмо"
     IDS_HINT_TITLE          "Знамето на распоредот е вклучено"
     IDS_HINT_TEXT           "За знамето секогаш да се гледа на лентата со задачи, вклучете ја Lang Switcher во Поставки: Лента со задачи → Други икони во системската лента. Засега е под стрелката ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Отвори ги поставките на Windows"
     IDS_MENU_WHATSNEW       "Што е ново во {0}…"
     IDS_UPDATES_SWITCH      "Известувај за ажурирањата на програмата"

@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "хат"
     IDS_HINT_TITLE          "Орналасу жалауы қосулы"
     IDS_HINT_TEXT           "Жалау тапсырмалар тақтасында әрдайым көрініп тұруы үшін Параметрлерде Lang Switcher бағдарламасын қосыңыз: Тапсырмалар тақтасы → Басқа жүйелік науа белгішелері. Әзірге ол ^ көрсеткісінің астында."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows параметрлерін ашу"
     IDS_MENU_WHATSNEW       "{0} нұсқасындағы жаңалықтар…"
     IDS_UPDATES_SWITCH      "Бағдарлама жаңартулары туралы хабарлау"

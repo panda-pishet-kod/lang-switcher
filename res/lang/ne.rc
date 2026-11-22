@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "पत्र"
     IDS_HINT_TITLE          "लेआउटको झन्डा खुला छ"
     IDS_HINT_TEXT           "झन्डा टास्कबारमा सधैँ देखियोस् भन्नका लागि सेटिङमा Lang Switcher खोल्नुहोस्: टास्कबार → अन्य सिस्टम ट्रे आइकनहरू। अहिलेलाई यो ^ तीरमुनि छ।"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows सेटिङ खोल्नुहोस्"
     IDS_MENU_WHATSNEW       "{0} मा के नयाँ छ…"
     IDS_UPDATES_SWITCH      "प्रोग्रामका अद्यावधिकबारे जानकारी दिनुहोस्"

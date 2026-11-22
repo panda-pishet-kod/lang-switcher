@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "ຈົດໝາຍ"
     IDS_HINT_TITLE          "ເປີດທຸງແຜນຜັງແລ້ວ"
     IDS_HINT_TEXT           "ເພື່ອໃຫ້ເຫັນທຸງໃນແຖບໜ້າວຽກຕະຫຼອດ ໃຫ້ເປີດ Lang Switcher ໃນການຕັ້ງຄ່າ: ແຖບໜ້າວຽກ → ໄອຄອນອື່ນໃນຖາດລະບົບ ຕອນນີ້ມັນຢູ່ໃຕ້ລູກສອນ ^"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "ເປີດການຕັ້ງຄ່າ Windows"
     IDS_MENU_WHATSNEW       "ມີຫຍັງໃໝ່ໃນ {0}…"
     IDS_UPDATES_SWITCH      "ແຈ້ງເມື່ອມີອັບເດດໂປຣແກຣມ"

@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "laiškas"
     IDS_HINT_TITLE          "Išdėstymo vėliavėlė įjungta"
     IDS_HINT_TEXT           "Kad vėliavėlė visada būtų matoma užduočių juostoje, įjunkite Lang Switcher parametruose: Užduočių juosta → Kitos sistemos dėklo piktogramos. Kol kas ji po rodykle ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Atidaryti Windows parametrus"
     IDS_MENU_WHATSNEW       "Kas naujo versijoje {0}…"
     IDS_UPDATES_SWITCH      "Pranešti apie programos naujinimus"

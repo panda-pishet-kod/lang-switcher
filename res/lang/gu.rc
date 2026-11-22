@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "પત્ર"
     IDS_HINT_TITLE          "લેઆઉટનો ધ્વજ ચાલુ છે"
     IDS_HINT_TEXT           "ધ્વજ ટાસ્કબાર પર હંમેશાં દેખાય તે માટે સેટિંગ્સમાં Lang Switcher ચાલુ કરો: ટાસ્કબાર → અન્ય સિસ્ટમ ટ્રે આઇકન. હમણાં તે ^ તીર નીચે છે."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows સેટિંગ્સ ખોલો"
     IDS_MENU_WHATSNEW       "{0} માં નવું શું છે…"
     IDS_UPDATES_SWITCH      "પ્રોગ્રામના અપડેટ વિશે જણાવો"

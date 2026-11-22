@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "ittra"
     IDS_HINT_TITLE          "Il-bandiera tat-tqassim hija mixgħula"
     IDS_HINT_TEXT           "Biex il-bandiera tidher dejjem fuq it-taskbar, ixgħel Lang Switcher fl-Issettjar: Taskbar → Ikoni oħra tas-system tray. Għalissa qiegħda taħt il-vleġġa ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Iftaħ l-Issettjar ta' Windows"
     IDS_MENU_WHATSNEW       "X'hemm ġdid f'{0}…"
     IDS_UPDATES_SWITCH      "Għarrafni bl-aġġornamenti tal-programm"

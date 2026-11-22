@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "पत्र"
     IDS_HINT_TITLE          "लेआउटचा ध्वज चालू आहे"
     IDS_HINT_TEXT           "ध्वज टास्कबारवर नेहमी दिसावा यासाठी सेटिंग्जमध्ये Lang Switcher चालू करा: टास्कबार → इतर सिस्टम ट्रे चिन्हे. सध्या तो ^ बाणाखाली आहे."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows सेटिंग्ज उघडा"
     IDS_MENU_WHATSNEW       "{0} मध्ये नवीन काय…"
     IDS_UPDATES_SWITCH      "प्रोग्रामच्या अपडेटबद्दल कळवा"

@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "carta"
     IDS_HINT_TITLE          "A bandeira do layout está ativada"
     IDS_HINT_TEXT           "Para deixar a bandeira sempre visível na barra de tarefas, ative o Lang Switcher em Configurações: Barra de Tarefas → Outros ícones da bandeja do sistema. Por enquanto, ela está sob a seta ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Abrir as Configurações do Windows"
     IDS_MENU_WHATSNEW       "Novidades da {0}…"
     IDS_UPDATES_SWITCH      "Avisar sobre atualizações do programa"

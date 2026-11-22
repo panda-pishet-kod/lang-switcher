@@ -280,6 +280,7 @@ BEGIN
     IDS_CORNER_LETTER       "خەت"
     IDS_HINT_TITLE          "ھەرپتاختا بايرىقى ئېچىلدى"
     IDS_HINT_TEXT           "بايراق ۋەزىپە بالدىقىدا ھەمىشە كۆرۈنۈپ تۇرۇشى ئۈچۈن، تەڭشەكلەردە Lang Switcher نى ئېچىڭ: ۋەزىپە بالدىقى ← باشقا سىستېما سىنبەلگىلىرى. ھازىرچە ئۇ ^ كۆرسەتكۈچ ئاستىدا."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows تەڭشەكلىرىنى ئېچىش"
     IDS_MENU_WHATSNEW       "{0} دىكى يېڭىلىقلار…"
     IDS_UPDATES_SWITCH      "پروگرامما يېڭىلانمىلىرىدىن خەۋەر قىلىش"

@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "pismo"
     IDS_HINT_TITLE          "Zastavica rasporeda je uključena"
     IDS_HINT_TEXT           "Da bi zastavica uvek bila vidljiva na traci zadataka, uključite Lang Switcher u Podešavanjima: Traka zadataka → Ostale ikone sistemske trake. Za sada je ispod strelice ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Otvori Windows podešavanja"
     IDS_MENU_WHATSNEW       "Šta je novo u {0}…"
     IDS_UPDATES_SWITCH      "Obaveštavaj o ažuriranjima programa"

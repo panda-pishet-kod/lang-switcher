@@ -277,6 +277,7 @@ BEGIN
     IDS_CORNER_LETTER       "లేఖ"
     IDS_HINT_TITLE          "లేఅవుట్ జెండా ఆన్‌లో ఉంది"
     IDS_HINT_TEXT           "జెండా టాస్క్‌బార్‌లో ఎప్పుడూ కనిపించాలంటే, సెట్టింగ్‌లలో Lang Switcher ని ఆన్ చేయండి: టాస్క్‌బార్ → ఇతర సిస్టమ్ ట్రే చిహ్నాలు. ప్రస్తుతం ఇది ^ బాణం కింద ఉంది."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows సెట్టింగ్‌లను తెరవండి"
     IDS_MENU_WHATSNEW       "{0}లో కొత్తవి…"
     IDS_UPDATES_SWITCH      "ప్రోగ్రామ్ నవీకరణల గురించి తెలియజేయండి"

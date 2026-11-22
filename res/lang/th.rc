@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "จดหมาย"
     IDS_HINT_TITLE          "เปิดธงเค้าโครงแล้ว"
     IDS_HINT_TEXT           "เพื่อให้เห็นธงบนแถบงานเสมอ ให้เปิด Lang Switcher ในการตั้งค่า: แถบงาน → ไอคอนอื่นๆ ในถาดระบบ ตอนนี้อยู่ใต้ลูกศร ^"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "เปิดการตั้งค่า Windows"
     IDS_MENU_WHATSNEW       "มีอะไรใหม่ใน {0}…"
     IDS_UPDATES_SWITCH      "แจ้งเตือนเมื่อมีอัปเดตโปรแกรม"

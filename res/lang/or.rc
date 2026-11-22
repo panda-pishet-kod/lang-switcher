@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "ଚିଠି"
     IDS_HINT_TITLE          "ଲେଆଉଟର ପତାକା ଚାଲୁ ଅଛି"
     IDS_HINT_TEXT           "ପତାକା ଟାସ୍କବାରରେ ସର୍ବଦା ଦେଖାଯିବା ପାଇଁ ସେଟିଂସରେ Lang Switcher ଚାଲୁ କରନ୍ତୁ: ଟାସ୍କବାର → ଅନ୍ୟ ସିଷ୍ଟମ ଟ୍ରେ ଆଇକନ। ବର୍ତ୍ତମାନ ଏହା ^ ତୀର ତଳେ ଅଛି।"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows ସେଟିଂସ୍ ଖୋଲନ୍ତୁ"
     IDS_MENU_WHATSNEW       "{0} ରେ ନୂଆ କ'ଣ…"
     IDS_UPDATES_SWITCH      "ପ୍ରୋଗ୍ରାମର ଅପଡେଟ୍ ବିଷୟରେ ଜଣାନ୍ତୁ"

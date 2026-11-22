@@ -280,6 +280,7 @@ BEGIN
     IDS_CORNER_LETTER       "kiri"
     IDS_HINT_TITLE          "Paigutuse lipp on sisse lülitatud"
     IDS_HINT_TEXT           "Et lipp oleks tegumiribal alati näha, lülitage Lang Switcher sisse sätetes: Tegumiriba → Muud süsteemisalve ikoonid. Praegu on see noole ^ all."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Ava Windowsi sätted"
     IDS_MENU_WHATSNEW       "Mis on uut versioonis {0}…"
     IDS_UPDATES_SWITCH      "Teavita programmi värskendustest"

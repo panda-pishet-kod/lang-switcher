@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "letër"
     IDS_HINT_TITLE          "Flamuri i paraqitjes është aktivizuar"
     IDS_HINT_TEXT           "Që flamuri të duket gjithmonë në shiritin e detyrave, aktivizoni Lang Switcher te Cilësimet: Shiriti i detyrave → Ikona të tjera të hapësirës së sistemit. Tani për tani është nën shigjetën ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Hap Cilësimet e Windows"
     IDS_MENU_WHATSNEW       "Çfarë ka të re në {0}…"
     IDS_UPDATES_SWITCH      "Më njofto për përditësimet e programit"

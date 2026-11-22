@@ -243,3 +243,17 @@ fn the_hint_of_the_flag_stays_after_its_main_button() {
         );
     }
 }
+
+/// ⭐ **Z11 (решение 208.209): the hint names the page of Settings of the Windows it stands on** —
+/// Б3 of AUDIT-180. The build decides (22000 and up is Windows 11): Windows 11 has its string,
+/// Windows 10 its own (the words — `tests\letters.rs`, `the_hint_says_the_path_of_its_windows`).
+#[test]
+fn the_hint_names_the_page_of_this_windows() {
+    use lang_switcher::letters::report::build_is_eleven;
+    use lang_switcher::settings;
+
+    assert_eq!(corner::hint_text_id(true), settings::IDS_HINT_TEXT);
+    assert_eq!(corner::hint_text_id(false), settings::IDS_HINT_TEXT_10);
+    assert!(build_is_eleven("22000") && build_is_eleven(" 26100 "));
+    assert!(!build_is_eleven("19045") && !build_is_eleven("21999") && !build_is_eleven(""));
+}

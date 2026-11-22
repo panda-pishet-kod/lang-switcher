@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "brev"
     IDS_HINT_TITLE          "Layoutflaggan är på"
     IDS_HINT_TEXT           "För att flaggan alltid ska synas i aktivitetsfältet, slå på Lang Switcher i Inställningar: Aktivitetsfältet → Andra ikoner i systemfältet. Just nu ligger den under pilen ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Öppna Windows-inställningar"
     IDS_MENU_WHATSNEW       "Nytt i {0}…"
     IDS_UPDATES_SWITCH      "Berätta om uppdateringar av programmet"

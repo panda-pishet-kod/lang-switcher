@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "ліст"
     IDS_HINT_TITLE          "Сцяг раскладкі ўключаны"
     IDS_HINT_TEXT           "Каб сцяг заўсёды было відаць на панэлі задач, уключыце Lang Switcher у Параметрах: Панэль задач → Іншыя значкі на панэлі задач. Пакуль ён пад стрэлкай ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Адкрыць Параметры Windows"
     IDS_MENU_WHATSNEW       "Што новага ў {0}…"
     IDS_UPDATES_SWITCH      "Паведамляць пра абнаўленні праграмы"

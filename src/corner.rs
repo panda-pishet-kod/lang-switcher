@@ -580,20 +580,41 @@ fn release_ended(end: End) {
 /// page of the taskbar and **leaves the hint up** (Z10, решение 208.209 — the owner's word: «должна
 /// дождаться пока я нажму понятно или пункт будет выставлен»); «Понятно» and ✕ close it, and so does
 /// the flag put on the taskbar ([`hint_tick`]). Not a word about dragging the icon — the drag did not
-/// move it (208.113 п. 7).
+/// move it (208.113 п. 7). The path in the text is the one of the Windows it stands on (Z11).
 pub fn hint_content() -> Content {
-    hint_content_in(crate::settings::ui_language())
+    hint_content_for(
+        crate::settings::ui_language(),
+        crate::letters::report::windows_is_eleven(),
+    )
 }
 
-/// [`hint_content`] in `language`.
+/// [`hint_content`] in `language` with the path of Windows 11 — what the instruments of the shell
+/// measure.
 pub fn hint_content_in(language: crate::settings::Language) -> Content {
+    hint_content_for(language, true)
+}
+
+/// The text of the hint by the Windows it stands on — Z11, Б3 of AUDIT-180 (решение 208.209):
+/// Windows 11 keeps the switch of the icon in «Персонализация → Панель задач → Другие значки
+/// области уведомлений», a section folded until it is expanded; Windows 10 — behind «Выберите
+/// значки, отображаемые в панели задач» of the same page. Pure.
+pub const fn hint_text_id(eleven: bool) -> u16 {
+    if eleven {
+        crate::settings::IDS_HINT_TEXT
+    } else {
+        crate::settings::IDS_HINT_TEXT_10
+    }
+}
+
+/// [`hint_content`] in `language` on Windows 11 (`eleven`) or on Windows 10.
+pub fn hint_content_for(language: crate::settings::Language, eleven: bool) -> Content {
     use crate::settings;
 
     let text = |id| settings::text_in(language, id);
     Content {
         about: text(settings::IDS_CORNER_FLAG),
         title: text(settings::IDS_HINT_TITLE),
-        text: text(settings::IDS_HINT_TEXT),
+        text: text(hint_text_id(eleven)),
         link: None,
         main: (
             text(settings::IDS_HINT_OPEN),

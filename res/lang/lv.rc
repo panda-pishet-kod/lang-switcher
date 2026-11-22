@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "vēstule"
     IDS_HINT_TITLE          "Izkārtojuma karodziņš ir ieslēgts"
     IDS_HINT_TEXT           "Lai karodziņš vienmēr būtu redzams uzdevumjoslā, ieslēdziet Lang Switcher iestatījumos: Uzdevumjosla → Citas sistēmas teknes ikonas. Pagaidām tas ir zem bultiņas ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Atvērt Windows iestatījumus"
     IDS_MENU_WHATSNEW       "Jaunumi versijā {0}…"
     IDS_UPDATES_SWITCH      "Ziņot par programmas atjauninājumiem"

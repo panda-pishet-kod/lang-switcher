@@ -284,6 +284,7 @@ BEGIN
     IDS_CORNER_LETTER       "γράμμα"
     IDS_HINT_TITLE          "Η σημαία διάταξης είναι ενεργή"
     IDS_HINT_TEXT           "Για να φαίνεται πάντα η σημαία στη γραμμή εργασιών, ενεργοποιήστε το Lang Switcher στις Ρυθμίσεις: Γραμμή εργασιών → Άλλα εικονίδια στην περιοχή ειδοποιήσεων. Προς το παρόν είναι κάτω από το βέλος ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Άνοιγμα Ρυθμίσεων των Windows"
     IDS_MENU_WHATSNEW       "Τι νέο υπάρχει στην {0}…"
     IDS_UPDATES_SWITCH      "Ενημέρωση για νέες εκδόσεις του προγράμματος"

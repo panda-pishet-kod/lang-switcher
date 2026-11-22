@@ -5230,6 +5230,30 @@ pub mod report {
     /// business spawning. An empty answer for a key that will not open: the line goes missing,
     /// nothing else.
     fn windows_build() -> String {
+        let [product, display, build] = current_version();
+
+        join(
+            " ",
+            &[
+                eleven(&product, &build).as_str(),
+                display.as_str(),
+                build.as_str(),
+            ],
+        )
+    }
+
+    /// Whether this is Windows 11 — by the build number, as [`eleven`] tells it (Z11 of AUDIT-180:
+    /// the hint of the flag names the page of Settings of the Windows it stands on). Windows 10
+    /// when the key will not open.
+    pub fn windows_is_eleven() -> bool {
+        let [_, _, build] = current_version();
+        build_is_eleven(&build)
+    }
+
+    /// `ProductName`, `DisplayVersion` and `CurrentBuild` of
+    /// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` — empty strings for a key that will not
+    /// open or a value that is not there. The one reader of the three, for the appeal and the hint.
+    fn current_version() -> [String; 3] {
         use windows::Win32::Foundation::ERROR_SUCCESS;
         use windows::Win32::System::Registry::{
             HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, REG_SZ, REG_VALUE_TYPE, RegCloseKey,
@@ -5252,7 +5276,7 @@ pub mod report {
         };
 
         if status != ERROR_SUCCESS {
-            return String::new();
+            return [String::new(), String::new(), String::new()];
         }
 
         let read = |name: PCWSTR| -> String {
@@ -5307,14 +5331,15 @@ pub mod report {
         // SAFETY: `key` came from a successful `RegOpenKeyExW` above and is closed exactly once.
         let _ = unsafe { RegCloseKey(key) };
 
-        join(
-            " ",
-            &[
-                eleven(&product, &build).as_str(),
-                display.as_str(),
-                build.as_str(),
-            ],
-        )
+        [product, display, build]
+    }
+
+    /// Whether a build number is Windows 11's: twenty-two thousand and up. Pure.
+    pub fn build_is_eleven(build: &str) -> bool {
+        build
+            .trim()
+            .parse::<u32>()
+            .is_ok_and(|number| number >= 22000)
     }
 
     /// ⛔ **`ProductName` says «Windows 10 Pro» on Windows 11**, and the live acceptance of Э32
@@ -5325,12 +5350,7 @@ pub mod report {
     /// Pure, and separate for that reason: the rule is a rule about two strings, and a test can
     /// walk it without a registry.
     pub fn eleven(product: &str, build: &str) -> String {
-        let is_eleven = build
-            .trim()
-            .parse::<u32>()
-            .is_ok_and(|number| number >= 22000);
-
-        if is_eleven && product.contains("Windows 10") {
+        if build_is_eleven(build) && product.contains("Windows 10") {
             product.replacen("Windows 10", "Windows 11", 1)
         } else {
             product.to_owned()

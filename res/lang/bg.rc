@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "писмо"
     IDS_HINT_TITLE          "Флагът на подредбата е включен"
     IDS_HINT_TEXT           "За да се вижда флагът винаги в лентата на задачите, включете Lang Switcher в Настройки: Лента на задачите → Други икони в системната област. Засега е под стрелката ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Отвори настройките на Windows"
     IDS_MENU_WHATSNEW       "Какво ново в {0}…"
     IDS_UPDATES_SWITCH      "Съобщавай за актуализации на програмата"

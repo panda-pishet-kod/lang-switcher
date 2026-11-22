@@ -278,6 +278,7 @@ BEGIN
     IDS_CORNER_LETTER       "കത്ത്"
     IDS_HINT_TITLE          "ലേഔട്ട് പതാക ഓണാണ്"
     IDS_HINT_TEXT           "പതാക ടാസ്ക്ബാറിൽ എപ്പോഴും കാണാൻ, ക്രമീകരണങ്ങളിൽ Lang Switcher ഓണാക്കുക: ടാസ്ക്ബാർ → മറ്റ് സിസ്റ്റം ട്രേ ഐക്കണുകൾ. ഇപ്പോൾ ഇത് ^ അമ്പടയാളത്തിന് താഴെയാണ്."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows ക്രമീകരണങ്ങൾ തുറക്കുക"
     IDS_MENU_WHATSNEW       "{0}-ൽ പുതിയത്…"
     IDS_UPDATES_SWITCH      "അപ്ഡേറ്റുകൾ അറിയിക്കുക"

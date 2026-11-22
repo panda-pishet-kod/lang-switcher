@@ -280,6 +280,7 @@ BEGIN
     IDS_CORNER_LETTER       "نامه"
     IDS_HINT_TITLE          "پرچم طرح‌بندی روشن است"
     IDS_HINT_TEXT           "برای اینکه پرچم همیشه در نوار وظیفه دیده شود، Lang Switcher را در تنظیمات روشن کنید: نوار وظیفه ← سایر نمادهای سینی سیستم. فعلاً زیر پیکان ^ است."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "باز کردن تنظیمات Windows"
     IDS_MENU_WHATSNEW       "تازه‌های {0}…"
     IDS_UPDATES_SWITCH      "اطلاع‌رسانی درباره‌ی به‌روزرسانی‌های برنامه"

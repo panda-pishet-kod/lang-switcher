@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "رسالة"
     IDS_HINT_TITLE          "علم التخطيط مفعّل"
     IDS_HINT_TEXT           "ليبقى العلم ظاهرًا دائمًا على شريط المهام، فعّل Lang Switcher في الإعدادات: شريط المهام ← أيقونات علبة النظام الأخرى. وهو حاليًا تحت السهم ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "فتح إعدادات Windows"
     IDS_MENU_WHATSNEW       "ما الجديد في {0}…"
     IDS_UPDATES_SWITCH      "إعلامي بتحديثات البرنامج"

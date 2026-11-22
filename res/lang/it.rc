@@ -281,6 +281,7 @@ BEGIN
     IDS_CORNER_LETTER       "lettera"
     IDS_HINT_TITLE          "La bandiera del layout è attiva"
     IDS_HINT_TEXT           "Per tenere la bandiera sempre visibile sulla barra delle applicazioni, attiva Lang Switcher in Impostazioni: Barra delle applicazioni → Altre icone della barra di sistema. Per ora è sotto la freccia ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Apri Impostazioni di Windows"
     IDS_MENU_WHATSNEW       "Novità della {0}…"
     IDS_UPDATES_SWITCH      "Avvisami degli aggiornamenti del programma"

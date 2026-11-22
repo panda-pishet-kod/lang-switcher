@@ -277,6 +277,7 @@ BEGIN
     IDS_CORNER_LETTER       "brev"
     IDS_HINT_TITLE          "Tastaturflagget er slått på"
     IDS_HINT_TEXT           "Hvis du vil at flagget alltid skal synes på oppgavelinjen, slår du på Lang Switcher i Innstillinger: Oppgavelinje → Andre ikoner i systemstatusfeltet. Foreløpig ligger det under pilen ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Åpne Windows-innstillinger"
     IDS_MENU_WHATSNEW       "Nytt i {0}…"
     IDS_UPDATES_SWITCH      "Si fra om oppdateringer av programmet"

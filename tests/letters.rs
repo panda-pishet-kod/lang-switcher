@@ -4985,3 +4985,45 @@ fn the_author_window_fits_the_narrowest_window() {
     }
     assert!(faults.is_empty(), "«От автора»:\n{}", faults.join("\n"));
 }
+
+/// ⭐ **Z11 (решение 208.209): the hint of the flag says the path of the Windows it stands on**, in
+/// the strings of the built program — Б3 of AUDIT-180: until 1.8.0 it sent everybody to «Панель
+/// задач → Другие значки на панели задач», a section Windows 11 does not have under that name.
+/// Windows 11: «Персонализация → Панель задач → Другие значки области уведомлений», a folded
+/// section — the text says to expand it; Windows 10: «Выберите значки, отображаемые в панели
+/// задач». The instruments of the shell measure Windows 11's text.
+#[test]
+fn the_hint_says_the_path_of_its_windows() {
+    let _guard = with_product_strings();
+    use lang_switcher::corner;
+
+    let ru11 = corner::hint_content_for(Language::Ru, true).text;
+    assert!(
+        ru11.contains(
+            "Персонализация → Панель задач → раскройте «Другие значки области уведомлений»"
+        ),
+        "ru, Windows 11: {ru11}"
+    );
+    let ru10 = corner::hint_content_for(Language::Ru, false).text;
+    assert!(
+        ru10.contains(
+            "Персонализация → Панель задач → «Выберите значки, отображаемые в панели задач»"
+        ),
+        "ru, Windows 10: {ru10}"
+    );
+    let en11 = corner::hint_content_for(Language::En, true).text;
+    assert!(
+        en11.contains("Personalization → Taskbar → expand “Other system tray icons”"),
+        "en, Windows 11: {en11}"
+    );
+    let en10 = corner::hint_content_for(Language::En, false).text;
+    assert!(
+        en10.contains("Personalization → Taskbar → “Select which icons appear on the taskbar”"),
+        "en, Windows 10: {en10}"
+    );
+    assert_eq!(
+        corner::hint_content_in(Language::Ru).text,
+        ru11,
+        "the instruments measure the text of Windows 11"
+    );
+}

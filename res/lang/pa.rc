@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "ਚਿੱਠੀ"
     IDS_HINT_TITLE          "ਲੇਆਉਟ ਦਾ ਝੰਡਾ ਚਾਲੂ ਹੈ"
     IDS_HINT_TEXT           "ਝੰਡਾ ਟਾਸਕਬਾਰ ਤੇ ਹਮੇਸ਼ਾ ਦਿਸੇ, ਇਸ ਲਈ ਸੈਟਿੰਗਾਂ ਵਿੱਚ Lang Switcher ਚਾਲੂ ਕਰੋ: ਟਾਸਕਬਾਰ → ਹੋਰ ਸਿਸਟਮ ਟਰੇ ਆਈਕਨ। ਹਾਲੇ ਇਹ ^ ਤੀਰ ਦੇ ਹੇਠਾਂ ਹੈ।"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows ਸੈਟਿੰਗਾਂ ਖੋਲ੍ਹੋ"
     IDS_MENU_WHATSNEW       "{0} ਵਿੱਚ ਨਵਾਂ ਕੀ ਹੈ…"
     IDS_UPDATES_SWITCH      "ਪ੍ਰੋਗਰਾਮ ਦੇ ਅੱਪਡੇਟਾਂ ਬਾਰੇ ਦੱਸੋ"

@@ -276,6 +276,7 @@ BEGIN
     IDS_CORNER_LETTER       "хат"
     IDS_HINT_TITLE          "Схема байроғи ёқилди"
     IDS_HINT_TEXT           "Байроқ вазифалар панелида доим кўриниб туриши учун Созламаларда Lang Switcher дастурини ёқинг: Вазифалар панели → Бошқа тизим токчаси белгилари. Ҳозирча у ^ стрелкаси остида."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows созламаларини очиш"
     IDS_MENU_WHATSNEW       "{0} версиясидаги янгиликлар…"
     IDS_UPDATES_SWITCH      "Дастур янгиланишлари ҳақида хабар бериш"

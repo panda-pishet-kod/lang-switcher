@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "лист"
     IDS_HINT_TITLE          "Прапор розкладки увімкнено"
     IDS_HINT_TEXT           "Щоб прапор завжди було видно на панелі завдань, увімкніть Lang Switcher у Параметрах: Панель завдань → Інші значки на панелі завдань. Поки він під стрілкою ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Відкрити Параметри Windows"
     IDS_MENU_WHATSNEW       "Що нового в {0}…"
     IDS_UPDATES_SWITCH      "Повідомляти про оновлення програми"

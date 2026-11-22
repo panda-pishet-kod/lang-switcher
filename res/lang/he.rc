@@ -277,6 +277,7 @@ BEGIN
     IDS_CORNER_LETTER       "מכתב"
     IDS_HINT_TITLE          "דגל הפריסה מופעל"
     IDS_HINT_TEXT           "כדי שהדגל יהיה תמיד גלוי בשורת המשימות, הפעילו את Lang Switcher בהגדרות: שורת המשימות ← סמלים אחרים במגש המערכת. בינתיים הוא מתחת לחץ ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "פתיחת הגדרות Windows"
     IDS_MENU_WHATSNEW       "מה חדש בגרסה {0}…"
     IDS_UPDATES_SWITCH      "להודיע על עדכוני התוכנה"

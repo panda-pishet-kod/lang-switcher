@@ -273,6 +273,7 @@ BEGIN
     IDS_CORNER_LETTER       "pismo"
     IDS_HINT_TITLE          "Zastavica razporeditve je vklopljena"
     IDS_HINT_TEXT           "Da bo zastavica v opravilni vrstici vedno vidna, vklopite Lang Switcher v Nastavitvah: Opravilna vrstica → Druge ikone v sistemski vrstici. Za zdaj je pod puščico ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Odpri nastavitve sistema Windows"
     IDS_MENU_WHATSNEW       "Kaj je novega v {0}…"
     IDS_UPDATES_SWITCH      "Obveščaj o posodobitvah programa"

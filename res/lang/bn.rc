@@ -274,6 +274,7 @@ BEGIN
     IDS_CORNER_LETTER       "চিঠি"
     IDS_HINT_TITLE          "লেআউটের পতাকা চালু আছে"
     IDS_HINT_TEXT           "পতাকা যেন টাস্কবারে সবসময় দেখা যায়, সেজন্য সেটিংসে Lang Switcher চালু করুন: টাস্কবার → অন্যান্য সিস্টেম ট্রে আইকন। আপাতত এটি ^ তীরের নিচে আছে।"
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Windows সেটিংস খুলুন"
     IDS_MENU_WHATSNEW       "{0}-এ নতুন কী…"
     IDS_UPDATES_SWITCH      "প্রোগ্রামের আপডেট সম্পর্কে জানান"

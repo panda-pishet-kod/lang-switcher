@@ -275,6 +275,7 @@ BEGIN
     IDS_CORNER_LETTER       "llythyr"
     IDS_HINT_TITLE          "Mae baner y cynllun ymlaen"
     IDS_HINT_TEXT           "I gadw'r faner yn y golwg ar y bar tasgau, trowch Lang Switcher ymlaen yn y Gosodiadau: Bar tasgau → Eiconau eraill hambwrdd y system. Am y tro mae o dan y saeth ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Agor Gosodiadau Windows"
     IDS_MENU_WHATSNEW       "Beth sy'n newydd yn {0}…"
     IDS_UPDATES_SWITCH      "Rhoi gwybod i mi am ddiweddariadau'r rhaglen"

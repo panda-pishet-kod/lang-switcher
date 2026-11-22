@@ -1723,6 +1723,9 @@ pub const IDS_HINT_TITLE: u16 = 3275;
 pub const IDS_HINT_TEXT: u16 = 3276;
 /// «Открыть Параметры Windows» — the main button of the hint, T-119-5.
 pub const IDS_HINT_OPEN: u16 = 3277;
+/// The text of the hint on Windows 10 — Z11 of AUDIT-180 (решение 208.209): the path to «Выберите
+/// значки, отображаемые в панели задач»; [`IDS_HINT_TEXT`] holds Windows 11's.
+pub const IDS_HINT_TEXT_10: u16 = 3340;
 /// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
 pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
@@ -2336,7 +2339,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and seventy-five since task T-120-19** — the line of the state of the
 /// thanks of the wizard, [`IDS_WIZARD_RECEIVED`] (3313). 274 + 1.
-pub const INTERFACE_STRINGS: [u16; 275] = [
+///
+/// ⚠ **Two hundred and seventy-six since Z11 of AUDIT-180** (решение 208.209) — the text of the
+/// hint of the flag on Windows 10, [`IDS_HINT_TEXT_10`] (3340). 275 + 1.
+pub const INTERFACE_STRINGS: [u16; 276] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2614,6 +2620,7 @@ pub const INTERFACE_STRINGS: [u16; 275] = [
     IDS_HINT_TITLE,
     IDS_HINT_TEXT,
     IDS_HINT_OPEN,
+    IDS_HINT_TEXT_10,
     IDS_MENU_WHATSNEW,
     IDS_UPDATES_SWITCH,
     IDS_NEWS_OFF_IN_FILE,

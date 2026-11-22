@@ -278,6 +278,7 @@ BEGIN
     IDS_CORNER_LETTER       "carta"
     IDS_HINT_TITLE          "La bandera de la distribución está activada"
     IDS_HINT_TEXT           "Para que la bandera esté siempre a la vista en la barra de tareas, active Lang Switcher en Configuración: Barra de tareas → Otros iconos de la bandeja del sistema. Por ahora está bajo la flecha ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Abrir Configuración de Windows"
     IDS_MENU_WHATSNEW       "Novedades de la {0}…"
     IDS_UPDATES_SWITCH      "Avisarme de las actualizaciones del programa"

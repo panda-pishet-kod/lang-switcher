@@ -281,6 +281,7 @@ BEGIN
     IDS_CORNER_LETTER       "list"
     IDS_HINT_TITLE          "Flaga układu jest włączona"
     IDS_HINT_TEXT           "Żeby flaga była zawsze widoczna na pasku zadań, włącz Lang Switcher w Ustawieniach: Pasek zadań → Inne ikony zasobnika systemowego. Na razie jest pod strzałką ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Otwórz Ustawienia systemu Windows"
     IDS_MENU_WHATSNEW       "Co nowego w {0}…"
     IDS_UPDATES_SWITCH      "Informuj o aktualizacjach programu"

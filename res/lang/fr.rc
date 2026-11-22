@@ -281,6 +281,7 @@ BEGIN
     IDS_CORNER_LETTER       "lettre"
     IDS_HINT_TITLE          "Le drapeau de disposition est activé"
     IDS_HINT_TEXT           "Pour garder le drapeau visible dans la barre des tâches, activez Lang Switcher dans Paramètres : Barre des tâches → Autres icônes de la barre d'état système. Pour l'instant, il est sous la flèche ^."
+    IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
     IDS_HINT_OPEN           "Ouvrir les Paramètres Windows"
     IDS_MENU_WHATSNEW       "Nouveautés de la {0}…"
     IDS_UPDATES_SWITCH      "M'informer des mises à jour du programme"
