@@ -270,7 +270,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Fleire tastaturinnstillingar"
     IDS_CORNER_UPDATE       "oppdatering"
     IDS_RELEASE_TITLE       "Lang Switcher er oppdatert til {0}"
-    IDS_RELEASE_TEXT        "Før: {0}. Nytt: programikonet kan vise flagget for gjeldande tastaturoppsett. Eit klikk på flagget opnar Windows-lista over tastaturoppsett. Blir slått på med ein avkryssingsboks i innstillingane."
+    IDS_RELEASE_TEXT        "Før: {0}. Nytt: programvindauga har fått ein ny utsjånad. Ikonet kan vise flagget for gjeldande tastaturoppsett, og eit klikk på flagget opnar Windows-lista over tastaturoppsett. Flagget blir slått på med ein avkryssingsboks i innstillingane."
     IDS_RELEASE_CHANGES     "Alle endringar på nettstaden"
     IDS_RELEASE_HOWTO       "Slik brukar du programmet"
     IDS_CORNER_OK           "Forstått"

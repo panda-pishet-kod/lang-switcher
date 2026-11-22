@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Aktar issettjar tat-tastiera"
     IDS_CORNER_UPDATE       "aġġornament"
     IDS_RELEASE_TITLE       "Lang Switcher ġie aġġornat għal {0}"
-    IDS_RELEASE_TEXT        "Qabel kien {0}. Ġdid: l-ikona tal-programm tista' turi l-bandiera tat-tqassim kurrenti. Klikk fuq il-bandiera jiftaħ il-lista tat-tqassimiet ta' Windows. Jinxtegħel b'kaxxa fl-issettjar."
+    IDS_RELEASE_TEXT        "Qabel kien {0}. Ġdid: it-twieqi tal-programm għandhom dehra ġdida. L-ikona tista' turi l-bandiera tat-tqassim kurrenti, u klikk fuq il-bandiera jiftaħ il-lista tat-tqassimiet ta' Windows. Il-bandiera tinxtegħel b'kaxxa fl-issettjar."
     IDS_RELEASE_CHANGES     "Il-bidliet kollha fuq is-sit"
     IDS_RELEASE_HOWTO       "Kif tużah"
     IDS_CORNER_OK           "Fhimt"

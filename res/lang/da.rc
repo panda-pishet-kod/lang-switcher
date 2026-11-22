@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Flere tastaturindstillinger"
     IDS_CORNER_UPDATE       "opdatering"
     IDS_RELEASE_TITLE       "Lang Switcher er opdateret til {0}"
-    IDS_RELEASE_TEXT        "Før: {0}. Nyt: Programikonet kan vise flaget for det aktuelle layout. Et klik på flaget åbner Windows' liste over layouts. Slås til med et flueben i indstillingerne."
+    IDS_RELEASE_TEXT        "Før: {0}. Nyt: Programmets vinduer har fået et nyt udseende. Ikonet kan vise flaget for det aktuelle layout, og et klik på flaget åbner Windows' liste over layouts. Flaget slås til med et flueben i indstillingerne."
     IDS_RELEASE_CHANGES     "Alle ændringer på webstedet"
     IDS_RELEASE_HOWTO       "Sådan bruger du det"
     IDS_CORNER_OK           "Forstået"

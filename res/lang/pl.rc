@@ -272,7 +272,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Więcej ustawień klawiatury"
     IDS_CORNER_UPDATE       "aktualizacja"
     IDS_RELEASE_TITLE       "Lang Switcher zaktualizowany do {0}"
-    IDS_RELEASE_TEXT        "Wcześniej {0}. Nowość: ikona programu może pokazywać flagę bieżącego układu. Kliknięcie flagi otwiera listę układów Windows. Włącza się to polem wyboru w ustawieniach."
+    IDS_RELEASE_TEXT        "Wcześniej {0}. Nowość: okna programu mają nowy wygląd. Ikona może pokazywać flagę bieżącego układu, a kliknięcie flagi otwiera listę układów Windows. Flagę włącza się polem wyboru w ustawieniach."
     IDS_RELEASE_CHANGES     "Wszystkie zmiany na stronie"
     IDS_RELEASE_HOWTO       "Jak używać"
     IDS_CORNER_OK           "Rozumiem"

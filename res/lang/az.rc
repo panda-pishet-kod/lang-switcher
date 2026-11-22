@@ -268,7 +268,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Digər klaviatura parametrləri"
     IDS_CORNER_UPDATE       "yeniləmə"
     IDS_RELEASE_TITLE       "Lang Switcher {0} versiyasına yeniləndi"
-    IDS_RELEASE_TEXT        "Əvvəl {0} idi. Yenilik: proqramın nişanı cari klaviatura dilinin bayrağını göstərə bilər. Bayrağa klik etdikdə Windows klaviatura dillərinin siyahısı açılır. Parametrlərdə qeyd qutusu ilə aktivləşdirilir."
+    IDS_RELEASE_TEXT        "Əvvəl {0} idi. Yenilik: proqramın pəncərələri yeni görünüş alıb. Nişan cari klaviatura dilinin bayrağını göstərə bilər, bayrağa klik etdikdə isə Windows klaviatura dillərinin siyahısı açılır. Bayraq parametrlərdə qeyd qutusu ilə aktivləşdirilir."
     IDS_RELEASE_CHANGES     "Bütün dəyişikliklər saytda"
     IDS_RELEASE_HOWTO       "İstifadə qaydası"
     IDS_CORNER_OK           "Aydındır"

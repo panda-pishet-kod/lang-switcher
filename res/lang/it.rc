@@ -272,7 +272,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Altre impostazioni della tastiera"
     IDS_CORNER_UPDATE       "aggiornamento"
     IDS_RELEASE_TITLE       "Lang Switcher è stato aggiornato alla {0}"
-    IDS_RELEASE_TEXT        "Prima avevi la {0}. Novità: l'icona del programma può mostrare la bandiera del layout attuale. Un clic sulla bandiera apre l'elenco dei layout di Windows. Si attiva con una casella nelle impostazioni."
+    IDS_RELEASE_TEXT        "Prima avevi la {0}. Novità: le finestre del programma hanno un nuovo aspetto. L'icona può mostrare la bandiera del layout attuale e un clic sulla bandiera apre l'elenco dei layout di Windows. La bandiera si attiva con una casella nelle impostazioni."
     IDS_RELEASE_CHANGES     "Tutte le modifiche sul sito"
     IDS_RELEASE_HOWTO       "Come si usa"
     IDS_CORNER_OK           "Ho capito"

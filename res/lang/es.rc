@@ -269,7 +269,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Más configuraciones de teclado"
     IDS_CORNER_UPDATE       "actualización"
     IDS_RELEASE_TITLE       "Lang Switcher se actualizó a la {0}"
-    IDS_RELEASE_TEXT        "Antes tenía la {0}. Novedad: el icono del programa puede mostrar la bandera de la distribución actual. Un clic en la bandera abre la lista de distribuciones de Windows. Se activa con una casilla en la configuración."
+    IDS_RELEASE_TEXT        "Antes tenía la {0}. Novedad: las ventanas del programa tienen un aspecto nuevo. El icono puede mostrar la bandera de la distribución actual, y un clic en la bandera abre la lista de distribuciones de Windows. La bandera se activa con una casilla en la configuración."
     IDS_RELEASE_CHANGES     "Todos los cambios en el sitio web"
     IDS_RELEASE_HOWTO       "Cómo se usa"
     IDS_CORNER_OK           "Entendido"

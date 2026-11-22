@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Papildu tastatūras iestatījumi"
     IDS_CORNER_UPDATE       "atjauninājums"
     IDS_RELEASE_TITLE       "Lang Switcher atjaunināts uz {0}"
-    IDS_RELEASE_TEXT        "Iepriekš bija {0}. Jaunums: programmas ikona var rādīt pašreizējā izkārtojuma karodziņu. Noklikšķinot uz karodziņa, atveras Windows izkārtojumu saraksts. Ieslēdz ar izvēles rūtiņu iestatījumos."
+    IDS_RELEASE_TEXT        "Iepriekš bija {0}. Jaunums: programmas logiem ir jauns izskats. Ikona var rādīt pašreizējā izkārtojuma karodziņu, un, noklikšķinot uz karodziņa, atveras Windows izkārtojumu saraksts. Karodziņu ieslēdz ar izvēles rūtiņu iestatījumos."
     IDS_RELEASE_CHANGES     "Visas izmaiņas vietnē"
     IDS_RELEASE_HOWTO       "Kā lietot"
     IDS_CORNER_OK           "Skaidrs"

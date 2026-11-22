@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Fleiri lyklaborðsstillingar"
     IDS_CORNER_UPDATE       "uppfærsla"
     IDS_RELEASE_TITLE       "Lang Switcher var uppfært í {0}"
-    IDS_RELEASE_TEXT        "Áður {0}. Nýtt: tákn forritsins getur sýnt fána núverandi lyklaborðsuppsetningar. Smellur á fánann opnar lista Windows yfir uppsetningar. Kveikt er á þessu með gátreit í stillingunum."
+    IDS_RELEASE_TEXT        "Áður {0}. Nýtt: gluggar forritsins hafa fengið nýtt útlit. Táknið getur sýnt fána núverandi lyklaborðsuppsetningar og smellur á fánann opnar lista Windows yfir uppsetningar. Kveikt er á fánanum með gátreit í stillingunum."
     IDS_RELEASE_CHANGES     "Allar breytingar á vefnum"
     IDS_RELEASE_HOWTO       "Hvernig á að nota"
     IDS_CORNER_OK           "Skil það"

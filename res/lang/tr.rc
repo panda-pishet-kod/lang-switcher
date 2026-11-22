@@ -271,7 +271,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Diğer klavye ayarları"
     IDS_CORNER_UPDATE       "güncelleme"
     IDS_RELEASE_TITLE       "Lang Switcher {0} sürümüne güncellendi"
-    IDS_RELEASE_TEXT        "Önceki sürüm: {0}. Yeni: program simgesi geçerli düzenin bayrağını gösterebilir. Bayrağa tıklayınca Windows düzen listesi açılır. Ayarlarda bir onay kutusuyla etkinleştirilir."
+    IDS_RELEASE_TEXT        "Önceki sürüm: {0}. Yeni: programın pencereleri yeni bir görünüme kavuştu. Simge geçerli düzenin bayrağını gösterebilir, bayrağa tıklayınca da Windows düzen listesi açılır. Bayrak ayarlarda bir onay kutusuyla etkinleştirilir."
     IDS_RELEASE_CHANGES     "Tüm değişiklikler sitede"
     IDS_RELEASE_HOWTO       "Nasıl kullanılır"
     IDS_CORNER_OK           "Anladım"

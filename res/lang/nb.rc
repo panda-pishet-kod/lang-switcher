@@ -268,7 +268,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Flere tastaturinnstillinger"
     IDS_CORNER_UPDATE       "oppdatering"
     IDS_RELEASE_TITLE       "Lang Switcher er oppdatert til {0}"
-    IDS_RELEASE_TEXT        "Før: {0}. Nytt: programikonet kan vise flagget for gjeldende tastaturoppsett. Et klikk på flagget åpner Windows-listen over tastaturoppsett. Slås på med en avmerkingsboks i innstillingene."
+    IDS_RELEASE_TEXT        "Før: {0}. Nytt: programvinduene har fått et nytt utseende. Ikonet kan vise flagget for gjeldende tastaturoppsett, og et klikk på flagget åpner Windows-listen over tastaturoppsett. Flagget slås på med en avmerkingsboks i innstillingene."
     IDS_RELEASE_CHANGES     "Alle endringer på nettstedet"
     IDS_RELEASE_HOWTO       "Slik bruker du programmet"
     IDS_CORNER_OK           "Greit"

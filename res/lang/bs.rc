@@ -267,7 +267,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Dodatne postavke tastature"
     IDS_CORNER_UPDATE       "ažuriranje"
     IDS_RELEASE_TITLE       "Lang Switcher je ažuriran na {0}"
-    IDS_RELEASE_TEXT        "Prije: {0}. Novo: ikona programa može prikazivati zastavicu trenutnog rasporeda. Klik na zastavicu otvara listu rasporeda Windowsa. Uključuje se kvačicom u postavkama."
+    IDS_RELEASE_TEXT        "Prije: {0}. Novo: prozori programa imaju novi izgled. Ikona može prikazivati zastavicu trenutnog rasporeda, a klik na zastavicu otvara listu rasporeda Windowsa. Zastavica se uključuje kvačicom u postavkama."
     IDS_RELEASE_CHANGES     "Sve promjene na web stranici"
     IDS_RELEASE_HOWTO       "Kako se koristi"
     IDS_CORNER_OK           "Jasno"

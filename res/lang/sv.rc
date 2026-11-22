@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Fler tangentbordsinställningar"
     IDS_CORNER_UPDATE       "uppdatering"
     IDS_RELEASE_TITLE       "Lang Switcher har uppdaterats till {0}"
-    IDS_RELEASE_TEXT        "Tidigare {0}. Nytt: programikonen kan visa flaggan för den aktuella layouten. Ett klick på flaggan öppnar Windows lista över layouter. Slås på med en kryssruta i inställningarna."
+    IDS_RELEASE_TEXT        "Tidigare {0}. Nytt: programmets fönster har fått ett nytt utseende. Ikonen kan visa flaggan för den aktuella layouten, och ett klick på flaggan öppnar Windows lista över layouter. Flaggan slås på med en kryssruta i inställningarna."
     IDS_RELEASE_CHANGES     "Alla ändringar på webbplatsen"
     IDS_RELEASE_HOWTO       "Så här använder du det"
     IDS_CORNER_OK           "Uppfattat"

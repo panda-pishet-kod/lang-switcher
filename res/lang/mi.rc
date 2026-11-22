@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Ētahi atu tautuhinga papapātuhi"
     IDS_CORNER_UPDATE       "whakahou"
     IDS_RELEASE_TITLE       "Kua whakahoutia a Lang Switcher ki {0}"
-    IDS_RELEASE_TEXT        "I mua ko {0}. Hou: ka taea e te tohu o te hōtaka te whakaatu i te haki o te whakatakotoranga o nāianei. Mā te pāwhiri i te haki ka puare te rārangi whakatakotoranga o Windows. Ka whakakāngia mā tētahi pouaka tohu i ngā tautuhinga."
+    IDS_RELEASE_TEXT        "I mua ko {0}. Hou: he āhua hou tō ngā matapihi o te hōtaka. Ka taea e te tohu te whakaatu i te haki o te whakatakotoranga o nāianei, ā, mā te pāwhiri i te haki ka puare te rārangi whakatakotoranga o Windows. Ka whakakāngia te haki mā tētahi pouaka tohu i ngā tautuhinga."
     IDS_RELEASE_CHANGES     "Ngā panonitanga katoa kei te paetukutuku"
     IDS_RELEASE_HOWTO       "Me pēhea te whakamahi"
     IDS_CORNER_OK           "Kua mārama"

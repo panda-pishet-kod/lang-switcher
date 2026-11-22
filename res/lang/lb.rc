@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Méi Tastaturastellungen"
     IDS_CORNER_UPDATE       "Update"
     IDS_RELEASE_TITLE       "Lang Switcher gouf op {0} aktualiséiert"
-    IDS_RELEASE_TEXT        "Virdru war et {0}. Nei: D'Programmsymbol kann de Fändel vum aktuelle Layout weisen. E Klick op de Fändel mécht d'Lëscht vun de Windows-Layouten op. Ageschalt gëtt dat mat engem Haken an den Astellungen."
+    IDS_RELEASE_TEXT        "Virdru war et {0}. Nei: D'Fënstere vum Programm hunn en neit Ausgesinn. D'Symbol kann de Fändel vum aktuelle Layout weisen, an e Klick op de Fändel mécht d'Lëscht vun de Windows-Layouten op. De Fändel gëtt mat engem Haken an den Astellungen ageschalt."
     IDS_RELEASE_CHANGES     "All d'Ännerungen op der Websäit"
     IDS_RELEASE_HOWTO       "Sou funktionéiert et"
     IDS_CORNER_OK           "Verstan"

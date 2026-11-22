@@ -270,7 +270,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Lisää näppäimistöasetuksia"
     IDS_CORNER_UPDATE       "päivitys"
     IDS_RELEASE_TITLE       "Lang Switcher on päivitetty versioon {0}"
-    IDS_RELEASE_TEXT        "Aiemmin {0}. Uutta: ohjelman kuvake voi näyttää nykyisen asettelun lipun. Lipun napsauttaminen avaa Windowsin asetteluluettelon. Käyttöön otetaan valintaruudulla asetuksissa."
+    IDS_RELEASE_TEXT        "Aiemmin {0}. Uutta: ohjelman ikkunoilla on uusi ulkoasu. Kuvake voi näyttää nykyisen asettelun lipun, jonka napsauttaminen avaa Windowsin asetteluluettelon. Lippu otetaan käyttöön valintaruudulla asetuksissa."
     IDS_RELEASE_CHANGES     "Kaikki muutokset sivustolla"
     IDS_RELEASE_HOWTO       "Käyttöohjeet"
     IDS_CORNER_OK           "Selvä"

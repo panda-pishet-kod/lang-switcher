@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Meer toetsenbordinstellingen"
     IDS_CORNER_UPDATE       "update"
     IDS_RELEASE_TITLE       "Lang Switcher is bijgewerkt naar {0}"
-    IDS_RELEASE_TEXT        "Eerst was het {0}. Nieuw: het programmapictogram kan de vlag van de huidige indeling tonen. Een klik op de vlag opent de lijst met indelingen van Windows. Aanzetten doe je met een vinkje in de instellingen."
+    IDS_RELEASE_TEXT        "Eerst was het {0}. Nieuw: de vensters van het programma hebben een nieuw uiterlijk. Het pictogram kan de vlag van de huidige indeling tonen, en een klik op de vlag opent de lijst met indelingen van Windows. De vlag zet je aan met een vinkje in de instellingen."
     IDS_RELEASE_CHANGES     "Alle wijzigingen op de website"
     IDS_RELEASE_HOWTO       "Zo werkt het"
     IDS_CORNER_OK           "Begrepen"

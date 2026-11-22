@@ -272,7 +272,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Plus de paramètres du clavier"
     IDS_CORNER_UPDATE       "mise à jour"
     IDS_RELEASE_TITLE       "Lang Switcher a été mis à jour vers {0}"
-    IDS_RELEASE_TEXT        "Version précédente : {0}. Nouveau : l'icône du programme peut afficher le drapeau de la disposition active. Un clic sur le drapeau ouvre la liste des dispositions de Windows. S'active par une case à cocher dans les paramètres."
+    IDS_RELEASE_TEXT        "Version précédente : {0}. Nouveau : les fenêtres du programme ont une nouvelle apparence. L'icône peut afficher le drapeau de la disposition active, et un clic sur le drapeau ouvre la liste des dispositions de Windows. Le drapeau s'active par une case à cocher dans les paramètres."
     IDS_RELEASE_CHANGES     "Toutes les modifications sur le site"
     IDS_RELEASE_HOWTO       "Comment s'en servir"
     IDS_CORNER_OK           "Compris"

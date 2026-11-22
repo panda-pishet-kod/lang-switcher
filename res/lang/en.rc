@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "More keyboard settings"
     IDS_CORNER_UPDATE       "update"
     IDS_RELEASE_TITLE       "Lang Switcher has been updated to {0}"
-    IDS_RELEASE_TEXT        "It was {0}. New: the icon of the program can show the flag of the current layout. A click on the flag opens the list of layouts of Windows. Turned on with a tick in the settings."
+    IDS_RELEASE_TEXT        "It was {0}. New: the windows of the program have a new look. The icon can show the flag of the current layout, and a click on the flag opens the list of layouts of Windows. The flag is turned on with a tick in the settings."
     IDS_RELEASE_CHANGES     "All the changes on the site"
     IDS_RELEASE_HOWTO       "How to use it"
     IDS_CORNER_OK           "Got it"

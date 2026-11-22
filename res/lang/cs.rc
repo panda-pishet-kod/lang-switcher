@@ -268,7 +268,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Další nastavení klávesnice"
     IDS_CORNER_UPDATE       "aktualizace"
     IDS_RELEASE_TITLE       "Lang Switcher byl aktualizován na {0}"
-    IDS_RELEASE_TEXT        "Dříve {0}. Novinka: ikona programu může ukazovat vlajku aktuálního rozložení. Kliknutí na vlajku otevře seznam rozložení Windows. Zapíná se zaškrtnutím v nastavení."
+    IDS_RELEASE_TEXT        "Dříve {0}. Novinka: okna programu mají nový vzhled. Ikona může ukazovat vlajku aktuálního rozložení a kliknutí na vlajku otevře seznam rozložení Windows. Vlajka se zapíná zaškrtnutím v nastavení."
     IDS_RELEASE_CHANGES     "Všechny změny na webu"
     IDS_RELEASE_HOWTO       "Jak se používá"
     IDS_CORNER_OK           "Rozumím"

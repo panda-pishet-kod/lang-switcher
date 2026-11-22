@@ -266,7 +266,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Rhagor o osodiadau bysellfwrdd"
     IDS_CORNER_UPDATE       "diweddariad"
     IDS_RELEASE_TITLE       "Mae Lang Switcher wedi'i ddiweddaru i {0}"
-    IDS_RELEASE_TEXT        "Roedd gennych {0}. Newydd: gall eicon y rhaglen ddangos baner y cynllun cyfredol. Mae clicio ar y faner yn agor rhestr cynlluniau Windows. Caiff ei droi ymlaen gyda thic yn y gosodiadau."
+    IDS_RELEASE_TEXT        "Roedd gennych {0}. Newydd: mae gan ffenestri'r rhaglen olwg newydd. Gall yr eicon ddangos baner y cynllun cyfredol, ac mae clicio ar y faner yn agor rhestr cynlluniau Windows. Caiff y faner ei throi ymlaen gyda thic yn y gosodiadau."
     IDS_RELEASE_CHANGES     "Yr holl newidiadau ar y wefan"
     IDS_RELEASE_HOWTO       "Sut i ddefnyddio"
     IDS_CORNER_OK           "Wedi deall"

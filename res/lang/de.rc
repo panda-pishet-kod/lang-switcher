@@ -270,7 +270,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Weitere Tastatureinstellungen"
     IDS_CORNER_UPDATE       "Update"
     IDS_RELEASE_TITLE       "Lang Switcher wurde auf {0} aktualisiert"
-    IDS_RELEASE_TEXT        "Bisher {0}. Neu: Das Programmsymbol kann die Flagge des aktuellen Layouts zeigen. Ein Klick auf die Flagge öffnet die Layoutliste von Windows. Eingeschaltet wird das per Häkchen in den Einstellungen."
+    IDS_RELEASE_TEXT        "Bisher {0}. Neu: Die Programmfenster haben ein neues Aussehen. Das Symbol kann die Flagge des aktuellen Layouts zeigen, und ein Klick darauf öffnet die Layoutliste von Windows. Die Flagge wird per Häkchen in den Einstellungen eingeschaltet."
     IDS_RELEASE_CHANGES     "Alle Änderungen auf der Website"
     IDS_RELEASE_HOWTO       "So wird es benutzt"
     IDS_CORNER_OK           "Verstanden"

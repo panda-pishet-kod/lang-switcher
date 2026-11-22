@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Daugiau klaviatūros parametrų"
     IDS_CORNER_UPDATE       "naujinimas"
     IDS_RELEASE_TITLE       "Lang Switcher atnaujintas į {0}"
-    IDS_RELEASE_TEXT        "Anksčiau buvo {0}. Nauja: programos piktograma gali rodyti dabartinio išdėstymo vėliavėlę. Spustelėjus vėliavėlę atsidaro Windows išdėstymų sąrašas. Įjungiama žymimuoju langeliu parametruose."
+    IDS_RELEASE_TEXT        "Anksčiau buvo {0}. Nauja: programos langai turi naują išvaizdą. Piktograma gali rodyti dabartinio išdėstymo vėliavėlę, o spustelėjus vėliavėlę atsidaro Windows išdėstymų sąrašas. Vėliavėlė įjungiama žymimuoju langeliu parametruose."
     IDS_RELEASE_CHANGES     "Visi pakeitimai svetainėje"
     IDS_RELEASE_HOWTO       "Kaip naudotis"
     IDS_CORNER_OK           "Aišku"

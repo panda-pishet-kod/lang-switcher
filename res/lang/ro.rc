@@ -268,7 +268,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Mai multe setări pentru tastatură"
     IDS_CORNER_UPDATE       "actualizare"
     IDS_RELEASE_TITLE       "Lang Switcher a fost actualizat la {0}"
-    IDS_RELEASE_TEXT        "Înainte era {0}. Nou: pictograma programului poate arăta steagul aranjamentului curent. Un clic pe steag deschide lista de aranjamente din Windows. Se activează dintr-o casetă de selectare în setări."
+    IDS_RELEASE_TEXT        "Înainte era {0}. Nou: ferestrele programului au un aspect nou. Pictograma poate arăta steagul aranjamentului curent, iar un clic pe steag deschide lista de aranjamente din Windows. Steagul se activează dintr-o casetă de selectare în setări."
     IDS_RELEASE_CHANGES     "Toate modificările pe site"
     IDS_RELEASE_HOWTO       "Cum se folosește"
     IDS_CORNER_OK           "Am înțeles"

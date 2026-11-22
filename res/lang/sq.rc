@@ -265,7 +265,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Më shumë cilësime të tastierës"
     IDS_CORNER_UPDATE       "përditësim"
     IDS_RELEASE_TITLE       "Lang Switcher u përditësua në {0}"
-    IDS_RELEASE_TEXT        "Më parë ishte {0}. E re: ikona e programit mund të tregojë flamurin e paraqitjes aktuale. Një klikim te flamuri hap listën e paraqitjeve të Windows. Aktivizohet me një kuti zgjedhjeje te cilësimet."
+    IDS_RELEASE_TEXT        "Më parë ishte {0}. E re: dritaret e programit kanë një pamje të re. Ikona mund të tregojë flamurin e paraqitjes aktuale, dhe një klikim te flamuri hap listën e paraqitjeve të Windows. Flamuri aktivizohet me një kuti zgjedhjeje te cilësimet."
     IDS_RELEASE_CHANGES     "Të gjitha ndryshimet në sajt"
     IDS_RELEASE_HOWTO       "Si përdoret"
     IDS_CORNER_OK           "E kuptova"

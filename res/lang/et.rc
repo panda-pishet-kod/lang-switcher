@@ -271,7 +271,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Rohkem klaviatuurisätteid"
     IDS_CORNER_UPDATE       "värskendus"
     IDS_RELEASE_TITLE       "Lang Switcher on värskendatud versioonile {0}"
-    IDS_RELEASE_TEXT        "Varem oli {0}. Uus: programmi ikoon võib näidata praeguse paigutuse lippu. Klõps lipul avab Windowsi paigutuste loendi. Lülitatakse sisse märkeruuduga sätetes."
+    IDS_RELEASE_TEXT        "Varem oli {0}. Uus: programmi akendel on uus välimus. Ikoon võib näidata praeguse paigutuse lippu ja klõps lipul avab Windowsi paigutuste loendi. Lipp lülitatakse sisse märkeruuduga sätetes."
     IDS_RELEASE_CHANGES     "Kõik muudatused veebisaidil"
     IDS_RELEASE_HOWTO       "Kuidas kasutada"
     IDS_CORNER_OK           "Selge"

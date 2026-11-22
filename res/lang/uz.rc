@@ -267,7 +267,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Qoʻshimcha klaviatura sozlamalari"
     IDS_CORNER_UPDATE       "yangilanish"
     IDS_RELEASE_TITLE       "Lang Switcher {0} versiyasiga yangilandi"
-    IDS_RELEASE_TEXT        "Avval {0} edi. Yangilik: dastur belgisi joriy sxema bayrogʻini koʻrsatishi mumkin. Bayroqqa bosilsa, Windows sxemalari roʻyxati ochiladi. Sozlamalarda belgilash katakchasi bilan yoqiladi."
+    IDS_RELEASE_TEXT        "Avval {0} edi. Yangilik: dastur oynalari yangi koʻrinishga ega boʻldi. Dastur belgisi joriy sxema bayrogʻini koʻrsatishi mumkin, bayroqqa bosilsa esa Windows sxemalari roʻyxati ochiladi. Bayroq sozlamalarda belgilash katakchasi bilan yoqiladi."
     IDS_RELEASE_CHANGES     "Barcha oʻzgarishlar saytda"
     IDS_RELEASE_HOWTO       "Qanday foydalaniladi"
     IDS_CORNER_OK           "Tushunarli"

@@ -267,7 +267,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Mais configurações de teclado"
     IDS_CORNER_UPDATE       "atualização"
     IDS_RELEASE_TITLE       "O Lang Switcher foi atualizado para a {0}"
-    IDS_RELEASE_TEXT        "Antes era a {0}. Novidade: o ícone do programa pode mostrar a bandeira do layout atual. Um clique na bandeira abre a lista de layouts do Windows. Para ativar, marque a caixa nas configurações."
+    IDS_RELEASE_TEXT        "Antes era a {0}. Novidade: as janelas do programa têm uma nova aparência. O ícone pode mostrar a bandeira do layout atual, e um clique na bandeira abre a lista de layouts do Windows. Para ativar a bandeira, marque a caixa nas configurações."
     IDS_RELEASE_CHANGES     "Todas as mudanças no site"
     IDS_RELEASE_HOWTO       "Como usar"
     IDS_CORNER_OK           "Entendi"

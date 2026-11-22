@@ -270,7 +270,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "További billentyűzetbeállítások"
     IDS_CORNER_UPDATE       "frissítés"
     IDS_RELEASE_TITLE       "A Lang Switcher frissült a(z) {0} verzióra"
-    IDS_RELEASE_TEXT        "Korábban: {0}. Újdonság: a program ikonja megjelenítheti az aktuális kiosztás zászlaját. A zászlóra kattintva megnyílik a Windows kiosztáslistája. Egy jelölőnégyzettel kapcsolható be a beállításokban."
+    IDS_RELEASE_TEXT        "Korábban: {0}. Újdonság: a program ablakai új megjelenést kaptak. Az ikon megjelenítheti az aktuális kiosztás zászlaját, a zászlóra kattintva pedig megnyílik a Windows kiosztáslistája. A zászló egy jelölőnégyzettel kapcsolható be a beállításokban."
     IDS_RELEASE_CHANGES     "Az összes változás a webhelyen"
     IDS_RELEASE_HOWTO       "Használat"
     IDS_CORNER_OK           "Értem"

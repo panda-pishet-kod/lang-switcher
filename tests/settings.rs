@@ -7679,12 +7679,14 @@ const FR_94_STRINGS: [(u16, &str, &str); 275] = [
         "Lang Switcher has been updated to {0}",
     ),
     (
+        // Решение 208.205: 1.8.0 — the new look of the windows and the flag; ru is the owner's text.
         settings::IDS_RELEASE_TEXT,
-        "Было {0}. Новое: значок программы может показывать флаг текущей раскладки. Щелчок по \
-         флагу — список раскладок Windows. Включается галочкой в настройках.",
-        "It was {0}. New: the icon of the program can show the flag of the current layout. A \
-         click on the flag opens the list of layouts of Windows. Turned on with a tick in the \
-         settings.",
+        "Было {0}. Новое: у окон программы новый вид. Значок может показывать флаг текущей \
+         раскладки, щелчок по флагу — список раскладок Windows. Флаг включается галочкой в \
+         настройках.",
+        "It was {0}. New: the windows of the program have a new look. The icon can show the flag \
+         of the current layout, and a click on the flag opens the list of layouts of Windows. The \
+         flag is turned on with a tick in the settings.",
     ),
     (
         settings::IDS_RELEASE_CHANGES,

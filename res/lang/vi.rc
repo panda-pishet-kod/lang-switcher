@@ -264,7 +264,7 @@ BEGIN
     IDS_OWN_LIST_MORE       "Cài đặt bàn phím khác"
     IDS_CORNER_UPDATE       "bản cập nhật"
     IDS_RELEASE_TITLE       "Lang Switcher đã được cập nhật lên {0}"
-    IDS_RELEASE_TEXT        "Trước đây là {0}. Mới: biểu tượng chương trình có thể hiển thị cờ của bố cục hiện tại. Nhấp vào cờ để mở danh sách bố cục của Windows. Bật bằng hộp kiểm trong cài đặt."
+    IDS_RELEASE_TEXT        "Trước đây là {0}. Mới: các cửa sổ của chương trình có giao diện mới. Biểu tượng có thể hiển thị cờ của bố cục hiện tại, và nhấp vào cờ sẽ mở danh sách bố cục của Windows. Bật cờ bằng hộp kiểm trong cài đặt."
     IDS_RELEASE_CHANGES     "Tất cả thay đổi trên trang web"
     IDS_RELEASE_HOWTO       "Cách sử dụng"
     IDS_CORNER_OK           "Đã hiểu"
