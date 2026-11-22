@@ -524,9 +524,10 @@ fn the_switches_of_the_settings_stand_in_groups_of_rows_with_their_hints() {
 
     let general = body("settings General");
     let group = general.find("Group([").expect("«Общие»: a group of rows");
+    // The group ends where «Язык интерфейса» begins (its own line since 06b7c9c, not a pair).
     let end = general
-        .find("Pair(")
-        .expect("«Общие»: the pair of the language and the theme");
+        .find("id: Language")
+        .expect("«Общие»: the choice of the language under the group");
     let rows = &general[group..end];
     for id in [
         "id: Autostart",
