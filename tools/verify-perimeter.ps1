@@ -70,8 +70,8 @@
     GATE 3 (task T-22-11; split by decision 181.37, stage E103) -- SEC-03, every https:// in the
     file is one it may carry. The file is TWO texts: the image the compiler made, and the
     certificate table signtool appended (the PE security directory). The image is judged against
-    the addresses src\letters.rs declares; the certificate table against the one address the
-    signature names, /du of signtool. Until stage E103 the whole file was judged against
+    the addresses src\links.rs declares (src\letters.rs until stage E120); the certificate table
+    against the one address the signature names, /du of signtool. Until stage E103 the whole file was judged against
     letters.rs alone, and the /du address passed only because it happened to be the program's own
     page (links::PROGRAM_URL); when that address took its mark ?lang=ru (decision 181.35), the
     signature's address was left unexplained and the gate failed on a string the program does
@@ -260,12 +260,17 @@ if ($crateFailed) {
 #
 # FR-102 and SEC-03: «в Release-бинаре единственные сетевые адреса — адреса ленты, проверяется
 # поиском по строкам бинаря». This gate reads the strings of the FILE THAT SHIPS and refuses any
-# https:// that the program does not declare in `letters::links`.
+# https:// that the program does not declare in its module `links` (src\links.rs).
+#
+# ⚠ Until stage E120 the module was `letters::links`, inside src\letters.rs; task T-120-23 moved it
+# into a file of its own, and this gate, still reading letters.rs, found 0 addresses declared and
+# every address of the image a stray. A source that is gone or declares nothing is now a FAIL of
+# its own, with its own reason -- not 53 «FOUND» lines that blame the image.
 #
 # ⚠ FIVE ADDRESSES AND NOT ONE. The mandate's sentence names the feed alone; the program also
 # carries the channel, the support page, the download page and its own page (FR-103, решение
 # 139.2), and every one of them is https:// by SEC-03's own rule that a link this program opens
-# is a secure one. So the allowed set is what `letters::links` declares, read out of the SOURCE
+# is a secure one. So the allowed set is what `links` declares, read out of the SOURCE
 # rather than typed here -- a list typed twice is a list that drifts.
 #
 # ⭐ That is why task T-78-1 changed four addresses and NOT ONE LINE of this gate: the two new
@@ -279,8 +284,10 @@ if ($crateFailed) {
 Write-Host ''
 Write-Host '--- Gate 3: SEC-03, the addresses in the shipped binary ---------------'
 
-$source = Join-Path $ProjectDir 'src\letters.rs'
+$sourceName = 'src\links.rs'
+$source = Join-Path $ProjectDir $sourceName
 $declared = @()
+$sourceFailed = $false
 
 if (Test-Path $source) {
     $text = Get-Content -LiteralPath $source -Raw -Encoding UTF8
@@ -289,10 +296,18 @@ if (Test-Path $source) {
     }
 }
 
-$declared = $declared | Sort-Object -Unique
+$declared = @($declared | Sort-Object -Unique)
 
-Write-Host ("  declared in src\letters.rs: {0}" -f $declared.Count)
+Write-Host ("  declared in {0}: {1}" -f $sourceName, $declared.Count)
 foreach ($url in $declared) { Write-Host ("    {0}" -f $url) }
+
+if (-not (Test-Path $source)) {
+    Write-Host ("  FAIL: {0} is not there -- the addresses the program declares are not known" -f $sourceName)
+    $sourceFailed = $true
+} elseif ($declared.Count -eq 0) {
+    Write-Host ("  FAIL: {0} declares no https:// address -- the addresses the program declares are not known" -f $sourceName)
+    $sourceFailed = $true
+}
 
 $bytes = [System.IO.File]::ReadAllBytes($Artifact)
 
@@ -348,7 +363,7 @@ if ($certLength -gt 0) {
 # one would be «explained» by it. Each run is therefore cut at every further «https://».
 #
 # ⚠ Stage E104: a run whose HOST has no dot is not an address and is not judged. The bare scheme
-# constant «https://» of the parser (letters::feed::split_https) is stored on its own, and in the
+# constant «https://» of the parser (feed::split_https) is stored on its own, and in the
 # image of the updater the linker put two printable bytes behind it: «https://H9» -- no host any
 # network knows. Every address that can leave a machine has a dotted host (a name or an IPv4), and
 # «localhost» is gate 6's. Such runs are printed by the caller as «not an address», never hidden.
@@ -390,7 +405,7 @@ function Get-StrayRuns($runs, $known) {
 
 $imageRuns = Get-HttpsRuns $imageBytes
 $imageStray = Get-StrayRuns $imageRuns $declared
-Write-Host ("  the image ({0} bytes): https:// runs {1}, against src\letters.rs" -f $imageBytes.Length, $imageRuns.Count)
+Write-Host ("  the image ({0} bytes): https:// runs {1}, against {2}" -f $imageBytes.Length, $imageRuns.Count, $sourceName)
 foreach ($url in $imageStray) { Write-Host ("  FOUND   {0}  (in the image)" -f $url) }
 foreach ($url in ($script:UndottedRuns | Sort-Object -Unique)) { Write-Host ("  not an address (no dotted host): {0}" -f $url) }
 
@@ -410,9 +425,11 @@ if ($signatureBytes.Length -gt 0) {
 }
 
 $signatureFailed = ($signatureStray.Count -gt 0)
-$addressFailed = ($imageStray.Count -gt 0) -or $signatureFailed -or $tableFailed
+$addressFailed = ($imageStray.Count -gt 0) -or $signatureFailed -or $tableFailed -or $sourceFailed
 
-if ($addressFailed) {
+if ($sourceFailed) {
+    Write-Host ("  RESULT: FAIL -- the addresses the program declares are not known: {0} is gone or declares none" -f $sourceName)
+} elseif ($addressFailed) {
     Write-Host '  RESULT: FAIL -- the file carries an address neither the program nor its signature declares'
 } else {
     Write-Host '  every address in the image is one the program declares, and the signature names only its own'
