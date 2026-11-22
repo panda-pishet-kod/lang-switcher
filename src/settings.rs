@@ -1704,6 +1704,12 @@ pub const IDS_LOG_HINT: u16 = 3315;
 pub const IDS_WIZARD_CARD_WRONG_NEXT: u16 = 3316;
 /// The same of the card of the idea: «Дальше: идея и проверка».
 pub const IDS_WIZARD_CARD_IDEA_NEXT: u16 = 3317;
+/// The state in the head of the menu of the icon, in small letters as the mock-up of the menu has
+/// it (AUDIT-180 Мн1): «работает», «приостановлена», «нужен перезапуск». The block «Состояние» of
+/// the settings keeps [`IDS_STATUS_WORKING`] and its two, which begin a line.
+pub const IDS_MENU_WORKING: u16 = 3318;
+pub const IDS_MENU_SUSPENDED: u16 = 3319;
+pub const IDS_MENU_RESTART: u16 = 3320;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2354,7 +2360,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// its line (3163, 3164) went into the first card (208.131), and the two cards took the line of
 /// where they lead, [`IDS_WIZARD_CARD_WRONG_NEXT`] (3316) and [`IDS_WIZARD_CARD_IDEA_NEXT`] (3317)
 /// (208.132). 277 − 2 + 2.
-pub const INTERFACE_STRINGS: [u16; 277] = [
+///
+/// ⚠ **Two hundred and eighty since AUDIT-180 Z14** — the state in the head of the menu in small
+/// letters, [`IDS_MENU_WORKING`] and its two (3318…3320). 277 + 3.
+pub const INTERFACE_STRINGS: [u16; 280] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2620,6 +2629,9 @@ pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_LOG_HINT,
     IDS_WIZARD_CARD_WRONG_NEXT,
     IDS_WIZARD_CARD_IDEA_NEXT,
+    IDS_MENU_WORKING,
+    IDS_MENU_SUSPENDED,
+    IDS_MENU_RESTART,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

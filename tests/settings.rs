@@ -6565,7 +6565,9 @@ impl Drop for ProductImage {
 ///
 /// ⚠ **277 again since AUDIT-180 Z8** — the card «Ничего не произошло» and its line (3163, 3164)
 /// left, the lines of where the two cards lead (3316, 3317) came (208.131, 208.132).
-const FR_94_STRINGS: [(u16, &str, &str); 277] = [
+///
+/// ⚠ **280 since AUDIT-180 Z14** — the state in the head of the menu in small letters (3318…3320).
+const FR_94_STRINGS: [(u16, &str, &str); 280] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7681,6 +7683,14 @@ const FR_94_STRINGS: [(u16, &str, &str); 277] = [
         settings::IDS_WIZARD_CARD_IDEA_NEXT,
         "Дальше: идея и проверка",
         "Next: the idea and the check",
+    ),
+    // AUDIT-180 Z14 (Мн1): the state in the head of the menu, in small letters.
+    (settings::IDS_MENU_WORKING, "работает", "working"),
+    (settings::IDS_MENU_SUSPENDED, "приостановлена", "suspended"),
+    (
+        settings::IDS_MENU_RESTART,
+        "нужен перезапуск",
+        "restart needed",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -12223,8 +12233,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        277,
-        "two hundred and SEVENTY-SEVEN identifiers in use again since AUDIT-180 Z8: the card «Ничего \
+        280,
+        "two hundred and EIGHTY identifiers in use since AUDIT-180 Z14: the state in the head of the \
+         menu in small letters (3318…3320). Two hundred and seventy-seven again since AUDIT-180 Z8: \
+         the card «Ничего \
          не произошло» and its line left (3163, 3164), the lines of where the two cards lead came \
          (3316, 3317). Two hundred and seventy-seven since AUDIT-180 \
          Z6: the hints of the flag \

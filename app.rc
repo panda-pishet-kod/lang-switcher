@@ -360,6 +360,10 @@ END
 // AUDIT-180, Z8 (decision 208.132): where the cards of the first step of the wizard lead.
 #define IDS_WIZARD_CARD_WRONG_NEXT 3316
 #define IDS_WIZARD_CARD_IDEA_NEXT 3317
+// AUDIT-180, Z14 (Mn1): the state in the head of the menu of the icon, in small letters.
+#define IDS_MENU_WORKING        3318
+#define IDS_MENU_SUSPENDED      3319
+#define IDS_MENU_RESTART        3320
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291

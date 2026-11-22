@@ -603,3 +603,39 @@ fn the_theme_of_the_settings_stays_a_segmented_switch_under_the_language() {
         }
     }
 }
+
+/// **AUDIT-180 Мн1 — the state in the head of the menu in small letters.** The head of the menu of
+/// the icon says «работает», «приостановлена», «нужен перезапуск» after its dot, as the mock-up of
+/// the menu has it; the block «Состояние» of the settings keeps the words that begin a line.
+#[test]
+fn the_head_of_the_menu_says_the_state_in_small_letters() {
+    use lang_switcher::ui::windows::tray_menu;
+
+    with_product_strings();
+    let menus = tray_menu::states(Language::Ru);
+    for (name, enabled, fail_safe) in [
+        ("menu", true, false),
+        ("menu-paused", false, false),
+        ("menu-restart", false, true),
+    ] {
+        let (dot, block) = tray_menu::status(enabled, fail_safe);
+        let head = settings::text_in(Language::Ru, tray_menu::head_words(dot));
+        let block = settings::text_in(Language::Ru, block);
+        let (_, window) = menus
+            .iter()
+            .find(|(state, _)| state == name)
+            .unwrap_or_else(|| panic!("the menu has the state {name}"));
+        let body = format!("{:?}", window.body);
+        assert!(
+            body.contains(&format!("MenuHead {{ state: {dot:?}, words: {head:?} }}")),
+            "{name}: the head says {head:?}: {}",
+            &body[..body.len().min(120)]
+        );
+        assert!(
+            head.chars().next().is_some_and(char::is_lowercase)
+                && block.chars().next().is_some_and(char::is_uppercase)
+                && head == block.to_lowercase(),
+            "{name}: the head {head:?} is the block's {block:?} in small letters"
+        );
+    }
+}
