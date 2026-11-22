@@ -7238,11 +7238,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
         "Новость от автора",
         "News from the author",
     ),
-    (
-        settings::IDS_NEWS_LATER,
-        "Напомнить позже",
-        "Remind me later",
-    ),
+    // Решение 208.112 п. 1 (слово владельца): the letter «Новость» and its knock — «Позже».
+    (settings::IDS_NEWS_LATER, "Позже", "Later"),
     (
         settings::IDS_NEWS_OPEN_LINK,
         "Читать на сайте",
@@ -7250,10 +7247,10 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
     ),
     (
         settings::IDS_NEWS_FOOT,
-        "«Прочитано» закрывает письмо насовсем. «Напомнить позже» или крестик: напомню через неделю и ещё \
-         раз через две, потом только точка на значке.",
-        "“Mark as read” closes the letter for good. “Remind me later” or the cross: I will remind you in \
-         a week and once more in two, after that only the dot on the icon.",
+        "«Прочитано» закрывает письмо насовсем. «Позже» или крестик: напомню через неделю и ещё раз \
+         через две, потом только точка на значке.",
+        "“Mark as read” closes the letter for good. “Later” or the cross: I will remind you in a week \
+         and once more in two, after that only the dot on the icon.",
     ),
     (
         settings::IDS_WIZARD_CAPTION,
