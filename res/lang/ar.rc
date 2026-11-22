@@ -274,7 +274,6 @@ BEGIN
     IDS_RELEASE_NEVER       "عدم إظهار نوافذ التحديث مرة أخرى"
     IDS_CORNER_FLAG         "علم التخطيط"
     IDS_CORNER_LETTER       "رسالة"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "علم التخطيط مفعّل"
     IDS_HINT_TEXT           "ليبقى العلم ظاهرًا دائمًا على شريط المهام، فعّل Lang Switcher في الإعدادات: شريط المهام ← أيقونات علبة النظام الأخرى. وهو حاليًا تحت السهم ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

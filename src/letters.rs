@@ -4650,7 +4650,7 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
 /// its ✕ leaves the letter to the schedule, as before.
 pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
     use crate::settings::{
-        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_NOTICE_WEEK,
+        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_SNOOZE,
         IDS_THANKS_TITLE,
     };
 
@@ -4670,7 +4670,7 @@ pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::co
         link: None,
         main: (text(IDS_LETTERS_OPEN), crate::corner::Action::Close),
         second: (letter == Letter::Thanks)
-            .then(|| (text(IDS_NOTICE_WEEK), crate::corner::Action::Close)),
+            .then(|| (text(IDS_THANKS_SNOOZE), crate::corner::Action::Close)),
         picture: false,
         check: None,
     })

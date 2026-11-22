@@ -273,7 +273,6 @@ BEGIN
     IDS_RELEASE_NEVER       "আপডেটৰ ৱিণ্ডো আকৌ নেদেখুৱাব"
     IDS_CORNER_FLAG         "লেআউটৰ পতাকা"
     IDS_CORNER_LETTER       "চিঠি"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "লেআউটৰ পতাকা অন আছে"
     IDS_HINT_TEXT           "পতাকাটো টাস্কবাৰত সদায় দেখা পাবলৈ ছেটিংছত Lang Switcher অন কৰক: টাস্কবাৰ → অন্য ছিষ্টেম ট্ৰে আইকন। এতিয়ালৈ ই ^ কাঁড়চিহ্নৰ তলত আছে।"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

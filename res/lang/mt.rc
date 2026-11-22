@@ -273,7 +273,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Turix aktar twieqi tal-aġġornament"
     IDS_CORNER_FLAG         "bandiera tat-tqassim"
     IDS_CORNER_LETTER       "ittra"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Il-bandiera tat-tqassim hija mixgħula"
     IDS_HINT_TEXT           "Biex il-bandiera tidher dejjem fuq it-taskbar, ixgħel Lang Switcher fl-Issettjar: Taskbar → Ikoni oħra tas-system tray. Għalissa qiegħda taħt il-vleġġa ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

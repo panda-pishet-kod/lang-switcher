@@ -272,7 +272,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Жаңарту терезелерін енді көрсетпеу"
     IDS_CORNER_FLAG         "орналасу жалауы"
     IDS_CORNER_LETTER       "хат"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Орналасу жалауы қосулы"
     IDS_HINT_TEXT           "Жалау тапсырмалар тақтасында әрдайым көрініп тұруы үшін Параметрлерде Lang Switcher бағдарламасын қосыңыз: Тапсырмалар тақтасы → Басқа жүйелік науа белгішелері. Әзірге ол ^ көрсеткісінің астында."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

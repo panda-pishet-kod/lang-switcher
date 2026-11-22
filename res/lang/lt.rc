@@ -271,7 +271,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Daugiau nerodyti naujinimų langų"
     IDS_CORNER_FLAG         "išdėstymo vėliavėlė"
     IDS_CORNER_LETTER       "laiškas"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Išdėstymo vėliavėlė įjungta"
     IDS_HINT_TEXT           "Kad vėliavėlė visada būtų matoma užduočių juostoje, įjunkite Lang Switcher parametruose: Užduočių juosta → Kitos sistemos dėklo piktogramos. Kol kas ji po rodykle ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

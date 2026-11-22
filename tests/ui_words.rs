@@ -212,23 +212,18 @@ fn the_buttons_that_close_a_window_say_the_words_of_the_passport() {
     );
 }
 
-/// The two buttons that put a letter off — «Спасибо» and «Новость». The button says that it
-/// reminds; when it reminds is said by the foot of each letter.
-const REMIND_LATER: [&str; 2] = ["IDS_THANKS_SNOOZE", "IDS_NEWS_LATER"];
+/// The button that puts a letter «Новость» off. Since решение 208.112 п. 1 (слово владельца) the two
+/// buttons that put a letter off are named apart — «Спасибо»: «Через неделю», «Новость»: its own —
+/// and each is named alike on the letter and on its knock (the same string); the one wording of
+/// GLOSSARY-E120 §3 is gone. What stays: the foot of the news letter quotes its button.
+const NEWS_LATER: &str = "IDS_NEWS_LATER";
 
 #[test]
-fn remind_me_later_is_one_word_and_the_foot_of_the_news_quotes_it() {
+fn the_foot_of_the_news_quotes_its_button() {
     let mut refused = Vec::new();
     for (tag, open, close) in [("ru", '«', '»'), ("en", '“', '”')] {
         let strings = strings_of(tag);
-        let [thanks, news] = REMIND_LATER.map(|id| strings[id].as_str());
-        if thanks != news {
-            refused.push(format!(
-                "{tag}.rc: {} — «{thanks}», {} — «{news}»: «напомнить позже» — одно слово во \
-                 всех окнах",
-                REMIND_LATER[0], REMIND_LATER[1]
-            ));
-        }
+        let news = strings[NEWS_LATER].as_str();
         let quoted = format!("{open}{news}{close}");
         let foot = &strings["IDS_NEWS_FOOT"];
         if !foot.contains(&quoted) {

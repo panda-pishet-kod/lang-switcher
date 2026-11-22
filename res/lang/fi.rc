@@ -277,7 +277,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Älä näytä päivitysikkunoita enää"
     IDS_CORNER_FLAG         "asettelun lippu"
     IDS_CORNER_LETTER       "kirje"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Asettelun lippu on käytössä"
     IDS_HINT_TEXT           "Jotta lippu näkyisi aina tehtäväpalkissa, ota Lang Switcher käyttöön Asetuksissa: Tehtäväpalkki → Muut ilmaisinalueen kuvakkeet. Toistaiseksi se on nuolen ^ alla."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

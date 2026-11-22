@@ -272,7 +272,6 @@ BEGIN
     IDS_RELEASE_NEVER       "ไม่ต้องแสดงหน้าต่างอัปเดตอีก"
     IDS_CORNER_FLAG         "ธงเค้าโครง"
     IDS_CORNER_LETTER       "จดหมาย"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "เปิดธงเค้าโครงแล้ว"
     IDS_HINT_TEXT           "เพื่อให้เห็นธงบนแถบงานเสมอ ให้เปิด Lang Switcher ในการตั้งค่า: แถบงาน → ไอคอนอื่นๆ ในถาดระบบ ตอนนี้อยู่ใต้ลูกศร ^"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

@@ -275,7 +275,6 @@ BEGIN
     IDS_RELEASE_NEVER       "புதுப்பிப்புச் சாளரங்களை இனி காட்டாதே"
     IDS_CORNER_FLAG         "தளவமைப்பு கொடி"
     IDS_CORNER_LETTER       "கடிதம்"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "தளவமைப்புக் கொடி இயக்கத்தில் உள்ளது"
     IDS_HINT_TEXT           "கொடி பணிப்பட்டியில் எப்போதும் தெரிய, அமைப்புகளில் Lang Switcher-ஐ இயக்கவும்: பணிப்பட்டி → பிற கணினித் தட்டு ஐகான்கள். இப்போது அது ^ அம்புக்குறியின் கீழ் உள்ளது."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

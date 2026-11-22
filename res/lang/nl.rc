@@ -273,7 +273,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Geen updatevensters meer tonen"
     IDS_CORNER_FLAG         "indelingsvlag"
     IDS_CORNER_LETTER       "brief"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "De indelingsvlag staat aan"
     IDS_HINT_TEXT           "Om de vlag altijd zichtbaar te houden op de taakbalk, zet je Lang Switcher aan in Instellingen: Taakbalk → Andere systeemvakpictogrammen. Voorlopig staat hij onder de pijl ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

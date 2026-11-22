@@ -4336,7 +4336,8 @@ fn the_knock_of_a_letter_is_the_window_in_the_corner() {
         );
         // Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): «Спасибо» has «Через неделю» as well;
         // «Новость» keeps one button and the ✕.
-        let second = (letter == Letter::Thanks).then(|| settings::text(settings::IDS_NOTICE_WEEK));
+        let second =
+            (letter == Letter::Thanks).then(|| settings::text(settings::IDS_THANKS_SNOOZE));
         assert_eq!(
             content.second.as_ref().map(|(label, _)| label.clone()),
             second,

@@ -274,7 +274,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Não mostrar mais janelas de atualização"
     IDS_CORNER_FLAG         "bandeira do layout"
     IDS_CORNER_LETTER       "carta"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "A bandeira do layout está ativada"
     IDS_HINT_TEXT           "Para deixar a bandeira sempre visível na barra de tarefas, ative o Lang Switcher em Configurações: Barra de Tarefas → Outros ícones da bandeja do sistema. Por enquanto, ela está sob a seta ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

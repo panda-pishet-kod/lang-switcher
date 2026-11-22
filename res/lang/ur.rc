@@ -275,7 +275,6 @@ BEGIN
     IDS_RELEASE_NEVER       "اپ ڈیٹ کی ونڈوز دوبارہ نہ دکھائیں"
     IDS_CORNER_FLAG         "لے آؤٹ کا جھنڈا"
     IDS_CORNER_LETTER       "خط"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "لے آؤٹ کا جھنڈا آن ہے"
     IDS_HINT_TEXT           "جھنڈا ٹاسک بار پر ہمیشہ نظر آئے، اس کے لیے ترتیبات میں Lang Switcher آن کریں: ٹاسک بار ← دیگر سسٹم ٹرے آئیکنز۔ ابھی یہ تیر ^ کے نیچے ہے۔"
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

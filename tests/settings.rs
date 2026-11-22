@@ -6562,9 +6562,7 @@ impl Drop for ProductImage {
 /// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
 ///
 /// ⚠ **276 since Z11 of AUDIT-180** — the text of the hint of the flag on Windows 10 (3340).
-///
-/// ⚠ **277 since Z13 of AUDIT-180** — «Через неделю» of the knock of «Спасибо» (3341).
-const FR_94_STRINGS: [(u16, &str, &str); 277] = [
+const FR_94_STRINGS: [(u16, &str, &str); 276] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7061,11 +7059,8 @@ const FR_94_STRINGS: [(u16, &str, &str); 277] = [
          deed, the support page lists a few ways. It is good that you value somebody else's \
          work ♥",
     ),
-    (
-        settings::IDS_THANKS_SNOOZE,
-        "Напомнить позже",
-        "Remind me later",
-    ),
+    // Решение 208.112 п. 1 (слово владельца): the letter «Спасибо» and its knock — «Через неделю».
+    (settings::IDS_THANKS_SNOOZE, "Через неделю", "In a week"),
     (
         settings::IDS_THANKS_FOOT,
         "Это письмо приходит один раз. Отложить его можно только раз — на неделю.",
@@ -7740,8 +7735,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 277] = [
          Personalization → Taskbar → “Select which icons appear on the taskbar”. For now it is \
          under the arrow ^.",
     ),
-    // Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): the second button of the knock of «Спасибо».
-    (settings::IDS_NOTICE_WEEK, "Через неделю", "In a week"),
     (
         settings::IDS_MENU_WHATSNEW,
         "Что нового в {0}…",
@@ -12221,10 +12214,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        277,
-        "two hundred and SEVENTY-SEVEN identifiers in use since Z13 of AUDIT-180: «Через неделю» of \
-         the knock of «Спасибо» (3341). Two hundred and seventy-six since Z11: the text of the hint \
-         of the flag on Windows 10 (3340). Two hundred and seventy-five since task T-120-19: the line \
+        276,
+        "two hundred and SEVENTY-SIX identifiers in use since Z11 of AUDIT-180: the text of the hint \
+         of the flag on Windows 10 (3340); the knock of «Спасибо» names its second button with the \
+         letter's own string (решение 208.112). Two hundred and seventy-five since task T-120-19: the line \
          of the state of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
          after Б: \
          the two buttons of the card «Поддержать автора» of «От автора» (3305, 3306, task \

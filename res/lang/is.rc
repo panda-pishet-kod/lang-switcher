@@ -273,7 +273,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Ekki sýna uppfærsluglugga aftur"
     IDS_CORNER_FLAG         "uppsetningarfáni"
     IDS_CORNER_LETTER       "bréf"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "Kveikt er á uppsetningarfánanum"
     IDS_HINT_TEXT           "Til að fáninn sjáist alltaf á verkstikunni skaltu kveikja á Lang Switcher í Stillingum: Verkstika → Önnur tákn í kerfisbakka. Í bili er hann undir örinni ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."

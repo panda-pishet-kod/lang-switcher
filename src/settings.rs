@@ -1726,9 +1726,6 @@ pub const IDS_HINT_OPEN: u16 = 3277;
 /// The text of the hint on Windows 10 — Z11 of AUDIT-180 (решение 208.209): the path to «Выберите
 /// значки, отображаемые в панели задач»; [`IDS_HINT_TEXT`] holds Windows 11's.
 pub const IDS_HINT_TEXT_10: u16 = 3340;
-/// «Через неделю» — the second button of the knock of «Спасибо»: the letter is put off by a week
-/// (Z13 of AUDIT-180, решения 208.112 п. 1, 208.209).
-pub const IDS_NOTICE_WEEK: u16 = 3341;
 /// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
 pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
@@ -1846,7 +1843,8 @@ pub const IDS_THANKS_PARA: u16 = 3097;
 pub const IDS_SUPPORT_PANEL: u16 = 3098;
 /// The text of that panel, the heart included.
 pub const IDS_SUPPORT_TEXT: u16 = 3099;
-/// «Напомнить через неделю» — the one snooze of FR-101.
+/// «Через неделю» — the one snooze of FR-101: the button of the letter «Спасибо» and the second of
+/// its knock (решение 208.112 п. 1, Z13 of AUDIT-180: the two name it alike).
 pub const IDS_THANKS_SNOOZE: u16 = 3100;
 /// The line under «Спасибо»: it is shown once.
 pub const IDS_THANKS_FOOT: u16 = 3101;
@@ -2346,9 +2344,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and seventy-six since Z11 of AUDIT-180** (решение 208.209) — the text of the
 /// hint of the flag on Windows 10, [`IDS_HINT_TEXT_10`] (3340). 275 + 1.
 ///
-/// ⚠ **Two hundred and seventy-seven since Z13 of AUDIT-180** (решения 208.112, 208.209) — «Через
-/// неделю» of the knock of «Спасибо», [`IDS_NOTICE_WEEK`] (3341). 276 + 1.
-pub const INTERFACE_STRINGS: [u16; 277] = [
+/// ⚠ The knock of «Спасибо» names its second button with the letter's own [`IDS_THANKS_SNOOZE`]
+/// (решение 208.112 п. 1: the knock and the letter name their buttons alike) — the 3341 of Z13
+/// left before any release, a hole.
+pub const INTERFACE_STRINGS: [u16; 276] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2627,7 +2626,6 @@ pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_HINT_TEXT,
     IDS_HINT_OPEN,
     IDS_HINT_TEXT_10,
-    IDS_NOTICE_WEEK,
     IDS_MENU_WHATSNEW,
     IDS_UPDATES_SWITCH,
     IDS_NEWS_OFF_IN_FILE,

@@ -273,7 +273,6 @@ BEGIN
     IDS_RELEASE_NEVER       "Keng Update-Fënstere méi weisen"
     IDS_CORNER_FLAG         "Layout-Fändel"
     IDS_CORNER_LETTER       "Bréif"
-    IDS_NOTICE_WEEK         "In a week"
     IDS_HINT_TITLE          "De Layout-Fändel ass ageschalt"
     IDS_HINT_TEXT           "Fir datt de Fändel ëmmer op der Taskleescht ze gesinn ass, schalt Lang Switcher an den Astellungen an: Taskleescht → Aner Symboler vun der Taskleescht. Fir de Moment ass en ënner dem Feil ^."
     IDS_HINT_TEXT_10        "To keep the flag in sight on the taskbar, turn Lang Switcher on in Settings: Personalization → Taskbar → Select which icons appear on the taskbar. For now it is under the arrow ^."
