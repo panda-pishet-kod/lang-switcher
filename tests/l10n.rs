@@ -685,8 +685,9 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        275,
-        "the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
+        277,
+        "AUDIT-180 Z6: the hints of the flag and of the journal (3314, 3315); before them, \
+         the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \
          (T-119-8): eleven that left with «Что нового» and the balloon «обновлён до X», and the \
