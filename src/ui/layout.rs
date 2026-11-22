@@ -23,7 +23,6 @@ use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
 use crate::ui::scene::{MenuState, OnPicture, Trailing};
 use crate::ui::text::{Align, Measure, Style, Wrap};
-use crate::ui::tokens::shape::CHEVRON;
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
@@ -861,7 +860,7 @@ impl<I: Copy> Placer<'_, I> {
         if !window.buttons.is_empty() {
             let height = {
                 let (kept, over) = (self.out.len(), self.over);
-                let h = self.buttons(&window.buttons, 0.0, 0.0, column);
+                let h = self.buttons(&window.buttons, 0.0, 0.0, column, true);
                 self.out.truncate(kept);
                 self.over = over;
                 h
@@ -994,12 +993,14 @@ impl<I: Copy> Placer<'_, I> {
                 self.button(node, Rect::new(x, y, bw, bh));
                 bh
             }
-            Node::Buttons(buttons) => self.buttons(buttons, x, y, w),
+            // A row of buttons of the content stands at the start edge (208.209, AUDIT-180 О2); only
+            // the row of the window is pressed to its end.
+            Node::Buttons(buttons) => self.buttons(buttons, x, y, w, false),
             Node::Action {
                 title,
                 words,
                 buttons,
-            } => self.action(title, words, buttons, x, y, w),
+            } => self.action(title, words, buttons, x, y, w, slot),
             Node::Toggle {
                 id,
                 label,
@@ -2058,12 +2059,13 @@ impl<I: Copy> Placer<'_, I> {
             + self.em(BUTTON_GAP) * nodes.len().saturating_sub(1) as f32
     }
 
-    /// `nodes` side by side, pressed to the right of `w`; what runs over is counted.
-    fn button_row(&mut self, nodes: &[&Node<I>], x: f32, y: f32, w: f32) -> f32 {
+    /// `nodes` side by side, pressed to the end of `w` (the row of the window) or standing at its
+    /// start (a row of the content, 208.209); what runs over is counted.
+    fn button_row(&mut self, nodes: &[&Node<I>], x: f32, y: f32, w: f32, at_end: bool) -> f32 {
         let gap = self.em(BUTTON_GAP);
         let total = self.row_width(nodes);
         self.over = self.over.max(total - w);
-        let mut left = x + w - total;
+        let mut left = if at_end { x + w - total } else { x };
         let mut h = 0.0_f32;
         for node in nodes {
             let (bw, bh) = self.button_size(node);
@@ -2110,17 +2112,20 @@ impl<I: Copy> Placer<'_, I> {
                     x + first_w + gap,
                     y,
                     w - first_w - gap,
+                    true,
                 );
                 return h.max(first_h);
             }
         }
-        self.buttons(&window.buttons, x, y, w)
+        self.buttons(&window.buttons, x, y, w, true)
     }
 
-    /// A row of buttons pressed to the right, the main one the rightmost. When it does not fit —
-    /// §3а, step 1 — two rows, the main one in the lower at its edge; then one under another across
-    /// the width, the main one on top, a label wider than the width on two lines (step 5).
-    fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
+    /// A row of buttons, the main one the last: pressed to the end of `w` — the row of the window —
+    /// or standing at its start — a row in a block, a card or the content (208.209, AUDIT-180 О2).
+    /// When it does not fit — §3а, step 1 — two rows, the main one in the lower at its edge; then
+    /// one under another across the width, the main one on top, a label wider than the width on
+    /// two lines (step 5).
+    fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32, at_end: bool) -> f32 {
         if self.kind == WindowKind::Corner {
             return self.corner_buttons(buttons, x, y, w);
         }
@@ -2138,15 +2143,15 @@ impl<I: Copy> Placer<'_, I> {
         order.extend(buttons.iter().filter(is_primary));
 
         if self.row_width(&order) <= w || !self.gives(Concession::Buttons) {
-            return self.button_row(&order, x, y, w);
+            return self.button_row(&order, x, y, w, at_end);
         }
         if let Some((main, rest)) = order.split_last()
             && !rest.is_empty()
             && self.row_width(rest) <= w
             && self.row_width(&[*main]) <= w
         {
-            let upper = self.button_row(rest, x, y, w);
-            let lower = self.button_row(&[*main], x, y + upper + gap, w);
+            let upper = self.button_row(rest, x, y, w, at_end);
+            let lower = self.button_row(&[*main], x, y + upper + gap, w, at_end);
             return upper + gap + lower;
         }
 
@@ -2162,8 +2167,12 @@ impl<I: Copy> Placer<'_, I> {
         top - y
     }
 
-    /// An action card: the title and the text, the buttons under them — or beside them, §3а step 3,
-    /// in a pair standing side by side when this makes the card lower.
+    /// An action card (passport §6, 208.209): in the frame of a block (AUDIT-180 О3), the title and
+    /// the text, the buttons under them at the start edge (О2) — at the foot of the card when its
+    /// `slot` is taller than what it holds: in a pair standing side by side the two cards take one
+    /// height and their buttons one line (А2, А3) — or beside them, §3а step 3, in such a pair when
+    /// this makes the card lower.
+    #[allow(clippy::too_many_arguments)]
     fn action(
         &mut self,
         title: &str,
@@ -2172,31 +2181,50 @@ impl<I: Copy> Placer<'_, I> {
         x: f32,
         y: f32,
         w: f32,
+        slot: Option<f32>,
     ) -> f32 {
-        let gap = self.em(BLOCK_ROW_GAP);
-        let under = |this: &mut Self| {
-            let mut top = y + this.text(Role::Strong, title, x, y, w, Wrap::Words);
-            top += gap + this.text(Role::Body, text, x, top + gap, w, Wrap::Words);
-            if !buttons.is_empty() {
-                top += gap + this.buttons(buttons, x, top + gap, w);
-            }
-            top - y
-        };
+        let (v, h) = (self.em(BLOCK_PAD.v), self.em(BLOCK_PAD.h));
+        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (x, y, w) = (x + h, y + v, (w - h * 2.0).max(0.0));
         let beside_lowers = self.gives(Concession::Card)
             && self.in_pair
             && !buttons.is_empty()
             && self.trial(|this| this.action_beside(title, text, buttons, x, y, w))
-                < self.trial(under);
+                < self.trial(|this| this.action_under(title, text, buttons, x, y, w, None));
+        let inner = if beside_lowers {
+            self.action_beside(title, text, buttons, x, y, w)
+        } else {
+            let room = slot.map(|slot| slot - v * 2.0);
+            self.action_under(title, text, buttons, x, y, w, room)
+        };
+        let height = (inner + v * 2.0).max(slot.unwrap_or(0.0));
+        self.out[frame].rect.h = height;
+        height
+    }
 
-        if !beside_lowers {
-            let mut top = y + self.text(Role::Strong, title, x, y, w, Wrap::Words);
-            top += gap + self.text(Role::Body, text, x, top + gap, w, Wrap::Words);
-            if !buttons.is_empty() {
-                top += gap + self.buttons(buttons, x, top + gap, w);
-            }
+    /// The inside of a card with its buttons under the title and the text, at the foot of `room`
+    /// when there is more of it than the card needs.
+    #[allow(clippy::too_many_arguments)]
+    fn action_under(
+        &mut self,
+        title: &str,
+        text: &str,
+        buttons: &[Node<I>],
+        x: f32,
+        y: f32,
+        w: f32,
+        room: Option<f32>,
+    ) -> f32 {
+        let gap = self.em(BLOCK_ROW_GAP);
+        let mut top = y + self.text(Role::Strong, title, x, y, w, Wrap::Words);
+        top += gap + self.text(Role::Body, text, x, top + gap, w, Wrap::Words);
+        if buttons.is_empty() {
             return top - y;
         }
-        self.action_beside(title, text, buttons, x, y, w)
+        let row = self.trial(|this| this.buttons(buttons, x, 0.0, w, false));
+        let at = room.map_or(top + gap, |room| (y + room - row).max(top + gap));
+        self.buttons(buttons, x, at, w, false);
+        at + row - y
     }
 
     /// The card with its buttons beside the title and the text.
@@ -2326,39 +2354,25 @@ impl<I: Copy> Placer<'_, I> {
             .fold(0.0, f32::max)
             + h * 2.0;
         let (track_w, track_h) = (cell * count, style.line_height() + v * 2.0);
-        let gap = self.em(CONTROL_GAP);
-        let label_w = self.width_of(style, label);
 
-        if label_w + gap + track_w <= w {
-            let line = style.line_height().max(track_h);
-            self.text(
-                Role::Body,
-                label,
-                x,
-                y + (line - style.line_height()) / 2.0,
-                w - track_w - gap,
-                Wrap::Words,
-            );
-            self.track(
-                id,
-                options,
-                selected,
-                Rect::new(
-                    x + w - track_w,
-                    y + (line - track_h) / 2.0,
-                    track_w,
-                    track_h,
-                ),
-            );
-            return line;
-        }
+        // Always on a line of its own across the column, its label over it (208.209, AUDIT-180 О5);
+        // a choice field when its cells do not fit even there.
         if track_w <= w {
-            let above = self.text(Role::Body, label, x, y, w, Wrap::Words) + self.em(BLOCK_ROW_GAP);
+            let above = self.label_above(label, x, y, w);
             self.track(id, options, selected, Rect::new(x, y + above, w, track_h));
             return above + track_h;
         }
 
         self.choice(id, label, options, selected, x, y, w)
+    }
+
+    /// The label over a field, a choice field or a segmented switch — in the role and at the gap of
+    /// the label of a text field (208.209, AUDIT-180 О4); nothing for an empty one.
+    fn label_above(&mut self, label: &str, x: f32, y: f32, w: f32) -> f32 {
+        if label.is_empty() {
+            return 0.0;
+        }
+        self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
     }
 
     /// A choice card: the card is pressed as a whole; the radio button before the title and its line.
@@ -2432,8 +2446,8 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
-    /// A label and a choice field as wide as its widest option and its corner mark: the field
-    /// does not change its width with the value (the live stand: «Eng…»).
+    /// A choice field under its label, across its column (208.209, AUDIT-180 О4): two of them stand
+    /// as a pair. The value is cut with an ellipsis short of the corner mark (Б6, `elements`).
     #[allow(clippy::too_many_arguments)]
     fn choice(
         &mut self,
@@ -2447,44 +2461,11 @@ impl<I: Copy> Placer<'_, I> {
     ) -> f32 {
         let style = self.style(Role::Body);
         let value = options.get(selected).map_or("", String::as_str);
-        let (v, h) = (self.em(FIELD_PAD.v), self.em(FIELD_PAD.h));
-        let widest = options
-            .iter()
-            .map(|option| self.width_of(style, option))
-            .fold(0.0, f32::max);
-        let (field_w, field_h) = (
-            (widest + h * 2.0 + CHEVRON.at(self.b)).min(w),
-            style.line_height() + v * 2.0,
-        );
-        let gap = self.em(CONTROL_GAP);
+        let field_h = style.line_height() + self.em(FIELD_PAD.v) * 2.0;
         let part = Part::Field {
             value: value.to_owned(),
         };
-
-        if self.width_of(style, label) + gap + field_w <= w {
-            let line = style.line_height().max(field_h);
-            self.text(
-                Role::Body,
-                label,
-                x,
-                y + (line - style.line_height()) / 2.0,
-                w - field_w - gap,
-                Wrap::Words,
-            );
-            self.push(
-                part,
-                Rect::new(
-                    x + w - field_w,
-                    y + (line - field_h) / 2.0,
-                    field_w,
-                    field_h,
-                ),
-                Some(id),
-            );
-            return line;
-        }
-
-        let above = self.text(Role::Body, label, x, y, w, Wrap::Words) + self.em(BLOCK_ROW_GAP);
+        let above = self.label_above(label, x, y, w);
         self.push(part, Rect::new(x, y + above, w, field_h), Some(id));
         above + field_h
     }
@@ -2505,11 +2486,7 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
         slot: Option<f32>,
     ) -> f32 {
-        let above = if label.is_empty() {
-            0.0
-        } else {
-            self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
-        };
+        let above = self.label_above(label, x, y, w);
         let (pad, lines) = match kind {
             FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
             FieldKind::Text | FieldKind::Code { .. } => (MULTILINE_PAD, FIELD_TEXT_LINES.0),

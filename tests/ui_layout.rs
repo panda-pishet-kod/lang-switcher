@@ -334,14 +334,19 @@ fn the_steps_of_a_wizard_are_as_tall_as_the_tallest_and_the_buttons_do_not_move(
 
 // ---- The row of buttons ---------------------------------------------------------------------
 
+/// The row of buttons of the window (passport §6): pressed to the right, the main one the rightmost;
+/// §3а step 1 when it does not fit.
 #[test]
 fn the_buttons_press_to_the_right_with_the_main_one_rightmost_and_give_way_by_step_1() {
     let row = |label_length: usize| {
         let label = "x".repeat(label_length);
-        bare(Node::Buttons(vec![
-            button(Id::Close, &label, ButtonKind::Primary),
-            button(Id::Copy, &label, ButtonKind::Normal),
-        ]))
+        Window {
+            buttons: vec![
+                button(Id::Close, &label, ButtonKind::Primary),
+                button(Id::Copy, &label, ButtonKind::Normal),
+            ],
+            ..bare(text(Role::Body, "a line"))
+        }
     };
     let order = |layout: &Layout<Id>| {
         layout
@@ -411,7 +416,8 @@ fn the_buttons_of_a_card_in_a_pair_move_beside_its_text_by_step_3() {
     let (b, t) = button_and_text(&roomy);
     assert!(b.y >= t.bottom(), "roomy: the button under the text");
 
-    let tight = lay(&window(11, true), usual());
+    // Ten lines: the frames of the cards (208.209) took the room of the eleventh.
+    let tight = lay(&window(10, true), usual());
     assert_eq!(tight.step, Some(Concession::Card));
     let (b, t) = button_and_text(&tight);
     assert!(
@@ -422,6 +428,161 @@ fn the_buttons_of_a_card_in_a_pair_move_beside_its_text_by_step_3() {
     let alone = lay(&window(11, false), usual());
     let (b, t) = button_and_text(&alone);
     assert!(b.y >= t.bottom(), "a card alone: the button under the text");
+}
+
+/// **208.209, AUDIT-180 О2 — a row of buttons of the content stands at the start edge.** In the
+/// body and in a block the buttons stand at the start of their column, under the text; only the row
+/// of the window is pressed to its end. (Mirrored with the window by the rule of every layout.)
+#[test]
+fn a_row_of_buttons_of_the_content_stands_at_the_start_and_the_row_of_the_window_at_the_end() {
+    let window = Window {
+        buttons: vec![button(Id::Close, "Close", ButtonKind::Primary)],
+        ..bare(Node::Column(vec![
+            text(Role::Body, "a line of the body"),
+            Node::Buttons(vec![button(Id::Copy, "Copy", ButtonKind::Normal)]),
+            Node::Surface(
+                Surface::Block,
+                Box::new(Node::Buttons(vec![button(
+                    Id::Site,
+                    "Site",
+                    ButtonKind::Normal,
+                )])),
+            ),
+        ]))
+    };
+    let layout = lay(&window, usual());
+    let rect = |id| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.id == Some(id) && matches!(item.part, Part::Button { .. }))
+            .map(|item| item.rect)
+            .expect("the button")
+    };
+    let line = texts(&layout)[0];
+    let block = rects_of(&layout, |part| {
+        matches!(part, Part::Surface(Surface::Block))
+    })[0];
+
+    assert!(
+        close(rect(Id::Copy).x, line.x),
+        "the row of the body at the start of the column: {:?} {line:?}",
+        rect(Id::Copy)
+    );
+    assert!(
+        rect(Id::Site).x - block.x < block.right() - rect(Id::Site).right(),
+        "the row of the block at its start: {:?} {block:?}",
+        rect(Id::Site)
+    );
+    assert!(
+        rect(Id::Close).right() > line.right() - 1.0 && rect(Id::Close).x > line.x + line.w / 2.0,
+        "the row of the window at its end: {:?} {line:?}",
+        rect(Id::Close)
+    );
+}
+
+/// **208.209, AUDIT-180 О4, О5 — the label over the field.** A choice field and a segmented switch
+/// stand under their labels across their column, however short the label and the options; two
+/// choice fields of a pair share a line, one across each half.
+#[test]
+fn a_choice_field_and_a_segmented_switch_stand_under_their_labels_across_the_column() {
+    let choice = |id, label: &str| Node::Choice {
+        id,
+        label: label.to_owned(),
+        options: vec!["One".to_owned(), "Two".to_owned()],
+        selected: 0,
+    };
+    let window = bare(Node::Column(vec![
+        choice(Id::Language, "Language"),
+        Node::Segments {
+            id: Id::Theme,
+            label: "Theme".to_owned(),
+            options: vec!["A".to_owned(), "B".to_owned()],
+            selected: 0,
+        },
+        Node::Pair(
+            Box::new(choice(Id::Site, "Source")),
+            Box::new(choice(Id::Copy, "Target")),
+        ),
+    ]));
+    let layout = lay(&window, usual());
+    let part = |id, wanted: fn(&Part) -> bool| {
+        layout
+            .items
+            .iter()
+            .find(|item| item.id == Some(id) && wanted(&item.part))
+            .map(|item| item.rect)
+            .expect("the element")
+    };
+    let field = |id| part(id, |part| matches!(part, Part::Field { .. }));
+    let labels = texts(&layout);
+    let (language, theme) = (labels[0], labels[1]);
+
+    let language_field = field(Id::Language);
+    assert!(
+        language_field.y >= language.bottom()
+            && close(language_field.x, language.x)
+            && close(language_field.w, language.w),
+        "the choice field under its label, across the column: {language_field:?} {language:?}"
+    );
+    let track = part(Id::Theme, |part| matches!(part, Part::Track));
+    assert!(
+        track.y >= theme.bottom() && close(track.w, language.w),
+        "the segments under their label, across the column: {track:?} {theme:?}"
+    );
+    let (source, target) = (field(Id::Site), field(Id::Copy));
+    assert!(
+        close(source.y, target.y)
+            && target.x > source.right()
+            && close(source.w, target.w)
+            && source.w < language.w / 2.0,
+        "the pair of fields side by side, one in each half: {source:?} {target:?}"
+    );
+}
+
+/// **208.209, AUDIT-180 О3, А2, А3 — the cards of a pair.** An action card stands in the frame of a
+/// block; in a pair standing side by side the two take one height — the taller card's — however
+/// long the text of either, and their buttons stand on one line at the foot, at the start edge.
+#[test]
+fn the_cards_of_a_pair_stand_in_frames_of_one_height_with_their_buttons_on_one_line() {
+    let card = |id, words: &str| Node::Action {
+        title: "Title".to_owned(),
+        words: words.to_owned(),
+        buttons: vec![button(id, "Copy", ButtonKind::Normal)],
+    };
+    let window = bare(Node::Pair(
+        Box::new(card(Id::Copy, "Short.")),
+        Box::new(card(
+            Id::Close,
+            "A text long enough to take several lines in its half of the column, and more lines \
+             still, so that its card is the taller one of the two.",
+        )),
+    ));
+    let layout = lay(&window, usual());
+    let frames = rects_of(&layout, |part| {
+        matches!(part, Part::Surface(Surface::Block))
+    });
+    let buttons = rects_of(&layout, |part| matches!(part, Part::Button { .. }));
+
+    assert_eq!(frames.len(), 2, "each card in its frame: {frames:?}");
+    assert!(
+        close(frames[0].h, frames[1].h) && close(frames[0].y, frames[1].y),
+        "the frames one height: {frames:?}"
+    );
+    assert!(
+        close(buttons[0].y, buttons[1].y),
+        "the buttons on one line: {buttons:?}"
+    );
+    for (button, frame) in buttons.iter().zip(&frames) {
+        assert!(
+            button.bottom() > frame.bottom() - frame.h / 3.0 && button.bottom() < frame.bottom(),
+            "the button at the foot of its frame: {button:?} {frame:?}"
+        );
+        assert!(
+            button.x - frame.x < frame.right() - button.right(),
+            "the button at the start of its frame: {button:?} {frame:?}"
+        );
+    }
 }
 
 /// §3а step 2: a pair stands in a column when a half is narrower than its widest unbreakable
@@ -576,10 +737,11 @@ fn a_switch_stands_at_the_end_of_its_line_and_a_check_box_before_its_label() {
     );
 }
 
-/// A segmented switch stands beside its label, on a line of its own when it does not fit beside
-/// it, and becomes a choice field when it does not fit even there.
+/// A segmented switch stands on a line of its own under its label, short options or long — the
+/// rule of 208.209 (AUDIT-180 О5; before it, beside the label while it fitted there) — and becomes
+/// a choice field when it does not fit even there.
 #[test]
-fn a_segmented_switch_moves_to_its_own_line_and_then_becomes_a_choice_field() {
+fn a_segmented_switch_stands_on_its_own_line_and_then_becomes_a_choice_field() {
     let segments = |option_length: usize| {
         bare(Node::Segments {
             id: Id::Theme,
@@ -600,9 +762,8 @@ fn a_segmented_switch_moves_to_its_own_line_and_then_becomes_a_choice_field() {
 
     let (track, field, label) = kinds(&lay(&segments(2), usual()));
     assert!(
-        field.is_empty()
-            && close(track[0].y + track[0].h / 2.0, label.y + label.h / 2.0)
-            && track[0].x >= label.right()
+        field.is_empty() && track[0].y > label.bottom() && close(track[0].w, label.w),
+        "short options: on a line of its own, across the column: {track:?} {label:?}"
     );
 
     let (track, field, label) = kinds(&lay(&segments(20), usual()));

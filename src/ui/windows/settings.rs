@@ -314,44 +314,49 @@ impl Settings {
                 self.line(IDS_UPDATES_SWITCH),
                 self.config.letters.release_window,
             ),
-            Node::Choice {
-                id: Id::Language,
-                label: self.line(IDS_LANGUAGE_LABEL),
-                options: self
-                    .languages
-                    .languages
-                    .iter()
-                    .map(|language| language.native_name().to_owned())
-                    .collect(),
-                selected: self
-                    .languages
-                    .languages
-                    .iter()
-                    .position(|candidate| *candidate == language)
-                    .unwrap_or(0),
-            },
         ];
+        let mut language_column = vec![Node::Choice {
+            id: Id::Language,
+            label: self.line(IDS_LANGUAGE_LABEL),
+            options: self
+                .languages
+                .languages
+                .iter()
+                .map(|language| language.native_name().to_owned())
+                .collect(),
+            selected: self
+                .languages
+                .languages
+                .iter()
+                .position(|candidate| *candidate == language)
+                .unwrap_or(0),
+        }];
         // T-120-22: under «Язык интерфейса», the quiet «Нашли ошибку в переводе?» — in every
         // language of the window but Russian, the language the others are translated from.
         // ⚠ Not while the note of a refused write stands over the section (C6 of the sheet, (г)):
         // with the note, the button pushes «Общие» of the narrow window out of it in ta, ml, tt
         // and ka; the note goes with the next change, and the button comes back with it.
         if self.language != Language::Ru && !self.refused {
-            nodes.push(Node::Buttons(vec![Node::Button {
+            language_column.push(Node::Buttons(vec![Node::Button {
                 id: Id::Translation,
                 label: self.line(IDS_TRANSLATION_REPORT),
                 kind: ButtonKind::Quiet,
                 browser: false,
             }]));
         }
-        nodes.push(Node::Segments {
-            id: Id::Theme,
-            label: self.line(IDS_THEME_LABEL),
-            options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
-                .map(|id| self.line(id))
-                .to_vec(),
-            selected: settings::theme_combo_index(self.config.general.theme),
-        });
+        // «Язык интерфейса» and «Оформление» as a pair, their labels over them (208.209, AUDIT-180
+        // Н5): one under the other where a half is too narrow — the rule of the pair.
+        nodes.push(Node::Pair(
+            Box::new(Node::Rows(language_column)),
+            Box::new(Node::Segments {
+                id: Id::Theme,
+                label: self.line(IDS_THEME_LABEL),
+                options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
+                    .map(|id| self.line(id))
+                    .to_vec(),
+                selected: settings::theme_combo_index(self.config.general.theme),
+            }),
+        ));
         nodes
     }
 
@@ -413,18 +418,21 @@ impl Settings {
         }];
         let labels = settings::layout_labels(&self.session, &self.session);
         if self.config.layouts.mode == LayoutMode::Pair {
-            nodes.push(Node::Choice {
-                id: Id::PairSource,
-                label: self.line(IDS_PAIR_SOURCE),
-                options: labels.clone(),
-                selected: self.layout_index(&self.config.layouts.pair_source),
-            });
-            nodes.push(Node::Choice {
-                id: Id::PairTarget,
-                label: self.line(IDS_PAIR_TARGET),
-                options: labels,
-                selected: self.layout_index(&self.config.layouts.pair_target),
-            });
+            // «Источник» and «Цель» as a pair, their labels over them (208.209, AUDIT-180 Н9).
+            nodes.push(Node::Pair(
+                Box::new(Node::Choice {
+                    id: Id::PairSource,
+                    label: self.line(IDS_PAIR_SOURCE),
+                    options: labels.clone(),
+                    selected: self.layout_index(&self.config.layouts.pair_source),
+                }),
+                Box::new(Node::Choice {
+                    id: Id::PairTarget,
+                    label: self.line(IDS_PAIR_TARGET),
+                    options: labels,
+                    selected: self.layout_index(&self.config.layouts.pair_target),
+                }),
+            ));
         } else {
             let names: Vec<LayoutId> = self.rows.iter().map(|row| row.layout).collect();
             let row_labels = settings::layout_labels(&names, &self.session);

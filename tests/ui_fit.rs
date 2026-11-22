@@ -925,6 +925,10 @@ fn a_button_too_wide_for_its_room_is_named_with_its_key() {
 /// instrument named the lead. The label of that day is kept here, so that the case outlives the
 /// translator's shorter label; if the window changes so that taking the lead away no longer makes
 /// it fit, the case is gone and this test says so, not passes for nothing.
+///
+/// ⚠ Built anew on 22.11 (208.209): the action card took the frame of a block, and in the narrow
+/// window the label of that day ran over the card with the lead or without it (60.7 points across).
+/// The same label, lead and factor reproduce the case in the large window, whose column is wider.
 #[test]
 fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     const LABEL: &str = "നിർമ്മാതാവിനെ പിന്തുണയ്ക്കുക";
@@ -957,7 +961,8 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
         Direction::LeftToRight,
     )
     .expect("DirectWrite");
-    let (class, w, h) = CLASSES[0];
+    // The large window: the case of the narrow one went with the frames of the cards (see above).
+    let (class, w, h) = CLASSES[2];
     let size = client_size(w, h);
     let _ = class;
     let k = K;
@@ -973,7 +978,8 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     });
     assert!(
         faults(&without_lead, size, k, false, &text).is_empty(),
-        "the case is gone: taking the lead away no longer makes the window fit — build it anew"
+        "the case is gone: taking the lead away no longer makes the window fit — build it anew: {:?}",
+        faults(&without_lead, size, k, false, &text)
     );
     let named = culprit(Language::Ml, &window, size, k, false, &text, &names);
     assert!(
