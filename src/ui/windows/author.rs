@@ -83,8 +83,8 @@ impl Author {
         }
     }
 
-    /// The card «Новости и обновления»: the state of the feed and of the version, the two
-    /// buttons, the switch.
+    /// The card «Новости и обновления»: the state of the feed and of the version, its buttons at the
+    /// start edge (208.209: «Открыть страницу загрузки» at the left edge of the block).
     fn news(&self) -> Node<Id> {
         let view = &self.view;
         let mut rows = vec![Node::Line(Role::Strong, self.line(IDS_NEWS_PANEL))];
@@ -119,19 +119,23 @@ impl Author {
         }
         buttons.push(self.button(Id::Download, IDS_NEWS_DOWNLOAD, ButtonKind::Normal));
         rows.push(Node::Buttons(buttons));
-        if let Some(on) = view.switch {
-            rows.push(Node::Toggle {
-                id: Id::Switch,
-                label: self.line(IDS_UPDATES_SWITCH),
-                hint: (!view.switch_note.is_empty()).then(|| view.switch_note.clone()),
-                on,
-                badge: None,
-            });
-        }
         if !view.file_only.is_empty() {
             rows.push(Node::Text(Role::Small, view.file_only.clone()));
         }
         Node::Surface(Surface::Block, Box::new(Node::Rows(rows)))
+    }
+
+    /// «Сообщать об обновлениях программы» — a line of its own under the block of the news, the
+    /// switch at its end (208.209, AUDIT-180 А5: the word of the owner moves it out of the block).
+    fn switch(&self) -> Option<Node<Id>> {
+        let view = &self.view;
+        view.switch.map(|on| Node::Toggle {
+            id: Id::Switch,
+            label: self.line(IDS_UPDATES_SWITCH),
+            hint: (!view.switch_note.is_empty()).then(|| view.switch_note.clone()),
+            on,
+            badge: None,
+        })
     }
 }
 
@@ -163,6 +167,19 @@ impl Content for Author {
         .filter(|(_, address)| letters::links::is_placeholder(address))
         .map(|(id, _)| id)
         .collect();
+        let mut body = vec![
+            // The title of the head of «О программе» (task T-81-3) with «От автора» over it, no
+            // number — the only window with a version over its title is «О программе» — and no
+            // subtitle: C6 of T-120-17, variants 1 + 3 (the mock-up of the window has none).
+            Node::Header {
+                eyebrow: Some(self.line(IDS_AUTHOR_CAPTION)),
+                title: view.line_1.clone(),
+                subtitle: None,
+            },
+            Node::Pair(Box::new(support), Box::new(feedback)),
+            self.news(),
+        ];
+        body.extend(self.switch());
         Window {
             kind: WindowKind::Ordinary,
             art: Some(Art::Thanks),
@@ -171,18 +188,7 @@ impl Content for Author {
                 address: site(),
                 link: Id::Site,
             }),
-            body: Node::Column(vec![
-                // The title of the head of «О программе» (task T-81-3) with «От автора» over it, no
-                // number — the only window with a version over its title is «О программе» — and no
-                // subtitle: C6 of T-120-17, variants 1 + 3 (the mock-up of the window has none).
-                Node::Header {
-                    eyebrow: Some(self.line(IDS_AUTHOR_CAPTION)),
-                    title: view.line_1.clone(),
-                    subtitle: None,
-                },
-                Node::Pair(Box::new(support), Box::new(feedback)),
-                self.news(),
-            ]),
+            body: Node::Column(body),
             buttons: vec![self.button(Id::Close, IDS_CLOSE, ButtonKind::Primary)],
             disabled,
         }

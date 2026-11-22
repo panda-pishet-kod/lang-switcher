@@ -4934,6 +4934,47 @@ fn the_lines_of_the_state_of_the_author_window_say_by_their_dot_whether_they_are
     }
 }
 
+/// **208.209, AUDIT-180 А5 — the switch under the block of the news.** «Сообщать об обновлениях
+/// программы» is a line of its own right after the block «Новости и обновления», not a row inside
+/// it: the word of the owner moved it out of the block of the mock-up.
+#[test]
+fn the_switch_of_the_author_window_stands_under_the_block_of_the_news() {
+    use lang_switcher::letters::author_view_sample;
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{Node, Surface};
+    use lang_switcher::ui::windows::author::{Author, Id};
+
+    let _guard = with_product_strings();
+    let news = settings::text_in(Language::Ru, settings::IDS_NEWS_PANEL);
+    let window = Author {
+        view: author_view_sample(Language::Ru),
+        language: Language::Ru,
+        theme: ThemeSetting::Light,
+    }
+    .describe();
+    let Node::Column(children) = &window.body else {
+        panic!("the body of «От автора» is a column: {:?}", window.body);
+    };
+    let block = children
+        .iter()
+        .position(|node| {
+            matches!(node, Node::Surface(Surface::Block, _)) && format!("{node:?}").contains(&news)
+        })
+        .expect("the block of the news");
+    let switch = children
+        .iter()
+        .position(|node| matches!(node, Node::Toggle { id: Id::Switch, .. }))
+        .expect("the switch, a node of the column itself");
+
+    assert_eq!(switch, block + 1, "the switch right under the block");
+    assert!(
+        !format!("{:?}", children[block]).contains("Switch"),
+        "no switch inside the block: {:?}",
+        children[block]
+    );
+}
+
 /// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
 /// window, 620 × 500, at a type not under 12 points** — in every language, at the factor of the
 /// table, laid out by the layout of the shell and measured by DirectWrite; the pair of its cards
