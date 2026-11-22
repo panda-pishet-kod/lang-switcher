@@ -228,8 +228,10 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             Node::ChoiceCard {
                 id: 1,
                 title: word("IDS_THEME_SYSTEM"),
-                words: word("IDS_THEME_LABEL"),
+                words: Some(word("IDS_THEME_LABEL")),
                 selected,
+                next: None,
+                icon: None,
             },
         );
     }

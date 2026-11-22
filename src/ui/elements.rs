@@ -25,7 +25,6 @@ use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
 use crate::ui::scene::{ButtonKind, Surface};
 use crate::ui::text::{Align, Direction, Measure, Style, Text, Wrap};
-use crate::ui::tokens::BUTTON_PAD;
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
@@ -34,6 +33,7 @@ use crate::ui::tokens::{
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
+use crate::ui::tokens::{BUTTON_PAD, CHOICE_ICON_GLYPH};
 use crate::ui::tokens::{
     ON_PICTURE_KEY_FRAME, ON_PICTURE_KEY_RADIUS, ON_PICTURE_WEIGHT, picture_colours,
 };
@@ -276,6 +276,24 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 Color::Ink2
             };
             painter.menu_icon(name, rect, c(colour));
+        }
+        // The icon of a choice card (208.132): a plate of `surface2`, the icon `accent` in its
+        // middle; grey with the card when it is unavailable.
+        Part::CardIcon { name } => {
+            painter.fill_rect(rect, RADIUS_MEDIUM.0, c(Color::Surface2));
+            let side = CHOICE_ICON_GLYPH.at(look.b);
+            let glyph = Rect::new(
+                rect.x + (rect.w - side) / 2.0,
+                rect.y + (rect.h - side) / 2.0,
+                side,
+                side,
+            );
+            let colour = if state.disabled {
+                Color::Ink3
+            } else {
+                Color::Accent
+            };
+            painter.menu_icon(name, glyph, c(colour));
         }
         Part::Taskbar(picture) => crate::ui::picture::draw(painter, look, picture, rect),
         Part::Cross => {

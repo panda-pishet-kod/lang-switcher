@@ -34,7 +34,9 @@ use crate::ui::tokens::{
     TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
     WIZARD_BUTTON_ROW_ABOVE,
 };
-use crate::ui::tokens::{ART_RING, BADGE_GAP, TYPE_FLOOR};
+use crate::ui::tokens::{
+    ART_RING, BADGE_GAP, CHOICE_ICON_PLATE, CHOICE_IN_LIST_PAD, CHOICE_NEXT_GAP, TYPE_FLOOR,
+};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
@@ -245,6 +247,11 @@ pub enum Part {
         name: String,
         emphasis: bool,
     },
+    /// The icon of a choice card on its plate (208.132, AUDIT-180 М2): `surface2`, the icon
+    /// `accent`.
+    CardIcon {
+        name: String,
+    },
     /// The picture of the taskbar in «Обновлено», at one moment.
     Taskbar(crate::ui::scene::Taskbar),
     /// The thin scroll bar of a list that has more rows than it shows.
@@ -358,6 +365,7 @@ impl Part {
             Part::Cross => "close cross",
             Part::Taskbar(_) => "taskbar picture",
             Part::MenuIcon { .. } => "menu icon",
+            Part::CardIcon { .. } => "card icon",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -1087,7 +1095,18 @@ impl<I: Copy> Placer<'_, I> {
                 title,
                 words,
                 selected,
-            } => self.choice_card(*id, title, words, *selected, x, y, w),
+                next,
+                icon,
+            } => self.choice_card(
+                *id,
+                (title, words.as_deref(), next.as_deref()),
+                *icon,
+                *selected,
+                x,
+                y,
+                w,
+                slot,
+            ),
             Node::Segments {
                 id,
                 label,
@@ -1940,13 +1959,24 @@ impl<I: Copy> Placer<'_, I> {
     }
 
     /// A group of rows (passport §3 «Группа строк»): the frame of a block with the paddings of the
-    /// group, each row padded above and below, a line across between two rows; the frame takes its
-    /// `slot` when it has one.
+    /// group, each row padded above and below, a line across between two rows. Given a `slot`
+    /// taller than the rows need, the frame takes it and the rows spread evenly over it (the list of
+    /// «Что приложить», 208.133: «пункты разнесены ровно»).
     fn group(&mut self, rows: &[Node<I>], x: f32, y: f32, w: f32, slot: Option<f32>) -> f32 {
         let (v, h) = (self.em(ROW_GROUP_PAD.v), self.em(ROW_GROUP_PAD.h));
-        let row_pad = self.em(ROW_GROUP_ROW);
         let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
         let (inner_x, inner_w) = (x + h, (w - h * 2.0).max(0.0));
+        let mut row_pad = self.em(ROW_GROUP_ROW);
+        if let Some(slot) = slot
+            && !rows.is_empty()
+        {
+            let natural = v * 2.0
+                + rows
+                    .iter()
+                    .map(|row| self.height(row, inner_w, None) + row_pad * 2.0)
+                    .sum::<f32>();
+            row_pad += (slot - natural).max(0.0) / (rows.len() * 2) as f32;
+        }
         let mut top = y + v;
         for (index, row) in rows.iter().enumerate() {
             if index > 0 {
@@ -2414,32 +2444,70 @@ impl<I: Copy> Placer<'_, I> {
         self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
     }
 
-    /// A choice card: the card is pressed as a whole; the radio button before the title and its line.
+    /// A choice card: the card is pressed as a whole; the radio button before the title, its line
+    /// under it, where the choice leads under that (`next`), an icon on a plate at the end — and,
+    /// given a `slot` taller than all that, the card takes it and its content stands in its middle
+    /// (208.132, 208.133: the cards of a step share its height).
     #[allow(clippy::too_many_arguments)]
     fn choice_card(
         &mut self,
         id: I,
-        title: &str,
-        text: &str,
+        (title, text, next): (&str, Option<&str>, Option<&str>),
+        icon: Option<&str>,
         selected: bool,
         x: f32,
         y: f32,
         w: f32,
+        slot: Option<f32>,
     ) -> f32 {
-        let (v, h) = (self.em(CHOICE_PAD.v), self.em(CHOICE_PAD.h));
+        // A card with its icon is a card of a choice of the road (the first step of the wizard); one
+        // without is a card in a list of variants — the kinds of field of «Где» — with the paddings
+        // of the passport for those (§3 «Карточка выбора … в списке вариантов», 208.136 п. 3).
+        let pad = if icon.is_some() {
+            CHOICE_PAD
+        } else {
+            CHOICE_IN_LIST_PAD
+        };
+        let (v, h) = (self.em(pad.v), self.em(pad.h));
         let card = self.push(Part::Card { selected }, Rect::new(x, y, w, 0.0), Some(id));
         let side = CHECK.at(self.b);
         let gap = self.em(CONTROL_GAP);
         let first = self.style(Role::Strong).line_height();
-        let (tx, tw) = (x + h + side + gap, w - h * 2.0 - side - gap);
+        let plate = icon.map_or(0.0, |_| self.em(CHOICE_ICON_PLATE));
+        let beside = if icon.is_some() { plate + gap } else { 0.0 };
+        let (tx, tw) = (
+            x + h + side + gap,
+            (w - h * 2.0 - side - gap - beside).max(0.0),
+        );
+        let start = self.out.len();
         let mut inner = self.text(Role::Strong, title, tx, y + v, tw, Wrap::Words);
-        inner += self.text(Role::Small, text, tx, y + v + inner, tw, Wrap::Words);
+        if let Some(text) = text {
+            inner += self.text(Role::Small, text, tx, y + v + inner, tw, Wrap::Words);
+        }
+        if let Some(next) = next {
+            inner += self.em(CHOICE_NEXT_GAP);
+            inner += self.text(Role::Small, next, tx, y + v + inner, tw, Wrap::Words);
+        }
         self.push(
             Part::Radio { on: selected },
             Rect::new(x + h, y + v + (first - side) / 2.0, side, side),
             None,
         );
-        let height = inner + v * 2.0;
+        let height = (inner + v * 2.0).max(slot.unwrap_or(0.0));
+        // In a taller card the content stands in its middle.
+        let lift = (height - inner - v * 2.0) / 2.0;
+        for item in &mut self.out[start..] {
+            item.rect.y += lift;
+        }
+        if let Some(name) = icon {
+            self.push(
+                Part::CardIcon {
+                    name: name.to_owned(),
+                },
+                Rect::new(x + w - h - plate, y + (height - plate) / 2.0, plate, plate),
+                None,
+            );
+        }
         self.out[card].rect.h = height;
         height
     }

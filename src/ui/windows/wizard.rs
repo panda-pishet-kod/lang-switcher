@@ -13,13 +13,14 @@ use crate::settings::{
     IDS_WIZARD_ATTACH_JOURNAL_SUB, IDS_WIZARD_ATTACH_LAYOUTS, IDS_WIZARD_ATTACH_MACHINE,
     IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_BACK, IDS_WIZARD_CANCEL, IDS_WIZARD_CAPTION,
     IDS_WIZARD_CAPTURE, IDS_WIZARD_CAPTURE_COUNT, IDS_WIZARD_CAPTURE_NOTE, IDS_WIZARD_CARD_IDEA,
-    IDS_WIZARD_CARD_IDEA_SUB, IDS_WIZARD_CARD_NOTHING, IDS_WIZARD_CARD_NOTHING_SUB,
-    IDS_WIZARD_CARD_WRONG, IDS_WIZARD_CARD_WRONG_SUB, IDS_WIZARD_CONTACT, IDS_WIZARD_COPY_ADDRESS,
-    IDS_WIZARD_COPY_TEXT, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
-    IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
-    IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_RECEIVED, IDS_WIZARD_REPEAT,
-    IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE,
-    IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP, IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
+    IDS_WIZARD_CARD_IDEA_NEXT, IDS_WIZARD_CARD_IDEA_SUB, IDS_WIZARD_CARD_WRONG,
+    IDS_WIZARD_CARD_WRONG_NEXT, IDS_WIZARD_CARD_WRONG_SUB, IDS_WIZARD_CONTACT,
+    IDS_WIZARD_COPY_ADDRESS, IDS_WIZARD_COPY_TEXT, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL,
+    IDS_WIZARD_FIELD_PASSWORD, IDS_WIZARD_FIELD_PASSWORD_SUB, IDS_WIZARD_FIELD_UNKNOWN,
+    IDS_WIZARD_GOT, IDS_WIZARD_MAIL_ADDRESS, IDS_WIZARD_PROGRAM, IDS_WIZARD_RECEIVED,
+    IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE,
+    IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_SAVE, IDS_WIZARD_SENT_TEXT, IDS_WIZARD_STEP,
+    IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHERE_FIELD, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
@@ -28,12 +29,21 @@ use crate::ui::scene::{
 };
 use ::windows::Win32::Foundation::HWND;
 
+/// Every step of both roads, whose heads the head of a step is as tall as (AUDIT-180 М3).
+const HEADS: [Step; 6] = [
+    Step::What,
+    Step::Where,
+    Step::Did,
+    Step::Idea,
+    Step::Attach,
+    Step::Preview,
+];
+
 /// The elements of the wizard, of all its pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Id {
     /// The cards of «Что случилось?».
     Wrong,
-    Nothing,
     Idea,
     /// «Программа» and «Взять из активного окна».
     Program,
@@ -81,7 +91,6 @@ impl Id {
 /// twice or changed under the request).
 pub const ALL: &[Id] = &[
     Id::Wrong,
-    Id::Nothing,
     Id::Idea,
     Id::Program,
     Id::Capture,
@@ -160,12 +169,12 @@ impl Page {
 
     /// The line over the title: «Написать автору · шаг N из M» on a step of the road, the name of
     /// the window alone on the thanks and on «Не удалось отправить», which are no steps of it.
-    fn eyebrow(&self) -> String {
+    fn eyebrow(&self, step: Option<usize>) -> String {
         let caption = self.line(IDS_WIZARD_CAPTION);
-        if self.wizard.current() == Step::Done || self.failed() {
+        let Some(index) = step else {
             return caption;
-        }
-        let number = (self.wizard.number() + 1).to_string();
+        };
+        let number = (index + 1).to_string();
         let total = self.wizard.road().len().to_string();
         format!(
             "{caption} · {}",
@@ -173,32 +182,49 @@ impl Page {
         )
     }
 
+    /// The head of the window: the line over the title, the title, its note.
+    fn header(&self, step: Option<usize>, words: &letters::StepWords) -> Node<Id> {
+        Node::Header {
+            eyebrow: Some(self.eyebrow(step)),
+            title: self.line(words.title),
+            subtitle: words.note.map(|note| self.line(note)),
+        }
+    }
+
+    /// «Что случилось?»: two cards (208.131), each with its icon and the line of where it leads
+    /// (208.132); they share the height of the step, their text in the middle (208.133).
     fn what(&self) -> Node<Id> {
         let chosen = self.wizard.draft().trouble;
-        let card = |id, trouble, title, words| Node::ChoiceCard {
-            id,
-            title: self.line(title),
-            words: self.line(words),
-            selected: chosen == trouble,
+        let card = |id, trouble, (title, words, next), icon| {
+            Node::Fill(Box::new(Node::ChoiceCard {
+                id,
+                title: self.line(title),
+                words: Some(self.line(words)),
+                selected: chosen == trouble,
+                next: Some(self.line(next)),
+                icon: Some(icon),
+            }))
         };
-        Node::Rows(vec![
+        Node::Column(vec![
             card(
                 Id::Wrong,
                 Trouble::WrongResult,
-                IDS_WIZARD_CARD_WRONG,
-                IDS_WIZARD_CARD_WRONG_SUB,
-            ),
-            card(
-                Id::Nothing,
-                Trouble::NothingHappened,
-                IDS_WIZARD_CARD_NOTHING,
-                IDS_WIZARD_CARD_NOTHING_SUB,
+                (
+                    IDS_WIZARD_CARD_WRONG,
+                    IDS_WIZARD_CARD_WRONG_SUB,
+                    IDS_WIZARD_CARD_WRONG_NEXT,
+                ),
+                "alert",
             ),
             card(
                 Id::Idea,
                 Trouble::Idea,
-                IDS_WIZARD_CARD_IDEA,
-                IDS_WIZARD_CARD_IDEA_SUB,
+                (
+                    IDS_WIZARD_CARD_IDEA,
+                    IDS_WIZARD_CARD_IDEA_SUB,
+                    IDS_WIZARD_CARD_IDEA_NEXT,
+                ),
+                "bulb",
             ),
         ])
     }
@@ -213,32 +239,49 @@ impl Page {
         } else {
             self.line(IDS_WIZARD_CAPTURE)
         };
-        let radio = |id, field, label| Node::Radio {
-            id,
-            label: self.line(label),
-            on: draft.field == field,
+        // The kinds of field are cards, as on the first step, and share what the step leaves
+        // (208.133, AUDIT-180 М4).
+        let card = |id, field, label, words: Option<u16>| {
+            Node::Fill(Box::new(Node::ChoiceCard {
+                id,
+                title: self.line(label),
+                words: words.map(|words| self.line(words)),
+                selected: draft.field == field,
+                next: None,
+                icon: None,
+            }))
         };
-        Node::Rows(vec![
-            Node::Row(vec![
-                self.field(
-                    Id::Program,
-                    IDS_WIZARD_PROGRAM,
-                    &draft.program,
-                    FieldKind::Line,
-                ),
-                Node::Button {
-                    id: Id::Capture,
-                    label: capture,
-                    kind: ButtonKind::Normal,
-                    browser: false,
-                },
+        Node::Column(vec![
+            Node::Rows(vec![
+                Node::Row(vec![
+                    self.field(
+                        Id::Program,
+                        IDS_WIZARD_PROGRAM,
+                        &draft.program,
+                        FieldKind::Line,
+                    ),
+                    Node::Button {
+                        id: Id::Capture,
+                        label: capture,
+                        kind: ButtonKind::Normal,
+                        browser: false,
+                    },
+                ]),
+                Node::Text(Role::Small, self.line(IDS_WIZARD_CAPTURE_NOTE)),
             ]),
-            Node::Text(Role::Small, self.line(IDS_WIZARD_CAPTURE_NOTE)),
-            Node::Line(Role::FieldLabel, self.line(IDS_WIZARD_WHERE_FIELD)),
-            radio(Id::Normal, Field::Normal, IDS_WIZARD_FIELD_NORMAL),
-            radio(Id::Password, Field::Password, IDS_WIZARD_FIELD_PASSWORD),
-            Node::Text(Role::Small, self.line(IDS_WIZARD_FIELD_PASSWORD_SUB)),
-            radio(Id::Unknown, Field::Unknown, IDS_WIZARD_FIELD_UNKNOWN),
+            Node::Fill(Box::new(Node::Rows(vec![
+                Node::Line(Role::FieldLabel, self.line(IDS_WIZARD_WHERE_FIELD)),
+                Node::Fill(Box::new(Node::Rows(vec![
+                    card(Id::Normal, Field::Normal, IDS_WIZARD_FIELD_NORMAL, None),
+                    card(
+                        Id::Password,
+                        Field::Password,
+                        IDS_WIZARD_FIELD_PASSWORD,
+                        Some(IDS_WIZARD_FIELD_PASSWORD_SUB),
+                    ),
+                    card(Id::Unknown, Field::Unknown, IDS_WIZARD_FIELD_UNKNOWN, None),
+                ]))),
+            ]))),
         ])
     }
 
@@ -268,15 +311,17 @@ impl Page {
                     FieldKind::Key { capturing: false },
                 )),
             ),
-            Node::Pair(
+            // «Ожидали» and «Получили» — fields of many lines, Enter breaks the line (208.136 п. 8),
+            // taking what the step leaves (208.133, AUDIT-180 М5).
+            Node::Fill(Box::new(Node::Pair(
                 Box::new(self.field(
                     Id::Expected,
                     IDS_WIZARD_EXPECTED,
                     &draft.expected,
-                    FieldKind::Line,
+                    FieldKind::Text,
                 )),
-                Box::new(self.field(Id::Got, IDS_WIZARD_GOT, &draft.got, FieldKind::Line)),
-            ),
+                Box::new(self.field(Id::Got, IDS_WIZARD_GOT, &draft.got, FieldKind::Text)),
+            ))),
             Node::Segments {
                 id: Id::Repeat,
                 label: self.line(IDS_WIZARD_REPEAT),
@@ -329,8 +374,12 @@ impl Page {
                 hint: Some(value),
             });
         }
-        rows.push(Node::Text(Role::Small, self.line(IDS_WIZARD_ATTACH_FOOT)));
-        Node::Rows(rows)
+        // The list in one frame, its items spread evenly over what the step leaves (208.133,
+        // AUDIT-180 М7).
+        Node::Column(vec![
+            Node::Fill(Box::new(Node::Group(rows))),
+            Node::Text(Role::Small, self.line(IDS_WIZARD_ATTACH_FOOT)),
+        ])
     }
 
     fn idea(&self) -> Node<Id> {
@@ -338,9 +387,20 @@ impl Page {
         // «Что предлагаете?» and «Чем это поможет?», or for a report about the translation «Что
         // написано сейчас?» and «Как правильно?» (T-120-22) — the two the appeal writes, too.
         let (what, helps) = draft.idea_labels();
+        // The two answers share the height of the step (208.133).
         Node::Rows(vec![
-            self.field(Id::Proposal, what, &draft.idea, FieldKind::Text),
-            self.field(Id::Helps, helps, &draft.helps, FieldKind::Text),
+            Node::Fill(Box::new(self.field(
+                Id::Proposal,
+                what,
+                &draft.idea,
+                FieldKind::Text,
+            ))),
+            Node::Fill(Box::new(self.field(
+                Id::Helps,
+                helps,
+                &draft.helps,
+                FieldKind::Text,
+            ))),
         ])
     }
 
@@ -447,7 +507,7 @@ impl Content for Page {
             Step::Attach => self.attach(),
             Step::Idea => self.idea(),
             Step::Preview if failed => self.not_sent(),
-            Step::Preview => Node::Fill(Box::new(self.preview())),
+            Step::Preview => self.preview(),
             Step::Done => self.sent(),
         };
         let art = if step == Step::Done {
@@ -462,20 +522,33 @@ impl Content for Page {
         } else {
             Vec::new()
         };
-        let mut column = vec![Node::Header {
-            eyebrow: Some(self.eyebrow()),
-            title: self.line(words.title),
-            subtitle: words.note.map(|note| self.line(note)),
-        }];
-        // The progress of the road (passport §6) on its steps; the thanks and «Не удалось
-        // отправить» are no steps of it.
-        if step != Step::Done && !failed {
-            column.push(Node::Progress {
-                total: self.wizard.road().len(),
-                current: self.wizard.number(),
-            });
-        }
-        column.push(body);
+        // The thanks and «Не удалось отправить» are no steps of the road: their head alone, their
+        // content in the middle of the height, as before.
+        let road = step != Step::Done && !failed;
+        let column = if road {
+            // On a step of the road the head is as tall as the tallest head of the road and the
+            // progress (passport §6) under it stands at one height on every step; the content
+            // takes the rest of the height, one block of it stretching (208.133, AUDIT-180 М3).
+            // The heads of every step of both roads: the bar stands at one height whichever card
+            // was chosen (208.133). They differ in the title and the note; the line over the title
+            // is the one of the step shown — one line on every step.
+            let eyebrow = Some(self.wizard.number());
+            let heads = HEADS
+                .iter()
+                .map(|each| self.header(eyebrow, &self.wizard.words_of(*each)))
+                .collect();
+            let shown = HEADS.iter().position(|each| *each == step).unwrap_or(0);
+            vec![
+                Node::Steps(shown, heads),
+                Node::Progress {
+                    total: self.wizard.road().len(),
+                    current: self.wizard.number(),
+                },
+                Node::Fill(Box::new(body)),
+            ]
+        } else {
+            vec![self.header(None, &words), body]
+        };
         Window {
             // The row of the wizard: «Отмена» at the edge of its own, the main button at the
             // other (passport §6).
@@ -537,7 +610,6 @@ impl Product {
         let wizard = &mut self.page.wizard;
         match id {
             Id::Wrong => wizard.choose(Trouble::WrongResult),
-            Id::Nothing => wizard.choose(Trouble::NothingHappened),
             Id::Idea => wizard.choose(Trouble::Idea),
             Id::Normal => wizard.set_field(Field::Normal),
             Id::Password => wizard.set_field(Field::Password),

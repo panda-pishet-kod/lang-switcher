@@ -357,6 +357,9 @@ END
 // AUDIT-180, Z6 (decision 208.209): the hints of the flag and of the journal in the settings.
 #define IDS_TRAY_FLAG_HINT      3314
 #define IDS_LOG_HINT            3315
+// AUDIT-180, Z8 (decision 208.132): where the cards of the first step of the wizard lead.
+#define IDS_WIZARD_CARD_WRONG_NEXT 3316
+#define IDS_WIZARD_CARD_IDEA_NEXT 3317
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291
@@ -473,8 +476,6 @@ END
 #define IDS_WIZARD_WHAT_NOTE    3160
 #define IDS_WIZARD_CARD_WRONG   3161
 #define IDS_WIZARD_CARD_WRONG_SUB 3162
-#define IDS_WIZARD_CARD_NOTHING 3163
-#define IDS_WIZARD_CARD_NOTHING_SUB 3164
 #define IDS_WIZARD_CARD_IDEA    3165
 #define IDS_WIZARD_CARD_IDEA_SUB 3166
 #define IDS_WIZARD_WHERE_TITLE  3167

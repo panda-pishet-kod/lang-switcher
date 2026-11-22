@@ -1935,3 +1935,54 @@ fn a_label_over_a_field_takes_no_colon() {
         .collect();
     assert_eq!(labels, ["Language", "Thème"], "the labels without colons");
 }
+
+/// **208.132, 208.133, AUDIT-180 М2 — a choice card with its icon, given a taller slot.** The icon
+/// stands on its plate at the end of the card, in its middle; the third line (where the card leads)
+/// under the line of the card; two cards of a column of fills share its height, and the text of each
+/// stands in its middle.
+#[test]
+fn a_choice_card_shows_its_icon_at_its_end_and_its_text_in_its_middle() {
+    let card = |id, icon| {
+        Node::Fill(Box::new(Node::ChoiceCard {
+            id,
+            title: "Title".to_owned(),
+            words: Some("Words".to_owned()),
+            selected: false,
+            next: Some("Next: this and that".to_owned()),
+            icon: Some(icon),
+        }))
+    };
+    let window = bare(Node::Column(vec![
+        text(Role::Body, "above"),
+        Node::Fill(Box::new(Node::Column(vec![
+            card(Id::Copy, "alert"),
+            card(Id::Site, "bulb"),
+        ]))),
+    ]));
+    let layout = lay(&window, usual());
+    let cards = rects_of(&layout, |part| matches!(part, Part::Card { .. }));
+    let icons = rects_of(&layout, |part| matches!(part, Part::CardIcon { .. }));
+    let titles: Vec<Rect> = layout
+        .items
+        .iter()
+        .filter(|item| matches!(&item.part, Part::Text { text, .. } if text == "Title"))
+        .map(|item| item.rect)
+        .collect();
+
+    assert_eq!((cards.len(), icons.len()), (2, 2), "two cards, two icons");
+    assert!(close(cards[0].h, cards[1].h), "one height: {cards:?}");
+    for ((card, icon), title) in cards.iter().zip(&icons).zip(&titles) {
+        assert!(
+            icon.right() < card.right() && card.right() - icon.right() < icon.x - card.x,
+            "the icon at the end of the card: {icon:?} {card:?}"
+        );
+        assert!(
+            close(icon.y + icon.h / 2.0, card.y + card.h / 2.0),
+            "the icon in the middle of the card: {icon:?} {card:?}"
+        );
+        assert!(
+            title.y > card.y + card.h / 6.0,
+            "the text lowered into the middle of a tall card: {title:?} {card:?}"
+        );
+    }
+}

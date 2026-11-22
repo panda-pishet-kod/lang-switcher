@@ -6562,6 +6562,9 @@ impl Drop for ProductImage {
 /// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
 ///
 /// ⚠ **277 since AUDIT-180 Z6** — the hints of the flag and of the journal (3314, 3315).
+///
+/// ⚠ **277 again since AUDIT-180 Z8** — the card «Ничего не произошло» and its line (3163, 3164)
+/// left, the lines of where the two cards lead (3316, 3317) came (208.131, 208.132).
 const FR_94_STRINGS: [(u16, &str, &str); 277] = [
     (
         settings::IDS_DIALOG_CAPTION,
@@ -7289,18 +7292,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 277] = [
     ),
     (
         settings::IDS_WIZARD_CARD_WRONG_SUB,
-        "слово исправилось не так, пропали буквы, раскладка не та",
-        "the fix came out wrong, letters went missing, the layout was not the one",
-    ),
-    (
-        settings::IDS_WIZARD_CARD_NOTHING,
-        "Ничего не произошло",
-        "Nothing happened",
-    ),
-    (
-        settings::IDS_WIZARD_CARD_NOTHING_SUB,
-        "нажали клавишу, а текст остался как был",
-        "you pressed the key and the text stayed as it was",
+        // AUDIT-180 Z8 (208.131): «Ничего не произошло» went into this card.
+        "слово исправилось не так, пропали буквы, раскладка не та или ничего не произошло",
+        "the fix came out wrong, letters went missing, the layout was not the one, or nothing happened",
     ),
     (
         settings::IDS_WIZARD_CARD_IDEA,
@@ -7676,6 +7670,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 277] = [
         settings::IDS_LOG_HINT,
         "Только имена операций и коды ошибок, ни одной клавиши",
         "Only operation names and error codes, not a single keystroke",
+    ),
+    // AUDIT-180 Z8 (208.132): where the two cards of the first step of the wizard lead.
+    (
+        settings::IDS_WIZARD_CARD_WRONG_NEXT,
+        "Дальше: где, что делали, что приложить, проверка",
+        "Next: where, what you were doing, what to attach, the check",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_IDEA_NEXT,
+        "Дальше: идея и проверка",
+        "Next: the idea and the check",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -12167,9 +12172,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     // T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124); task
     // T-119-9 (решение 208.99): the balloon of «Обновление» and its two old words (3137, 3138, 3140,
     // 3143).
-    const RETIRED_E119: [u16; 17] = [
+    // AUDIT-180 Z8 (решение 208.131): the card «Ничего не произошло» of the wizard and its line
+    // (3163, 3164) went into the first card — two more holes, held by the same checks.
+    const RETIRED_E119: [u16; 19] = [
         3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124, 3137, 3138,
-        3140, 3143,
+        3140, 3143, 3163, 3164,
     ];
 
     assert!(
@@ -12211,13 +12218,16 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     for hole in RETIRED_E119 {
         assert!(
             !settings::INTERFACE_STRINGS.contains(&hole),
-            "{hole} left the vocabulary with task T-119-8, T-119-9 or T-119-10 and must not come back into it"
+            "{hole} left the vocabulary with task T-119-8, T-119-9, T-119-10 or AUDIT-180 Z8 and must not come back into it"
         );
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
         277,
-        "two hundred and SEVENTY-SEVEN identifiers in use since AUDIT-180 Z6: the hints of the flag \
+        "two hundred and SEVENTY-SEVEN identifiers in use again since AUDIT-180 Z8: the card «Ничего \
+         не произошло» and its line left (3163, 3164), the lines of where the two cards lead came \
+         (3316, 3317). Two hundred and seventy-seven since AUDIT-180 \
+         Z6: the hints of the flag \
          and of the journal (3314, 3315). Two hundred and seventy-five since task T-120-19: the line \
          of the state \
          of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \

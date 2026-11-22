@@ -686,7 +686,9 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     assert_eq!(
         english.strings.len(),
         277,
-        "AUDIT-180 Z6: the hints of the flag and of the journal (3314, 3315); before them, \
+        "AUDIT-180 Z8: the card «Ничего не произошло» and its line left (3163, 3164), the lines of \
+         where the two cards lead came (3316, 3317); AUDIT-180 Z6: the hints of the flag and of \
+         the journal (3314, 3315); before them, \
          the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
          nine for the appeal that goes to the site, eight that left with the group, the issues \
          and the two thanks, stage E114 (T-114-2): the sixth row of the help, and stage E119 \

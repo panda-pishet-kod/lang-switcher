@@ -146,8 +146,10 @@ fn the_controls_answer_on_their_whole_line_and_a_card_on_the_whole_card() {
         Node::ChoiceCard {
             id: 1,
             title: label.clone(),
-            words: "строка".to_owned(),
+            words: Some("строка".to_owned()),
             selected: true,
+            next: None,
+            icon: None,
         },
     ] {
         let (items, height) = place_node(&node, width, b(), Class::Ordinary, &text);

@@ -61,12 +61,10 @@ fn full_facts() -> Facts {
 #[test]
 fn the_road_of_an_idea_is_shorter_than_the_road_of_a_trouble() {
     assert_eq!(Trouble::WrongResult.steps(), 5);
-    assert_eq!(Trouble::NothingHappened.steps(), 5);
     assert_eq!(Trouble::Idea.steps(), 3);
 
     assert!(Trouble::Idea.is_idea());
     assert!(!Trouble::WrongResult.is_idea());
-    assert!(!Trouble::NothingHappened.is_idea());
 }
 
 // =========================================================================================
@@ -687,4 +685,172 @@ fn the_text_of_the_appeal_reads_in_the_direction_of_its_own_language() {
         marked.starts_with("kind: Code { rtl: true }"),
         "a report about the translation in Hebrew goes right to left: {marked}"
     );
+}
+
+/// The window of the page `name` of the wizard in Russian.
+fn window_of(name: &str) -> lang_switcher::ui::scene::Window<wizard::Id> {
+    use lang_switcher::ui::host::Content;
+
+    let (_, wizard) = letters::wizard_pages()
+        .into_iter()
+        .find(|(page, _)| *page == name)
+        .unwrap_or_else(|| panic!("{name} is a page of the wizard"));
+    wizard::Page {
+        wizard,
+        language: settings::Language::Ru,
+        theme: lang_switcher::theme::ThemeSetting::Light,
+    }
+    .describe()
+}
+
+/// **AUDIT-180 Z8, решения 208.131, 208.132 — the first step.** Two cards — «Программа сделала не
+/// то», whose line says «…или ничего не произошло», and «Хочу предложить улучшение» — each with its
+/// icon and the line of where it leads.
+#[test]
+fn the_first_step_offers_two_cards_with_their_icons_and_where_they_lead() {
+    with_product_texts();
+    let body = format!("{:?}", window_of("wizard what").body);
+    let next = |id| {
+        format!(
+            "next: Some({:?})",
+            settings::text_in(settings::Language::Ru, id)
+        )
+    };
+    assert_eq!(body.matches("ChoiceCard").count(), 2, "two cards: {body}");
+    for (icon, id) in [
+        ("alert", settings::IDS_WIZARD_CARD_WRONG_NEXT),
+        ("bulb", settings::IDS_WIZARD_CARD_IDEA_NEXT),
+    ] {
+        assert!(
+            body.contains(&format!("icon: Some({icon:?})")) && body.contains(&next(id)),
+            "the card of {icon} with where it leads: {body}"
+        );
+    }
+    assert!(
+        settings::text_in(settings::Language::Ru, settings::IDS_WIZARD_CARD_WRONG_SUB)
+            .ends_with("или ничего не произошло"),
+        "the line of the first card names what the second card used to"
+    );
+}
+
+/// **AUDIT-180 Z8, решения 208.133, 208.136 п. 8 — the steps as decided.** «Где»: the kinds of field
+/// are cards, no radio buttons; «Что делали»: «Ожидали» and «Получили» are fields of many lines;
+/// «Что приложить»: the list stands in one group of rows.
+#[test]
+fn the_steps_of_the_wizard_are_cards_fields_of_many_lines_and_a_group() {
+    with_product_texts();
+    let place = format!("{:?}", window_of("wizard where").body);
+    assert!(
+        place.matches("ChoiceCard").count() == 3 && !place.contains("Radio"),
+        "«Где»: three cards and no radio button: {place}"
+    );
+    let did = format!("{:?}", window_of("wizard did").body);
+    for id in ["Expected", "Got"] {
+        let at = did
+            .find(&format!("id: {id},"))
+            .unwrap_or_else(|| panic!("«Что делали»: the field {id}"));
+        let kind = did[at..].find("kind: ").map(|from| &did[at + from..]);
+        assert!(
+            kind.is_some_and(|kind| kind.starts_with("kind: Text")),
+            "«Что делали»: {id} is a field of many lines"
+        );
+    }
+    let attach = format!("{:?}", window_of("wizard attach").body);
+    assert!(
+        attach.contains("Group([Check"),
+        "«Что приложить»: the list in a group of rows: {attach}"
+    );
+}
+
+/// **AUDIT-180 Z8, решение 208.133 — the bar of the steps at one height, a block down to the
+/// buttons.** On every step of both roads, laid out in Russian in the window of 900 × 540 and in the
+/// large one, the progress stands at one height, and the content reaches as close to the row of
+/// buttons on every step: one block of each step takes what the step leaves.
+#[test]
+fn the_bar_of_the_steps_stands_at_one_height_and_a_block_reaches_the_buttons() {
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::layout::{Part, client_size};
+    use lang_switcher::ui::text::{Direction, Text};
+
+    with_product_texts();
+    let language = settings::Language::Ru;
+    let text = Text::new(language.tag(), Direction::LeftToRight).expect("DirectWrite");
+    for size in [client_size(900.0, 540.0), client_size(1280.0, 720.0)] {
+        let mut bars = Vec::new();
+        let mut gaps = Vec::new();
+        for (name, _) in letters::wizard_pages() {
+            if matches!(name, "wizard sent" | "wizard failed") {
+                continue;
+            }
+            let window = window_of(name);
+            let layout = fit::emergency(
+                &window,
+                size,
+                fit::k_for(language.tag(), size.class),
+                false,
+                &text,
+            );
+            let bar = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::Progress { .. }))
+                .map(|item| item.rect.y)
+                .unwrap_or_else(|| panic!("{name}: the bar of the steps"));
+            let rule = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::ButtonRule))
+                .map(|item| item.rect.y)
+                .unwrap_or_else(|| panic!("{name}: the rule over the buttons"));
+            let lowest = layout
+                .items
+                .iter()
+                .filter(|item| {
+                    item.rect.y < rule && !matches!(item.part, Part::Panel | Part::Art(_))
+                })
+                .map(|item| item.rect.y + item.rect.h)
+                .fold(0.0_f32, f32::max);
+            bars.push((name, bar));
+            gaps.push((name, rule - lowest));
+        }
+        let first = bars[0].1;
+        assert!(
+            bars.iter().all(|(_, y)| (y - first).abs() < 0.5),
+            "{size:?}: the bar at one height on every step: {bars:?}"
+        );
+        let gap = gaps[0].1;
+        assert!(
+            gaps.iter().all(|(_, g)| (g - gap).abs() < 1.0),
+            "{size:?}: one distance to the buttons on every step: {gaps:?}"
+        );
+    }
+}
+
+/// The strings of the product binary, opened as data — the tests of the window and of its layout
+/// read the words the program shows (`with_product_strings` of this file only sets the language).
+fn with_product_texts() {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::sync::OnceLock;
+    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::System::LibraryLoader::{LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW};
+    use windows::core::PCWSTR;
+
+    static PRODUCT: OnceLock<usize> = OnceLock::new();
+    let raw = *PRODUCT.get_or_init(|| {
+        let exe = std::env::current_exe()
+            .expect("the test executable has a path")
+            .parent()
+            .and_then(Path::parent)
+            .expect("the test executable lives in <target>\\debug\\deps")
+            .join("LangSwitcher.exe");
+        let path: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: a path ending in a zero; the module is kept open for the process.
+        let module =
+            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+                .expect("the product binary opens as a data file");
+        module.0 as usize
+    });
+    settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
+    with_product_strings();
 }

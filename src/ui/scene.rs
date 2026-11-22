@@ -187,8 +187,14 @@ pub enum Node<I> {
     ChoiceCard {
         id: I,
         title: String,
-        words: String,
+        /// The line under the title; none for a card of a title alone (an empty string would be a
+        /// string the language lacks to the instrument of fitting).
+        words: Option<String>,
         selected: bool,
+        /// A third line in `small`: where the choice leads («Дальше: …», 208.132, AUDIT-180 М2).
+        next: Option<String>,
+        /// An icon of `resarticons` on a plate at the end of the card (208.132).
+        icon: Option<&'static str>,
     },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
     /// beside the label, and becomes a choice field when it does not fit even there.
@@ -404,11 +410,15 @@ impl<I> Node<I> {
                 title,
                 words,
                 selected,
+                next,
+                icon,
             } => Node::ChoiceCard {
                 id: f(id),
                 title,
                 words,
                 selected,
+                next,
+                icon,
             },
             Node::Segments {
                 id,
@@ -574,9 +584,16 @@ impl<I> Node<I> {
             }
             Node::Radio { label, .. } => f(Role::Body, label),
             Node::Progress { .. } => {}
-            Node::ChoiceCard { title, words, .. } => {
+            Node::ChoiceCard {
+                title, words, next, ..
+            } => {
                 f(Role::Strong, title);
-                f(Role::Small, words);
+                if let Some(words) = words {
+                    f(Role::Small, words);
+                }
+                if let Some(next) = next {
+                    f(Role::Small, next);
+                }
             }
             Node::Segments { label, options, .. } => {
                 f(Role::Body, label);

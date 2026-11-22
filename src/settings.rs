@@ -1699,6 +1699,11 @@ pub const IDS_TRAY_FLAG_HINT: u16 = 3314;
 /// The hint under «Вести журнал» in «Диагностика» — AUDIT-180 Н10 (решение 208.209), the line of the
 /// mock-up: what the journal holds.
 pub const IDS_LOG_HINT: u16 = 3315;
+/// The third line of the first card of the wizard — where it leads (AUDIT-180 М2, решение 208.132):
+/// «Дальше: где, что делали, что приложить, проверка».
+pub const IDS_WIZARD_CARD_WRONG_NEXT: u16 = 3316;
+/// The same of the card of the idea: «Дальше: идея и проверка».
+pub const IDS_WIZARD_CARD_IDEA_NEXT: u16 = 3317;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2131,11 +2136,10 @@ pub const IDS_WIZARD_WHAT_NOTE: u16 = 3160;
 pub const IDS_WIZARD_CARD_WRONG: u16 = 3161;
 /// Its second line.
 pub const IDS_WIZARD_CARD_WRONG_SUB: u16 = 3162;
-/// The second card: «Ничего не произошло».
-pub const IDS_WIZARD_CARD_NOTHING: u16 = 3163;
-/// Its second line.
-pub const IDS_WIZARD_CARD_NOTHING_SUB: u16 = 3164;
-/// The third card: «Хочу предложить улучшение» — the short road.
+// ⚠ **3163 and 3164 are retired, not free** — AUDIT-180 Z8, решение 208.131: the card «Ничего не
+// произошло» and its line went into the first one («…или ничего не произошло»). The numbers stay
+// holes, as 3004 does: a key of an old translation must not come back meaning something else.
+/// The second card: «Хочу предложить улучшение» — the short road.
 pub const IDS_WIZARD_CARD_IDEA: u16 = 3165;
 /// Its second line.
 pub const IDS_WIZARD_CARD_IDEA_SUB: u16 = 3166;
@@ -2345,6 +2349,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and seventy-seven since AUDIT-180 Z6** — the hints of the flag and of the
 /// journal, [`IDS_TRAY_FLAG_HINT`] (3314) and [`IDS_LOG_HINT`] (3315). 275 + 2.
+///
+/// ⚠ **Two hundred and seventy-seven again since AUDIT-180 Z8** — the card «Ничего не произошло» and
+/// its line (3163, 3164) went into the first card (208.131), and the two cards took the line of
+/// where they lead, [`IDS_WIZARD_CARD_WRONG_NEXT`] (3316) and [`IDS_WIZARD_CARD_IDEA_NEXT`] (3317)
+/// (208.132). 277 − 2 + 2.
 pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
@@ -2519,8 +2528,6 @@ pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_WIZARD_WHAT_NOTE,
     IDS_WIZARD_CARD_WRONG,
     IDS_WIZARD_CARD_WRONG_SUB,
-    IDS_WIZARD_CARD_NOTHING,
-    IDS_WIZARD_CARD_NOTHING_SUB,
     IDS_WIZARD_CARD_IDEA,
     IDS_WIZARD_CARD_IDEA_SUB,
     IDS_WIZARD_WHERE_TITLE,
@@ -2611,6 +2618,8 @@ pub const INTERFACE_STRINGS: [u16; 277] = [
     IDS_WIZARD_RECEIVED,
     IDS_TRAY_FLAG_HINT,
     IDS_LOG_HINT,
+    IDS_WIZARD_CARD_WRONG_NEXT,
+    IDS_WIZARD_CARD_IDEA_NEXT,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

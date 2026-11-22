@@ -705,8 +705,10 @@ impl Content for Choices {
         body.extend((0..3).map(|n| Node::ChoiceCard {
             id: Pick::Card(n),
             title: format!("Card {n}"),
-            words: "The words of the card".to_owned(),
+            words: Some("The words of the card".to_owned()),
             selected: self.card.get() == n,
+            next: None,
+            icon: None,
         }));
         body.extend((0..2).map(|n| Node::Radio {
             id: Pick::Radio(n),

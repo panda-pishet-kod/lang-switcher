@@ -49,6 +49,18 @@ pub const EXCUSED: &[Excuse] = &[
         decision: Some("208.209, А1 — ждёт ответа"),
         why: "карточки в рамках (Z3) с полным текстом владельца не помещаются при 12 т.",
     },
+    // AUDIT-180 Z8 (208.133): the head of a step of the wizard is as tall as the tallest head of
+    // both roads — the one of «Что делали», whose note is long in ta and ml — and «Что приложить»
+    // under it does not fit at 12 points there. The translator shortens IDS_WIZARD_DID_NOTE.
+    Excuse {
+        window: "wizard attach",
+        class: Class::Ordinary,
+        languages: &["ml", "ta"],
+        category: Some(Category::Wave),
+        until: "волна переводов 1.8.0 (l10n\\180-wave-strings.md)",
+        decision: None,
+        why: "шапка мастера по самой высокой — IDS_WIZARD_DID_NOTE длинна в ta и ml (Z8)",
+    },
     // AUDIT-180 Z3: «Поддержать автора ↗» of the card of «Спасибо» is wider than the card in its
     // frame in ta and uz-Cyrl, in both classes — the translator shortens it.
     Excuse {

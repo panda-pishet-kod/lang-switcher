@@ -2054,7 +2054,13 @@ impl Wizard {
     /// in «Общие» (T-120-22, C3 of the controller): «Опишите идею» does not go with «Что написано
     /// сейчас?» and «Как правильно?». The explanation under it stays.
     pub fn words(&self) -> StepWords {
-        let step = self.current();
+        self.words_of(self.current())
+    }
+
+    /// The words of `step` as the head of the window says them on it — [`Wizard::words`] asked of
+    /// any step of the road: the head of the wizard is as tall as the tallest head of its road, so
+    /// that the progress stands at one height on every step (AUDIT-180 М3, решение 208.133).
+    pub fn words_of(&self, step: Step) -> StepWords {
         let mut words = step_words(step, self.post);
         if step == Step::Idea && self.draft.reports_translation().is_some() {
             words.title = settings::IDS_TRANSLATION_REPORT;
@@ -4761,14 +4767,14 @@ pub fn language_changed(owner: HWND) {
 pub mod report {
     use crate::settings::{self, Language};
 
-    /// The three cards of the first step — which of them is chosen decides the shape of the
-    /// whole wizard: five steps for the two troubles, three for the idea.
+    /// The two cards of the first step — which of them is chosen decides the shape of the whole
+    /// wizard: five steps for the trouble, three for the idea. «Ничего не произошло» was a card of
+    /// its own till AUDIT-180 Z8 (решение 208.131): it is a trouble of the first card now, which
+    /// says so («…или ничего не произошло»).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Trouble {
         /// «Программа сделала не то».
         WrongResult,
-        /// «Ничего не произошло».
-        NothingHappened,
         /// «Хочу предложить улучшение» — the short road.
         Idea,
     }
@@ -4952,12 +4958,12 @@ pub mod report {
     pub fn build(draft: &Draft, facts: &Facts) -> String {
         use settings::{
             IDS_WIZARD_ATTACH_JOURNAL, IDS_WIZARD_ATTACH_LAYOUTS, IDS_WIZARD_ATTACH_MACHINE,
-            IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_NOTHING,
-            IDS_WIZARD_CARD_WRONG, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL,
-            IDS_WIZARD_FIELD_PASSWORD, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
-            IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS,
-            IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_TRANSLATION_LINE,
-            IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHERE_FIELD, text,
+            IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_WRONG,
+            IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
+            IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT, IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT,
+            IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES,
+            IDS_WIZARD_TRANSLATION_LINE, IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHAT_TITLE,
+            IDS_WIZARD_WHERE_FIELD, text,
         };
 
         let mut out = String::with_capacity(1024);
@@ -4987,7 +4993,6 @@ pub mod report {
             &text(IDS_WIZARD_WHAT_TITLE),
             &text(match draft.trouble {
                 Trouble::WrongResult => IDS_WIZARD_CARD_WRONG,
-                Trouble::NothingHappened => IDS_WIZARD_CARD_NOTHING,
                 Trouble::Idea => IDS_WIZARD_CARD_IDEA,
             }),
         );
