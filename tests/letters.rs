@@ -4334,10 +4334,13 @@ fn the_knock_of_a_letter_is_the_window_in_the_corner() {
             settings::text(settings::IDS_LETTERS_OPEN),
             "{letter:?}: «Открыть письмо»"
         );
-        // Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209): «Спасибо» has «Через неделю» as well;
-        // «Новость» keeps one button and the ✕.
-        let second =
-            (letter == Letter::Thanks).then(|| settings::text(settings::IDS_THANKS_SNOOZE));
+        // Решение 208.112 п. 1: the knock names its second button as its letter does — «Через
+        // неделю» for «Спасибо», «Позже» for «Новость» (the same strings).
+        let second = Some(settings::text(if letter == Letter::Thanks {
+            settings::IDS_THANKS_SNOOZE
+        } else {
+            settings::IDS_NEWS_LATER
+        }));
         assert_eq!(
             content.second.as_ref().map(|(label, _)| label.clone()),
             second,
@@ -5060,15 +5063,63 @@ fn the_end_of_a_knock_opens_puts_off_or_leaves_to_the_schedule() {
         "after the one snooze the ✕ leaves the letter to the schedule"
     );
 
+    // Решение 208.112 п. 1: «Новость» — «Открыть письмо» / «Позже», the ✕ the same as «Позже».
     let news = Some(Letter::News(7));
-    assert_eq!(notice_end(news, EndBy::Main, false), NoticeEnd::Open);
-    assert_eq!(notice_end(news, EndBy::Close, false), NoticeEnd::Schedule);
+    assert_eq!(notice_end(news, EndBy::Main, true), NoticeEnd::Open);
+    assert_eq!(notice_end(news, EndBy::Second, true), NoticeEnd::Later);
     assert_eq!(
         notice_end(news, EndBy::Close, true),
+        NoticeEnd::Later,
+        "the ✕ of the knock of «Новость» is «Позже»"
+    );
+    assert_eq!(
+        notice_end(news, EndBy::Close, false),
         NoticeEnd::Schedule,
-        "a week is the snooze of «Спасибо» alone"
+        "a knock without its second button leaves the letter to the schedule"
     );
     assert_eq!(notice_end(None, EndBy::Close, true), NoticeEnd::Schedule);
+}
+
+/// ⭐ **Решение 208.112 п. 1: «Позже» of the knock of «Новость» does what the letter's own «Позже»
+/// does** — the letter counts as shown (the one body that records a showing, `after_shown`), so it
+/// does not come by itself at the next quiet moment; its reminders come on the seventh and the
+/// fourteenth day, and the item stays unread.
+#[test]
+fn later_from_the_knock_of_news_leaves_it_to_its_reminders() {
+    let item = news(12);
+    let items = [item];
+    let feed = FeedView {
+        update: None,
+        news: &items,
+    };
+    let arrived = day(2026, 11, 23);
+    let mut state = settled("0.39.0");
+    state.last_letter = Some(arrived.plus_days(-2));
+    state.thanks = Thanks::Done; // «Спасибо» is behind: only the news is in question
+
+    assert_eq!(
+        letters::due(&state, arrived, "0.39.0", feed, true),
+        Some(Letter::News(12)),
+        "the news knocks on the day it came"
+    );
+
+    // «Позже» (or the ✕) of the knock.
+    letters::after_shown(&mut state, Letter::News(12), arrived, "0.39.0");
+
+    assert_eq!(state.first_shown_on(12), Some(arrived));
+    assert!(!state.is_read(12), "«Позже» does not mark it read");
+    for later in [0, 1, 6] {
+        assert_eq!(
+            letters::due(&state, arrived.plus_days(later), "0.39.0", feed, true),
+            None,
+            "day {later}: no letter by itself"
+        );
+    }
+    assert_eq!(
+        letters::due(&state, arrived.plus_days(7), "0.39.0", feed, true),
+        Some(Letter::News(12)),
+        "the first reminder on the seventh day"
+    );
 }
 
 /// ⭐ **Z13: «Через неделю» of the knock puts «Спасибо» off by seven days and spends its one

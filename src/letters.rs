@@ -4640,18 +4640,19 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
 
 /// What the window in the corner says about a letter that has come, in `language` — the knock of
 /// FR-101 on the shell (T-120-14, T-120-16): «LANG SWITCHER · ПИСЬМО», the heading of the letter,
-/// the words of [`toast_strings`], «Открыть письмо», and for «Спасибо» a second button, «Через
-/// неделю». `None` for the letters that do not knock.
+/// the words of [`toast_strings`], «Открыть письмо», and the second button of its letter: «Через
+/// неделю» for «Спасибо», «Позже» for «Новость». `None` for the letters that do not knock.
 ///
-/// ⭐ **Z13 of AUDIT-180 (решения 208.112 п. 1, 208.209):** «Через неделю» puts «Спасибо» off by
-/// [`SNOOZE_DAYS`] — the one snooze of FR-101, the same as the letter's own button
-/// ([`snooze_thanks`]) — and the ✕ does what the second button does ([`notice_end`]). A knock after
-/// the snooze is spent has no second button ([`announce`]); «Новость» knocks with one button and
-/// its ✕ leaves the letter to the schedule, as before.
+/// ⭐ **Решение 208.112 п. 1 (слово владельца), Z13 of AUDIT-180:** the knock and its letter name
+/// their buttons alike — the same strings — and the ✕ does what the second button does
+/// ([`notice_end`]). «Через неделю» puts «Спасибо» off by [`SNOOZE_DAYS`], the one snooze of FR-101
+/// ([`snooze_thanks`]); a knock after it is spent has no second button ([`announce`]). «Позже» does
+/// to «Новость» what the letter's own «Позже» does: the letter counts as shown, and its reminders
+/// come in a week and in two ([`after_shown`]).
 pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
     use crate::settings::{
-        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LETTER_TITLE, IDS_THANKS_SNOOZE,
-        IDS_THANKS_TITLE,
+        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
+        IDS_THANKS_SNOOZE, IDS_THANKS_TITLE,
     };
 
     // The words of the old balloon; its title is not shown — the header of the window in the corner
@@ -4669,8 +4670,11 @@ pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::co
         text: text(words),
         link: None,
         main: (text(IDS_LETTERS_OPEN), crate::corner::Action::Close),
-        second: (letter == Letter::Thanks)
-            .then(|| (text(IDS_THANKS_SNOOZE), crate::corner::Action::Close)),
+        second: match letter {
+            Letter::Thanks => Some((text(IDS_THANKS_SNOOZE), crate::corner::Action::Close)),
+            Letter::News(_) => Some((text(IDS_NEWS_LATER), crate::corner::Action::Close)),
+            Letter::Welcome | Letter::Update => None,
+        },
         picture: false,
         check: None,
     })
@@ -4683,22 +4687,26 @@ pub enum NoticeEnd {
     Open,
     /// «Через неделю», or the ✕ of a knock that offered it: «Спасибо» is put off by a week.
     Week,
-    /// The ✕ of a knock without «Через неделю»: the letter is left to the schedule — it opens by
-    /// itself at the next quiet moment (FR-101).
+    /// «Позже», or the ✕ of the knock of «Новость»: the letter counts as shown — its reminders come
+    /// in a week and in two, as after the letter's own «Позже».
+    Later,
+    /// The ✕ of a knock without its second button: the letter is left to the schedule — it opens
+    /// by itself at the next quiet moment (FR-101).
     Schedule,
 }
 
-/// What the end of the knock of `letter` means, ended `by` — Z13 of AUDIT-180 (решения 208.112 п. 1,
-/// 208.209): the main button opens the letter; the second button and the ✕ of a knock that
-/// offered «Через неделю» (`week`) put «Спасибо» off by a week; the ✕ of any other knock leaves the
-/// letter to the schedule. Pure.
-pub fn notice_end(letter: Option<Letter>, by: crate::corner::EndBy, week: bool) -> NoticeEnd {
+/// What the end of the knock of `letter` means, ended `by` — решение 208.112 п. 1, Z13 of AUDIT-180:
+/// the main button opens the letter; the second button and the ✕ of a knock that offered its second
+/// button (`second`) put «Спасибо» off by a week, or «Новость» off by its reminders; the ✕ of a knock
+/// without it leaves the letter to the schedule. Pure.
+pub fn notice_end(letter: Option<Letter>, by: crate::corner::EndBy, second: bool) -> NoticeEnd {
     use crate::corner::EndBy;
 
-    match by {
-        EndBy::Main => NoticeEnd::Open,
-        EndBy::Second | EndBy::Close if week && letter == Some(Letter::Thanks) => NoticeEnd::Week,
-        EndBy::Second | EndBy::Close => NoticeEnd::Schedule,
+    match (by, letter) {
+        (EndBy::Main, _) => NoticeEnd::Open,
+        (EndBy::Second | EndBy::Close, Some(Letter::Thanks)) if second => NoticeEnd::Week,
+        (EndBy::Second | EndBy::Close, Some(Letter::News(_))) if second => NoticeEnd::Later,
+        (EndBy::Second | EndBy::Close, _) => NoticeEnd::Schedule,
     }
 }
 
@@ -4707,8 +4715,8 @@ thread_local! {
     /// письмо» opens; the window in the corner tells its end through a plain `fn`.
     static NOTICE_OWNER: std::cell::Cell<Option<HWND>> = const { std::cell::Cell::new(None) };
 
-    /// Whether the last knock offered «Через неделю» (Z13).
-    static NOTICE_WEEK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether the last knock offered its second button — «Через неделю» or «Позже» (Z13, 208.112).
+    static NOTICE_SECOND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 
     /// The letter the knock in the corner stands for while it is up (Z17): none once it ended or
     /// was taken away.
@@ -4764,12 +4772,12 @@ fn announce(owner: HWND, letter: Letter) {
 
     // Z13: «Через неделю» is the one snooze of «Спасибо» (FR-101); a knock after it is spent —
     // by this button or by the letter's own — comes without it.
-    if !snooze_is_offered(&state_now()) {
+    if letter == Letter::Thanks && !snooze_is_offered(&state_now()) {
         content.second = None;
     }
 
     NOTICE_OWNER.with(|slot| slot.set(Some(owner)));
-    NOTICE_WEEK.with(|slot| slot.set(content.second.is_some()));
+    NOTICE_SECOND.with(|slot| slot.set(content.second.is_some()));
     if crate::corner::show(content, true, notice_ended) {
         NOTICE_FOR.with(|slot| slot.set(Some(letter)));
     }
@@ -4777,13 +4785,15 @@ fn announce(owner: HWND, letter: Letter) {
 
 /// The knock ended — [`notice_end`]: «Открыть письмо» opens the letter, the person asked for it;
 /// «Через неделю» and the ✕ of the knock of «Спасибо» put it off by a week, by the body of the
-/// letter's own button; any other ✕ or `Esc` leaves the letter to the schedule.
+/// letter's own button; «Позже» and the ✕ of the knock of «Новость» count it as shown, so its
+/// reminders come in a week and in two; the ✕ of a knock without a second button leaves the letter
+/// to the schedule.
 fn notice_ended(end: crate::corner::End) {
     NOTICE_FOR.with(|slot| slot.set(None));
     let letter = ANNOUNCED.with_borrow(|announced| *announced);
-    let week = NOTICE_WEEK.with(std::cell::Cell::get);
+    let second = NOTICE_SECOND.with(std::cell::Cell::get);
 
-    match notice_end(letter, end.by, week) {
+    match notice_end(letter, end.by, second) {
         NoticeEnd::Open => {
             if let Some(owner) = NOTICE_OWNER.with(std::cell::Cell::get) {
                 open_announced(owner);
@@ -4794,6 +4804,14 @@ fn notice_ended(end: crate::corner::End) {
                 update_state(|state| snooze_thanks(state, today));
             }
             // The knock is answered: the next tick does not show the letter by itself.
+            ANNOUNCED.with_borrow_mut(|announced| *announced = None);
+        }
+        NoticeEnd::Later => {
+            // «Позже» of «Новость» — what the letter's own «Позже» does: the letter counts as
+            // shown, by the one body that records a showing, and its reminders take it from here.
+            if let (Some(today), Some(news)) = (today(), letter) {
+                update_state(|state| after_shown(state, news, today, &version_string()));
+            }
             ANNOUNCED.with_borrow_mut(|announced| *announced = None);
         }
         NoticeEnd::Schedule => {}
