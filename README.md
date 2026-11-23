@@ -35,7 +35,7 @@ languages.
     <td align="center" valign="top"><img src="docs/img/en-tray-menu.png" width="546" alt="The tray menu: Lang Switcher, Working at the top; then Suspend with its key Pause, Settings…, the switch Start when I sign in, Write to the author…, About, Exit"><br>The tray menu</td>
   </tr>
   <tr>
-    <td align="center" valign="top"><img src="docs/img/en-settings.png" width="800" alt="The settings window: the sections General, Hotkey, Layouts, Exclusions and Diagnostics on the left; General is open with the switches Start when I sign in, Sound feedback, Fix the selected text, Layout flag in the tray and Tell me about updates of the program, the interface language, Found a mistake in the translation?, the appearance; Close at the bottom"><br>Settings</td>
+    <td align="center" valign="top"><img src="docs/img/en-settings.png" width="800" alt="The settings window: the sections General, Hotkey, Layouts, Exclusions and Diagnostics on the left; General is open with the switches Start when I sign in, Sound feedback, Fix the selected text, Layout flag in the tray and Tell me about program updates, the interface language, Found a mistake in the translation?, the appearance; Close at the bottom"><br>Settings</td>
   </tr>
 </table>
 

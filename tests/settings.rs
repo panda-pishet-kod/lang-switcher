@@ -7662,7 +7662,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 282] = [
     (
         settings::IDS_TRAY_FLAG_HINT,
         "Значок программы показывает флаг текущей раскладки",
-        "The icon of the program shows the flag of the current layout",
+        "The program icon shows the flag of the current layout",
     ),
     (
         settings::IDS_LOG_HINT,
@@ -7781,7 +7781,7 @@ const FR_94_STRINGS: [(u16, &str, &str); 282] = [
     (
         settings::IDS_UPDATES_SWITCH,
         "Сообщать об обновлениях программы",
-        "Tell me about updates of the program",
+        "Tell me about program updates",
     ),
     // Task T-119-10: under the switch of «От автора» while the feed is off in the file.
     (
