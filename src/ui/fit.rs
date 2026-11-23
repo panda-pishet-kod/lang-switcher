@@ -118,16 +118,16 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "en",
         K {
-            narrow: 0.856,
-            ordinary: 0.856,
-            large: 0.997,
+            narrow: 0.857,
+            ordinary: 0.857,
+            large: 0.999,
         },
     ),
     (
         "uk",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -150,17 +150,17 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "es",
         K {
-            narrow: 0.863,
-            ordinary: 0.863,
+            narrow: 0.866,
+            ordinary: 0.866,
             large: 0.987,
         },
     ),
     (
         "pt",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -174,24 +174,24 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "pl",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "cs",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "tr",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -206,49 +206,49 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "he",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "ar",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "hi",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "bn",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "ur",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "pa",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -262,8 +262,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "te",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -278,25 +278,25 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "fa",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 0.997,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "gu",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "th",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -310,32 +310,32 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "or",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "ml",
         K {
-            narrow: 0.843,
-            ordinary: 0.843,
+            narrow: 0.84,
+            ordinary: 0.84,
             large: 0.96,
         },
     ),
     (
         "uz",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.995,
         },
     ),
     (
         "uz-Cyrl",
         K {
-            narrow: 0.873,
-            ordinary: 0.873,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.995,
         },
     ),
@@ -344,14 +344,14 @@ pub const TABLE: &[(&str, K)] = &[
         K {
             narrow: 0.868,
             ordinary: 0.868,
-            large: 1.0,
+            large: 0.999,
         },
     ),
     (
         "as",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -366,40 +366,40 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "km",
         K {
-            narrow: 0.87,
-            ordinary: 0.87,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "kk",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "sr",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "sr-Latn",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "ug",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -414,33 +414,33 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "hy",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "lo",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "be",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "tt",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -462,8 +462,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "vi",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
@@ -488,47 +488,47 @@ pub const TABLE: &[(&str, K)] = &[
         K {
             narrow: 0.872,
             ordinary: 0.872,
-            large: 1.0,
+            large: 0.999,
         },
     ),
     (
         "sv",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "sq",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "da",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "fi",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "hr",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -542,9 +542,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "nb",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -558,9 +558,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "sl",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -574,41 +574,41 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "lv",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "et",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 1.0,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "cy",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),
     (
         "mt",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 0.997,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
         "is",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
-            large: 0.997,
+            narrow: 0.872,
+            ordinary: 0.872,
+            large: 0.999,
         },
     ),
     (
@@ -630,8 +630,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "nn",
         K {
-            narrow: 0.877,
-            ordinary: 0.877,
+            narrow: 0.872,
+            ordinary: 0.872,
             large: 0.997,
         },
     ),

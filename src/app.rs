@@ -6075,6 +6075,10 @@ mod tests {
     /// reading, so that nothing left over from an earlier moment can pass for an answer.
     #[test]
     fn the_reading_of_the_grave_key_reaches_the_recorder_at_start_up_and_on_the_probe() {
+        // A fresh buffer holds no cache, so the first probe rebuilds it: without the gate that
+        // rebuild landed inside the measurement of the probe of FR-21 beside it — 2 for 1.
+        let _gate = cache_builds_gate();
+
         for reading in [true, false] {
             GRAVE_READING.set(Some(reading));
 
@@ -6102,6 +6106,65 @@ mod tests {
                 "проба при запаркованном буфере, чтение {reading}"
             );
         }
+    }
+
+    /// **Every test of this module that can rebuild the cache of FR-20 takes the gate** — the rule
+    /// of [`cache_builds_gate`]. The test of the grave key rebuilt it without the gate, and the
+    /// probe of FR-21 beside it read 2 builds for its 1 (release 1.8.0); a test is independent of
+    /// its neighbours only while all of them keep the rule. The positive control is the count: the
+    /// three tests that rebuild today must be found.
+    #[test]
+    fn every_test_that_rebuilds_the_cache_takes_the_gate() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join("app.rs"),
+        )
+        .expect("src/app.rs must be readable")
+        .replace("\r\n", "\n");
+        let tests = source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .expect("this file ends in its own test module")
+            .1;
+
+        let rebuilders = [
+            "rebuild_layout_cache",
+            "refresh_layout_and_cache",
+            "answer_device_change",
+            "start_input_pipeline",
+        ];
+        let (mut rebuilding, mut ungated) = (Vec::new(), Vec::new());
+        for chunk in tests.split("#[test]").skip(1) {
+            let code: String = chunk
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let name = code
+                .split_once("fn ")
+                .and_then(|(_, rest)| rest.split_once('('))
+                .map_or("?", |(name, _)| name)
+                .to_owned();
+            if rebuilders
+                .iter()
+                .any(|rebuilder| code.contains(&format!("{rebuilder}(")))
+            {
+                if !code.contains("cache_builds_gate()") {
+                    ungated.push(name.clone());
+                }
+                rebuilding.push(name);
+            }
+        }
+
+        println!("rebuilding: {rebuilding:?}");
+        assert!(
+            rebuilding.len() >= 3,
+            "the tests that rebuild the cache are found: {rebuilding:?}"
+        );
+        assert!(
+            ungated.is_empty(),
+            "a test rebuilds the cache of FR-20 without cache_builds_gate(): {ungated:?}"
+        );
     }
 
     /// **FR-11.** Neither a new active layout nor a rebuilt cache flushes the buffer — the two
