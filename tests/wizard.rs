@@ -12,16 +12,30 @@ use lang_switcher::letters::{self, Step};
 use lang_switcher::settings;
 use lang_switcher::ui::windows::wizard;
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
 /// The interface strings of the product, so that the labels of an appeal are the real ones.
 ///
 /// The same helper the letters tests use: without it `settings::text` answers with the strings
 /// of whatever module ran first, and an appeal would be checked against blanks.
 /// The strings of the product, opened as data, and Russian as the language of the program: every
 /// test of this file reads the same words (one of them opening the strings while another builds an
-/// appeal without them raced, AUDIT-180 Z8).
-fn with_product_strings() {
-    with_product_texts();
+/// appeal without them raced, AUDIT-180 Z8). The lock of the language comes with them — see
+/// [`LANGUAGE`].
+#[must_use = "the lock of the language is held for the whole test"]
+fn with_product_strings() -> MutexGuard<'static, ()> {
+    with_product_texts()
 }
+
+/// **The language of the interface is one per process** (`settings::set_ui_language`) and the
+/// tests of this file run side by side: every test that sets it or reads a word through it holds
+/// this lock to its end, taken by [`with_product_texts`]. Without it
+/// `the_saved_file_is_named_by_the_day`, which switches to English for a moment, let
+/// `every_value_of_both_radio_rows_is_written_out` read its words in English beside an appeal in
+/// Russian, or the other way round: measured on release 1.8.0 — the file red 10 times in 200 runs
+/// of the image with `testing`, and 0 in 200 with that one test skipped (208.236 п. 6). The rule of
+/// `cache_builds_gate` of `src\app.rs` (`cd01061`), for the language.
+static LANGUAGE: Mutex<()> = Mutex::new(());
 
 /// A draft with something in every field — the one an appeal is fullest from.
 fn full_draft() -> Draft {
@@ -194,7 +208,7 @@ fn the_thanks_is_one_for_both_kinds_of_appeal() {
 /// empty lines behind them.
 #[test]
 fn an_appeal_carries_the_answers_and_leaves_out_the_blanks() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let appeal = build(&full_draft(), &full_facts());
 
@@ -230,7 +244,7 @@ fn an_appeal_carries_the_answers_and_leaves_out_the_blanks() {
 /// **The idea road writes the idea and not the trouble** — the other half of the same rule.
 #[test]
 fn an_idea_carries_two_answers_and_no_layout() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let draft = Draft {
         trouble: Trouble::Idea,
@@ -263,7 +277,7 @@ fn an_idea_carries_two_answers_and_no_layout() {
 /// ⚠ Control: the same draft and facts as a trouble carry the journal — the facts are not empty.
 #[test]
 fn an_idea_carries_what_was_written_and_the_version_and_nothing_of_the_machine() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let idea = Draft {
         trouble: Trouble::Idea,
@@ -311,7 +325,7 @@ fn an_idea_carries_what_was_written_and_the_version_and_nothing_of_the_machine()
 
 #[test]
 fn each_box_of_the_attachment_step_answers_for_its_own_line() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let facts = full_facts();
 
@@ -393,7 +407,7 @@ fn each_box_of_the_attachment_step_answers_for_its_own_line() {
 /// person's words with no «unknown» in it.
 #[test]
 fn an_appeal_survives_a_machine_that_says_nothing_about_itself() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let appeal = build(&full_draft(), &Facts::default());
 
@@ -413,7 +427,7 @@ fn an_appeal_survives_a_machine_that_says_nothing_about_itself() {
 /// in the first screenshot it took of the last step: the whole appeal stood in one run.
 #[test]
 fn the_appeal_breaks_its_lines_the_way_windows_reads_them() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let appeal = build(&full_draft(), &full_facts());
 
@@ -435,7 +449,7 @@ fn the_appeal_breaks_its_lines_the_way_windows_reads_them() {
 /// **A text of several lines is indented under its label** rather than run together with it.
 #[test]
 fn a_multi_line_answer_keeps_its_lines() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let appeal = build(
         &Draft {
@@ -455,7 +469,7 @@ fn a_multi_line_answer_keeps_its_lines() {
 /// **The three answers of the radio rows reach the appeal** — every value of both closed sets.
 #[test]
 fn every_value_of_both_radio_rows_is_written_out() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     for field in [Field::Normal, Field::Password, Field::Unknown] {
         for repeat in [Repeat::Always, Repeat::Sometimes, Repeat::Once] {
@@ -495,7 +509,7 @@ fn every_value_of_both_radio_rows_is_written_out() {
 /// change with the interface language.
 #[test]
 fn the_saved_file_is_named_by_the_day() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let day = letters::Date::from_ymd(2026, 10, 14).expect("a day");
     let name = letters::report::file_name(day);
@@ -556,7 +570,7 @@ fn the_name_of_windows_is_corrected_by_its_build_number() {
 /// that step in one assertion.
 #[test]
 fn the_line_beside_the_box_is_the_line_in_the_appeal() {
-    with_product_strings();
+    let _language = with_product_strings();
 
     let facts = full_facts();
     let beside = letters::report::machine_line(&facts);
@@ -595,7 +609,7 @@ fn the_thanks_is_a_step_of_the_wizard_and_no_road_counts_it() {
 fn the_line_of_the_site_stands_only_on_the_thanks() {
     use lang_switcher::ui::host::Content;
 
-    with_product_strings();
+    let _language = with_product_strings();
 
     for (name, wizard) in letters::wizard_pages() {
         let window = wizard::Page {
@@ -711,7 +725,7 @@ fn window_of(name: &str) -> lang_switcher::ui::scene::Window<wizard::Id> {
 /// icon and the line of where it leads.
 #[test]
 fn the_first_step_offers_two_cards_with_their_icons_and_where_they_lead() {
-    with_product_texts();
+    let _language = with_product_texts();
     let body = format!("{:?}", window_of("wizard what").body);
     let next = |id| {
         format!(
@@ -741,7 +755,7 @@ fn the_first_step_offers_two_cards_with_their_icons_and_where_they_lead() {
 /// «Что приложить»: the list stands in one group of rows.
 #[test]
 fn the_steps_of_the_wizard_are_cards_fields_of_many_lines_and_a_group() {
-    with_product_texts();
+    let _language = with_product_texts();
     let place = format!("{:?}", window_of("wizard where").body);
     assert!(
         place.matches("ChoiceCard").count() == 3 && !place.contains("Radio"),
@@ -775,7 +789,7 @@ fn the_bar_of_the_steps_stands_at_one_height_and_a_block_reaches_the_buttons() {
     use lang_switcher::ui::layout::{Part, client_size};
     use lang_switcher::ui::text::{Direction, Text};
 
-    with_product_texts();
+    let _language = with_product_texts();
     let language = settings::Language::Ru;
     let text = Text::new(language.tag(), Direction::LeftToRight).expect("DirectWrite");
     for size in [client_size(900.0, 540.0), client_size(1280.0, 720.0)] {
@@ -831,7 +845,11 @@ fn the_bar_of_the_steps_stands_at_one_height_and_a_block_reaches_the_buttons() {
 
 /// The strings of the product binary, opened as data — the tests of the window and of its layout
 /// read the words the program shows (`with_product_strings` of this file only sets the language).
-fn with_product_texts() {
+/// Takes the lock of the language first ([`LANGUAGE`]) and hands it back, held.
+#[must_use = "the lock of the language is held for the whole test"]
+fn with_product_texts() -> MutexGuard<'static, ()> {
+    let language = LANGUAGE.lock().unwrap_or_else(PoisonError::into_inner);
+
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use std::sync::OnceLock;
@@ -856,4 +874,6 @@ fn with_product_texts() {
     });
     settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
     settings::set_ui_language(settings::Language::Ru);
+
+    language
 }
