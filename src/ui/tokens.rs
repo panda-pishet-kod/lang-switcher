@@ -604,8 +604,6 @@ impl Circle {
     }
 }
 
-/// Окно — доля рабочей области монитора.
-pub const WINDOW_SHARE: Share = Share(2.0 / 3.0);
 /// Малое окно (`host::Content::least`) — его размер и его наименьшая рамка; и мера класса малого
 /// экрана в приборе влезания.
 pub const WINDOW_MIN: SizePt = SizePt::pt(620.0, 500.0);
@@ -616,7 +614,8 @@ pub const FRAME_MIN: SizePt = SizePt::pt(900.0, 540.0);
 pub const WINDOW_MAX: SizePt = SizePt::pt(1280.0, 720.0);
 /// ◆ Две колонки с панелью — с этой ширины окна (208.168: 880, не 680).
 pub const TWO_COLUMNS_FROM: Pt = Pt(880.0);
-/// ◆ Окно при открытии — не меньше, пока рабочая область позволяет (208.168).
+/// ◆ Окно при открытии, пока рабочая область позволяет: наименьшая рамка, а не две трети области
+/// (208.224 п. 10, 208.227); растянуть — до `WINDOW_MAX`.
 pub const WINDOW_OPEN_MIN: SizePt = SizePt::pt(900.0, 540.0);
 /// ◆ Класс кегля «обычное» — с этого размера окна (208.168).
 pub const CLASS_ORDINARY_FROM: SizePt = SizePt::pt(900.0, 540.0);

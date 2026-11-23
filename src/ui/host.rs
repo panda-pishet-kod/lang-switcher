@@ -157,8 +157,8 @@ pub trait Content {
     fn timer(&self) -> Option<u32> {
         None
     }
-    /// The window opens at the least size of the passport (620 × 500) rather than at two thirds of
-    /// the work area — a small window of a few lines (T-120-21 Б: the details for the author). The
+    /// The window opens at the least size of the passport (620 × 500) rather than at 900 × 540 — a
+    /// small window of a few lines (T-120-21 Б: the details for the author). The
     /// person may still make it larger.
     fn least(&self) -> bool {
         false
@@ -735,7 +735,7 @@ fn class(popup: bool) -> PCWSTR {
 }
 
 /// Opens a window of the shell for `content`, owned by `owner`, centred on the work area of the
-/// monitor under the mouse, at two thirds of it.
+/// monitor under the mouse, at 900 × 540 while it holds that (208.227).
 pub fn open<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<HWND> {
     let hwnd = create(content, owner)?;
     // Cloaked until the first frame is drawn: the window never shows empty.

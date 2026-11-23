@@ -3,8 +3,9 @@
 //! 1, 2 and 0.5 — every other one comes from the style table).
 //!
 //! What it decides, all by the passport (§3, §7):
-//! * **the size and class of a window** — two thirds of the work area, between 620 × 500 and
-//!   1280 × 720 points; a work area smaller than that — the whole of it, and only then scrolling;
+//! * **the size and class of a window** — at opening 900 × 540 points, the least frame, while the
+//!   work area holds it, stretched by a person up to 1280 × 720; a work area smaller than that — the
+//!   whole of it, and only then scrolling;
 //! * **one column or two** — the panel with the picture at 680 points and wider; a narrow window
 //!   puts the circle with the panda beside its header (not in the settings);
 //! * **the containers** — column, rows, wrapping row, pair and triple, fill, surfaces, the steps of a
@@ -31,7 +32,7 @@ use crate::ui::tokens::{
     LETTER_CARD_PAD, LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD,
     NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE,
     ROW_GROUP_PAD, ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART,
-    TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
+    TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
     WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{
@@ -128,15 +129,11 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
         };
     }
 
-    // Two thirds of the work area, but at opening no less than 900 × 540 while the area holds it
-    // (208.168), within the limits of the frame.
-    let side = |area: f32, open: f32, least: f32, most: f32| {
-        (area * WINDOW_SHARE.0)
-            .max(open.min(area))
-            .clamp(least, most)
-    };
-    let w = side(area_w, WINDOW_OPEN_MIN.w.0, FRAME_MIN.w.0, WINDOW_MAX.w.0);
-    let h = side(area_h, WINDOW_OPEN_MIN.h.0, FRAME_MIN.h.0, WINDOW_MAX.h.0);
+    // At opening 900 × 540, not two thirds of the work area (208.224 п. 10, 208.227: «лучше по
+    // умолчанию запускать окна в минимальном размере, так они лучше смотрятся, если нужно
+    // пользователь сам растянет»), within the limits of the frame.
+    let w = WINDOW_OPEN_MIN.w.0.clamp(FRAME_MIN.w.0, WINDOW_MAX.w.0);
+    let h = WINDOW_OPEN_MIN.h.0.clamp(FRAME_MIN.h.0, WINDOW_MAX.h.0);
 
     WindowSize {
         w,

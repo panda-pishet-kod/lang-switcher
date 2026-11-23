@@ -4065,7 +4065,7 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
 /// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
 /// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
 /// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
-/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// eight pages are laid out at the narrowest window and at a larger one: the
 /// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
 /// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
 ///

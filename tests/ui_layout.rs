@@ -95,28 +95,21 @@ fn close(a: f32, b: f32) -> bool {
 
 // ---- The size of a window -------------------------------------------------------------------
 
+/// **AUDIT-180b п. 10 (решение 208.227)** — a window opens at 900 × 540, the least frame, on every
+/// work area that holds it; a person stretches it. Red before: two thirds of the work area — 910 ×
+/// 540 on 1366 × 728, 1280 × 693 on 1920 × 1040.
 #[test]
-fn the_size_of_a_window_is_two_thirds_of_the_work_area_within_its_limits() {
+fn a_window_opens_at_the_least_frame_wherever_the_work_area_holds_it() {
     let cases = [
-        (
-            (1366.0, 728.0),
-            (1366.0 * 2.0 / 3.0, 540.0),
-            Class::Ordinary,
-            false,
-        ),
-        (
-            (1920.0, 1040.0),
-            (1280.0, 1040.0 * 2.0 / 3.0),
-            Class::Large,
-            false,
-        ),
+        ((1366.0, 728.0), (900.0, 540.0), Class::Ordinary, false),
+        ((1920.0, 1040.0), (900.0, 540.0), Class::Ordinary, false),
         // 208.198: a work area under 900 × 540 is a small screen — the window takes all of it and
         // its body scrolls; 900 × 540 is the least frame.
         ((700.0, 560.0), (700.0, 560.0), Class::Narrow, true),
         ((899.0, 600.0), (899.0, 600.0), Class::Narrow, true),
         ((900.0, 540.0), (900.0, 540.0), Class::Ordinary, false),
-        ((2560.0, 1400.0), (1280.0, 720.0), Class::Large, false),
-        ((3840.0, 2120.0), (1280.0, 720.0), Class::Large, false),
+        ((2560.0, 1400.0), (900.0, 540.0), Class::Ordinary, false),
+        ((3840.0, 2120.0), (900.0, 540.0), Class::Ordinary, false),
         ((640.0, 360.0), (640.0, 360.0), Class::Narrow, true),
         ((930.0, 750.0), (900.0, 540.0), Class::Ordinary, false),
     ];
