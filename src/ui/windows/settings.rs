@@ -362,7 +362,7 @@ impl Settings {
                 .position(|candidate| *candidate == language)
                 .unwrap_or(0),
         }];
-        // T-120-22: under «Язык интерфейса», the quiet «Нашли ошибку в переводе?» — in every
+        // T-120-22: under «Язык интерфейса», the button «Нашли ошибку в переводе?» — in every
         // language of the window but Russian, the language the others are translated from.
         // ⚠ Not while the note of a refused write stands over the section (C6 of the sheet, (г)):
         // with the note, the button pushes «Общие» of the narrow window out of it in ta, ml, tt
@@ -371,7 +371,7 @@ impl Settings {
             language_column.push(Node::Buttons(vec![Node::Button {
                 id: Id::Translation,
                 label: self.line(IDS_TRANSLATION_REPORT),
-                kind: ButtonKind::Quiet,
+                kind: ButtonKind::Normal,
                 browser: false,
             }]));
         }
@@ -740,7 +740,7 @@ impl Settings {
             Node::Buttons(vec![Node::Button {
                 id: Id::Details,
                 label: self.line(IDS_STATUS_DETAILS),
-                kind: ButtonKind::Quiet,
+                kind: ButtonKind::Normal,
                 browser: false,
             }]),
         ]);

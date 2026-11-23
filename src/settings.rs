@@ -1482,7 +1482,7 @@ pub const IDS_GROUP_GENERAL: u16 = 3001;
 pub const IDS_AUTOSTART: u16 = 3002;
 /// The label of the language combo box.
 pub const IDS_LANGUAGE_LABEL: u16 = 3003;
-/// «Нашли ошибку в переводе?» — the quiet button under the language, task T-120-22 (решение
+/// «Нашли ошибку в переводе?» — the button under the language, task T-120-22 (решение
 /// 208.169, С12); it opens the wizard on the page of the idea. Block 3280…3295 (`app.rc`).
 pub const IDS_TRANSLATION_REPORT: u16 = 3289;
 // ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was `IDS_LANGUAGE_RESTART`,
@@ -1599,7 +1599,7 @@ pub const IDS_STATUS_HOTKEY: u16 = 3285;
 pub const IDS_STATUS_AUTOSTART_ON: u16 = 3286;
 /// «Запуск при входе в систему: выключен».
 pub const IDS_STATUS_AUTOSTART_OFF: u16 = 3287;
-/// «Подробности для автора» — the quiet button that opens the lines of the developer.
+/// «Подробности для автора» — the button that opens the lines of the developer.
 pub const IDS_STATUS_DETAILS: u16 = 3288;
 /// «Копировать» — the window of «Подробности для автора» puts its lines on the clipboard (T-120-21,
 /// C6 (а)); 3295, the reserve the controller named.
@@ -1719,6 +1719,11 @@ pub const IDS_AUTHOR_TITLE: u16 = 3321;
 /// `<a>` and `</a>` (`ui::scene::linked`) — the group or GitHub Issues,
 /// `letters::links::feedback_url` of the language.
 pub const IDS_THANKS_SAY: u16 = 3322;
+/// «Письма от автора» — the title of «Последние письма» under its eyebrow, which is the caption
+/// [`IDS_LETTERS_CAPTION`] (AUDIT-180b Н4, решение 208.227: the head of the mock-up).
+pub const IDS_LETTERS_TITLE: u16 = 3342;
+/// The subtitle of «Последние письма»: what the list holds (AUDIT-180b Н4, решение 208.227).
+pub const IDS_LETTERS_SUB: u16 = 3343;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2433,7 +2438,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ The knock of «Спасибо» names its second button with the letter's own [`IDS_THANKS_SNOOZE`]
 /// (решение 208.112 п. 1: the knock and the letter name their buttons alike) — the 3341 of Z13
 /// left before any release, a hole.
-pub const INTERFACE_STRINGS: [u16; 282] = [
+///
+/// ⚠ **Two hundred and eighty-four since AUDIT-180b Н4** (решение 208.227) — the head of «Последние
+/// письма» as the mock-up has it: [`IDS_LETTERS_TITLE`] (3342) and [`IDS_LETTERS_SUB`] (3343).
+/// 282 + 2.
+pub const INTERFACE_STRINGS: [u16; 284] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2577,6 +2586,8 @@ pub const INTERFACE_STRINGS: [u16; 282] = [
     IDS_FEEDBACK_TEXT,
     IDS_WRITE_TO_AUTHOR,
     IDS_LETTERS_CAPTION,
+    IDS_LETTERS_TITLE,
+    IDS_LETTERS_SUB,
     IDS_LETTERS_FOOT,
     IDS_LETTERS_OPEN,
     IDS_NEWS_READ_BUTTON,

@@ -90,7 +90,7 @@ impl Content for Probe {
                 Node::Button {
                     id: Id::Copy,
                     label: "Copy".to_owned(),
-                    kind: ButtonKind::Quiet,
+                    kind: ButtonKind::Normal,
                     browser: false,
                 },
                 Node::Button {

@@ -4065,7 +4065,7 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
 /// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
 /// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
 /// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
-/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// eight pages are laid out at the narrowest window and at a larger one: the
 /// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
 /// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
 ///
@@ -5107,7 +5107,7 @@ fn the_switch_of_the_author_window_stands_under_the_block_of_the_news() {
     let block = children
         .iter()
         .position(|node| {
-            matches!(node, Node::Surface(Surface::Block, _)) && format!("{node:?}").contains(&news)
+            matches!(node, Node::Surface(Surface::Nested, _)) && format!("{node:?}").contains(&news)
         })
         .expect("the block of the news");
     let switch = children
@@ -5464,5 +5464,97 @@ fn the_title_and_the_card_of_the_author_window_are_the_owners_text_split() {
         body.contains(&format!("title: {title:?}")) && body.contains(&format!("words: {card:?}")),
         "the head says the first sentence and the card the rest: {}",
         &body[..body.len().min(300)]
+    );
+}
+
+/// **AUDIT-180b Н4 (решение 208.227)** — «Последние письма» has the head of the mock-up: the
+/// caption as its eyebrow, «Письма от автора», what the list holds; and, so that the letter of the
+/// update and three news items stay under it in the least window, the cards are tighter than a
+/// nested card (208.136 п. 2): half a block apart, `LETTER_CARD_PAD` inside. Red before: no
+/// eyebrow, the caption as the title, no subtitle, the cards a block apart with the paddings of a
+/// nested card.
+#[test]
+fn the_letters_list_has_the_head_of_the_mock_up_and_its_cards_half_a_block_apart() {
+    use lang_switcher::settings::{IDS_LETTERS_CAPTION, IDS_LETTERS_SUB, IDS_LETTERS_TITLE};
+    use lang_switcher::ui::layout::{Class, Part, WindowSize, lay_out};
+    use lang_switcher::ui::scene::{Node, Surface};
+    use lang_switcher::ui::text::FixedAdvance;
+    use lang_switcher::ui::tokens::{BLOCK_ROW_GAP, LETTER_CARD_PAD};
+    use lang_switcher::ui::windows::letters_list;
+
+    let _guard = with_product_strings();
+    let line = |id| settings::text_in(Language::Ru, id);
+    let (caption, title_line, sub_line) = (
+        line(IDS_LETTERS_CAPTION),
+        line(IDS_LETTERS_TITLE),
+        line(IDS_LETTERS_SUB),
+    );
+    assert_eq!(
+        (caption.as_str(), title_line.as_str(), sub_line.as_str()),
+        (
+            "Последние письма",
+            "Письма от автора",
+            "Три последние новости и письмо об обновлении, если оно есть"
+        ),
+        "the words of the mock-up in the product binary"
+    );
+
+    let (_, window) = letters_list::states(Language::Ru)
+        .into_iter()
+        .next()
+        .expect("the full list");
+    let Node::Column(body) = &window.body else {
+        panic!("the body is a column")
+    };
+    let Some(Node::Header {
+        eyebrow,
+        title,
+        subtitle,
+    }) = body.first()
+    else {
+        panic!("the list begins with its head")
+    };
+    assert_eq!(eyebrow.as_deref(), Some(caption.as_str()), "the eyebrow");
+    assert_eq!(title, &title_line, "the title");
+    assert_eq!(subtitle.as_deref(), Some(sub_line.as_str()), "the subtitle");
+
+    let size = WindowSize {
+        w: 900.0,
+        h: 540.0,
+        class: Class::Ordinary,
+        scrolls: false,
+    };
+    let layout = lay_out(&window, size, 1.0, false, &FixedAdvance(0.5));
+    let cards: Vec<_> = layout
+        .items
+        .iter()
+        .filter(|item| matches!(item.part, Part::Surface(Surface::Nested)))
+        .map(|item| item.rect)
+        .collect();
+    assert_eq!(
+        cards.len(),
+        4,
+        "the letter of the update and three news items"
+    );
+    let close = |a: f32, b: f32| (a - b).abs() < 0.01;
+    for pair in cards.windows(2) {
+        assert!(
+            close(pair[1].y, pair[0].bottom() + BLOCK_ROW_GAP.at(layout.b)),
+            "the cards are not half a block apart: {:?} {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+    let label = layout
+        .items
+        .iter()
+        .filter(|item| matches!(item.part, Part::Text { .. }))
+        .map(|item| item.rect)
+        .find(|rect| rect.y > cards[0].y && rect.bottom() <= cards[0].bottom())
+        .expect("the label of the first card");
+    assert!(
+        close(label.y, cards[0].y + LETTER_CARD_PAD.v.at(layout.b)),
+        "the card is not padded with LETTER_CARD_PAD: {label:?} in {:?}",
+        cards[0]
     );
 }

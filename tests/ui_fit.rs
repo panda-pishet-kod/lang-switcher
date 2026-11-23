@@ -1048,8 +1048,8 @@ fn feed_letters(
 
 /// Whether an entry of `kind` with a text of `points` code points fits its letter — «Обновление» for
 /// an update, «Новость» for a news item (word of the owner, 2026-11-20) — in the
-/// window of the reference (decision 208.197: the size it opens in, two thirds of the work area and
-/// not less than Ordinary 900 × 540 — a smaller window scrolls) at the factor of the table, on every
+/// window of the reference (decision 208.197: the size it opens in — Ordinary 900 × 540, since
+/// 208.227 on every work area that holds it; a smaller window scrolls) at the factor of the table, on every
 /// main face, with the steps of
 /// giving way the table is counted with (`Concession::TABLE`, as [`k_needed`] first tries): an entry
 /// that fitted only with more steps would ask the table a lower factor.

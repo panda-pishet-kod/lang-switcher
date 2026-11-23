@@ -187,6 +187,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Намерихте грешка или имате идея? Съветникът ще състави съобщение и ще го изпрати на автора само когато натиснете „Изпрати“."
     IDS_WRITE_TO_AUTHOR     "Писане до автора…"
     IDS_LETTERS_CAPTION     "Последни писма"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Пазят се трите последни новини. Когато дойде четвърта, най-старата си отива, дори непрочетена."
     IDS_LETTERS_OPEN        "Отвори писмото"
     IDS_NEWS_READ_BUTTON    "Прочетено"

@@ -190,6 +190,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "იპოვეთ შეცდომა ან გაქვთ იდეა? ოსტატი მიმართვას შეადგენს და ავტორს მხოლოდ მაშინ გაუგზავნის, როცა დააჭერთ ღილაკს „გაგზავნა“."
     IDS_WRITE_TO_AUTHOR     "მისწერეთ ავტორს…"
     IDS_LETTERS_CAPTION     "ბოლო წერილები"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "ინახება სამი ბოლო სიახლე. მეოთხის მოსვლისას ყველაზე ძველი იშლება, წაკითხული იქნება თუ არა."
     IDS_LETTERS_OPEN        "გახსნა"
     IDS_NEWS_READ_BUTTON    "წაკითხულია"

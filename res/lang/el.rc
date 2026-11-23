@@ -197,6 +197,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Βρήκατε σφάλμα ή έχετε ιδέα; Ο οδηγός συνθέτει το μήνυμα και το στέλνει στον δημιουργό μόνο όταν πατήσετε «Αποστολή»."
     IDS_WRITE_TO_AUTHOR     "Γράψτε στον δημιουργό"
     IDS_LETTERS_CAPTION     "Τελευταία γράμματα"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Κρατούνται οι τρεις τελευταίες ειδήσεις. Όταν έρθει τέταρτη, η παλαιότερη φεύγει, ακόμη κι αδιάβαστη."
     IDS_LETTERS_OPEN        "Άνοιγμα"
     IDS_NEWS_READ_BUTTON    "Διαβάστηκε"

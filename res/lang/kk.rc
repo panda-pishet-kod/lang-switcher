@@ -187,6 +187,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Қате таптыңыз ба немесе идеяңыз бар ма? Шебер өтінішті жинап, «Жіберу» түймесін басқанда ғана авторға жібереді."
     IDS_WRITE_TO_AUTHOR     "Авторға жазу…"
     IDS_LETTERS_CAPTION     "Соңғы хаттар"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Соңғы үш жаңалық сақталады. Төртіншісі келгенде, ең ескісі оқылған-оқылмағанына қарамастан кетеді."
     IDS_LETTERS_OPEN        "Хатты ашу"
     IDS_NEWS_READ_BUTTON    "Оқылды"

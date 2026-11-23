@@ -122,7 +122,8 @@ impl Author {
         if !view.file_only.is_empty() {
             rows.push(Node::Text(Role::Small, view.file_only.clone()));
         }
-        Node::Surface(Surface::Block, Box::new(Node::Rows(rows)))
+        // A nested card, as the two above it (AUDIT-180b Н3, решение 208.227: the mock-up's `.card`).
+        Node::Surface(Surface::Nested, Box::new(Node::Rows(rows)))
     }
 
     /// «Сообщать об обновлениях программы» — a line of its own under the block of the news, the

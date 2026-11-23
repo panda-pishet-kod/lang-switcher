@@ -5,9 +5,10 @@
 //!
 //! * **No frame of its own,** placed inside the wrapper at the paddings of the table: a line field
 //!   centred on the wrapper's height, a text field filling it, its scroll bar the system's (in the
-//!   dark theme it stays light — the accepted price, T-120-18 п. 6).
+//!   dark theme it stays light — the accepted price, T-120-18 п. 6) and shown only while the text
+//!   does not fit (AUDIT-180b Н2, решение 208.227).
 //! * **Colours from the table** through `WM_CTLCOLOREDIT` (the window answers it with
-//!   [`Fields::colours`]); the font is the role `body`'s face and size, made for the scale now; a field of code is set in the
+//!   [`colours_of`], before its host is borrowed: AUDIT-180b п. 7); the font is the role `body`'s face and size, made for the scale now; a field of code is set in the
 //!   monospace face of the role `code` (T-120-19) — or wholly in the font of `body`, while its text
 //!   has a letter the monospace face lacks (208.202: Consolas has no Hebrew and no Arabic, and the
 //!   face Windows 10 puts in their place is markedly smaller).
@@ -21,7 +22,7 @@
 //! FR-72: what the shell asks of its own fields goes through `SendMessageTimeoutW`.
 
 use crate::ui::tokens::Rgb;
-use ::windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use ::windows::Win32::Foundation::{COLORREF, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use ::windows::Win32::Graphics::Gdi::{
     CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush, DEFAULT_CHARSET,
     DT_EDITCONTROL, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_RTLREADING, DT_SINGLELINE, DT_WORDBREAK,
@@ -29,7 +30,10 @@ use ::windows::Win32::Graphics::Gdi::{
     GetTextMetricsW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, ReleaseDC,
     SelectObject, SetBkColor, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
 };
-use ::windows::Win32::UI::Controls::EM_SETMARGINS;
+use ::windows::Win32::UI::Controls::{
+    EM_GETFIRSTVISIBLELINE, EM_GETLINECOUNT, EM_GETRECT, EM_REPLACESEL, EM_SETMARGINS,
+    ShowScrollBar,
+};
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, SetFocus, VK_ESCAPE, VK_RETURN, VK_TAB,
 };
@@ -48,7 +52,10 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    IsWindowVisible, SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow,
+    GWL_STYLE, SB_VERT, WM_IME_ENDCOMPOSITION, WM_SIZE,
+};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    GetPropW, IsWindowVisible, RemovePropW, SW_HIDE, SW_SHOWNOACTIVATE, SetPropW, ShowWindow,
 };
 use ::windows::core::{HSTRING, PCWSTR, w};
 use std::cell::{Cell, RefCell};
@@ -111,10 +118,17 @@ pub struct Look {
 struct Data {
     hint: RefCell<Vec<u16>>,
     colour: Cell<COLORREF>,
+    /// The colours the window answers `WM_CTLCOLOREDIT` with — the text, the background and its
+    /// brush (one of [`Fields`]'s, deleted only after every field is gone).
+    ink: Cell<COLORREF>,
+    fill: Cell<COLORREF>,
+    brush: Cell<HBRUSH>,
     multiline: bool,
     rtl: bool,
     /// A field of a key: whether it captures now.
     capture: Cell<Option<bool>>,
+    /// A text field is asking whether its text fits — the bar it shows or hides sizes it again.
+    fitting: Cell<bool>,
 }
 
 struct Item<I> {
@@ -235,9 +249,10 @@ impl<I: Copy + PartialEq> Fields<I> {
         gone.into_iter().for_each(destroy);
 
         for spec in specs {
+            let brush = brush_for(&mut self.brushes, spec.fill);
             let at = match self.items.iter().position(|item| item.id == spec.id) {
                 Some(at) => at,
-                None => match make(parent, spec, look) {
+                None => match make(parent, spec, look, brush) {
                     Some(item) => {
                         self.items.push(item);
                         self.items.len() - 1
@@ -306,6 +321,9 @@ impl<I: Copy + PartialEq> Fields<I> {
                 item.data.colour.set(colour);
                 item.ink = spec.ink;
                 item.fill = spec.fill;
+                item.data.ink.set(colorref(spec.ink));
+                item.data.fill.set(colorref(spec.fill));
+                item.data.brush.set(brush);
                 // SAFETY: as above.
                 let _ = unsafe { InvalidateRect(Some(item.hwnd), None, true) };
             }
@@ -384,31 +402,6 @@ impl<I: Copy + PartialEq> Fields<I> {
         // SAFETY: reads the focus of this thread.
         let focus = unsafe { GetFocus() };
         self.items.iter().any(|item| item.hwnd == focus)
-    }
-
-    /// The answer to `WM_CTLCOLOREDIT` and `WM_CTLCOLORSTATIC` for the field `hwnd`: its colours
-    /// set on `dc`, its background's brush.
-    pub fn colours(&mut self, dc: HDC, hwnd: HWND) -> Option<LRESULT> {
-        let (ink, fill) = self
-            .items
-            .iter()
-            .find(|item| item.hwnd == hwnd)
-            .map(|item| (item.ink, item.fill))?;
-        let brush = match self.brushes.iter().find(|(colour, _)| *colour == fill) {
-            Some((_, brush)) => *brush,
-            None => {
-                // SAFETY: a plain value; the brush is deleted by `release`.
-                let brush = unsafe { CreateSolidBrush(colorref(fill)) };
-                self.brushes.push((fill, brush));
-                brush
-            }
-        };
-        // SAFETY: the DC Windows passed with the message.
-        unsafe {
-            SetTextColor(dc, colorref(ink));
-            SetBkColor(dc, colorref(fill));
-        }
-        Some(LRESULT(brush.0 as isize))
     }
 
     /// Takes the fields out of the window and frees what they held: on `WM_DESTROY` of the window,
@@ -547,7 +540,52 @@ fn is_format(letter: char) -> bool {
     )
 }
 
-fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I>> {
+/// The brush of `fill`, made the first time it is asked; kept until [`Fields::release`].
+fn brush_for(brushes: &mut Vec<(Rgb, HBRUSH)>, fill: Rgb) -> HBRUSH {
+    if let Some((_, brush)) = brushes.iter().find(|(colour, _)| *colour == fill) {
+        return *brush;
+    }
+    // SAFETY: a plain value; the brush is deleted by `release` or `drop`, after the fields.
+    let brush = unsafe { CreateSolidBrush(colorref(fill)) };
+    brushes.push((fill, brush));
+    brush
+}
+
+/// The property of a field of the shell that points to what its procedure reads — for the window
+/// that asks its colours without the host (`GetWindowSubclass` is not exported by name from the
+/// comctl32 of a program without the manifest of version 6, which is what the tests are).
+const DATA_PROP: PCWSTR = w!("LangSwitcher.Field");
+
+/// The answer to `WM_CTLCOLOREDIT` and `WM_CTLCOLORSTATIC` for `field`: its colours set on `dc`,
+/// its background's brush; none for a window that is not a field of the shell.
+///
+/// Read from what the field's own procedure keeps, not from the host of the window (AUDIT-180b
+/// п. 7, решение 208.227): a field asks while the window is busy too — a font set with a redraw,
+/// the keyboard moved to it inside an event —, and a host already borrowed left the question to
+/// `DefWindowProcW`, whose brush is the white of the system window: the field «Ожидали» of the
+/// wizard white in the dark theme.
+pub fn colours_of(dc: HDC, field: HWND) -> Option<LRESULT> {
+    // SAFETY: reads a property of a window of this thread; a window that is not a field of the
+    // shell has none and answers null.
+    let data = unsafe { GetPropW(field, DATA_PROP) };
+    if data.is_invalid() {
+        return None;
+    }
+    // SAFETY: the box `make` put there, kept until `destroy` takes the property away first.
+    let data = unsafe { &*(data.0 as *const Data) };
+    let brush = data.brush.get();
+    if brush.is_invalid() {
+        return None;
+    }
+    // SAFETY: the DC Windows passed with the message.
+    unsafe {
+        SetTextColor(dc, data.ink.get());
+        SetBkColor(dc, data.fill.get());
+    }
+    Some(LRESULT(brush.0 as isize))
+}
+
+fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look, brush: HBRUSH) -> Option<Item<I>> {
     let mut style = WS_CHILD.0 | WS_VISIBLE.0;
     style |= if spec.multiline {
         WS_VSCROLL.0 | (ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN) as u32
@@ -587,14 +625,20 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
     let data = Box::new(Data {
         hint: RefCell::new(spec.hint.encode_utf16().collect()),
         colour: Cell::new(colorref(look.hint)),
+        ink: Cell::new(colorref(spec.ink)),
+        fill: Cell::new(colorref(spec.fill)),
+        brush: Cell::new(brush),
         multiline: spec.multiline,
         rtl: spec.rtl,
         capture: Cell::new(spec.capture),
+        fitting: Cell::new(false),
     });
     // SAFETY: the procedure below and the box kept in the item until `destroy` removes the
     // procedure first.
     let _ =
         unsafe { SetWindowSubclass(hwnd, Some(procedure), SUBCLASS, (&raw const *data) as usize) };
+    // SAFETY: as above; the property goes with the procedure in `destroy` and in `WM_NCDESTROY`.
+    let _ = unsafe { SetPropW(hwnd, DATA_PROP, Some(HANDLE((&raw const *data) as *mut _))) };
     Some(Item {
         id: spec.id,
         hwnd,
@@ -613,6 +657,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look) -> Option<Item<I
 fn destroy<I>(item: Item<I>) {
     // SAFETY: a child window of this thread, or one already gone — then both calls refuse.
     unsafe {
+        let _ = RemovePropW(item.hwnd, DATA_PROP);
         let _ = RemoveWindowSubclass(item.hwnd, Some(procedure), SUBCLASS);
         let _ = DestroyWindow(item.hwnd);
     }
@@ -699,8 +744,44 @@ fn paint_hint(hwnd: HWND, data: &Data) {
     }
 }
 
+/// Whether the text of the text field `hwnd` goes beyond its height — then, and only then, it shows
+/// its scroll bar (AUDIT-180b Н2, решение 208.227: the bar of Windows was always there, light in the
+/// dark theme, in an empty field too). Shown, the bar narrows the field and the text can only take
+/// more lines, so the answer does not swing.
+fn fit_scroll_bar(hwnd: HWND, data: &Data) {
+    if !data.multiline || data.fitting.replace(true) {
+        return;
+    }
+    let lines = i32::try_from(tell(hwnd, EM_GETLINECOUNT, 0, 0)).unwrap_or(i32::MAX);
+    let first = tell(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    let mut rect = RECT::default();
+    // SAFETY: a field of this thread fills the local rectangle (FR-72: the timeout form); the call
+    // returns before the local goes.
+    let _ = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            EM_GETRECT,
+            WPARAM(0),
+            LPARAM((&raw mut rect) as isize),
+            SMTO_ABORTIFHUNG,
+            FIELD_TIMEOUT_MS,
+            None,
+        )
+    };
+    let font = HFONT(tell(hwnd, WM_GETFONT, 0, 0) as *mut _);
+    let needs = first > 0 || lines.saturating_mul(line_of(font)) > rect.bottom - rect.top;
+    // SAFETY: a window of this thread.
+    let shown = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } & WS_VSCROLL.0 as isize != 0;
+    if needs != shown {
+        // SAFETY: as above.
+        let _ = unsafe { ShowScrollBar(hwnd, SB_VERT, needs) };
+    }
+    data.fitting.set(false);
+}
+
 /// The shell's procedure in every field: the keys of the window go to the window, the hint is
-/// drawn, an emptied or filled field is drawn again.
+/// drawn, an emptied or filled field is drawn again, a text field shows its scroll bar only while
+/// its text does not fit.
 unsafe extern "system" fn procedure(
     hwnd: HWND,
     message: u32,
@@ -754,7 +835,8 @@ unsafe extern "system" fn procedure(
             return answer;
         }
         WM_NCDESTROY => {
-            // SAFETY: the procedure leaves a window that goes.
+            // SAFETY: the procedure and its property leave a window that goes.
+            let _ = unsafe { RemovePropW(hwnd, DATA_PROP) };
             let _ = unsafe { RemoveWindowSubclass(hwnd, Some(procedure), SUBCLASS) };
         }
         _ => {}
@@ -770,6 +852,14 @@ unsafe extern "system" fn procedure(
     if watched && before != is_empty(hwnd) {
         // SAFETY: a window of this thread; drawn again with or without the hint.
         let _ = unsafe { InvalidateRect(Some(hwnd), None, true) };
+    }
+    if watched
+        || matches!(
+            message,
+            WM_SIZE | WM_SETFONT | EM_REPLACESEL | WM_IME_ENDCOMPOSITION
+        )
+    {
+        fit_scroll_bar(hwnd, data);
     }
     answer
 }

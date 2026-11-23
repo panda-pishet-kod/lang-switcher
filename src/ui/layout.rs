@@ -3,8 +3,9 @@
 //! 1, 2 and 0.5 — every other one comes from the style table).
 //!
 //! What it decides, all by the passport (§3, §7):
-//! * **the size and class of a window** — two thirds of the work area, between 620 × 500 and
-//!   1280 × 720 points; a work area smaller than that — the whole of it, and only then scrolling;
+//! * **the size and class of a window** — at opening 900 × 540 points, the least frame, while the
+//!   work area holds it, stretched by a person up to 1280 × 720; a work area smaller than that — the
+//!   whole of it, and only then scrolling;
 //! * **one column or two** — the panel with the picture at 680 points and wider; a narrow window
 //!   puts the circle with the panda beside its header (not in the settings);
 //! * **the containers** — column, rows, wrapping row, pair and triple, fill, surfaces, the steps of a
@@ -28,10 +29,10 @@ use crate::ui::tokens::{
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
     FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
-    LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
-    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, ROW_GROUP_PAD,
-    ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
-    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
+    LETTER_CARD_PAD, LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD,
+    NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE,
+    ROW_GROUP_PAD, ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART,
+    TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
     WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{
@@ -128,15 +129,11 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
         };
     }
 
-    // Two thirds of the work area, but at opening no less than 900 × 540 while the area holds it
-    // (208.168), within the limits of the frame.
-    let side = |area: f32, open: f32, least: f32, most: f32| {
-        (area * WINDOW_SHARE.0)
-            .max(open.min(area))
-            .clamp(least, most)
-    };
-    let w = side(area_w, WINDOW_OPEN_MIN.w.0, FRAME_MIN.w.0, WINDOW_MAX.w.0);
-    let h = side(area_h, WINDOW_OPEN_MIN.h.0, FRAME_MIN.h.0, WINDOW_MAX.h.0);
+    // At opening 900 × 540, not two thirds of the work area (208.224 п. 10, 208.227: «лучше по
+    // умолчанию запускать окна в минимальном размере, так они лучше смотрятся, если нужно
+    // пользователь сам растянет»), within the limits of the frame.
+    let w = WINDOW_OPEN_MIN.w.0.clamp(FRAME_MIN.w.0, WINDOW_MAX.w.0);
+    let h = WINDOW_OPEN_MIN.h.0.clamp(FRAME_MIN.h.0, WINDOW_MAX.h.0);
 
     WindowSize {
         w,
@@ -1820,7 +1817,9 @@ impl<I: Copy> Placer<'_, I> {
         y: f32,
         w: f32,
     ) -> f32 {
-        let (pad_v, pad_h) = (self.em(NESTED_PAD.v), self.em(NESTED_PAD.h));
+        // Tighter than a nested card (208.136 п. 2): the list must hold the letter of the update and
+        // three news items under its head at the least window.
+        let (pad_v, pad_h) = (self.em(LETTER_CARD_PAD.v), self.em(LETTER_CARD_PAD.h));
         let card = self.push(
             Part::Surface(Surface::Nested),
             Rect::new(x, y, w, 0.0),
@@ -2333,7 +2332,8 @@ impl<I: Copy> Placer<'_, I> {
         top - y
     }
 
-    /// An action card (passport §6, 208.209): in the frame of a block (AUDIT-180 О3), the title and
+    /// An action card (passport §6, 208.209): a nested card — `surface2` in a frame of `line`, as the
+    /// mock-up's `.card` (AUDIT-180b Н3, решение 208.227; the frame AUDIT-180 О3) —, the title and
     /// the text, the buttons under them at the start edge (О2) — at the foot of the card when its
     /// `slot` is taller than what it holds: in a pair standing side by side the two cards take one
     /// height and their buttons one line (А2, А3) — or beside them, §3а step 3, in such a pair when
@@ -2349,8 +2349,12 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
         slot: Option<f32>,
     ) -> f32 {
-        let (v, h) = (self.em(BLOCK_PAD.v), self.em(BLOCK_PAD.h));
-        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (v, h) = (self.em(NESTED_PAD.v), self.em(NESTED_PAD.h));
+        let frame = self.push(
+            Part::Surface(Surface::Nested),
+            Rect::new(x, y, w, 0.0),
+            None,
+        );
         let (x, y, w) = (x + h, y + v, (w - h * 2.0).max(0.0));
         let beside_lowers = self.gives(Concession::Card)
             && self.in_pair

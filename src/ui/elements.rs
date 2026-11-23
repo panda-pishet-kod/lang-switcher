@@ -30,7 +30,7 @@ use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
     FOCUS_RING, HOVER_MIX, KEY_BOTTOM, LINE, LINK_UNDERLINE, MULTILINE_PAD, PANEL_DOT,
     PANEL_DOT_STEP, PRESSED_MIX, RADIUS_CHECK, RADIUS_MEDIUM, RADIUS_SMALL, Rgb, Role, SECTION_PAD,
-    SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
+    SEGMENT_HOVER_INSET, SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
 use crate::ui::tokens::{BUTTON_PAD, CHOICE_ICON_GLYPH};
@@ -112,6 +112,11 @@ impl State {
 
 /// `base` moved `state`'s steps along the fill steps; `None` is no fill. Unavailable — no fill.
 fn stepped(base: Option<Color>, state: State) -> Option<Color> {
+    stepped_by(base, state, state.steps())
+}
+
+/// [`stepped`] by `steps` steps of the fill rather than the ones of `state`.
+fn stepped_by(base: Option<Color>, state: State, steps: usize) -> Option<Color> {
     if state.disabled {
         return None;
     }
@@ -120,10 +125,10 @@ fn stepped(base: Option<Color>, state: State) -> Option<Color> {
             Some(at) => at,
             None => return Some(colour),
         },
-        None if state.steps() == 0 => return None,
+        None if steps == 0 => return None,
         None => 0,
     };
-    let at = (start + state.steps()).min(FILL_STEPS.len() - 1);
+    let at = (start + steps).min(FILL_STEPS.len() - 1);
     Some(FILL_STEPS[at])
 }
 
@@ -151,6 +156,11 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
 }
 
 /// Whether the keyboard ring is drawn around this part when it has the focus.
+///
+/// A group that is one stop of Tab — the sections of the settings, the segments of a switch, the
+/// rows of a list — rings its current element alone, as the radio buttons of Windows do, and the
+/// arrows move it (AUDIT-180b п. 2, решение 208.227): not every section, the whole track or the
+/// whole list.
 fn takes_ring(part: &Part) -> bool {
     matches!(
         part,
@@ -159,10 +169,10 @@ fn takes_ring(part: &Part) -> bool {
             | Part::Button { .. }
             | Part::Link { .. }
             | Part::InlineLink
-            | Part::Track
             | Part::Field { .. }
-            | Part::Section { .. }
-            | Part::List(_)
+            | Part::Section { current: true, .. }
+            | Part::Segment { selected: true, .. }
+            | Part::ListRow { selected: true, .. }
             | Part::Cross
     )
 }
@@ -391,7 +401,9 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             } else if let Some(fill) =
                 stepped(Some(Color::Surface2), state).filter(|_| state.steps() > 0)
             {
-                painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
+                // Inside the track, its frame whole (AUDIT-180b п. 3, решение 208.227).
+                let inset = SEGMENT_HOVER_INSET.0;
+                painter.fill_rect(rect.inset(inset), RADIUS_SMALL.0 - inset, c(fill));
             }
             let weight = selected.then_some(BUTTON_PRIMARY_WEIGHT);
             let colour = if state.disabled {
@@ -508,7 +520,15 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 painter.clip_rect(rect);
                 painter.fill_rect(Rect::new(x, rect.y, stripe, rect.h), 0.0, c(Color::Accent));
                 painter.unclip();
-            } else if let Some(fill) = stepped(None, state) {
+            } else if state.steps() > 0 {
+                // On the panel of `surface2` a step of the fill would not show (AUDIT-180b п. 4,
+                // решение 208.227; the mock-up has the same fault): under the mouse the ground of the
+                // current section, pressed `line`.
+                let fill = if state.pressed {
+                    Color::Line
+                } else {
+                    Color::Surface
+                };
                 painter.fill_rect(rect, RADIUS_MEDIUM.0, c(fill));
             }
             let pad = SECTION_PAD.h.at(look.b);
@@ -593,8 +613,13 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             painter.fill_rect(rect, RADIUS_MEDIUM.0, c(Color::Surface));
             painter.stroke_rect(rect, RADIUS_MEDIUM.0, line, c(frame_of(state)));
         }
-        Part::ListRow { selected, .. } => {
-            if *selected && !state.disabled {
+        Part::ListRow {
+            selected, check, ..
+        } => {
+            // In a list of check boxes the cursor chooses nothing — the boxes do —, so its frame
+            // is shown only to the keyboard (AUDIT-180b п. 1, решение 208.227); in a list of a
+            // choice it is the value.
+            if *selected && !state.disabled && (check.is_none() || state.focus) {
                 selected_frame(painter, look, rect, RADIUS_SMALL.0, state);
             } else if let Some(fill) = stepped(None, state) {
                 painter.fill_rect(rect, RADIUS_SMALL.0, c(fill));
@@ -809,7 +834,9 @@ fn chevron(painter: &mut Painter, look: &Look, rect: Rect, state: State) {
 }
 
 /// A button of its kind (§6): the main one dark and mixed with `bg` by the mouse, the usual one on
-/// `surface` with a frame of `edge`, the quiet one with neither.
+/// `surface` with a frame of `edge` — in the dark theme a step further under the mouse, where
+/// `surface2` is hardly told from `surface` (AUDIT-180b п. 3). There is no third kind: the quiet one
+/// without a frame did not read as a button (AUDIT-180b пп. 8–9, решение 208.227).
 fn button(
     painter: &mut Painter,
     look: &Look,
@@ -818,19 +845,11 @@ fn button(
     rect: Rect,
     state: State,
 ) {
-    let radius = match kind {
-        ButtonKind::Quiet => RADIUS_SMALL.0,
-        _ => RADIUS_MEDIUM.0,
-    };
+    let radius = RADIUS_MEDIUM.0;
     let c = |colour: Color| look.colour(colour);
 
     let (fill, frame, text, weight) = match (kind, state.disabled) {
-        (_, true) => (
-            None,
-            (kind != ButtonKind::Quiet).then_some(Color::Line),
-            c(Color::Ink3),
-            None,
-        ),
+        (_, true) => (None, Some(Color::Line), c(Color::Ink3), None),
         (ButtonKind::Primary, false) => {
             let share = if state.pressed {
                 PRESSED_MIX.0
@@ -843,13 +862,15 @@ fn button(
             painter.fill_rect(rect, radius, fill);
             (None, None, c(Color::ButtonFg), Some(BUTTON_PRIMARY_WEIGHT))
         }
-        (ButtonKind::Normal, false) => (
-            stepped(Some(Color::Surface), state),
-            Some(Color::Edge),
-            c(Color::Ink),
-            None,
-        ),
-        (ButtonKind::Quiet, false) => (stepped(None, state), None, c(Color::Ink), None),
+        (ButtonKind::Normal, false) => {
+            let further = usize::from(look.theme == Theme::Dark && state.steps() > 0);
+            (
+                stepped_by(Some(Color::Surface), state, state.steps() + further),
+                Some(Color::Edge),
+                c(Color::Ink),
+                None,
+            )
+        }
     };
 
     if let Some(fill) = fill {
@@ -908,12 +929,7 @@ pub fn button_label_wraps(label: f32, inner_w: f32, inner_h: f32, line: f32) -> 
 /// The keyboard ring of §4 around `rect`, `FOCUS_GAP` outside it, its corners following the part's.
 fn ring(painter: &mut Painter, look: &Look, part: &Part, rect: Rect) {
     let radius = match part {
-        Part::Card { .. }
-        | Part::Section { .. }
-        | Part::Button {
-            kind: ButtonKind::Normal | ButtonKind::Primary,
-            ..
-        } => RADIUS_MEDIUM.0,
+        Part::Card { .. } | Part::Section { .. } | Part::Button { .. } => RADIUS_MEDIUM.0,
         _ => RADIUS_SMALL.0,
     };
     let out = FOCUS_GAP.0 + FOCUS_RING.0;

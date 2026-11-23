@@ -186,6 +186,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Kua kite i tētahi hapa, he whakaaro rānei? Mā te kaiārahi e whakarite tētahi karere, ā, ka tukuna ki te kaituhi ina pēhia anake “Tukua”."
     IDS_WRITE_TO_AUTHOR     "Tuhi ki te kaituhi…"
     IDS_LETTERS_CAPTION     "Ngā reta tata nei"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Ka puritia ngā pūrongo hou rawa e toru. Ina tae mai te tuawhā, ka haere te mea tawhito rawa, kua pānuitia, kāore rānei."
     IDS_LETTERS_OPEN        "Whakatuwhera"
     IDS_NEWS_READ_BUTTON    "Kua pānuitia"

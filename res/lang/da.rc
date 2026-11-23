@@ -186,6 +186,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Fundet en fejl eller fået en idé? Guiden samler en henvendelse og sender den til udvikleren, først når du trykker på »Send«."
     IDS_WRITE_TO_AUTHOR     "Skriv til udvikleren…"
     IDS_LETTERS_CAPTION     "Seneste breve"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "De tre seneste nyheder gemmes. Når en fjerde kommer, fjernes den ældste, læst eller ej."
     IDS_LETTERS_OPEN        "Åbn brevet"
     IDS_NEWS_READ_BUTTON    "Markér som læst"

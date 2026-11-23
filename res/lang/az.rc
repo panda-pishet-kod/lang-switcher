@@ -190,6 +190,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Xəta tapdınız, yoxsa ideyanız var? Sehrbaz müraciəti toplayacaq və yalnız siz «Göndər» düyməsini basanda müəllifə göndərəcək."
     IDS_WRITE_TO_AUTHOR     "Müəllifə yaz…"
     IDS_LETTERS_CAPTION     "Son məktublar"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Son üç xəbər saxlanılır. Dördüncüsü gələndə ən köhnəsi, oxunub-oxunmamasından asılı olmayaraq, silinir."
     IDS_LETTERS_OPEN        "Məktubu aç"
     IDS_NEWS_READ_BUTTON    "Oxundu"

@@ -190,6 +190,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "מצאתם תקלה או שיש לכם רעיון? האשף יחבר פנייה וישלח אותה למפתח רק כשתלחצו «שליחה»."
     IDS_WRITE_TO_AUTHOR     "כתיבה למפתח…"
     IDS_LETTERS_CAPTION     "מכתבים אחרונים"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "נשמרות שלוש הידיעות האחרונות. כשמגיעה רביעית, הישנה ביותר יוצאת, גם אם לא נקראה."
     IDS_LETTERS_OPEN        "פתיחת המכתב"
     IDS_NEWS_READ_BUTTON    "נקרא"

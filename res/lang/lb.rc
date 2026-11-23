@@ -188,6 +188,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "E Feeler fonnt oder eng Iddi? Den Assistent stellt eng Noriicht zesummen a schéckt se nëmmen un den Auteur, wann Dir op „Schécken“ dréckt."
     IDS_WRITE_TO_AUTHOR     "Dem Auteur schreiwen…"
     IDS_LETTERS_CAPTION     "Rezent Bréiwer"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Déi dräi lescht Neiegkeete ginn opbewahrt. Wann eng véiert ukënnt, geet déi eelst fort, ob gelies oder net."
     IDS_LETTERS_OPEN        "Bréif opmaachen"
     IDS_NEWS_READ_BUTTON    "Gelies"

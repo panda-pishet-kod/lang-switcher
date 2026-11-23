@@ -7690,7 +7690,7 @@ fn the_switch_of_updates_is_one_setting_in_the_settings_and_in_from_the_author()
 }
 
 /// **T-120-22 Б — the red before.** With the interface in German, «Общие» of the window of the
-/// settings holds the quiet button «Нашли ошибку в переводе?», and its press opens the wizard on the
+/// settings holds the button «Нашли ошибку в переводе?», and its press opens the wizard on the
 /// page of the idea marked with the language: the two fields ask what it says now and how it should,
 /// and one «Далее» on, the appeal begins with the mark and the code `de`. The press goes through the
 /// product's own content and the wizard's own, as a person's clicks do.
@@ -7771,9 +7771,9 @@ fn the_translation_button_of_the_general_section_opens_the_wizard_marked_with_th
 
     assert!(opened.is_some(), "«Настройки…» opens the window");
     assert!(
-        button.as_deref().is_some_and(|part| part.contains("Quiet")
+        button.as_deref().is_some_and(|part| part.contains("Normal")
             && part.contains(&label(settings::IDS_TRANSLATION_REPORT))),
-        "«Общие» in German holds the quiet button «Нашли ошибку в переводе?»: {button:?}"
+        "«Общие» in German holds the button «Нашли ошибку в переводе?»: {button:?}"
     );
     assert!(pressed && wizard.is_some(), "its press opens the wizard");
     // ⚠ Контроль: the labels of the idea and of the translation differ in German, or the checks

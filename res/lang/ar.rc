@@ -189,6 +189,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "وجدت خللًا أو لديك فكرة؟ يجمع المعالج الرسالة ولا يرسلها إلى المؤلف إلا عندما تضغط «إرسال»."
     IDS_WRITE_TO_AUTHOR     "الكتابة إلى المؤلف…"
     IDS_LETTERS_CAPTION     "آخر الرسائل"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "تُحفظ آخر ثلاثة أخبار. وعند وصول الرابع يخرج الأقدم، ولو لم يُقرأ."
     IDS_LETTERS_OPEN        "فتح الرسالة"
     IDS_NEWS_READ_BUTTON    "مقروءة"

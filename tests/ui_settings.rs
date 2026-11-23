@@ -43,8 +43,8 @@ fn with_product_strings() {
 }
 
 /// Prints every state of the window — five sections and «Несколько раскладок» — × light and dark ×
-/// ru, de, he (the mirror) and en × the window of 2/3 of a 1920 × 1040 work area and the least one,
-/// 620 × 500, with a list of the layouts beside them.
+/// ru, de, he (the mirror) and en × the window as it opens (900 × 540, 208.227), the largest one a
+/// person may stretch it to and the least one, 620 × 500, with a list of the layouts beside them.
 #[test]
 fn print_the_pictures_of_the_window_of_the_settings() {
     use lang_switcher::ui::canvas::{Canvas, Mode};
@@ -63,8 +63,9 @@ fn print_the_pictures_of_the_window_of_the_settings() {
     std::fs::create_dir_all(folder).expect("the folder of the pictures");
     with_product_strings();
 
-    let sizes: [(&str, WindowSize); 2] = [
-        ("two-thirds", window_size(1920.0, 1040.0)),
+    let sizes: [(&str, WindowSize); 3] = [
+        ("opening", window_size(1920.0, 1040.0)),
+        ("largest", client_size(1280.0, 720.0)),
         ("least", client_size(620.0, 500.0)),
     ];
     let mut lines = Vec::new();
@@ -437,7 +438,7 @@ fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
 }
 
 /// **T-120-22 Б: «Нашли ошибку в переводе?» stands under «Язык интерфейса» in every language but
-/// Russian** — the language the others are translated from. A quiet button, the very next element
+/// Russian** — the language the others are translated from. A usual button, the very next element
 /// after the choice of the language and before the theme.
 #[test]
 fn the_translation_button_stands_under_the_language_in_every_language_but_russian() {
@@ -465,8 +466,8 @@ fn the_translation_button_stands_under_the_language_in_every_language_but_russia
             settings::text_in(language, settings::IDS_TRANSLATION_REPORT)
         );
         assert!(
-            choice < at && between.contains("kind: Quiet") && between.contains(&label),
-            "{language:?}: the quiet {label} under the language and above the theme: {between}"
+            choice < at && between.contains("kind: Normal") && between.contains(&label),
+            "{language:?}: the button {label} under the language and above the theme: {between}"
         );
     }
 }

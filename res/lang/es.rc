@@ -191,6 +191,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "¿Encontró un error o tiene una idea? El asistente compone el mensaje y solo lo envía al autor cuando pulse «Enviar»."
     IDS_WRITE_TO_AUTHOR     "Escribir al autor…"
     IDS_LETTERS_CAPTION     "Últimas cartas"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Se guardan las tres últimas noticias. Cuando llega una cuarta, la más antigua se va, aunque no se haya leído."
     IDS_LETTERS_OPEN        "Abrir la carta"
     IDS_NEWS_READ_BUTTON    "Leída"

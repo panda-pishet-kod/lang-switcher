@@ -187,6 +187,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "ভুল পেয়েছেন, না কোনো ধারণা আছে? উইজার্ড একটি বার্তা তৈরি করে দেবে, আর আপনি “পাঠান” চাপলেই কেবল তা নির্মাতার কাছে যাবে।"
     IDS_WRITE_TO_AUTHOR     "নির্মাতাকে লিখুন…"
     IDS_LETTERS_CAPTION     "সাম্প্রতিক চিঠি"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "সর্বশেষ তিনটি খবর রাখা হয়। চতুর্থটি এলে সবচেয়ে পুরোনোটি চলে যায়, পড়া হোক বা না হোক।"
     IDS_LETTERS_OPEN        "চিঠি খুলুন"
     IDS_NEWS_READ_BUTTON    "পড়া হয়েছে"
