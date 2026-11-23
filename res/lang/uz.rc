@@ -155,7 +155,7 @@ BEGIN
     IDS_THANKS_FOOT         "Bu xat faqat bir marta keladi. Uni faqat bir marta, bir haftaga kechiktirish mumkin."
     IDS_AUTHOR_CAPTION      "Muallifdan"
     IDS_AUTHOR_PANEL        "Muallif"
-    IDS_AUTHOR_TEXT         "U bepul va shunday qoladi. Amalda rahmat aytmoqchi boʻlsangiz, qoʻllab-quvvatlash sahifasida bir necha usul bor. Birovning mehnatini qadrlashingiz yaxshi ♥"
+    IDS_AUTHOR_TEXT         "Bepul, shunday qoladi. Rahmat aytish — qoʻllab-quvvatlash sahifasida. Qadrlashingiz yaxshi ♥"
     IDS_AUTHOR_TITLE        "Dasturni bir kishi boʻsh vaqtida yaratadi"
     IDS_THANKS_SAY          "Yoqqan boʻlsa, bu haqda <a>GitHub Issues-da</a> yozing."
     IDS_NEWS_PANEL          "Yangiliklar va yangilanishlar"
