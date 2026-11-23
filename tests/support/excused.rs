@@ -119,10 +119,11 @@ pub fn unsettled(excuses: &[Excuse]) -> Vec<String> {
 /// while the wave takes it. The guard «строка ≠ английской» of `tests\l10n.rs` lets it through,
 /// printed and never in silence; the gate of a release (`tests\ui_fit.rs`) lets no string of the
 /// wave through, as it lets no window of the wave through.
+#[derive(Clone, Copy)]
 pub struct Untranslated {
     /// The identifiers, `IDS_…`.
     pub ids: &'static [&'static str],
-    /// The languages; empty — every one but English.
+    /// The languages; empty — every one in which the string still reads as English.
     pub languages: &'static [&'static str],
     /// None is never written: a record without a category is refused — [`uncategorised_strings`].
     pub category: Option<Category>,
@@ -135,8 +136,9 @@ pub struct Untranslated {
 
 /// **The strings excused from translation** (208.236 п. 6), each with its category and its term.
 ///
-/// A string a stage adds in English to every language waits here for its wave — for example, as
-/// the eighteen strings of the second hotkey would (3360…3377, 208.233):
+/// A string a stage adds in English and Russian, with the other languages standing in English,
+/// waits here for its wave — for example, as the eighteen strings of the second hotkey would
+/// (3360…3377, 208.233):
 ///
 /// ```text
 /// Untranslated {
@@ -145,7 +147,7 @@ pub struct Untranslated {
 ///     category: Some(Category::Wave),
 ///     until: "волна 18 строк второй клавиши",
 ///     decision: Some("208.233"),
-///     why: "строки второй клавиши добавлены английскими во все языки до волны",
+///     why: "строки второй клавиши стоят английскими в 64 языках до волны",
 /// }
 /// ```
 pub const UNTRANSLATED: &[Untranslated] = &[];
@@ -196,31 +198,35 @@ pub fn unsettled_strings(records: &[Untranslated]) -> Vec<String> {
 }
 
 /// The strings of `records`, and the languages of each, that excused nothing in a pass of the
-/// guard which met the English strings `matched` (identifier, language); `tags` — the languages
-/// of the pass but English, which a record of every language stands for. A string translated
-/// since is taken away from its record, so that the record hides no English string to come.
-pub fn stale_strings(
-    records: &[Untranslated],
-    matched: &[(String, String)],
-    tags: &[String],
-) -> Vec<String> {
+/// guard which met the English strings `matched` (identifier, language) — the rule of [`stale`]:
+/// a record that names its languages answers for each of them, and a record of every language
+/// for its string in some language at least. A string the wave has translated is taken away from
+/// its record, so that the record hides no English string to come; one translated in part stays
+/// under a record of every language until the last of them — and a release lets no record of the
+/// wave through at all.
+pub fn stale_strings(records: &[Untranslated], matched: &[(String, String)]) -> Vec<String> {
+    let hit = |id: &str, tag: Option<&str>| {
+        matched
+            .iter()
+            .any(|(m_id, m_tag)| m_id == id && tag.is_none_or(|tag| tag == m_tag))
+    };
     let mut found = Vec::new();
     for record in records {
-        let languages: Vec<&str> = if record.languages.is_empty() {
-            tags.iter().map(String::as_str).collect()
-        } else {
-            record.languages.to_vec()
-        };
         for id in record.ids {
-            let translated: Vec<&str> = languages
-                .iter()
-                .copied()
-                .filter(|tag| {
-                    !matched
-                        .iter()
-                        .any(|(m_id, m_tag)| m_id == id && m_tag == tag)
-                })
-                .collect();
+            let translated: Vec<&str> = if record.languages.is_empty() {
+                if hit(id, None) {
+                    Vec::new()
+                } else {
+                    vec!["все языки"]
+                }
+            } else {
+                record
+                    .languages
+                    .iter()
+                    .copied()
+                    .filter(|tag| !hit(id, Some(tag)))
+                    .collect()
+            };
             if !translated.is_empty() {
                 found.push(format!(
                     "{id} уже не английская в: {} — снять из записи «{}»",

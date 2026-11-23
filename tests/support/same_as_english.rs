@@ -15,6 +15,7 @@
 //!   `en.rc` — is refused, so that it hides no English string to come.
 
 /// A string of the languages `languages` that reads as the English one and is right.
+#[derive(Clone, Copy)]
 pub struct Same {
     /// The identifier, `IDS_…`.
     pub id: &'static str,

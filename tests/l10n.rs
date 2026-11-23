@@ -791,11 +791,6 @@ fn english_left(
     };
     let mut matched_same: BTreeSet<(String, String)> = BTreeSet::new();
     let mut matched_wave: Vec<(String, String)> = Vec::new();
-    let tags: Vec<String> = files
-        .iter()
-        .map(|(tag, _)| tag.clone())
-        .filter(|tag| tag != "en")
-        .collect();
 
     for (tag, text) in files {
         if tag == "en" {
@@ -854,7 +849,7 @@ fn english_left(
             .map(|line| format!("excused.rs: запись без категории, срока или строки — {line}")),
     );
     found.refused.extend(
-        excused::stale_strings(untranslated, &matched_wave, &tags)
+        excused::stale_strings(untranslated, &matched_wave)
             .into_iter()
             .map(|line| format!("excused.rs: {line}")),
     );
@@ -894,8 +889,9 @@ fn no_language_keeps_a_string_of_english_but_the_ones_listed() {
 
 /// **The guard of English can fail, and says where** (208.236 п. 6): English put back into one
 /// string of `de.rc` — the experiment of TR-L10N-180c — is refused naming `de.rc` and the string;
-/// under a record of the wave the same string passes, printed; and a record of either list that
-/// excuses nothing is refused.
+/// under a record of the wave, of its language or of every language, the same string passes,
+/// printed; and a record of either list that excuses nothing is refused. The lists are taken as
+/// they are and one record added, so that the test holds whatever waits for its wave today.
 #[test]
 fn the_guard_of_english_names_the_language_and_the_string() {
     const ID: &str = "IDS_LETTERS_TITLE";
@@ -962,36 +958,55 @@ fn the_guard_of_english_names_the_language_and_the_string() {
         refused[0]
     );
 
-    let wave = [Untranslated {
-        ids: &[ID],
-        languages: &["de"],
-        category: Some(excused::Category::Wave),
-        until: "опыт",
-        decision: None,
-        why: "опыт поломкой",
-    }];
-    let found = english_left(&mutated, &english, SAME_AS_ENGLISH, &wave);
-    assert!(
-        new(&found).is_empty(),
-        "under a record of the wave it passes: {:?}",
-        new(&found)
-    );
-    assert_eq!(found.waiting.len(), 1, "and it is printed as waiting");
+    // The lists as they are, and one record more: whatever they excuse already stays excused.
+    let with = |languages: &'static [&'static str]| -> Vec<Untranslated> {
+        let mut records = UNTRANSLATED.to_vec();
+        records.push(Untranslated {
+            ids: &[ID],
+            languages,
+            category: Some(excused::Category::Wave),
+            until: "опыт",
+            decision: None,
+            why: "опыт поломкой",
+        });
+        records
+    };
 
-    let found = english_left(&files, &english, SAME_AS_ENGLISH, &wave);
-    assert!(
-        new(&found)
-            .iter()
-            .any(|line| line.contains(&format!("{ID} уже не английская в: de"))),
-        "a record of the wave for a string translated is refused: {:?}",
-        new(&found)
-    );
+    // A record of the wave, by language or of every language — the latter while the other
+    // languages are translated, as the strings of a stage stand translated in Russian.
+    for languages in [&["de"][..], &[][..]] {
+        let wave = with(languages);
+        let found = english_left(&mutated, &english, SAME_AS_ENGLISH, &wave);
+        assert!(
+            new(&found).is_empty(),
+            "under a record of the wave {languages:?} it passes: {:?}",
+            new(&found)
+        );
+        assert_eq!(
+            found.waiting.len(),
+            as_they_are.waiting.len() + 1,
+            "and it is printed as waiting"
+        );
+    }
 
-    let right = [Same {
+    // The same records where the string is translated: they excuse nothing, and are refused.
+    for (languages, words) in [(&["de"][..], "de"), (&[][..], "все языки")] {
+        let found = english_left(&files, &english, SAME_AS_ENGLISH, &with(languages));
+        assert!(
+            new(&found)
+                .iter()
+                .any(|line| line.contains(&format!("{ID} уже не английская в: {words} "))),
+            "a record of the wave {languages:?} for a string translated is refused: {:?}",
+            new(&found)
+        );
+    }
+
+    let mut right = SAME_AS_ENGLISH.to_vec();
+    right.push(Same {
         id: ID,
         languages: &["de"],
         why: "опыт поломкой",
-    }];
+    });
     let found = english_left(&files, &english, &right, UNTRANSLATED);
     assert!(
         new(&found)
