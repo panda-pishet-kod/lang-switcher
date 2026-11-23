@@ -4065,7 +4065,7 @@ fn a_letter_is_a_window_of_the_shell_and_its_template_is_gone() {
 /// thanks stands where «Далее» stands on the steps.** The wizard is opened by the product's own
 /// `letters::open_wizard` through the door of the tests and must be of the class of an ordinary
 /// window of the shell and answer `ui::host::probe`; `app.rc` carries no `IDD_WIZARD`. Then the
-/// eight pages are laid out at the narrowest window and at two thirds of a 1920 × 1080 screen: the
+/// eight pages are laid out at the narrowest window and at a larger one: the
 /// main button of the row — «Далее», «Отправить», «Повторить», «Закрыть» — has one right edge and
 /// one top on every page (the sheet: «ряд кнопок в одной точке на всех шагах»).
 ///
@@ -5107,7 +5107,7 @@ fn the_switch_of_the_author_window_stands_under_the_block_of_the_news() {
     let block = children
         .iter()
         .position(|node| {
-            matches!(node, Node::Surface(Surface::Block, _)) && format!("{node:?}").contains(&news)
+            matches!(node, Node::Surface(Surface::Nested, _)) && format!("{node:?}").contains(&news)
         })
         .expect("the block of the news");
     let switch = children

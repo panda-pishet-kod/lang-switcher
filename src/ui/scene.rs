@@ -65,10 +65,9 @@ pub fn linked(sentence: &str) -> String {
 pub enum ButtonKind {
     /// Dark, one per window, the rightmost of its row; Enter.
     Primary,
-    /// Light with a frame.
+    /// Light with a frame — every other button, the small actions too (AUDIT-180b пп. 8–9,
+    /// решение 208.227: the quiet one without a frame did not read as a button).
     Normal,
-    /// No frame and no fill: small actions.
-    Quiet,
 }
 
 /// The surfaces of §3 that hold other nodes and are not pressed.

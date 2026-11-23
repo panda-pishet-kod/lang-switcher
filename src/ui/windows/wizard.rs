@@ -2,7 +2,7 @@
 //! three for an idea, the thanks and «Не удалось отправить», in the elements of passport §6 — the
 //! choice cards, the field of the program with «Взять из активного окна» beside it, the radio
 //! buttons, the list of the layout and the key, the segmented switch «Повторяется», the four boxes
-//! of what is attached, the text of the appeal and the contact, the quiet buttons. What it gathers,
+//! of what is attached, the text of the appeal and the contact, the buttons of the copy and the folder. What it gathers,
 //! what it sends and where is `letters::Wizard` and `letters::report`, as they were: not a sign
 //! of the appeal changes.
 
@@ -66,7 +66,7 @@ pub enum Id {
     /// «Что предлагаете?» and «Чем это поможет?».
     Proposal,
     Helps,
-    /// The text of the appeal, «Как с вами связаться», and the quiet buttons.
+    /// The text of the appeal, «Как с вами связаться», and the buttons of the copy and the folder.
     Appeal,
     Contact,
     CopyText,
@@ -404,11 +404,12 @@ impl Page {
         ])
     }
 
-    /// The quiet buttons and the line of what the last of them did.
+    /// The buttons of the copy and the folder — usual ones with a frame (AUDIT-180b п. 8) — and the
+    /// line of what the last of them did.
     fn actions(&self, ids: &[(Id, u16)]) -> Vec<Node<Id>> {
         let mut rows = vec![Node::Row(
             ids.iter()
-                .map(|(id, label)| self.button(*id, *label, ButtonKind::Quiet))
+                .map(|(id, label)| self.button(*id, *label, ButtonKind::Normal))
                 .collect(),
         )];
         if !self.wizard.said().is_empty() {
@@ -471,7 +472,7 @@ impl Page {
             Node::Row(vec![self.button(
                 Id::Channel,
                 settings::IDS_CHANNEL_OPEN,
-                ButtonKind::Quiet,
+                ButtonKind::Normal,
             )]),
         ])
     }

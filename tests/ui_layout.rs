@@ -95,28 +95,21 @@ fn close(a: f32, b: f32) -> bool {
 
 // ---- The size of a window -------------------------------------------------------------------
 
+/// **AUDIT-180b п. 10 (решение 208.227)** — a window opens at 900 × 540, the least frame, on every
+/// work area that holds it; a person stretches it. Red before: two thirds of the work area — 910 ×
+/// 540 on 1366 × 728, 1280 × 693 on 1920 × 1040.
 #[test]
-fn the_size_of_a_window_is_two_thirds_of_the_work_area_within_its_limits() {
+fn a_window_opens_at_the_least_frame_wherever_the_work_area_holds_it() {
     let cases = [
-        (
-            (1366.0, 728.0),
-            (1366.0 * 2.0 / 3.0, 540.0),
-            Class::Ordinary,
-            false,
-        ),
-        (
-            (1920.0, 1040.0),
-            (1280.0, 1040.0 * 2.0 / 3.0),
-            Class::Large,
-            false,
-        ),
+        ((1366.0, 728.0), (900.0, 540.0), Class::Ordinary, false),
+        ((1920.0, 1040.0), (900.0, 540.0), Class::Ordinary, false),
         // 208.198: a work area under 900 × 540 is a small screen — the window takes all of it and
         // its body scrolls; 900 × 540 is the least frame.
         ((700.0, 560.0), (700.0, 560.0), Class::Narrow, true),
         ((899.0, 600.0), (899.0, 600.0), Class::Narrow, true),
         ((900.0, 540.0), (900.0, 540.0), Class::Ordinary, false),
-        ((2560.0, 1400.0), (1280.0, 720.0), Class::Large, false),
-        ((3840.0, 2120.0), (1280.0, 720.0), Class::Large, false),
+        ((2560.0, 1400.0), (900.0, 540.0), Class::Ordinary, false),
+        ((3840.0, 2120.0), (900.0, 540.0), Class::Ordinary, false),
         ((640.0, 360.0), (640.0, 360.0), Class::Narrow, true),
         ((930.0, 750.0), (900.0, 540.0), Class::Ordinary, false),
     ];
@@ -540,8 +533,8 @@ fn a_choice_field_and_a_segmented_switch_stand_under_their_labels_across_the_col
     );
 }
 
-/// **208.209, AUDIT-180 О3, А2, А3 — the cards of a pair.** An action card stands in the frame of a
-/// block; in a pair standing side by side the two take one height — the taller card's — however
+/// **208.209, AUDIT-180 О3, А2, А3, AUDIT-180b Н3 — the cards of a pair.** An action card stands
+/// in the frame of a nested card (`surface2`, the mock-up's `.card`, решение 208.227); in a pair standing side by side the two take one height — the taller card's — however
 /// long the text of either, and their buttons stand on one line at the foot, at the start edge.
 #[test]
 fn the_cards_of_a_pair_stand_in_frames_of_one_height_with_their_buttons_on_one_line() {
@@ -560,7 +553,7 @@ fn the_cards_of_a_pair_stand_in_frames_of_one_height_with_their_buttons_on_one_l
     ));
     let layout = lay(&window, usual());
     let frames = rects_of(&layout, |part| {
-        matches!(part, Part::Surface(Surface::Block))
+        matches!(part, Part::Surface(Surface::Nested))
     });
     let buttons = rects_of(&layout, |part| matches!(part, Part::Button { .. }));
 
@@ -979,7 +972,7 @@ fn every_window() -> Vec<Window<Id>> {
             }]),
         ]),
         buttons: vec![
-            button(Id::Copy, "Copy", ButtonKind::Quiet),
+            button(Id::Copy, "Copy", ButtonKind::Normal),
             button(Id::Close, "Close", ButtonKind::Primary),
         ],
     };
@@ -1698,7 +1691,7 @@ fn the_wizard_has_its_progress_its_row_and_its_check_boxes_with_a_line() {
     let window = Window {
         kind: WindowKind::Wizard,
         buttons: vec![
-            button(Id::Cancel, "Cancel", ButtonKind::Quiet),
+            button(Id::Cancel, "Cancel", ButtonKind::Normal),
             button(Id::Back, "Back", ButtonKind::Normal),
             button(Id::Next, "Next", ButtonKind::Primary),
         ],

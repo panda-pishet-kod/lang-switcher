@@ -411,3 +411,273 @@ fn a_long_value_of_a_choice_field_stops_short_of_its_corner_mark() {
         "text in the padding before the corner mark, at x {gap:?} (mark at {mark_left})"
     );
 }
+
+// ---- AUDIT-180b (решение 208.227): the look of the parts the owner found wrong ---------------
+
+/// `parts` drawn in `theme` over `ground` on a canvas of `w` × `h` points at 100 %.
+fn parts_drawn(
+    theme: Theme,
+    ground: Color,
+    w: f32,
+    h: f32,
+    parts: &[(Part, Rect, State)],
+) -> Image {
+    let text = Text::new("ru-RU", Direction::LeftToRight).expect("DirectWrite");
+    let look = Look {
+        theme,
+        rtl: false,
+        b: b(),
+        h: 512.0,
+        text: &text,
+    };
+    let mut canvas = Canvas::in_memory(w, h, 1.0, Mode::Direct2D).expect("a canvas");
+    canvas.frame(|painter| {
+        painter.clear(ground.get(theme));
+        for (part, rect, state) in parts {
+            lang_switcher::ui::elements::draw(painter, &look, part, *rect, *state);
+        }
+    });
+    canvas.image().expect("pixels")
+}
+
+/// How far `a` is from `b`: the largest difference of a channel.
+fn apart(a: lang_switcher::ui::tokens::Rgb, b: lang_switcher::ui::tokens::Rgb) -> u8 {
+    a.r.abs_diff(b.r)
+        .max(a.g.abs_diff(b.g))
+        .max(a.b.abs_diff(b.b))
+}
+
+/// The pixels of `image` within `near` of `colour`, inside `rect` or, with `outside`, out of it.
+fn pixels_of(
+    image: &Image,
+    colour: lang_switcher::ui::tokens::Rgb,
+    rect: Rect,
+    outside: bool,
+) -> usize {
+    let mut count = 0;
+    for y in 0..image.height {
+        for x in 0..image.width {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let inside = fx > rect.x && fx < rect.right() && fy > rect.y && fy < rect.bottom();
+            if inside != outside && apart(image.at(x, y), colour) <= 8 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// **AUDIT-180b п. 1** — in a list of check boxes the cursor chooses nothing, so the mouse sees no
+/// frame on it and the keyboard does; the cursor of a list of a choice is the value and keeps its
+/// frame. Red before: the first row of «Исключения» always in a frame of `ink`.
+#[test]
+fn the_cursor_of_a_list_of_check_boxes_is_framed_for_the_keyboard_alone() {
+    let rect = Rect::new(10.0, 10.0, 200.0, 30.0);
+    let ink = Color::Ink.get(Theme::Light);
+    let framed = |check: Option<bool>, state: State| {
+        let row = Part::ListRow {
+            selected: true,
+            index: 0,
+            check,
+        };
+        let image = parts_drawn(
+            Theme::Light,
+            Color::Surface,
+            220.0,
+            50.0,
+            &[(row, rect, state)],
+        );
+        pixels_of(&image, ink, rect.inset(-1.0), false) > 0
+    };
+    assert!(
+        !framed(Some(false), State::NORMAL),
+        "the cursor of a list of check boxes is framed for the mouse"
+    );
+    assert!(
+        !framed(Some(true), State::HOVER),
+        "the cursor of a list of check boxes is framed under the mouse"
+    );
+    assert!(
+        framed(Some(false), State::FOCUS),
+        "the keyboard does not see the cursor of a list of check boxes"
+    );
+    assert!(
+        framed(None, State::NORMAL),
+        "the value of a list of a choice lost its frame"
+    );
+}
+
+/// **AUDIT-180b п. 2** — a group that is one stop of Tab rings its current element alone: the
+/// current section, the selected segment, the row of the cursor; not every section, not the track,
+/// not the whole list. Red before: five rings on the sections, the ring around the track and the
+/// list.
+#[test]
+fn a_group_rings_its_current_element_alone() {
+    let rect = Rect::new(20.0, 20.0, 160.0, 32.0);
+    let accent = Color::Accent.get(Theme::Light);
+    let section = |current| Part::Section {
+        index: 0,
+        current,
+        label: "Общие".to_owned(),
+    };
+    let segment = |selected| Part::Segment {
+        index: 0,
+        selected,
+        label: "Светлая".to_owned(),
+    };
+    let row = |selected| Part::ListRow {
+        selected,
+        index: 0,
+        check: Some(false),
+    };
+    for (part, ringed) in [
+        (section(true), true),
+        (section(false), false),
+        (segment(true), true),
+        (segment(false), false),
+        (Part::Track, false),
+        (row(true), true),
+        (row(false), false),
+    ] {
+        let image = parts_drawn(
+            Theme::Light,
+            Color::Surface,
+            200.0,
+            72.0,
+            &[(part.clone(), rect, State::FOCUS)],
+        );
+        // The ring stands outside the part; the stripe of the current section is inside.
+        let ring = pixels_of(&image, accent, rect.inset(-1.0), true);
+        assert_eq!(
+            ring > 0,
+            ringed,
+            "{part:?} with the keyboard: {ring} pixels of the ring"
+        );
+    }
+}
+
+/// **AUDIT-180b п. 3** — a segment under the mouse is filled inside its track, whose frame stays
+/// whole; a usual button under the mouse in the dark theme goes a step further, to `line`, where
+/// `surface2` is hardly told from `surface`. Red before: the fill over the whole height covered
+/// the frame of the track; the dark button 2B303A → 323845.
+#[test]
+fn the_hover_of_a_segment_keeps_its_track_whole_and_a_dark_button_shows_the_mouse() {
+    let rect = Rect::new(10.0, 10.0, 120.0, 30.0);
+    for theme in [Theme::Light, Theme::Dark] {
+        let segment = Part::Segment {
+            index: 0,
+            selected: false,
+            label: String::new(),
+        };
+        let image = parts_drawn(
+            theme,
+            Color::Surface,
+            140.0,
+            50.0,
+            &[
+                (Part::Track, rect, State::NORMAL),
+                (segment, rect, State::HOVER),
+            ],
+        );
+        let fill = Color::Line.get(theme);
+        let (mid, top) = ((rect.x + rect.w / 2.0) as u32, rect.y as u32);
+        assert!(
+            apart(image.at(mid, (rect.y + rect.h / 2.0) as u32), fill) <= 2,
+            "{theme:?}: the segment is not filled under the mouse"
+        );
+        assert!(
+            apart(image.at(mid, top), fill) > 2,
+            "{theme:?}: the fill of the segment covers the frame of its track"
+        );
+    }
+
+    let button = Part::Button {
+        kind: ButtonKind::Normal,
+        label: String::new(),
+    };
+    for (theme, state, colour) in [
+        (Theme::Dark, State::HOVER, Color::Line),
+        (Theme::Dark, State::PRESSED, Color::Line2),
+        (Theme::Light, State::HOVER, Color::Surface2),
+        (Theme::Light, State::PRESSED, Color::Line),
+    ] {
+        let image = parts_drawn(
+            theme,
+            Color::Bg,
+            140.0,
+            50.0,
+            &[(button.clone(), rect, state)],
+        );
+        let at = image.at(
+            (rect.x + rect.w / 2.0) as u32,
+            (rect.y + rect.h / 2.0) as u32,
+        );
+        assert!(
+            apart(at, colour.get(theme)) <= 1,
+            "{theme:?}, {state:?}: the usual button is {at:?}, not {colour:?}"
+        );
+    }
+}
+
+/// **AUDIT-180b п. 4** — a section of the settings under the mouse takes `surface`, the ground of
+/// the current one, pressed `line`: a step of the fill from nothing is `surface2`, the colour of
+/// the panel it stands on, and did not show (in the mock-up too). Red before: `surface2`.
+#[test]
+fn a_section_under_the_mouse_shows_on_its_panel() {
+    let rect = Rect::new(10.0, 10.0, 160.0, 32.0);
+    for theme in [Theme::Light, Theme::Dark] {
+        for (state, colour) in [
+            (State::HOVER, Color::Surface),
+            (State::PRESSED, Color::Line),
+        ] {
+            let section = Part::Section {
+                index: 1,
+                current: false,
+                label: String::new(),
+            };
+            let image = parts_drawn(
+                theme,
+                Color::Surface2,
+                180.0,
+                52.0,
+                &[(section, rect, state)],
+            );
+            let at = image.at(
+                (rect.x + rect.w / 2.0) as u32,
+                (rect.y + rect.h / 2.0) as u32,
+            );
+            assert!(
+                apart(at, colour.get(theme)) <= 1,
+                "{theme:?}, {state:?}: the section is {at:?}, not {colour:?}"
+            );
+        }
+    }
+}
+
+/// **AUDIT-180b п. 5** — the dots of the panel are seen at 100 %: a dot has a pixel at least three
+/// quarters of the way from the panel's `surface2` to `line2`, as the mock-up's (its CSS names the
+/// radius, 1,2 px: a dot of 2,4 across). Red before: a dot of 1,2 across — its darkest pixel 236
+/// on a panel of 241 in the light theme, the mock-up's 211.
+#[test]
+fn the_dots_of_the_panel_are_seen_at_a_hundred_percent() {
+    for theme in [Theme::Light, Theme::Dark] {
+        let image = parts_drawn(
+            theme,
+            Color::Bg,
+            72.0,
+            72.0,
+            &[(Part::Panel, Rect::new(0.0, 0.0, 72.0, 72.0), State::NORMAL)],
+        );
+        let (ground, dot) = (Color::Surface2.get(theme), Color::Line2.get(theme));
+        let darkest = (6..13)
+            .flat_map(|y| (6..13).map(move |x| (x, y)))
+            .map(|(x, y)| apart(image.at(x, y), ground))
+            .max()
+            .unwrap_or(0);
+        let span = apart(dot, ground);
+        assert!(
+            u32::from(darkest) * 4 >= u32::from(span) * 3,
+            "{theme:?}: the darkest pixel of a dot is {darkest} from the panel of {span}"
+        );
+    }
+}

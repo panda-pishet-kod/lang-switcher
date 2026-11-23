@@ -157,8 +157,8 @@ pub trait Content {
     fn timer(&self) -> Option<u32> {
         None
     }
-    /// The window opens at the least size of the passport (620 × 500) rather than at two thirds of
-    /// the work area — a small window of a few lines (T-120-21 Б: the details for the author). The
+    /// The window opens at the least size of the passport (620 × 500) rather than at 900 × 540 — a
+    /// small window of a few lines (T-120-21 Б: the details for the author). The
     /// person may still make it larger.
     fn least(&self) -> bool {
         false
@@ -735,7 +735,7 @@ fn class(popup: bool) -> PCWSTR {
 }
 
 /// Opens a window of the shell for `content`, owned by `owner`, centred on the work area of the
-/// monitor under the mouse, at two thirds of it.
+/// monitor under the mouse, at 900 × 540 while it holds that (208.227).
 pub fn open<C: Content + 'static>(content: C, owner: Option<HWND>) -> WinResult<HWND> {
     let hwnd = create(content, owner)?;
     // Cloaked until the first frame is drawn: the window never shows empty.
@@ -1144,6 +1144,16 @@ unsafe extern "system" fn procedure(
             // SAFETY: a live window of this thread.
             let _ = unsafe { DestroyWindow(hwnd) };
             return LRESULT(0);
+        }
+        // Answered before the host is borrowed: a field asks for its colours while the window is
+        // busy too, and a borrowed host would leave it the white of `DefWindowProcW` (AUDIT-180b
+        // п. 7, решение 208.227).
+        WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => {
+            if let Some(answer) =
+                field::colours_of(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _))
+            {
+                return answer;
+            }
         }
         WM_NCDESTROY => {
             // SAFETY: as in `slot_of`; the window forgets the pointer first, then the slot made
@@ -2992,9 +3002,6 @@ impl<C: Content> Handler for Host<C> {
                 self.deliver(hwnd, Event::FocusLost { id, to });
                 Some(LRESULT(0))
             }
-            WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => self
-                .fields
-                .colours(HDC(wparam.0 as *mut _), HWND(lparam.0 as *mut _)),
             WM_SETFOCUS => {
                 // The window activated again: the keyboard back to its field.
                 if let Some(id) = self.focus {
