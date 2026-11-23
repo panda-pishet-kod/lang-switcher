@@ -35,54 +35,17 @@ pub struct Excuse {
 /// **The windows excused from fitting** (208.175), each with its category and its term.
 pub const EXCUSED: &[Excuse] = &[
     // AUDIT-180 А1 (208.211): the title of «От автора» is the first sentence of the owner's text and
-    // the card says the rest. In ru and en it is split; in these languages, till the wave splits
-    // their old translation the same way, the title is the English stand-in and the card still says
-    // the whole text — the window of 900 × 540 does not fit at 12 points.
+    // the card says the rest. The wave split the old translation of every language the same way
+    // (L10N-180b, without a word lost); these languages still do not fit the window of 900 × 540
+    // even at 12 points: the owner's text is not cut (the owner was promised), so the owner decides.
     Excuse {
         window: "author",
         class: Class::Ordinary,
-        languages: &[
-            "be", "cy", "de", "el", "hy", "ka", "km", "lb", "mi", "ml", "nl", "ta", "te", "uz",
-            "uz-Cyrl",
-        ],
+        languages: &["hy", "ka", "ml", "te", "uz", "uz-Cyrl"],
         category: Some(Category::Wave),
-        until: "волна переводов 1.8.0: разбить прежний перевод IDS_AUTHOR_TEXT (208.211)",
+        until: "волна переводов 1.8.0: «От автора» не влезает при кегле 12 — решает владелец (L10N-180b)",
         decision: None,
-        why: "до волны заголовок «От автора» — английская заглушка, а карточка — весь прежний текст",
-    },
-    // AUDIT-180 Z8 (208.133): the head of a step of the wizard is as tall as the tallest head of
-    // both roads — the one of «Что делали», whose note is long in ta and ml — and «Что приложить»
-    // under it does not fit at 12 points there. The translator shortens IDS_WIZARD_DID_NOTE.
-    Excuse {
-        window: "wizard attach",
-        class: Class::Ordinary,
-        languages: &["ml", "ta"],
-        category: Some(Category::Wave),
-        until: "волна переводов 1.8.0 (l10n\\180-wave-strings.md)",
-        decision: None,
-        why: "шапка мастера по самой высокой — IDS_WIZARD_DID_NOTE длинна в ta и ml (Z8)",
-    },
-    // AUDIT-180 Z3: «Поддержать автора ↗» of the card of «Спасибо» is wider than the card in its
-    // frame in ta and uz-Cyrl, in both classes — the translator shortens it. Since the link went
-    // into the lead (208.217, Пс2) uz-Cyrl of the ordinary window fits at the factor of the table,
-    // but not with the margin of the pass of the table even at 12 points: the excuse stays.
-    Excuse {
-        window: "letter thanks",
-        class: Class::Ordinary,
-        languages: &["ta", "uz-Cyrl"],
-        category: Some(Category::Wave),
-        until: "волна переводов 1.8.0 (l10n\\180-wave-strings.md)",
-        decision: None,
-        why: "IDS_SUPPORT_OPEN шире карточки в рамке (Z3)",
-    },
-    Excuse {
-        window: "letter thanks",
-        class: Class::Narrow,
-        languages: &["ta", "uz-Cyrl"],
-        category: Some(Category::Wave),
-        until: "волна переводов 1.8.0 (l10n\\180-wave-strings.md)",
-        decision: None,
-        why: "IDS_SUPPORT_OPEN шире карточки в рамке (Z3)",
+        why: "заголовок (hy, ka, ml) или текст карточки (te, uz, uz-Cyrl) длиннее окна; текст не режется",
     },
 ];
 
