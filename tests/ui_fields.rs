@@ -24,8 +24,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, ES_MULTILINE, ES_RIGHT, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW,
     GetWindowTextW, IsWindow, MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetWindowTextW, WM_CLOSE,
-    WM_CTLCOLOREDIT, WM_GETFONT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_PAINT,
-    WS_EX_RTLREADING,
+    WM_CTLCOLOREDIT, WM_GETFONT, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_PAINT, WS_EX_RTLREADING,
 };
 use windows::core::HSTRING;
 
@@ -305,6 +305,9 @@ fn send(hwnd: HWND, message: u32, wparam: usize, lparam: isize) -> isize {
     unsafe { SendMessageW(hwnd, message, Some(WPARAM(wparam)), Some(LPARAM(lparam))) }.0
 }
 
+/// `MK_LBUTTON`: the left button down, in the `wParam` of a message of the mouse.
+const MK_LBUTTON: usize = 0x0001;
+
 fn point(x: f32, y: f32) -> isize {
     let (x, y) = (x.round() as i16 as u16, y.round() as i16 as u16);
     ((y as isize) << 16) | x as isize
@@ -436,6 +439,35 @@ fn the_mouse_and_the_wheel_reach_the_rows() {
         point(at.x as f32, at.y as f32),
     );
     assert_eq!(open.events(), [Event::Scrolled(Id::Layouts, 3)]);
+}
+
+/// ⭐ **Решение 208.235**: the thumb of the bar of a list in a window is dragged by the mouse too —
+/// the rows follow it to the end of the list, no row is selected, and the list takes the keyboard.
+#[test]
+fn the_thumb_of_the_bar_of_a_list_is_dragged() {
+    let open = Open::new();
+    let (_, bar) = open.items("Scroll {").remove(0);
+    let x = bar.x + bar.w / 2.0;
+    send(open.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, point(x, bar.y + 2.0));
+    send(
+        open.hwnd,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        point(x, bar.bottom() + 300.0),
+    );
+    send(open.hwnd, WM_LBUTTONUP, 0, point(x, bar.bottom() + 300.0));
+    let events = open.events();
+    assert!(
+        matches!(events.as_slice(), [Event::Scrolled(Id::Layouts, first)] if *first > 0),
+        "the thumb dragged to the end: {events:?}"
+    );
+    assert!(
+        !open
+            .items("ListRow { selected: false, index: 19")
+            .is_empty(),
+        "the last row is not shown"
+    );
+    assert_eq!(open.focus().as_deref(), Some("Layouts"));
 }
 
 /// A row with a check box: a click selects the row and turns its box, with the row and the value;

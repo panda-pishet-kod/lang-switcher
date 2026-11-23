@@ -155,6 +155,35 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
     }
 }
 
+/// ⭐ **The thumb of a scroll bar** at `bar` — what the bar draws and what the mouse takes hold of
+/// (решение 208.235: «за палочку не тянется»): as long as the share of the rows shown, no shorter
+/// than twice the bar is wide, at the share of the way the first row shown has gone. None when every
+/// row is shown. One body for the drawing and the dragging, so the thumb taken is the thumb seen.
+pub fn scroll_thumb(bar: Rect, first: usize, visible: usize, total: usize) -> Option<Rect> {
+    if total <= visible {
+        return None;
+    }
+    let length = (bar.h * visible as f32 / total as f32).max(bar.w * 2.0);
+    let travel = bar.h - length;
+    let at = travel * first as f32 / (total - visible) as f32;
+    Some(Rect::new(bar.x, bar.y + at, bar.w, length))
+}
+
+/// The first row shown when the thumb of `bar` has its top at `top` — the reverse of
+/// [`scroll_thumb`], kept inside the list: the thumb dragged above the bar is the first row, below
+/// it the last page.
+pub fn scroll_first_at(bar: Rect, visible: usize, total: usize, top: f32) -> usize {
+    let Some(thumb) = scroll_thumb(bar, 0, visible, total) else {
+        return 0;
+    };
+    let travel = bar.h - thumb.h;
+    if travel <= 0.0 {
+        return 0;
+    }
+    let share = ((top - bar.y) / travel).clamp(0.0, 1.0);
+    (share * (total - visible) as f32).round() as usize
+}
+
 /// Whether the keyboard ring is drawn around this part when it has the focus.
 ///
 /// A group that is one stop of Tab — the sections of the settings, the segments of a switch, the
@@ -631,11 +660,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             total,
         } => {
             painter.fill_rect(rect, rect.w / 2.0, c(Color::Surface2));
-            if *total > *visible {
-                let length = (rect.h * *visible as f32 / *total as f32).max(rect.w * 2.0);
-                let travel = rect.h - length;
-                let at = travel * *first as f32 / (*total - *visible) as f32;
-                let thumb = Rect::new(rect.x, rect.y + at, rect.w, length);
+            if let Some(thumb) = scroll_thumb(rect, *first, *visible, *total) {
                 painter.fill_rect(thumb, rect.w / 2.0, c(Color::Edge));
             }
         }

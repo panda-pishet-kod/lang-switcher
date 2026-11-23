@@ -63,13 +63,28 @@ fn print_the_pictures_of_the_window_of_the_settings() {
     std::fs::create_dir_all(folder).expect("the folder of the pictures");
     with_product_strings();
 
-    let sizes: [(&str, WindowSize); 3] = [
+    // 208.235: the tightest window of the ordinary class too — the small screen the owner looks at.
+    let sizes: [(&str, WindowSize); 4] = [
         ("opening", window_size(1920.0, 1040.0)),
         ("largest", client_size(1280.0, 720.0)),
+        ("ordinary", client_size(900.0, 540.0)),
         ("least", client_size(620.0, 500.0)),
     ];
+    // The languages of C3, or those `LANGSW_UI_SETTINGS_LANGS` names by their tags («bs,lb»): the
+    // pictures of a language the fitting is asked about (208.235).
+    let languages: Vec<Language> = match std::env::var("LANGSW_UI_SETTINGS_LANGS") {
+        Ok(tags) => tags
+            .split(',')
+            .filter_map(|tag| {
+                Language::ALL
+                    .into_iter()
+                    .find(|language| language.tag().eq_ignore_ascii_case(tag.trim()))
+            })
+            .collect(),
+        Err(_) => LANGUAGES.to_vec(),
+    };
     let mut lines = Vec::new();
-    for language in LANGUAGES {
+    for language in languages {
         let rtl = language.is_rtl();
         let direction = if rtl {
             Direction::RightToLeft

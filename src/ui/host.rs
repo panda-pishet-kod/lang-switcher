@@ -46,7 +46,7 @@
 
 use crate::theme::{ThemeSetting, resolve, system_is_light, title_bar_is_dark};
 use crate::ui::canvas::{Canvas, Mode, POINT_DPI, Rect};
-use crate::ui::elements::{self, Look, State, hit_area, input_fill};
+use crate::ui::elements::{self, Look, State, hit_area, input_fill, scroll_first_at, scroll_thumb};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
 use crate::ui::layout::menu_width;
@@ -97,13 +97,13 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     LoadCursorW, MA_NOACTIVATE, MINMAXINFO, PostMessageW, RegisterClassExW,
     SPI_GETCLIENTAREAANIMATION, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE,
     SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursor, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, SystemParametersInfoW, WHEEL_DELTA, WM_CLOSE, WM_COMMAND,
-    WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND,
-    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS,
-    WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_CLIPCHILDREN,
-    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_POPUP,
-    WS_SYSMENU, WS_THICKFRAME,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE,
+    WM_COMMAND, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE,
+    WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
+    WM_SETCURSOR, WM_SETFOCUS, WM_SETTINGCHANGE, WM_SIZE, WM_THEMECHANGED, WM_TIMER, WNDCLASSEXW,
+    WS_CAPTION, WS_CLIPCHILDREN, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MINIMIZEBOX,
+    WS_OVERLAPPED, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, HICON, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsChild, LR_DEFAULTCOLOR, LoadImageW,
@@ -653,6 +653,21 @@ fn notification_area() -> RECT {
     }
 }
 
+/// ⭐ **The thumb of a list's scroll bar held by the mouse** — решение 208.235: «только колесиком,
+/// мышкой за палочку не тянется». Taken on the press, the rows follow the mouse till the button is
+/// let go; the bar and the place of the press on the thumb stay as they were at the press.
+#[derive(Clone, Copy, Debug)]
+struct ThumbDrag<I> {
+    /// The list whose bar it is.
+    id: I,
+    /// The bar on the screen, in points.
+    bar: Rect,
+    visible: usize,
+    total: usize,
+    /// How far below the top of the thumb the press was, in points.
+    grab: f32,
+}
+
 struct Host<C: Content> {
     content: C,
     window: Window<C::Id>,
@@ -686,6 +701,8 @@ struct Host<C: Content> {
     fields: Fields<C::Id>,
     /// What the wheel turned short of a whole notch.
     wheel: i32,
+    /// The thumb of a list's scroll bar the mouse holds (208.235).
+    thumb: Option<ThumbDrag<C::Id>>,
     /// How far the body of a small screen is scrolled, in points (208.198); 0 — at its top.
     scroll_y: f32,
     /// The window is a popup: no caption, in the corner, not taking the focus.
@@ -1204,6 +1221,7 @@ impl<C: Content> Host<C> {
             pictures: Some(Box::new(crate::ui::art::Art::new())),
             fields: Fields::default(),
             wheel: 0,
+            thumb: None,
             scroll_y: 0.0,
             popup: None,
             drop: None,
@@ -2129,6 +2147,82 @@ impl<C: Content> Host<C> {
             })
     }
 
+    /// The scroll bar of a list under `x`, `y` (client pixels), with the list's identifier and view
+    /// and the bar on the screen, in points (решение 208.235). The bar drawn is thin; the mouse takes
+    /// it across the whole margin it stands in — from the end of the rows to the frame of the list.
+    /// The bar of a list is the first after the list's own part (`layout::list`).
+    fn list_bar_at(&self, x: f32, y: f32) -> Option<(C::Id, ListView, Rect)> {
+        let (x, y) = (x / self.scale, y / self.scale);
+        let layout = self.layout.as_ref()?;
+        let mut list = None;
+        for (index, item) in layout.items.iter().enumerate() {
+            match (&item.part, item.id) {
+                (Part::List(view), Some(id)) => list = Some((id, *view, item.rect)),
+                (Part::Scroll { .. }, None) => {
+                    let Some((id, view, frame)) = list.take() else {
+                        continue;
+                    };
+                    if self.window.disabled.contains(&id) || !self.seen_at(index, x, y) {
+                        continue;
+                    }
+                    let bar = self.on_screen(index, item.rect);
+                    let frame = self.on_screen(index, frame);
+                    let margin = (frame.right() - bar.right()).min(bar.x - frame.x).max(0.0);
+                    if x >= bar.x - margin
+                        && x < bar.right() + margin
+                        && y >= bar.y
+                        && y < bar.bottom()
+                    {
+                        return Some((id, view, bar));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// ⭐ **A press on the scroll bar of a list** — решение 208.235. On the thumb it takes hold of
+    /// it ([`Self::drag_thumb`]); beside it the list goes a page that way, as a bar of Windows does.
+    /// The list takes the keyboard, as a press on one of its rows gives it.
+    fn press_bar(&mut self, hwnd: HWND, id: C::Id, view: ListView, bar: Rect, y: f32) {
+        self.pressed = None;
+        self.hover = None;
+        self.focus = Some(id);
+        self.give_keyboard(hwnd);
+        if let Some(thumb) = scroll_thumb(bar, view.first, view.visible, view.total) {
+            if y >= thumb.y && y < thumb.bottom() {
+                self.thumb = Some(ThumbDrag {
+                    id,
+                    bar,
+                    visible: view.visible,
+                    total: view.total,
+                    grab: y - thumb.y,
+                });
+            } else {
+                let page = view.visible.saturating_sub(1).max(1) as isize;
+                let first = view.scrolled(if y < thumb.y { -page } else { page });
+                if first != view.first {
+                    self.deliver(hwnd, Event::Scrolled(id, first));
+                }
+            }
+        }
+        // SAFETY: a live window of this thread.
+        unsafe { SetCapture(hwnd) };
+        invalidate(hwnd);
+    }
+
+    /// The thumb held moved to `y` (points): the list shows the rows the thumb's place stands for.
+    fn drag_thumb(&mut self, hwnd: HWND, drag: ThumbDrag<C::Id>, y: f32) {
+        let first = scroll_first_at(drag.bar, drag.visible, drag.total, y - drag.grab);
+        self.lay_out(hwnd);
+        if let Some(view) = self.list_view(drag.id)
+            && first != view.first
+        {
+            self.deliver(hwnd, Event::Scrolled(drag.id, first));
+        }
+    }
+
     /// Selects `row` of the list `id` and scrolls it into view.
     fn select_row(&mut self, hwnd: HWND, id: C::Id, view: ListView, row: usize) {
         if row != view.selected && !self.deliver(hwnd, Event::Selected(id, row)) {
@@ -2841,6 +2935,11 @@ impl<C: Content> Handler for Host<C> {
                     self.tracking = unsafe { TrackMouseEvent(&mut track) }.is_ok();
                 }
                 let (x, y) = point_of(lparam);
+                // 208.235: the thumb held follows the mouse, wherever it goes while the button is down.
+                if let Some(drag) = self.thumb {
+                    self.drag_thumb(hwnd, drag, y / self.scale);
+                    return Some(LRESULT(0));
+                }
                 self.lay_out(hwnd);
                 let hover = self.hit(x, y);
                 if hover != self.hover {
@@ -2883,6 +2982,10 @@ impl<C: Content> Handler for Host<C> {
                 let (x, y) = point_of(lparam);
                 self.cue = false;
                 self.lay_out(hwnd);
+                if let Some((id, view, bar)) = self.list_bar_at(x, y) {
+                    self.press_bar(hwnd, id, view, bar, y / self.scale);
+                    return Some(LRESULT(0));
+                }
                 self.pressed = self.hit(x, y);
                 self.hover = self.pressed;
                 // A field of a key out of its capture only shows the key: a press on it is beside.
@@ -2903,6 +3006,19 @@ impl<C: Content> Handler for Host<C> {
                 unsafe { SetCapture(hwnd) };
                 invalidate(hwnd);
                 Some(LRESULT(0))
+            }
+            // 208.235: the thumb let go — the rows stay where it left them; nothing is pressed.
+            WM_LBUTTONUP if self.thumb.is_some() => {
+                self.thumb = None;
+                // SAFETY: releases the capture taken on the press.
+                let _ = unsafe { ReleaseCapture() };
+                invalidate(hwnd);
+                Some(LRESULT(0))
+            }
+            // The capture taken away (another window, Esc of a drag of Windows): the thumb is let go.
+            WM_CAPTURECHANGED => {
+                self.thumb = None;
+                None
             }
             WM_LBUTTONUP => {
                 // SAFETY: releases the capture taken on the press.

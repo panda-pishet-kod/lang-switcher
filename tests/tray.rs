@@ -7526,6 +7526,118 @@ mod window_of_the_settings {
             "«Правый Ctrl»"
         );
     }
+
+    /// ⭐ **Решение 208.235** — the lists of the settings scroll: the list of the cycle and the list
+    /// of «Исключения» show from the row the wheel, the keys or the thumb of the bar moved them to.
+    /// Until this they showed from the first row whatever the bar said.
+    #[test]
+    fn the_lists_of_the_settings_keep_where_they_were_scrolled() {
+        let mut config = Config::default();
+        config.exclusions.processes = (0..20).map(|n| format!("game{n:02}.exe")).collect();
+        let mut window =
+            Settings::with_session(config, Language::Ru, Vec::new(), Box::new(|_| true));
+        let first_of = |window: &Settings, list: &str| {
+            let shown = shown(window);
+            let at = shown
+                .find(&format!("List {{ id: {list},"))
+                .unwrap_or_else(|| panic!("no list {list}: {shown}"));
+            let rest = &shown[at..];
+            let first = rest.find("first: ").expect("the first row") + "first: ".len();
+            rest[first..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|number| number.parse::<usize>().ok())
+                .expect("a number")
+        };
+
+        window.section = Section::Exclusions;
+        assert_eq!(first_of(&window, "Exclusions"), 0);
+        window.event(Event::Scrolled(Id::Exclusions, 7));
+        assert_eq!(first_of(&window, "Exclusions"), 7, "«Исключения»");
+
+        window.section = Section::Layouts;
+        window.config.layouts.mode = lang_switcher::settings::LayoutMode::Cycle;
+        assert_eq!(first_of(&window, "Cycle"), 0);
+        window.event(Event::Scrolled(Id::Cycle, 2));
+        assert_eq!(first_of(&window, "Cycle"), 2, "the list of the cycle");
+    }
+
+    /// ⭐ **Решение 208.235.** After «Всё равно установить» the text of the warning stays under the
+    /// field, small and grey, with no title and no buttons — and when the settings open again; «Удалить»
+    /// beside «Задать» takes the second key back to «Не задана», the mode kept, the note gone. With
+    /// nothing set «Удалить» is unavailable, and so it is in a capture and while the warning waits.
+    #[test]
+    fn the_tap_keeps_a_grey_note_and_the_second_key_is_removed() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        window.config.switch_hotkey.enabled = true;
+        let off = |window: &Settings| window.describe().disabled.contains(&Id::SwitchKeyRemove);
+        assert!(
+            shown(&window).contains("SwitchKeyRemove"),
+            "«Удалить» is there"
+        );
+        assert!(off(&window), "nothing to remove");
+
+        window.event(Event::Pressed(Id::SwitchKeySet));
+        assert!(off(&window), "in a capture");
+        window.event(Event::KeyDown {
+            id: Id::SwitchKey,
+            vk: RCONTROL,
+        });
+        window.event(Event::KeyUp {
+            id: Id::SwitchKey,
+            vk: RCONTROL,
+        });
+        assert!(off(&window), "while the warning waits");
+        window.event(Event::Pressed(Id::CtrlWarnSet));
+
+        let note = format!("Text(Small, {:?})", ru(settings::IDS_CTRL_WARN_TEXT));
+        let after = shown(&window);
+        assert!(
+            after.contains(&note),
+            "no grey note after the choice: {after}"
+        );
+        assert!(
+            !after.contains(&ru(settings::IDS_CTRL_WARN_TITLE)),
+            "the title went"
+        );
+        assert!(!after.contains("CtrlWarnSet"), "the buttons went");
+        assert!(!off(&window), "a key to remove");
+
+        // The settings open again on the file as it was written.
+        let set = applied.borrow().last().cloned().expect("the tap set");
+        let mut again = Settings::with_session(set, Language::Ru, Vec::new(), Box::new(|_| true));
+        again.section = Section::Hotkey;
+        assert!(
+            shown(&again).contains(&note),
+            "the note is gone on opening again"
+        );
+
+        let changes = applied.borrow().len();
+        window.event(Event::Pressed(Id::SwitchKeyRemove));
+        assert_eq!(
+            applied.borrow().len(),
+            changes + 1,
+            "«Удалить» changed nothing"
+        );
+        let removed = applied
+            .borrow()
+            .last()
+            .cloned()
+            .expect("«Удалить» changed the file");
+        assert!(removed.switch_hotkey.enabled, "the mode stays");
+        assert_eq!(removed.switch_hotkey.key, "");
+        assert!(!removed.two_keys());
+        let after = shown(&window);
+        assert!(!after.contains(&note), "the note stayed after «Удалить»");
+        assert!(
+            after.contains(&ru(settings::IDS_SWITCH_KEY_NONE)),
+            "«Не задана»"
+        );
+        assert!(off(&window), "nothing left to remove");
+    }
 }
 
 /// Presses the `index`-th part whose printed form begins with `part` that the layout of `hwnd` placed — the sections of the

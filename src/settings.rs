@@ -3637,6 +3637,12 @@ pub fn hotkey_note(hotkey: &Hotkey) -> Option<u16> {
 /// a key written in `[switch_hotkey]` that is not in force — an unknown name, a lawless trigger, the
 /// main key of `[hotkey]` — is [`IDS_NOTE_SWITCH_INVALID`]; a text key is the warning of FR-95 the
 /// first key gets. No key written is «не задана» and says nothing.
+///
+/// ⭐ **A tap of `Ctrl` in force is [`IDS_CTRL_WARN_TEXT`]** — решение 208.235: «оставить после
+/// выбора сероватое предупреждение какие последствия могут быть». What the warning said before «Всё
+/// равно установить», without its title and buttons, stays under the field for as long as the key is
+/// the tap — read from the file, so it is there when the settings open again, and gone once the key
+/// is another or removed.
 pub fn switch_hotkey_note(config: &Config) -> Option<u16> {
     let switch = &config.switch_hotkey;
 
@@ -3646,6 +3652,9 @@ pub fn switch_hotkey_note(config: &Config) -> Option<u16> {
 
     match config.switch_binding() {
         None => Some(IDS_NOTE_SWITCH_INVALID),
+        Some((_, modifiers)) if modifiers & crate::hook::SINGLE_TAP != 0 => {
+            Some(IDS_CTRL_WARN_TEXT)
+        }
         Some((vk, modifiers))
             if modifiers & crate::hook::SINGLE_TAP == 0 && types_a_character(vk, modifiers) =>
         {

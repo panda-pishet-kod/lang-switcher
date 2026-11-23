@@ -426,6 +426,16 @@ impl SwitchHotkey {
         }
     }
 
+    /// ⭐ **The section with no key** — решение 208.235: «сбросить вторую клавишу до пустого
+    /// состояния». The mode as it is; the key, its modifiers and its trigger as a section that never
+    /// had one, so the file says `key = ""` — «не задана».
+    pub fn cleared(&self) -> Self {
+        Self {
+            enabled: self.enabled,
+            ..Self::default()
+        }
+    }
+
     /// The tap of the `Ctrl` of `vk` — `VK_LCONTROL` or `VK_RCONTROL` — as the section stores it,
     /// the mode as it is; `None` for any other code.
     pub fn ctrl_tap(&self, vk: u16) -> Option<Self> {

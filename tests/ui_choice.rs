@@ -15,7 +15,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, IsWindow, MSG, PM_REMOVE, PeekMessageW, SendMessageW, WM_CHAR, WM_CLOSE,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_PAINT,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
 };
 
 #[path = "support/pressed.rs"]
@@ -173,6 +173,9 @@ fn alive(hwnd: HWND) -> bool {
     unsafe { IsWindow(Some(hwnd)) }.as_bool()
 }
 
+/// `MK_LBUTTON`: the left button down, in the `wParam` of a message of the mouse.
+const MK_LBUTTON: usize = 0x0001;
+
 fn point(x: f32, y: f32) -> isize {
     ((y.round() as i16 as u16 as isize) << 16) | (x.round() as i16 as u16 as isize)
 }
@@ -329,4 +332,72 @@ fn a_long_list_scrolls_and_a_closed_field_steps_by_the_arrows() {
     open.key(VK_RETURN.0);
     pump();
     assert_eq!(open.events(), [Event::Selected(Id::Language, 65)]);
+}
+
+/// The first row the bar of the list `hwnd` says is shown: `Scroll { first: N, .. }`.
+fn first_shown(hwnd: HWND) -> usize {
+    let (part, _) = items(hwnd, "Scroll {").remove(0);
+    part.split("first: ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .and_then(|number| number.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no first row in «{part}»"))
+}
+
+/// ⭐ **Решение 208.235** — «прокрутка в выборе языка интерфейса не работает, только колесиком
+/// мышкой за палочку не тянется»: the thumb of the bar is taken by the mouse — also beside the thin
+/// bar, in its margin — and the rows follow it to the end of the list; let go, the list stays open
+/// and nothing is chosen. A press on the bar beside the thumb goes a page.
+#[test]
+fn the_thumb_of_the_bar_is_dragged_by_the_mouse() {
+    let open = Open::with((1..=66).map(|n| format!("Language {n:02}")).collect());
+    let list = open.open_list();
+    let (_, bar) = items(list, "Scroll {").remove(0);
+    assert_eq!(first_shown(list), 0);
+
+    // The thumb stands at the top: taken just left of the bar, in its margin.
+    let x = bar.x - 2.0;
+    send(list, WM_LBUTTONDOWN, MK_LBUTTON, point(x, bar.y + 2.0));
+    send(
+        list,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        point(x, bar.y + bar.h / 2.0),
+    );
+    let middle = first_shown(list);
+    assert!(
+        middle > 0 && middle < 66,
+        "the thumb half way down shows row {middle}"
+    );
+    // Far below the window: the end of the list, no further.
+    send(
+        list,
+        WM_MOUSEMOVE,
+        MK_LBUTTON,
+        point(x, bar.bottom() + 400.0),
+    );
+    send(list, WM_LBUTTONUP, 0, point(x, bar.bottom() + 400.0));
+    pump();
+    assert!(alive(list), "letting go of the thumb closed the list");
+    assert!(
+        !items(list, "index: 65").is_empty(),
+        "the thumb dragged to the end does not show the last row"
+    );
+    let end = first_shown(list);
+    assert!(open.events().is_empty(), "the drag chose a row");
+
+    // Beside the thumb, above it: a page back.
+    send(list, WM_LBUTTONDOWN, MK_LBUTTON, point(x, bar.y + 1.0));
+    send(list, WM_LBUTTONUP, 0, point(x, bar.y + 1.0));
+    let paged = first_shown(list);
+    assert!(
+        paged < end && paged > 0,
+        "a press above the thumb went from {end} to {paged}, not a page"
+    );
+    // The mouse moving with no thumb held scrolls nothing.
+    send(list, WM_MOUSEMOVE, 0, point(x, bar.bottom() - 1.0));
+    assert_eq!(first_shown(list), paged);
+    send(list, WM_LBUTTONUP, 0, point(x, bar.bottom() - 1.0));
+    pump();
+    assert!(open.events().is_empty(), "the bar chose a row");
 }

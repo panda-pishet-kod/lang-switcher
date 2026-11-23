@@ -87,6 +87,8 @@ pub enum Id {
     SwitchKey,
     /// «Задать» beside it.
     SwitchKeySet,
+    /// «Удалить» after «Задать»: the second key back to «Не задана» (решение 208.235).
+    SwitchKeyRemove,
     /// «Всё равно установить» of the warning about a single `Ctrl` (В-4).
     CtrlWarnSet,
     /// «Выбрать другую клавишу» of the warning.
@@ -160,6 +162,10 @@ pub struct Settings {
     cycle_at_open: Vec<String>,
     languages: LanguageOrder,
     cycle_selected: usize,
+    /// The first row shown of the list of the cycle and of «Исключения» — moved by the wheel, the
+    /// keys and the thumb of the bar (решение 208.235: «за палочку не тянется»).
+    cycle_first: usize,
+    exclusions_first: usize,
     /// The names of «Исключения» marked for «Удалить».
     marked: Vec<bool>,
     exclusion_name: String,
@@ -253,6 +259,8 @@ impl Settings {
             language,
             section: Section::General,
             cycle_selected: 0,
+            cycle_first: 0,
+            exclusions_first: 0,
             exclusion_name: String::new(),
             refused: false,
             journal: None,
@@ -511,7 +519,7 @@ impl Settings {
             ),
             None => (value, hint),
         };
-        let mut nodes = vec![Node::Row(vec![
+        let mut row = vec![
             Node::Field {
                 id: field,
                 label: self.line(label),
@@ -522,7 +530,27 @@ impl Settings {
                 },
             },
             button(set_button, self.line(set)),
-        ])];
+        ];
+        // ⭐ Решение 208.235: the second key can go back to «Не задана» — «Удалить» after «Задать»
+        // (the string of «Исключения»; no new one). Unavailable while nothing is set, in a capture
+        // and while the warning waits ([`Self::disabled`]).
+        if target == CaptureTarget::Switch {
+            row.push(button(Id::SwitchKeyRemove, self.line(IDS_EXCLUSION_REMOVE)));
+        }
+        // 208.235: the grey note of a tap of `Ctrl` in force stands half a block under its own field,
+        // a line of the field's block — a block under it, the section does not fit bs and lb in the
+        // ordinary window (ui_fit).
+        if target == CaptureTarget::Switch
+            && capture.is_none()
+            && warning.is_none()
+            && settings::switch_hotkey_note(&self.config) == Some(settings::IDS_CTRL_WARN_TEXT)
+        {
+            return vec![Node::Rows(vec![
+                Node::Row(row),
+                Node::Text(Role::Small, line),
+            ])];
+        }
+        let mut nodes = vec![Node::Row(row)];
         // With two keys the line of the ways under the first field stands aside at rest — its notes,
         // the line after a capture and the lines of a capture stay: the section of two keys does not
         // fit bs and lb even at 12 points with it (ui_fit after Н1 of 1.8.0).
@@ -626,7 +654,7 @@ impl Settings {
                     })
                     .collect(),
                 selected: self.cycle_selected,
-                first: 0,
+                first: self.cycle_first,
             })));
             nodes.push(Node::Buttons(vec![
                 button(Id::Up, self.line(IDS_CYCLE_UP)),
@@ -654,7 +682,7 @@ impl Settings {
                     })
                     .collect(),
                 selected: 0,
-                first: 0,
+                first: self.exclusions_first,
             })),
             Node::Buttons(vec![button(Id::Remove, self.line(IDS_EXCLUSION_REMOVE))]),
             // The two ways to add one, side by side as in the mock-up (`.form2`).
@@ -974,6 +1002,15 @@ impl Settings {
     /// The elements unavailable now.
     fn disabled(&self) -> Vec<Id> {
         let mut off = Vec::new();
+        // 208.235: nothing to remove, a capture of either key, the warning about a single `Ctrl` —
+        // with two keys, where «Удалить» stands at all.
+        if self.config.switch_hotkey.enabled
+            && (!self.config.switch_hotkey.is_set()
+                || self.capture.is_some()
+                || self.ctrl_warning.is_some())
+        {
+            off.push(Id::SwitchKeyRemove);
+        }
         if !self.marked.iter().any(|marked| *marked) {
             off.push(Id::Remove);
         }
@@ -1190,6 +1227,12 @@ impl Content for Settings {
                 }
                 self.ctrl_warning = None;
             }
+            // ⭐ Решение 208.235: the second key back to «Не задана», the mode as it is. With no second
+            // key the program works as with one (§2 п. 3 of the design: `Config::two_keys`).
+            Event::Pressed(Id::SwitchKeyRemove) => {
+                self.ctrl_warning = None;
+                self.change(|config| config.switch_hotkey = config.switch_hotkey.cleared());
+            }
             // Решение 208.228: the mode; the second key is kept in the file either way.
             Event::Selected(Id::HotkeyMode, index) => {
                 self.ctrl_warning = None;
@@ -1238,6 +1281,8 @@ impl Content for Settings {
                 }
             }
             Event::Selected(Id::Cycle, index) => self.cycle_selected = index,
+            Event::Scrolled(Id::Cycle, first) => self.cycle_first = first,
+            Event::Scrolled(Id::Exclusions, first) => self.exclusions_first = first,
             Event::RowChecked(Id::Cycle, index, on) => {
                 if let Some(row) = self.rows.get_mut(index) {
                     row.checked = on;
@@ -1567,6 +1612,13 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     window.section = Section::Hotkey;
     window.ctrl_warning = Some(RIGHT_CTRL);
     all.push(("settings Hotkey ctrl warning".to_owned(), window.describe()));
+    // Решение 208.235: after «Всё равно установить» — the tap in force, the grey note of what it may
+    // break under the field, the segment and the first group back.
+    window.ctrl_warning = None;
+    if let Some(tap) = window.config.switch_hotkey.ctrl_tap(RIGHT_CTRL) {
+        window.config.switch_hotkey = tap;
+    }
+    all.push(("settings Hotkey ctrl set".to_owned(), window.describe()));
     all
 }
 

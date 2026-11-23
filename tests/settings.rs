@@ -15287,6 +15287,43 @@ mod second_hotkey {
         );
     }
 
+    /// ⭐ **Решение 208.235.** The second key removed keeps the mode and is written `key = ""`, which
+    /// reads back as «не задана»: no second key in force, one key at work (§2 п. 3 of the design), no
+    /// note. A tap of `Ctrl` in force keeps under its field what the warning said it may break — in
+    /// the mode of two keys only.
+    #[test]
+    fn the_second_key_removed_is_written_empty_and_a_tap_keeps_its_note() {
+        let tap = two_keys("RightCtrl", &[], "tap");
+        assert_eq!(
+            settings::switch_hotkey_note(&tap),
+            Some(settings::IDS_CTRL_WARN_TEXT),
+            "the grey note of a tap"
+        );
+        let mut one = tap.clone();
+        one.switch_hotkey.enabled = false;
+        assert_eq!(settings::switch_hotkey_note(&one), None, "one key: no note");
+
+        let mut removed = tap.clone();
+        removed.switch_hotkey = removed.switch_hotkey.cleared();
+        assert!(removed.switch_hotkey.enabled, "the mode stays");
+        assert!(!removed.switch_hotkey.is_set());
+        assert_eq!(removed.switch_binding(), None);
+        assert!(!removed.two_keys(), "no second key — one key at work");
+        assert_eq!(settings::switch_hotkey_note(&removed), None);
+
+        let written = removed.to_toml_string().expect("it writes");
+        let section = written
+            .split("[switch_hotkey]")
+            .nth(1)
+            .and_then(|rest| rest.split("\n[").next())
+            .unwrap_or_else(|| panic!("no section: {written}"));
+        assert!(section.contains("enabled = true"), "{section}");
+        assert!(section.contains("key = \"\""), "{section}");
+        let back = Config::from_toml_str(&written).expect("it reads back").0;
+        assert_eq!(back, removed, "the round trip");
+        assert!(!back.two_keys());
+    }
+
     /// **The names**: «Правый Ctrl» in the windows, `RightCtrl` for the author, the key's own name
     /// otherwise, «Не задана» with none.
     #[test]
