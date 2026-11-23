@@ -536,7 +536,20 @@ pub fn lay_out<I: Copy>(
     rtl: bool,
     measure: &dyn Measure,
 ) -> Layout<I> {
-    lay_out_with(window, size, k, rtl, measure, Concession::ALL)
+    lay_out_in(window, size, k, rtl, measure, Concession::ALL, false)
+}
+
+/// [`lay_out`] for the canvas that draws it: `plain` — the plain look of GDI, which sets the brand
+/// line in two lines (решение 208.220, [`Placer::plain`]).
+pub fn lay_out_for<I: Copy>(
+    window: &Window<I>,
+    size: WindowSize,
+    k: f32,
+    rtl: bool,
+    measure: &dyn Measure,
+    plain: bool,
+) -> Layout<I> {
+    lay_out_in(window, size, k, rtl, measure, Concession::ALL, plain)
 }
 
 /// [`lay_out`] with only the steps `allowed` of the order of giving way (§3а) — the instrument of
@@ -548,6 +561,18 @@ pub fn lay_out_with<I: Copy>(
     rtl: bool,
     measure: &dyn Measure,
     allowed: &[Concession],
+) -> Layout<I> {
+    lay_out_in(window, size, k, rtl, measure, allowed, false)
+}
+
+fn lay_out_in<I: Copy>(
+    window: &Window<I>,
+    size: WindowSize,
+    k: f32,
+    rtl: bool,
+    measure: &dyn Measure,
+    allowed: &[Concession],
+    plain: bool,
 ) -> Layout<I> {
     // The window in the corner keeps its sizes (§2): its buttons' role at their 13,5 points.
     let b = if window.kind == WindowKind::Corner {
@@ -563,6 +588,7 @@ pub fn lay_out_with<I: Copy>(
         one_column: size.w < TWO_COLUMNS_FROM.0,
         kind: window.kind,
         art: window.art,
+        plain,
         picture: None,
         sections_at: None,
         given: 0,
@@ -637,6 +663,7 @@ pub fn menu_width<I: Copy>(window: &Window<I>, measure: &dyn Measure) -> f32 {
         one_column: true,
         kind: window.kind,
         art: None,
+        plain: false,
         picture: None,
         sections_at: None,
         given: 0,
@@ -715,6 +742,11 @@ struct Placer<'m, I> {
     one_column: bool,
     kind: WindowKind,
     art: Option<Art>,
+    /// The canvas draws in the plain look of GDI (решение 208.220): the brand line stands in two
+    /// lines, the name over the address, each the whole width of the panel's column — GDI sets a
+    /// face wider than DirectWrite measures it (whole pixels a letter), and on one line the name
+    /// came out «Panda K…» and the address cut.
+    plain: bool,
     /// The circle the picture of the panel is drawn in, once it is placed: what lies over the
     /// picture is placed by it.
     picture: Option<Rect>,
@@ -846,39 +878,66 @@ impl<I: Copy> Placer<'_, I> {
                     panel - edge * 2.0,
                     line,
                 );
-                // The name in the main face, the address beside it in the monospace one.
-                let name_style = Style {
-                    face: Face::Main,
-                    weight: BRAND_NAME_WEIGHT,
-                    ..style
+                // The plain look (208.220): the name over the address, each the whole column —
+                // no measure of DirectWrite cuts what GDI sets wider.
+                let plain_line = |part, y, id| Placed {
+                    part,
+                    rect: Rect::new(at.x, y, at.w, line),
+                    id,
                 };
-                let name_w = self.width_of(name_style, &brand.name).min(at.w);
-                let gap = BRAND_GAP.0 * style.size;
-                let room = (at.w - name_w - gap).max(0.0);
-                // Placed after the content and the buttons: the link of the address is the last
-                // stop of Tab, the order of reading (passport §7).
-                brand_line = vec![
-                    Placed {
-                        part: Part::BrandName {
-                            text: brand.name.clone(),
-                        },
-                        rect: Rect::new(at.x, at.y, name_w, line),
-                        id: None,
-                    },
-                    Placed {
-                        part: Part::Link {
-                            text: brand.address.clone(),
-                            role: Role::Brand,
-                        },
-                        rect: Rect::new(
-                            at.x + name_w + gap,
-                            at.y,
-                            self.width_of(style, &brand.address).min(room),
-                            line,
+                if self.plain {
+                    brand_line = vec![
+                        plain_line(
+                            Part::BrandName {
+                                text: brand.name.clone(),
+                            },
+                            at.y - line,
+                            None,
                         ),
-                        id: Some(brand.link),
-                    },
-                ];
+                        plain_line(
+                            Part::Link {
+                                text: brand.address.clone(),
+                                role: Role::Brand,
+                            },
+                            at.y,
+                            Some(brand.link),
+                        ),
+                    ];
+                } else {
+                    // The name in the main face, the address beside it in the monospace one.
+                    let name_style = Style {
+                        face: Face::Main,
+                        weight: BRAND_NAME_WEIGHT,
+                        ..style
+                    };
+                    let name_w = self.width_of(name_style, &brand.name).min(at.w);
+                    let gap = BRAND_GAP.0 * style.size;
+                    let room = (at.w - name_w - gap).max(0.0);
+                    // Placed after the content and the buttons: the link of the address is the last
+                    // stop of Tab, the order of reading (passport §7).
+                    brand_line = vec![
+                        Placed {
+                            part: Part::BrandName {
+                                text: brand.name.clone(),
+                            },
+                            rect: Rect::new(at.x, at.y, name_w, line),
+                            id: None,
+                        },
+                        Placed {
+                            part: Part::Link {
+                                text: brand.address.clone(),
+                                role: Role::Brand,
+                            },
+                            rect: Rect::new(
+                                at.x + name_w + gap,
+                                at.y,
+                                self.width_of(style, &brand.address).min(room),
+                                line,
+                            ),
+                            id: Some(brand.link),
+                        },
+                    ];
+                }
             }
             (area_x, area_w) = (panel, size.w - panel);
         }
@@ -2837,6 +2896,7 @@ pub fn place_node<I: Copy>(
         one_column: class == Class::Narrow,
         kind: WindowKind::Ordinary,
         art: None,
+        plain: false,
         picture: None,
         sections_at: None,
         given: 0,

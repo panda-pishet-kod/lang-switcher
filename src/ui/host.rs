@@ -45,7 +45,7 @@
 //! Knows nothing of what a window contains.
 
 use crate::theme::{ThemeSetting, resolve, system_is_light, title_bar_is_dark};
-use crate::ui::canvas::{Canvas, POINT_DPI, Rect};
+use crate::ui::canvas::{Canvas, Mode, POINT_DPI, Rect};
 use crate::ui::elements::{self, Look, State, hit_area, input_fill};
 use crate::ui::field::{self, Fields, Spec};
 use crate::ui::fit;
@@ -676,6 +676,9 @@ struct Host<C: Content> {
     cue: bool,
     tracking: bool,
     frames: u32,
+    /// The layout was made for the plain look of GDI (решение 208.220): a canvas that turned to it
+    /// in a frame has the window laid out again.
+    laid_plain: bool,
     background: Option<Rgb>,
     /// What draws the pictures of the panda: `art.rs`, its pictures kept at their size and scale.
     pictures: Option<Box<dyn crate::ui::canvas::Pictures>>,
@@ -1186,6 +1189,7 @@ impl<C: Content> Host<C> {
             cue: false,
             tracking: false,
             frames: 0,
+            laid_plain: false,
             background: None,
             pictures: Some(Box::new(crate::ui::art::Art::new())),
             fields: Fields::default(),
@@ -1845,7 +1849,20 @@ impl<C: Content> Host<C> {
             }) => b / window_b(size.w, size.h, 1.0),
             _ => fit::k_for(&self.locale, size.class),
         };
-        self.layout = Some(fit::emergency(&self.window, size, k, self.rtl, text));
+        // The canvas that draws it says the look: the plain look sets the brand line in two lines.
+        let plain = self
+            .canvas
+            .as_ref()
+            .is_some_and(|canvas| canvas.mode() == Mode::Gdi);
+        self.laid_plain = plain;
+        self.layout = Some(fit::emergency_for(
+            &self.window,
+            size,
+            k,
+            self.rtl,
+            text,
+            plain,
+        ));
         self.scroll_y = self.scroll_y.clamp(0.0, self.scroll_most());
         if let Some(pressed) = self.stale_marks.take() {
             self.hover = mouse_over(hwnd).and_then(|(x, y)| self.hit(x, y));
@@ -2140,13 +2157,7 @@ impl<C: Content> Host<C> {
     }
 
     fn paint(&mut self, hwnd: HWND) {
-        self.lay_out(hwnd);
-        // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
-        self.sync_fields(hwnd);
-        self.follow_capture(hwnd);
-        self.keep_picture_moving(hwnd);
-        self.keep_ticking(hwnd);
-        self.keep_timing(hwnd);
+        // The canvas first: its look is the layout's (208.220).
         if self.canvas.is_none() {
             let mut client = RECT::default();
             // SAFETY: the out parameter is a local.
@@ -2158,6 +2169,13 @@ impl<C: Content> Host<C> {
                 self.scale,
             ));
         }
+        self.lay_out(hwnd);
+        // The colours of the fields follow the state of their wrappers (the mouse, the keyboard).
+        self.sync_fields(hwnd);
+        self.follow_capture(hwnd);
+        self.keep_picture_moving(hwnd);
+        self.keep_ticking(hwnd);
+        self.keep_timing(hwnd);
         let background = Color::Bg.get(self.theme);
         let states: Vec<State> = match &self.layout {
             Some(layout) => layout
@@ -2187,7 +2205,7 @@ impl<C: Content> Host<C> {
         let body = layout.scroll;
         let in_body =
             |index: usize| body.is_some_and(|body| (body.start..body.end).contains(&index));
-        canvas.frame_with(pictures, |painter| {
+        let drawn = canvas.frame_with(pictures, |painter| {
             painter.clear(background);
             for (index, (item, state)) in layout.items.iter().zip(&states).enumerate() {
                 if !in_body(index) {
@@ -2218,6 +2236,11 @@ impl<C: Content> Host<C> {
         });
         self.frames += 1;
         self.background = Some(background);
+        // The canvas turned to the plain look in this frame: the window is laid out for it again.
+        if (drawn == Mode::Gdi) != self.laid_plain {
+            self.layout = None;
+            invalidate(hwnd);
+        }
     }
 
     /// The topmost element answering a press at `x`, `y` (client pixels).

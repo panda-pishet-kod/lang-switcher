@@ -1250,3 +1250,142 @@ fn every_window_draws_in_the_plain_look_in_every_state() {
         }
     }
 }
+
+/// **The brand line of the plain look: two whole lines, over nothing** (решение 208.220, слово
+/// владельца «можно сделать в 2 строчки, и тогда влезет»). GDI sets a face wider than DirectWrite
+/// measures it, and on one line the plain look drew «Panda K…» and cut the address. In every window
+/// with the brand line, in ru and he, in the two classes with a panel, at 100, 125 and 150 %: the
+/// name stands over the address; no other part of the window crosses either; GDI draws each in its
+/// place pixel for pixel as in a box as wide as the window — nothing cut, no ellipsis — and its ink
+/// stays inside its own line.
+#[test]
+fn the_brand_line_of_the_plain_look_is_two_whole_lines_over_nothing() {
+    use lang_switcher::ui::canvas::{Canvas, Image, Mode, Rect};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::tokens::{Color, Theme};
+
+    with_product_strings();
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let crosses = |a: Rect, b: Rect| {
+        let e = 0.01;
+        a.x < b.right() - e && b.x < a.right() - e && a.y < b.bottom() - e && b.y < a.bottom() - e
+    };
+    let ink = |image: &Image| {
+        let mut found: Option<(u32, u32, u32, u32)> = None;
+        for y in 0..image.height {
+            for x in 0..image.width {
+                if image.at(x, y) != bg {
+                    let (l, t, r, b) = found.unwrap_or((x, y, x, y));
+                    found = Some((l.min(x), t.min(y), r.max(x), b.max(y)));
+                }
+            }
+        }
+        found
+    };
+    let mut seen = 0;
+    for language in [Language::Ru, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        for (name, window) in catalogue(language) {
+            if window.brand.is_none() {
+                continue;
+            }
+            for (class, w, h) in &CLASSES[1..] {
+                let size = client_size(*w, *h);
+                let k = fit::k_for(language.tag(), *class);
+                let layout = fit::emergency_for(&window, size, k, rtl, &text, true);
+                let tag = language.tag();
+                let brand: Vec<usize> = (0..layout.items.len())
+                    .filter(|&i| match &layout.items[i].part {
+                        Part::BrandName { .. } => true,
+                        Part::Link { role, .. } => *role == Role::Brand,
+                        _ => false,
+                    })
+                    .collect();
+                assert_eq!(
+                    brand.len(),
+                    2,
+                    "{name} {tag} {class:?}: the name and the address"
+                );
+                let (name_r, address_r) =
+                    (layout.items[brand[0]].rect, layout.items[brand[1]].rect);
+                assert!(
+                    (name_r.bottom() - address_r.y).abs() < 0.01
+                        && (name_r.x - address_r.x).abs() < 0.01
+                        && (name_r.w - address_r.w).abs() < 0.01,
+                    "{name} {tag} {class:?}: the name over the address, one column: {name_r:?} \
+                     {address_r:?}"
+                );
+                for (index, item) in layout.items.iter().enumerate() {
+                    if brand.contains(&index) || matches!(item.part, Part::Panel) {
+                        continue;
+                    }
+                    for line in [name_r, address_r] {
+                        assert!(
+                            !crosses(item.rect, line),
+                            "{name} {tag} {class:?}: {:?} at {:?} crosses the brand line {line:?}",
+                            item.part,
+                            item.rect
+                        );
+                    }
+                }
+
+                let look = Look {
+                    theme,
+                    rtl,
+                    b: layout.b,
+                    h: size.h,
+                    text: &text,
+                };
+                for scale in [1.0_f32, 1.25, 1.5] {
+                    for &index in &brand {
+                        let (part, rect) = (&layout.items[index].part, layout.items[index].rect);
+                        let drawn = |rect: Rect| {
+                            let mut canvas = Canvas::in_memory(size.w, size.h, scale, Mode::Gdi)
+                                .expect("a canvas");
+                            canvas.frame(|painter| {
+                                painter.clear(bg);
+                                elements::draw(painter, &look, part, rect, State::NORMAL);
+                            });
+                            canvas.image().expect("pixels")
+                        };
+                        // As wide as the window, from the edge it starts at.
+                        let wide = if rtl {
+                            Rect::new(rect.right() - size.w, rect.y, size.w, rect.h)
+                        } else {
+                            Rect::new(rect.x, rect.y, size.w, rect.h)
+                        };
+                        let (own, free) = (drawn(rect), drawn(wide));
+                        let at = |x: u32, y: u32| own.at(x, y) == free.at(x, y);
+                        let same = (0..own.height).all(|y| (0..own.width).all(|x| at(x, y)));
+                        assert!(
+                            same,
+                            "{name} {tag} {class:?} {}: {part:?} is cut in its line {rect:?}",
+                            scale * 100.0
+                        );
+                        let (l, t, r, b) = ink(&own).expect("ink");
+                        let px = |v: f32| v * scale;
+                        assert!(
+                            l as f32 >= px(rect.x) - 1.0
+                                && r as f32 <= px(rect.right()) + 1.0
+                                && t as f32 >= px(rect.y) - 1.0
+                                && b as f32 <= px(rect.bottom()) + 1.0,
+                            "{name} {tag} {class:?} {}: the ink of {part:?} ({l}, {t})…({r}, {b}) \
+                             leaves its line {rect:?}",
+                            scale * 100.0
+                        );
+                    }
+                }
+                seen += 1;
+            }
+        }
+    }
+    assert!(seen > 0, "no window with the brand line");
+    println!("the brand line in the plain look: {seen} windows and classes");
+}

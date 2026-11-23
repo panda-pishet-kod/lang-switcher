@@ -1151,6 +1151,75 @@ fn the_brand_line_is_the_name_and_the_address_beside_it() {
     }
 }
 
+/// **The plain look sets the brand line in two lines** (решение 208.220, слово владельца «можно
+/// сделать в 2 строчки, и тогда влезет»): the name over the address, each the whole column of the
+/// panel, the address where the one line stood — so the plain look cuts neither. The look of
+/// Direct2D keeps its one line (the test above).
+#[test]
+fn the_plain_look_sets_the_name_over_the_address_each_the_whole_column() {
+    use lang_switcher::ui::layout::lay_out_for;
+
+    let window = Window {
+        art: Some(Art::About),
+        brand: Some(Brand {
+            name: "Panda Koder".to_owned(),
+            address: "panda-pishet-kod.dev".to_owned(),
+            link: Id::Site,
+        }),
+        buttons: vec![Node::Button {
+            id: Id::Close,
+            label: "Close".to_owned(),
+            kind: ButtonKind::Primary,
+            browser: false,
+        }],
+        ..bare(text(Role::Body, "Body"))
+    };
+    let brand = |layout: &Layout<Id>| {
+        let name = rects_of(layout, |part| matches!(part, Part::BrandName { .. }))[0];
+        let address = rects_of(layout, |part| {
+            matches!(
+                part,
+                Part::Link {
+                    role: Role::Brand,
+                    ..
+                }
+            )
+        })[0];
+        (name, address)
+    };
+    for rtl in [false, true] {
+        let one = lay_out(&window, usual(), 1.0, rtl, &MEASURE);
+        let two = lay_out_for(&window, usual(), 1.0, rtl, &MEASURE, true);
+        let ((name, address), (on_one_name, on_one_address)) = (brand(&two), brand(&one));
+        let panel = rects_of(&two, |part| matches!(part, Part::Panel))[0];
+
+        assert!(
+            close(name.bottom(), address.y) && close(name.h, address.h),
+            "rtl {rtl}: the name stands over the address, a line each: {name:?} {address:?}"
+        );
+        assert!(
+            close(address.y, on_one_address.y) && close(address.y, on_one_name.y),
+            "rtl {rtl}: the address stands where the one line stood"
+        );
+        for line in [name, address] {
+            assert!(
+                close(line.x, name.x) && close(line.w, name.w),
+                "rtl {rtl}: one column for both: {name:?} {address:?}"
+            );
+            assert!(
+                close(line.x - panel.x, panel.right() - line.right())
+                    && line.w > on_one_name.w + on_one_address.w,
+                "rtl {rtl}: the whole column of the panel: {line:?} in {panel:?}"
+            );
+        }
+        assert_eq!(
+            two.focus_order().last(),
+            Some(&Id::Site),
+            "rtl {rtl}: the address is still the last stop of Tab"
+        );
+    }
+}
+
 /// The example with a key: the word typed, the key, the arrow, the word fixed, in this order from
 /// the start; in Hebrew the row mirrors and the arrow points left.
 #[test]

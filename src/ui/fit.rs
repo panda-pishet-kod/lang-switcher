@@ -8,7 +8,7 @@
 //! Knows nothing of Direct2D.
 
 use crate::diag;
-use crate::ui::layout::{Class, Layout, WindowSize, lay_out};
+use crate::ui::layout::{Class, Layout, WindowSize, lay_out_for};
 use crate::ui::scene::Window;
 use crate::ui::text::Measure;
 use crate::ui::tokens::{TYPE_FLOOR, window_b};
@@ -31,7 +31,20 @@ pub fn emergency<I: Copy>(
     rtl: bool,
     measure: &dyn Measure,
 ) -> Layout<I> {
-    let at = |k: f32| lay_out(window, size, k, rtl, measure);
+    emergency_for(window, size, k, rtl, measure, false)
+}
+
+/// [`emergency`] for the canvas that draws it: `plain` — the plain look of GDI
+/// ([`lay_out_for`], решение 208.220).
+pub fn emergency_for<I: Copy>(
+    window: &Window<I>,
+    size: WindowSize,
+    k: f32,
+    rtl: bool,
+    measure: &dyn Measure,
+    plain: bool,
+) -> Layout<I> {
+    let at = |k: f32| lay_out_for(window, size, k, rtl, measure, plain);
     let first = at(k);
     if first.shortfall.fits() {
         return first;
