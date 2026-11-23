@@ -50,7 +50,10 @@ const STEPS: u32 = 10;
 const DOWN: f32 = 0.005;
 #[path = "support/excused.rs"]
 mod excused;
-use excused::{Category, EXCUSED, excuse_line, excused, uncategorised, unsettled};
+use excused::{
+    Category, EXCUSED, UNTRANSLATED, excuse_line, excused, uncategorised, uncategorised_strings,
+    unsettled, unsettled_strings,
+};
 
 /// The number of a step of the order of giving way in the passport (§3а).
 fn step_number(step: Concession) -> usize {
@@ -844,7 +847,9 @@ fn english_forty_percent_longer_does_not_fit_at_its_factor() {
 /// **Every excuse has a category and a term** (208.175): a record without one is refused.
 #[test]
 fn every_excuse_has_a_category_and_a_term() {
-    let refused = uncategorised(EXCUSED);
+    let mut refused = uncategorised(EXCUSED);
+    // 208.236 п. 6: the strings excused from translation obey the same rule.
+    refused.extend(uncategorised_strings(UNTRANSLATED));
     assert!(
         refused.is_empty(),
         "excuses without a category or a term (208.175):\n{}",
@@ -854,10 +859,13 @@ fn every_excuse_has_a_category_and_a_term() {
 
 /// **The gate of a release** (208.175, T-120-24): with `LANGSW_UI_FIT_RELEASE` set, as the build of
 /// a release sets it, no excuse of the wave of translations is left and every excuse of the owner
-/// names its decision. Before a release the instrument prints what is still open.
+/// names its decision. Before a release the instrument prints what is still open. Since 208.236
+/// п. 6 the strings excused from translation as well: no English stand-in waiting for its wave
+/// goes out in a release.
 #[test]
 fn at_a_release_every_excuse_is_settled() {
-    let open = unsettled(EXCUSED);
+    let mut open = unsettled(EXCUSED);
+    open.extend(unsettled_strings(UNTRANSLATED));
     if std::env::var_os("LANGSW_UI_FIT_RELEASE").is_some() {
         assert!(
             open.is_empty(),

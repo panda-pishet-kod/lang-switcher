@@ -10,6 +10,8 @@
 //! * the registry `res/lang/languages.toml` (T-L10N-4) against `Language::ALL` and against
 //!   Windows itself;
 //! * the guard of the files (T-L10N-3) against `en.rc`, with its mutants;
+//! * the guard «строка ≠ английской заглушке» (208.236 п. 6), with its list of the strings that
+//!   read as English and are right and the strings excused while their wave comes;
 //! * the context `res/lang/context.tsv` (T-L10N-5): one row for every string and only for them.
 
 #[path = "support/resource_script.rs"]
@@ -19,6 +21,16 @@ mod resource_script;
 #[path = "support/scripts.rs"]
 mod scripts;
 
+/// The strings excused from translation while their wave comes (208.236 п. 6).
+#[path = "support/excused.rs"]
+mod excused;
+
+/// The strings that read as English and are right (208.236 п. 6).
+#[path = "support/same_as_english.rs"]
+mod same_as_english;
+
+use excused::{UNTRANSLATED, Untranslated};
+use same_as_english::{SAME_AS_ENGLISH, Same};
 use scripts::script_of_char;
 
 use lang_switcher::letters::feed;
@@ -668,9 +680,9 @@ fn english() -> LanguageFile {
 /// **Every language file has exactly the strings of `en.rc`, the same substitutions in each, no
 /// empty string, well-formed escapes, its code page line and the LANGUAGE of the registry.**
 ///
-/// The strings that read the same as English are listed, not refused: «OK», «Lang Switcher», the
-/// names of keys and of `%APPDATA%` are the same in many languages, and only a reader can tell an
-/// untranslated string from a legitimate one.
+/// The strings that read the same as English are listed here, and refused by
+/// [`no_language_keeps_a_string_of_english_but_the_ones_listed`] unless a reader has listed them as
+/// right or a record excuses them while their wave comes (208.236 п. 6).
 #[test]
 fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     let english = english();
@@ -732,6 +744,277 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
         "{} отказов:\n{}",
         refused.len(),
         refused.join("\n")
+    );
+}
+
+/// Whether a string holds a letter outside its substitutions and its escapes. One without is no
+/// word of any language — `" → "`, `"{0} · {1}"` — and a language that writes it as English leaves
+/// no English behind.
+fn has_a_letter(text: &str) -> bool {
+    let mut rest = text.to_owned();
+    for placeholder in placeholders(text) {
+        rest = rest.replace(&placeholder, "");
+    }
+    let rest = rest
+        .replace("\\\\", "")
+        .replace("\\n", "")
+        .replace("\\t", "");
+    rest.chars().any(char::is_alphabetic)
+}
+
+/// What the guard «строка ≠ английской» found in one pass.
+struct EnglishLeft {
+    /// The refusals, each naming the file and the string, and what to do.
+    refused: Vec<String>,
+    /// The strings that read as English and are right, by the list.
+    right: usize,
+    /// The strings without a letter, which are no word of any language.
+    not_words: usize,
+    /// The strings excused while their wave comes, as they print.
+    waiting: Vec<String>,
+}
+
+/// **The guard «строка ≠ английской заглушке»** (208.236 п. 6) over `files`, held to `english`:
+/// every string of a language but English that is the very text of `en.rc` and holds a letter is
+/// refused, unless `same` lists it as right or `untranslated` excuses it while its wave comes. A
+/// record of either list that excuses nothing is refused too.
+fn english_left(
+    files: &[(String, String)],
+    english: &LanguageFile,
+    same: &[Same],
+    untranslated: &[Untranslated],
+) -> EnglishLeft {
+    let mut found = EnglishLeft {
+        refused: Vec::new(),
+        right: 0,
+        not_words: 0,
+        waiting: Vec::new(),
+    };
+    let mut matched_same: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut matched_wave: Vec<(String, String)> = Vec::new();
+
+    for (tag, text) in files {
+        if tag == "en" {
+            continue;
+        }
+        let read = read_language_file(&format!("{tag}.rc"), text);
+        for (id, string) in &read.strings {
+            if english.strings.get(id) != Some(string) {
+                continue;
+            }
+            if !has_a_letter(string) {
+                found.not_words += 1;
+                continue;
+            }
+            if same_as_english::same(same, id, tag).is_some() {
+                found.right += 1;
+                matched_same.insert((id.clone(), tag.clone()));
+                continue;
+            }
+            if let Some(record) = excused::untranslated(untranslated, id, tag) {
+                found.waiting.push(format!(
+                    "{tag}.rc: {id} — {}",
+                    excused::untranslated_line(record)
+                ));
+                matched_wave.push((id.clone(), tag.clone()));
+                continue;
+            }
+            found.refused.push(format!(
+                "{tag}.rc: {id} — осталась английской «{string}»: переведите; если в языке так и \
+                 пишется — запись с причиной в tests\\support\\same_as_english.rs; если строка ждёт \
+                 волну — запись «волна переводов» в UNTRANSLATED tests\\support\\excused.rs"
+            ));
+        }
+    }
+
+    for record in same {
+        if record.languages.is_empty() || record.why.is_empty() {
+            found.refused.push(format!(
+                "same_as_english.rs: {} — запись без языка или без причины",
+                record.id
+            ));
+        }
+        for tag in record.languages {
+            if !matched_same.contains(&(record.id.to_owned(), (*tag).to_owned())) {
+                found.refused.push(format!(
+                    "same_as_english.rs: {} у {tag} — уже не совпадает с английской, в ней нет \
+                     букв или такой строки нет: запись снять",
+                    record.id
+                ));
+            }
+        }
+    }
+    found.refused.extend(
+        excused::uncategorised_strings(untranslated)
+            .into_iter()
+            .map(|line| format!("excused.rs: запись без категории, срока или строки — {line}")),
+    );
+    found.refused.extend(
+        excused::stale_strings(untranslated, &matched_wave)
+            .into_iter()
+            .map(|line| format!("excused.rs: {line}")),
+    );
+    found
+}
+
+/// **No language keeps a string of English but the ones listed** (208.236 п. 6, TR-L10N-180c).
+///
+/// A string of a language that is the very text of `en.rc` is how an untranslated stand-in looks,
+/// and until this guard nothing caught one: English put back into `de.rc` left this file and
+/// `ui_fit` green. It is refused by language and identifier unless it holds no letter, a reader
+/// listed it as right (`tests\support\same_as_english.rs`), or a record of the wave excuses it
+/// (`UNTRANSLATED` of `tests\support\excused.rs`) — printed, never in silence.
+#[test]
+fn no_language_keeps_a_string_of_english_but_the_ones_listed() {
+    let english = english();
+    let files = resource_script::language_files();
+    let found = english_left(&files, &english, SAME_AS_ENGLISH, UNTRANSLATED);
+
+    println!(
+        "совпали с английскими: {} без букв, {} верные по списку, {} ждут волну",
+        found.not_words,
+        found.right,
+        found.waiting.len()
+    );
+    for line in &found.waiting {
+        println!("- ждёт волну: {line}");
+    }
+
+    assert!(
+        found.refused.is_empty(),
+        "{} отказов «строка ≠ английской» (208.236 п. 6):\n{}",
+        found.refused.len(),
+        found.refused.join("\n")
+    );
+}
+
+/// **The guard of English can fail, and says where** (208.236 п. 6): English put back into one
+/// string of `de.rc` — the experiment of TR-L10N-180c — is refused naming `de.rc` and the string;
+/// under a record of the wave, of its language or of every language, the same string passes,
+/// printed; and a record of either list that excuses nothing is refused. The lists are taken as
+/// they are and one record added, so that the test holds whatever waits for its wave today.
+#[test]
+fn the_guard_of_english_names_the_language_and_the_string() {
+    const ID: &str = "IDS_LETTERS_TITLE";
+
+    let english = english();
+    let files = resource_script::language_files();
+    let as_they_are = english_left(&files, &english, SAME_AS_ENGLISH, UNTRANSLATED);
+
+    let (_, de) = files
+        .iter()
+        .find(|(tag, _)| tag == "de")
+        .expect("app.rc includes res/lang/de.rc");
+    let german = read_language_file("de.rc", de)
+        .strings
+        .remove(ID)
+        .expect("de.rc has the title of «Последние письма»");
+    let text = english.strings.get(ID).expect("en.rc has it");
+    assert_ne!(&german, text, "de.rc translates {ID}");
+
+    let mutant: String = de
+        .lines()
+        .map(|line| {
+            let names_it = line
+                .trim_start()
+                .strip_prefix(ID)
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace));
+            if names_it {
+                line.replacen(&format!("\"{german}\""), &format!("\"{text}\""), 1)
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        read_language_file("de.rc", &mutant).strings.get(ID),
+        Some(text),
+        "the mutant puts English into de.rc {ID}"
+    );
+    let mutated: Vec<(String, String)> = files
+        .iter()
+        .map(|(tag, file)| {
+            let file = if tag == "de" { &mutant } else { file };
+            (tag.clone(), file.clone())
+        })
+        .collect();
+
+    let new = |found: &EnglishLeft| -> Vec<String> {
+        found
+            .refused
+            .iter()
+            .filter(|line| !as_they_are.refused.contains(line))
+            .cloned()
+            .collect()
+    };
+
+    let found = english_left(&mutated, &english, SAME_AS_ENGLISH, UNTRANSLATED);
+    println!("English in de.rc {ID}:\n{}", new(&found).join("\n"));
+    let refused = new(&found);
+    assert_eq!(refused.len(), 1, "one string put back, one refusal");
+    assert!(
+        refused[0].starts_with(&format!("de.rc: {ID} — осталась английской")),
+        "the refusal names the language and the string: {}",
+        refused[0]
+    );
+
+    // The lists as they are, and one record more: whatever they excuse already stays excused.
+    let with = |languages: &'static [&'static str]| -> Vec<Untranslated> {
+        let mut records = UNTRANSLATED.to_vec();
+        records.push(Untranslated {
+            ids: &[ID],
+            languages,
+            category: Some(excused::Category::Wave),
+            until: "опыт",
+            decision: None,
+            why: "опыт поломкой",
+        });
+        records
+    };
+
+    // A record of the wave, by language or of every language — the latter while the other
+    // languages are translated, as the strings of a stage stand translated in Russian.
+    for languages in [&["de"][..], &[][..]] {
+        let wave = with(languages);
+        let found = english_left(&mutated, &english, SAME_AS_ENGLISH, &wave);
+        assert!(
+            new(&found).is_empty(),
+            "under a record of the wave {languages:?} it passes: {:?}",
+            new(&found)
+        );
+        assert_eq!(
+            found.waiting.len(),
+            as_they_are.waiting.len() + 1,
+            "and it is printed as waiting"
+        );
+    }
+
+    // The same records where the string is translated: they excuse nothing, and are refused.
+    for (languages, words) in [(&["de"][..], "de"), (&[][..], "все языки")] {
+        let found = english_left(&files, &english, SAME_AS_ENGLISH, &with(languages));
+        assert!(
+            new(&found)
+                .iter()
+                .any(|line| line.contains(&format!("{ID} уже не английская в: {words} "))),
+            "a record of the wave {languages:?} for a string translated is refused: {:?}",
+            new(&found)
+        );
+    }
+
+    let mut right = SAME_AS_ENGLISH.to_vec();
+    right.push(Same {
+        id: ID,
+        languages: &["de"],
+        why: "опыт поломкой",
+    });
+    let found = english_left(&files, &english, &right, UNTRANSLATED);
+    assert!(
+        new(&found)
+            .iter()
+            .any(|line| line.starts_with(&format!("same_as_english.rs: {ID} у de"))),
+        "a record of the right ones for a string translated is refused: {:?}",
+        new(&found)
     );
 }
 

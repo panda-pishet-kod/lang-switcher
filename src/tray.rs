@@ -94,7 +94,7 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_LARGE_ICON, NIIF_USER, NIM_ADD,
     NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONUSERCLICK, NIN_SELECT, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, Shell_NotifyIconW,
+    NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, GetClassNameW, GetCursorPos, GetSystemMetrics, HICON, IMAGE_ICON, LR_DEFAULTCOLOR,
@@ -109,6 +109,92 @@ use windows::core::{Error as WinError, PCWSTR, Result as WinResult, w};
 use crate::layouts::LayoutId;
 use crate::settings::{self, Config, Quarantined, SavePolicy};
 use crate::{APP_NAME, app, diag, theme};
+
+// ---------------------------------------------------------------------------------------
+// The shell, and the tests kept out of it — 208.236 п. 6 (208.226, 208.232)
+// ---------------------------------------------------------------------------------------
+
+/// **The one door of this module to `Shell_NotifyIconW`** — 208.236 п. 6.
+///
+/// Every call of this module is still written `Shell_NotifyIconW(NIM_…, &data)`; the name is
+/// this function now and not the import, so that one place decides where the call goes. On a
+/// thread a test has kept out of the shell — [`keep_this_thread_out_of_the_shell`] — the call
+/// does not leave the process and answers success: the icon "is there" for every count and flag
+/// of [`Tray`], and nothing is added to the notification area. Everywhere else, and always in
+/// the build that ships ([`shell_may_be_left_out`]), it is the call of Windows itself.
+///
+/// Why at all: Windows remembers an icon without a GUID by the path of the image and its uID
+/// (`reports\TRAY-DUPES-180.md`), so each folder of a target and each hash of a test image used
+/// to leave a row of its own under «Другие значки области уведомлений» on the machine the tests
+/// ran on — 27 of them on 2026-11-23 (208.226).
+///
+/// # Safety
+///
+/// The contract of `Shell_NotifyIconW`: `data` points at a live, fully initialised
+/// `NOTIFYICONDATAW` whose `cbSize` describes it. It is only read, and not kept.
+#[allow(non_snake_case)]
+unsafe fn Shell_NotifyIconW(
+    message: windows::Win32::UI::Shell::NOTIFY_ICON_MESSAGE,
+    data: *const NOTIFYICONDATAW,
+) -> windows::core::BOOL {
+    if this_thread_is_out_of_the_shell() {
+        return true.into();
+    }
+
+    SHELL_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+
+    // SAFETY: the caller's contract, passed on unchanged.
+    unsafe { windows::Win32::UI::Shell::Shell_NotifyIconW(message, data) }
+}
+
+thread_local! {
+    /// Whether a test has kept this thread out of the shell — read only where
+    /// [`shell_may_be_left_out`] lets it be.
+    static OUT_OF_THE_SHELL: Cell<bool> = const { Cell::new(false) };
+
+    /// The calls of this thread that went to the shell itself.
+    static SHELL_CALLS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// **Whether a build may keep a thread out of the shell** — 208.236 п. 6: a build with debug
+/// assertions (both batteries are one) or with the feature `testing`; **never the build that
+/// ships**, `--release` without `testing`, whose icon must reach the notification area whatever
+/// asked otherwise.
+///
+/// `cfg(test)` cannot be the condition: `tests\tray.rs` links the library built without it. Nor
+/// can `testing` alone — the plain battery runs without it, and half the runs would still leave
+/// rows behind (the reasoning of [`settings::autostart_may_register`]). Pure and public for the
+/// same reason as that function: the batteries are not the build that ships, and they check its
+/// answer here.
+pub const fn shell_may_be_left_out(debug_build: bool, testing: bool) -> bool {
+    debug_build || testing
+}
+
+/// What [`shell_may_be_left_out`] answers for this very build.
+const THIS_BUILD_MAY_LEAVE_THE_SHELL_OUT: bool =
+    shell_may_be_left_out(cfg!(debug_assertions), cfg!(feature = "testing"));
+
+/// Keeps the trays of this thread out of the shell (`true`) or sends them to it again (`false`)
+/// — for the tests, which call it before they install a tray; nothing in the program does.
+///
+/// Per thread, because the tests of one image run side by side, and the few that are about the
+/// shell itself go to it while the rest stay out. In the build that ships the request is held
+/// and never read: [`this_thread_is_out_of_the_shell`] answers `false` there.
+pub fn keep_this_thread_out_of_the_shell(out: bool) {
+    OUT_OF_THE_SHELL.with(|flag| flag.set(out));
+}
+
+/// Whether the `Shell_NotifyIconW` of this thread stays in the process — see
+/// [`keep_this_thread_out_of_the_shell`].
+pub fn this_thread_is_out_of_the_shell() -> bool {
+    THIS_BUILD_MAY_LEAVE_THE_SHELL_OUT && OUT_OF_THE_SHELL.with(Cell::get)
+}
+
+/// How many calls of this thread went to the shell itself — what a test reads to know that it
+/// stayed out, or that it really reached the notification area.
+pub fn shell_calls_on_this_thread() -> u32 {
+    SHELL_CALLS.with(Cell::get)
+}
 
 // ---------------------------------------------------------------------------------------
 // The menu of FR-91 — labels and commands
