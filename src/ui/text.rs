@@ -791,12 +791,6 @@ impl Laid {
         &self.links
     }
 
-    /// Whether the ellipsis cut the line at all: its last character is cut away.
-    pub fn is_cut(&self) -> bool {
-        let length = self.shown.encode_utf16().count() as u32;
-        length > 0 && self.is_trimmed(length - 1)
-    }
-
     /// The text as it is shown: in capitals where the role asks for them.
     pub fn shown(&self) -> &str {
         &self.shown
