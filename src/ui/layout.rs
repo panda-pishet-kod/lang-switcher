@@ -499,12 +499,11 @@ impl<I: Copy + PartialEq> Layout<I> {
         let r = item.rect;
         if matches!(item.part, Part::InlineLink)
             && let Some(paragraph) = straight.items.iter().find(|placed| {
-                let p = placed.rect;
+                // The paragraph the middle of the words stands in.
+                let (p, x, y) = (placed.rect, r.x + r.w * 0.5, r.y + r.h * 0.5);
                 matches!(placed.part, Part::Text { .. })
-                    && r.x >= p.x - 0.01
-                    && r.right() <= p.right() + 0.01
-                    && r.y >= p.y - 0.01
-                    && r.bottom() <= p.bottom() + 0.01
+                    && (p.x..=p.right()).contains(&x)
+                    && (p.y..=p.bottom()).contains(&y)
             })
         {
             let p = paragraph.rect;
