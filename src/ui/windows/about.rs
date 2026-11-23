@@ -34,6 +34,10 @@ pub struct About {
     pub language: Language,
     pub key: String,
     pub theme: ThemeSetting,
+    /// ⭐ **The name of the second hotkey in the mode of two keys** — решение 208.228; `None` with
+    /// one key. With it the sixth row («Ничего не набрано… — раскладка переключится») goes — the
+    /// first key with nothing to fix knocks (В-2) — and the seventh names the second key.
+    pub switch_key: Option<String>,
 }
 
 impl About {
@@ -56,14 +60,26 @@ impl Content for About {
     type Id = Id;
 
     fn describe(&self) -> Window<Id> {
-        let help = [
+        let mut help: Vec<String> = [
             IDS_ABOUT_HELP_1,
             IDS_ABOUT_HELP_2,
             IDS_ABOUT_HELP_3,
             IDS_ABOUT_HELP_4,
             IDS_ABOUT_HELP_5,
             IDS_ABOUT_HELP_6,
-        ];
+        ]
+        .iter()
+        .map(|id| self.line(*id).replace("{0}", &strong(&self.key)))
+        .collect();
+        // Решение 208.228: with two keys the sixth row is no longer true — the seventh takes its
+        // place and names the second key (§7 of the design, variant Б of В-2).
+        if let Some(switch) = &self.switch_key {
+            help.pop();
+            help.push(
+                self.line(settings::IDS_ABOUT_HELP_7)
+                    .replace("{0}", &strong(switch)),
+            );
+        }
         // The version of the build is the version of the file: both come out of `Cargo.toml`,
         // and the release checks that the two agree (`tools\verify-version.ps1`).
         let eyebrow = format!("{} {}", crate::APP_NAME, env!("CARGO_PKG_VERSION"));
@@ -84,11 +100,7 @@ impl Content for About {
                 },
                 Node::Rows(vec![
                     Node::Line(Role::Label, self.line(IDS_ABOUT_HELP)),
-                    Node::Numbered(
-                        help.iter()
-                            .map(|id| self.line(*id).replace("{0}", &strong(&self.key)))
-                            .collect(),
-                    ),
+                    Node::Numbered(help),
                 ]),
             ]),
             buttons: vec![
@@ -141,9 +153,16 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
     let about = About {
         language,
         key: "Pause".to_owned(),
+        switch_key: None,
         theme: ThemeSetting::Light,
     };
-    vec![("about".to_owned(), about.describe())]
+    // Решение 208.228: and with two keys — the seventh row, the name of the second key.
+    let one = ("about".to_owned(), about.describe());
+    let two = About {
+        switch_key: Some("ScrollLock".to_owned()),
+        ..about
+    };
+    vec![one, ("about two keys".to_owned(), two.describe())]
 }
 
 /// The window the menu opens: the description and what the program adds to it.
@@ -194,7 +213,15 @@ impl Content for Product {
 /// One window at a time: while «О программе» or the settings dialog is up nothing is made — the
 /// menu greys the command for the same reason (`tray::dialog_locks_command`), and this is the
 /// door behind it. A window Windows refused is journaled; the user is told by its absence.
-pub fn open(owner: HWND, theme: ThemeSetting, hotkey: &Hotkey) -> Option<HWND> {
+///
+/// `switch_key` is the name of the second hotkey in the mode of two keys, `None` with one
+/// (решение 208.228).
+pub fn open(
+    owner: HWND,
+    theme: ThemeSetting,
+    hotkey: &Hotkey,
+    switch_key: Option<String>,
+) -> Option<HWND> {
     if settings::about_is_open() || settings::dialog_is_open() {
         return None;
     }
@@ -204,6 +231,7 @@ pub fn open(owner: HWND, theme: ThemeSetting, hotkey: &Hotkey) -> Option<HWND> {
             language: settings::ui_language(),
             key: settings::effective_hotkey_name(hotkey),
             theme,
+            switch_key,
         },
         owner,
         _session: AboutSession::open(),

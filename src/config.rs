@@ -317,6 +317,147 @@ pub const TRIGGER_DOUBLE_TAP: &str = "double_tap";
 /// for it, and each half of the name the windows show, «Shift, Shift» (task T-95-1).
 pub const DOUBLE_TAP_KEY: &str = "Shift";
 
+/// `[switch_hotkey] trigger` of **one tap of a `Ctrl`** — решение 208.228, В-4: «только второй
+/// клавишей, только через предупреждение». Lawful with `key` [`LEFT_CTRL_KEY`] or
+/// [`RIGHT_CTRL_KEY`] and no modifiers, in `[switch_hotkey]` alone: `[hotkey]` has no such word, and
+/// [`Hotkey::binding`] answers `None` for it.
+pub const TRIGGER_TAP: &str = "tap";
+
+/// The name of the left `Ctrl` of a tap — the side the capture saw tapped (решение 208.228).
+pub const LEFT_CTRL_KEY: &str = "LeftCtrl";
+
+/// The name of the right `Ctrl` of a tap.
+pub const RIGHT_CTRL_KEY: &str = "RightCtrl";
+
+/// **Section `[switch_hotkey]` — the second hotkey, «Переключить раскладку»** (решение 208.228,
+/// замысел `HOTKEY-TWO-DESIGN.md` §4). With 1.8.0.
+///
+/// `enabled` is the mode of the section «Горячая клавиша»: `false` — «Одна клавиша», the default and
+/// what every file before it means; `true` — «Две клавиши». The key is kept when the mode goes back
+/// to one key, and comes back with it.
+///
+/// `key`, `modifiers` and `trigger` are read the way `[hotkey]` reads them ([`Hotkey::binding`],
+/// one body), plus the tap of a `Ctrl` ([`TRIGGER_TAP`]). An empty `key` is «не задана».
+///
+/// ⚠ **A second key that is no good is no key** — not the default `Pause`, which would collide with
+/// the first: an unknown name, `double_tap` with anything but `Shift`, or the main key of `[hotkey]`
+/// ([`Config::switch_binding`]). The section says so ([`switch_hotkey_note`]).
+///
+/// ⚠ **`schema_version` stays 10** (В-6): no value of a closed set is new to a build that reads this
+/// section, a build before it skips the section (no `deny_unknown_fields`) and drops it at its next
+/// write — the second key is lost on a way back, and `[hotkey]` means what it meant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SwitchHotkey {
+    /// «Две клавиши» — the mode of the section.
+    #[serde(default)]
+    pub enabled: bool,
+    /// The name of the key, as `[hotkey] key`; empty — not set.
+    #[serde(default)]
+    pub key: String,
+    /// The modifiers held with it, as `[hotkey] modifiers`.
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+    /// How the key is pressed: `press`, `double_tap` or [`TRIGGER_TAP`].
+    #[serde(default = "default_hotkey_trigger")]
+    pub trigger: String,
+}
+
+impl Default for SwitchHotkey {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            key: String::new(),
+            modifiers: Vec::new(),
+            trigger: default_hotkey_trigger(),
+        }
+    }
+}
+
+impl SwitchHotkey {
+    /// Whether a key is written in the section at all — an empty `key` is «не задана».
+    pub fn is_set(&self) -> bool {
+        !self.key.trim().is_empty()
+    }
+
+    /// The code and the set this section means **on its own** — `None` for no key and for a key
+    /// that is no good. A tap of `Ctrl` is `VK_LCONTROL` or `VK_RCONTROL` with
+    /// `hook::SINGLE_TAP`; anything else is read by [`Hotkey::binding`] — one body for both keys.
+    /// Whether it collides with the first key is [`Config::switch_binding`]'s question.
+    pub fn binding(&self) -> Option<(u16, u16)> {
+        if !self.is_set() {
+            return None;
+        }
+
+        if self.trigger.trim().eq_ignore_ascii_case(TRIGGER_TAP) {
+            let key = self.key.trim();
+            let vk = if key.eq_ignore_ascii_case(LEFT_CTRL_KEY) {
+                VK_LCONTROL.0
+            } else if key.eq_ignore_ascii_case(RIGHT_CTRL_KEY) {
+                VK_RCONTROL.0
+            } else {
+                return None;
+            };
+
+            return self
+                .modifiers
+                .is_empty()
+                .then_some((vk, crate::hook::SINGLE_TAP));
+        }
+
+        self.as_hotkey().binding()
+    }
+
+    /// The key as `[hotkey]` would store it — the name, the modifiers, the trigger.
+    pub fn as_hotkey(&self) -> Hotkey {
+        Hotkey {
+            key: self.key.clone(),
+            modifiers: self.modifiers.clone(),
+            trigger: self.trigger.clone(),
+        }
+    }
+
+    /// The section with `hotkey` as its key, the mode as it is.
+    pub fn with_key(&self, hotkey: Hotkey) -> Self {
+        Self {
+            enabled: self.enabled,
+            key: hotkey.key,
+            modifiers: hotkey.modifiers,
+            trigger: hotkey.trigger,
+        }
+    }
+
+    /// The tap of the `Ctrl` of `vk` — `VK_LCONTROL` or `VK_RCONTROL` — as the section stores it,
+    /// the mode as it is; `None` for any other code.
+    pub fn ctrl_tap(&self, vk: u16) -> Option<Self> {
+        let key = match vk {
+            v if v == VK_LCONTROL.0 => LEFT_CTRL_KEY,
+            v if v == VK_RCONTROL.0 => RIGHT_CTRL_KEY,
+            _ => return None,
+        };
+
+        Some(Self {
+            enabled: self.enabled,
+            key: key.to_owned(),
+            modifiers: Vec::new(),
+            trigger: TRIGGER_TAP.to_owned(),
+        })
+    }
+
+    /// Whether the key is a tap of a `Ctrl` — what [`Self::binding`] reads, so a tap that is no
+    /// good is not one.
+    pub fn is_ctrl_tap(&self) -> bool {
+        self.binding()
+            .is_some_and(|(_, set)| set & crate::hook::SINGLE_TAP != 0)
+    }
+}
+
+/// **Whether two hotkeys share their main key** — решение 208.228, §5 of the design: one main key
+/// serves one purpose. The same code whatever the sets (`Pause` and `Shift+Pause` — a bare key
+/// answers with any modifiers held, 157.11), and two double presses of `Shift` (both are `VK_SHIFT`).
+pub const fn same_main_key(first: (u16, u16), second: (u16, u16)) -> bool {
+    first.0 == second.0
+}
+
 /// Section `[layouts]` of section 7, with the defaults confirmed by decision 19.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Layouts {
@@ -818,6 +959,10 @@ pub struct Config {
     /// Section `[hotkey]`.
     #[serde(default)]
     pub hotkey: Hotkey,
+    /// Section `[switch_hotkey]` — the second hotkey, «Переключить раскладку» (решение 208.228).
+    /// Always written, as `[hotkey]` is.
+    #[serde(default)]
+    pub switch_hotkey: SwitchHotkey,
     /// Section `[layouts]`.
     #[serde(default)]
     pub layouts: Layouts,
@@ -855,6 +1000,7 @@ impl Default for Config {
             schema_version: CURRENT_SCHEMA_VERSION,
             general: General::default(),
             hotkey: Hotkey::default(),
+            switch_hotkey: SwitchHotkey::default(),
             layouts: Layouts::default(),
             replacement: Replacement::default(),
             selection: Selection::default(),
@@ -1251,6 +1397,31 @@ impl Config {
     /// site, which is what a named constructor gives.
     pub fn for_a_first_run() -> Self {
         Self::for_a_first_run_in(system_language_for_a_first_run())
+    }
+
+    /// **The second hotkey in force** — решение 208.228: the code and the set of `[switch_hotkey]`
+    /// in the mode of two keys, or `None` — one key, no key written, a key that is no good, or a key
+    /// whose main key is the first one's ([`same_main_key`]). The first key is compared as it is
+    /// published: its binding, or the default `Pause` that stands for a name nobody knows.
+    pub fn switch_binding(&self) -> Option<(u16, u16)> {
+        if !self.switch_hotkey.enabled {
+            return None;
+        }
+
+        let switch = self.switch_hotkey.binding()?;
+        let fix = self
+            .hotkey
+            .binding()
+            .unwrap_or((crate::hook::DEFAULT_HOTKEY_VK, 0));
+
+        (!same_main_key(fix, switch)).then_some(switch)
+    }
+
+    /// Whether the program works with two keys right now — a second key in force
+    /// ([`Self::switch_binding`]). The mode «Две клавиши» with no key set is still one key (§2 п. 3
+    /// of the design).
+    pub fn two_keys(&self) -> bool {
+        self.switch_binding().is_some()
     }
 
     /// [`Config::for_a_first_run`] with the language handed in — task T-55-9. Pure, so that a test

@@ -150,7 +150,33 @@ pub struct Untranslated {
 ///     why: "строки второй клавиши стоят английскими в 64 языках до волны",
 /// }
 /// ```
-pub const UNTRANSLATED: &[Untranslated] = &[];
+pub const UNTRANSLATED: &[Untranslated] = &[Untranslated {
+    ids: &[
+        "IDS_HOTKEY_MODE_ONE",
+        "IDS_HOTKEY_MODE_TWO",
+        "IDS_HOTKEY_FIX_LABEL",
+        "IDS_HOTKEY_SWITCH_LABEL",
+        "IDS_SECTION_HOTKEY_SUB_TWO",
+        "IDS_SWITCH_KEY_HINT",
+        "IDS_SWITCH_KEY_NONE",
+        "IDS_STATUS_SWITCH_KEY",
+        "IDS_ABOUT_HELP_7",
+        "IDS_CAPTURE_TAKEN_FIX",
+        "IDS_CAPTURE_TAKEN_SWITCH",
+        "IDS_NOTE_SWITCH_INVALID",
+        "IDS_KEY_LEFT_CTRL",
+        "IDS_KEY_RIGHT_CTRL",
+        "IDS_CTRL_WARN_TITLE",
+        "IDS_CTRL_WARN_TEXT",
+        "IDS_CTRL_WARN_SET",
+        "IDS_CTRL_WARN_OTHER",
+    ],
+    languages: &[],
+    category: Some(Category::Wave),
+    until: "волна 18 строк второй клавиши (3360…3377)",
+    decision: Some("208.233"),
+    why: "строки второй клавиши (208.228) стоят английскими в 64 языках до волны",
+}];
 
 /// The record of `records` that excuses the string `id` of the language `tag`, if there is one.
 pub fn untranslated<'a>(

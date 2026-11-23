@@ -3844,13 +3844,18 @@ pub fn toggle_autostart_via(write_run_key: impl FnOnce(bool) -> WinResult<()>) {
 /// The theme setting and the hotkey are *copied* out of the tray in one borrow that ends before
 /// the window is made: the help names the key, modifiers included (task T-93-1).
 fn show_about(hwnd: HWND) {
-    let Some((setting, key)) =
-        with_tray(|tray| (tray.config().general.theme, tray.config().hotkey.clone()))
-    else {
+    // Решение 208.228: and the name of the second key, in the mode of two keys.
+    let Some((setting, key, switch)) = with_tray(|tray| {
+        let config = tray.config();
+        let switch = config
+            .two_keys()
+            .then(|| settings::switch_hotkey_name_in(settings::ui_language(), config));
+        (config.general.theme, config.hotkey.clone(), switch)
+    }) else {
         return;
     };
 
-    let _ = crate::ui::windows::about::open(hwnd, setting, &key);
+    let _ = crate::ui::windows::about::open(hwnd, setting, &key, switch);
 }
 
 /// The four-part file version of the running executable, from its `VERSIONINFO` resource.

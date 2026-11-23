@@ -50,6 +50,7 @@ fn armed() -> Mode {
         hotkey_modifiers: 0,
         hotkey_double_tap: false,
         hotkey_yields: false,
+        switch: hook::SwitchKey::NONE,
     }
 }
 
@@ -70,6 +71,7 @@ fn passed_on() -> Outcome {
         decision: Decision::Pass,
         fire_hotkey: false,
         probe_layout: false,
+        fire_switch: false,
     }
 }
 
@@ -136,6 +138,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         hotkey_modifiers: 0,
         hotkey_double_tap: false,
         hotkey_yields: false,
+        switch: hook::SwitchKey::NONE,
     };
 
     // FR-95 suppresses the hotkey "когда программа активна", and this program is not yet known
@@ -1252,7 +1255,7 @@ fn every_private_message_of_this_module_is_gated_on_state_the_sender_cannot_writ
     assert_eq!(
         arms,
         vec![
-            "WM_APP_HOTKEY => {",
+            "WM_APP_HOTKEY | WM_APP_SWITCH_KEY => {",
             "WM_APP_FAIL_SAFE => {",
             "WM_APP_SEED_CAPS => {",
         ],
@@ -1262,6 +1265,9 @@ fn every_private_message_of_this_module_is_gated_on_state_the_sender_cannot_writ
     // The one this task is about. The other two are argued at their constants and neither can
     // be driven by what the message carries: `WM_APP_HOTKEY` converts text the sender cannot
     // see, and `WM_APP_SEED_CAPS` replaces this program's belief with the system's own reading.
+    // Решение 208.228: `WM_APP_SWITCH_KEY` shares the first arm — it only counts a handoff here —
+    // and is argued at its constant: a forgery buys one switch of the layout, what `Alt+Shift`
+    // gives anybody.
     let gate = body
         .find("if !fail_safe() {")
         .expect("the WM_APP_FAIL_SAFE arm must be gated on the flag only this process writes");
@@ -1729,6 +1735,7 @@ fn the_capslock_seed_is_outside_the_callback() {
 fn armed_in_an_excluded_process() -> Mode {
     Mode {
         hotkey_yields: true,
+        switch: hook::SwitchKey::NONE,
         ..armed()
     }
 }
@@ -2154,7 +2161,8 @@ fn a_lost_hotkey_press_is_answered_with_the_idle_tone() {
     .replace("\r\n", "\n");
 
     let post_hotkey = source
-        .split_once("fn post_hotkey() {")
+        // Решение 208.228: the one body posts either key's message.
+        .split_once("fn post_hotkey(message: u32) {")
         .expect("post_hotkey must be in this file")
         .1
         .split_once("\n}\n")
@@ -2864,8 +2872,9 @@ fn the_key_and_its_modifiers_are_published_as_one_word() {
         .next()
         .expect("the product half");
 
+    // Решение 208.228: the one word holds both hotkeys — sixty-four bits.
     assert_eq!(
-        product.matches("static HOTKEY: AtomicU32").count(),
+        product.matches("static HOTKEY: AtomicU64").count(),
         1,
         "one word holds the hotkey"
     );
@@ -3553,6 +3562,7 @@ fn with_the_double_press_pause_is_an_ordinary_key() {
 fn in_an_excluded_process_the_double_press_converts_nothing() {
     let excluded = Mode {
         hotkey_yields: true,
+        switch: hook::SwitchKey::NONE,
         ..armed_on_double_shift()
     };
 
@@ -3694,8 +3704,10 @@ fn the_double_press_is_handed_the_four_reads_and_a_combination_its_whole_set() {
     let code = without_comments(&source);
 
     let decide = body_of_fn(&code, "fn decide_here(");
+    // Решение 208.228: a double press or a tap of `Ctrl` of either key, with no combination
+    // beside it, is the four reads; a combination of either key — the whole set.
     let choice = decide
-        .split_once("if mode.hotkey_double_tap {")
+        .split_once("if taps && !combination {")
         .map(|(_, rest)| rest)
         .unwrap_or("");
     let (double, combination) = choice.split_once("} else {").unwrap_or(("", ""));
@@ -3880,4 +3892,374 @@ fn the_rule_of_the_double_press_is_one_body() {
         !taps.release(5_060, true),
         "an earlier stamp reads as far away"
     );
+}
+
+// -------------------------------------------------------------------------------------
+// Two hotkeys — «Исправить набранное» and «Переключить раскладку» (решение 208.228)
+// -------------------------------------------------------------------------------------
+//
+// The second key rides the word of the first (`SwitchKey`), and `classify` answers it with
+// `fire_switch` beside `fire_hotkey`. Every row is a pure call with the time, the set held and the
+// mouse count written out, as the rows of the double press above are.
+
+/// `ScrollLock` — the second key of the mock-up.
+const VK_SCROLL: u16 = 0x91;
+
+/// `C` — a letter pressed with `Ctrl`.
+const VK_C: u16 = 0x43;
+
+/// The running state with `first` as the fixing key and `second` as the switching one — each a
+/// code and its set with the flags in it, as `app::publish_configuration` publishes them.
+fn armed_on_two(first: (u16, u16), second: (u16, u16)) -> Mode {
+    let fix = hook::SwitchKey::from_word(first.0, first.1);
+
+    Mode {
+        hotkey_vk: first.0,
+        hotkey_modifiers: fix.modifiers,
+        hotkey_double_tap: fix.double_tap,
+        switch: hook::SwitchKey::from_word(second.0, second.1),
+        ..armed()
+    }
+}
+
+/// Drives `events` through `classify` in `mode` and answers each fire — its index and the key,
+/// `"fix"` or `"switch"` — and the decision of every event, in order.
+fn fires_in(mode: Mode, events: &[At]) -> (Vec<(usize, &'static str)>, Vec<Decision>) {
+    let mut state = HotkeyState::default();
+    let mut fires = Vec::new();
+    let mut decisions = Vec::new();
+
+    for (index, &(vk, edge, time, held, mouse)) in events.iter().enumerate() {
+        let outcome = hook::classify(
+            mode,
+            &mut state,
+            KeyEvent {
+                time,
+                ..user_key(vk, edge)
+            },
+            || held,
+            || mouse,
+        );
+
+        assert!(
+            !(outcome.fire_hotkey && outcome.fire_switch),
+            "event {index}: one stroke is one key's"
+        );
+
+        if outcome.fire_hotkey {
+            fires.push((index, "fix"));
+        }
+        if outcome.fire_switch {
+            fires.push((index, "switch"));
+        }
+        decisions.push(outcome.decision);
+    }
+
+    (fires, decisions)
+}
+
+/// A press of `key` from `down` to `up` with `held` held, no mouse.
+fn press(key: u16, down: u32, up: u32, held: u16) -> [At; 2] {
+    [
+        (key, Edge::Down, down, held, 0),
+        (key, Edge::Up, up, held, 0),
+    ]
+}
+
+/// `Pause` fixes, a tap of the `Ctrl` of `vk` switches.
+fn armed_on_pause_and_ctrl_tap(vk: u16) -> Mode {
+    armed_on_two((VK_PAUSE, 0), (vk, hook::SINGLE_TAP))
+}
+
+/// No fire at all.
+const NONE: [(usize, &str); 0] = [];
+
+/// **Both keys pressed: each fires its own message, each is suppressed whole** — `Pause` fixes,
+/// `ScrollLock` switches (the moment «Обе клавиши заданы» of the mock-up). ⭐ The red «before»: on
+/// the base `ScrollLock` is an ordinary key — passed on, nothing fired.
+#[test]
+fn two_pressed_keys_fire_each_their_own_message() {
+    let mode = armed_on_two((VK_PAUSE, 0), (VK_SCROLL, 0));
+    let events = [press(VK_PAUSE, 0, 50, 0), press(VK_SCROLL, 100, 150, 0)].concat();
+    let (fires, decisions) = fires_in(mode, &events);
+
+    assert_eq!(fires, [(0, "fix"), (2, "switch")]);
+    assert_eq!(
+        decisions,
+        [Decision::Suppress; 4],
+        "FR-95: both keys are swallowed, presses and releases"
+    );
+
+    // A letter between them is an ordinary stroke.
+    let (fires, decisions) = fires_in(mode, &press(VK_A, 0, 10, 0));
+    assert_eq!(fires, NONE);
+    assert_eq!(decisions, [Decision::Pass; 2]);
+}
+
+/// **FR-08 for each key**: a held second key fires once, and the release of one key leaves the
+/// hold of the other alone.
+#[test]
+fn each_key_holds_its_own_press() {
+    let mode = armed_on_two((VK_PAUSE, 0), (VK_SCROLL, 0));
+    let events: Vec<At> = vec![
+        (VK_SCROLL, Edge::Down, 0, 0, 0),
+        (VK_SCROLL, Edge::Down, 30, 0, 0),
+        (VK_PAUSE, Edge::Down, 40, 0, 0),
+        (VK_PAUSE, Edge::Up, 50, 0, 0),
+        (VK_SCROLL, Edge::Down, 60, 0, 0),
+        (VK_SCROLL, Edge::Up, 70, 0, 0),
+        (VK_SCROLL, Edge::Down, 80, 0, 0),
+    ];
+    let (fires, _) = fires_in(mode, &events);
+
+    assert_eq!(
+        fires,
+        [(0, "switch"), (2, "fix"), (6, "switch")],
+        "the repeats of a held key fire nothing, the release of `Pause` does not end the hold of \
+         `ScrollLock`, and a new press after its release fires again"
+    );
+}
+
+/// **A combination as the second key answers only to its own set** (157.11 for the second key).
+#[test]
+fn a_combination_as_the_second_key_answers_only_to_its_set() {
+    let mode = armed_on_two((VK_PAUSE, 0), (VK_F12, hook::MOD_CTRL));
+
+    let (fires, decisions) = fires_in(mode, &press(VK_F12, 0, 50, hook::MOD_CTRL));
+    assert_eq!(fires, [(0, "switch")]);
+    assert_eq!(decisions, [Decision::Suppress; 2]);
+
+    let (fires, decisions) = fires_in(mode, &press(VK_F12, 0, 50, 0));
+    assert_eq!(fires, NONE, "the bare `F12` stays with the programs");
+    assert_eq!(decisions, [Decision::Pass; 2]);
+}
+
+/// **The double press as the first key, a pressed key as the second** — the request of JN1D0V7N
+/// (the moment «двойной Shift» of the mock-up): the pair fixes, `Pause` switches, and `Pause` in
+/// the middle of a pair breaks it.
+#[test]
+fn the_double_press_fixes_and_a_pressed_key_switches() {
+    let mode = armed_on_two((VK_SHIFT, hook::DOUBLE_TAP), (VK_PAUSE, 0));
+
+    let (fires, _) = fires_in(mode, &two_taps(1_200));
+    assert_eq!(fires, [(3, "fix")], "the pair is the first key's");
+
+    let (fires, _) = fires_in(mode, &press(VK_PAUSE, 0, 50, 0));
+    assert_eq!(fires, [(0, "switch")]);
+
+    let events = [
+        tap(VK_LSHIFT, 1_000, 1_080),
+        press(VK_PAUSE, 1_100, 1_120, 0),
+        tap(VK_LSHIFT, 1_200, 1_280),
+    ]
+    .concat();
+    let (fires, _) = fires_in(mode, &events);
+    assert_eq!(
+        fires,
+        [(2, "switch")],
+        "the second key between two taps switches and breaks the pair"
+    );
+}
+
+/// **The double press as the second key** — the pair switches, the first key fixes.
+#[test]
+fn the_double_press_may_be_the_second_key() {
+    let mode = armed_on_two((VK_PAUSE, 0), (VK_SHIFT, hook::DOUBLE_TAP));
+
+    let (fires, decisions) = fires_in(mode, &two_taps(1_200));
+    assert_eq!(fires, [(3, "switch")]);
+    assert_eq!(
+        decisions,
+        [Decision::Pass; 4],
+        "the taps reach the programs"
+    );
+
+    let (fires, _) = fires_in(mode, &press(VK_PAUSE, 0, 50, 0));
+    assert_eq!(fires, [(0, "fix")]);
+}
+
+/// **One tap of the chosen `Ctrl` switches, on its release, and reaches the programs** (В-4).
+/// ⭐ The red «before»: on the base a `Ctrl` is an ordinary key and fires nothing.
+#[test]
+fn a_tap_of_the_chosen_ctrl_switches_on_its_release() {
+    let mode = armed_on_pause_and_ctrl_tap(VK_RCONTROL);
+
+    let (fires, decisions) = fires_in(mode, &tap(VK_RCONTROL, 1_000, 1_080));
+    assert_eq!(fires, [(1, "switch")], "the release, and only it");
+    assert_eq!(
+        decisions,
+        [Decision::Pass; 2],
+        "the `Ctrl` reaches the programs"
+    );
+
+    let exactly = tap(VK_RCONTROL, 1_000, 1_000 + hook::DOUBLE_TAP_MS);
+    assert_eq!(
+        fires_in(mode, &exactly).0,
+        [(1, "switch")],
+        "held exactly the window"
+    );
+
+    let other = tap(VK_LCONTROL, 1_000, 1_080);
+    assert_eq!(
+        fires_in(mode, &other).0,
+        NONE,
+        "the other `Ctrl` is not the key"
+    );
+
+    // The first key is untouched by the tap of the second.
+    assert_eq!(fires_in(mode, &press(VK_PAUSE, 0, 50, 0)).0, [(0, "fix")]);
+}
+
+/// **What is no tap of `Ctrl`**: held too long, a key pressed while it is down (`Ctrl+C`, `AltGr`),
+/// `Shift`, `Alt`, `Win` or the other `Ctrl` held, a mouse button pressed, a long hold that repeats.
+#[test]
+fn a_ctrl_that_is_no_tap_fires_nothing() {
+    let mode = armed_on_pause_and_ctrl_tap(VK_LCONTROL);
+
+    let held_long = tap(VK_LCONTROL, 1_000, 1_000 + hook::DOUBLE_TAP_MS + 1);
+    assert_eq!(fires_in(mode, &held_long).0, NONE, "401 ms is a hold");
+
+    let copy: Vec<At> = vec![
+        (VK_LCONTROL, Edge::Down, 1_000, 0, 0),
+        (VK_C, Edge::Down, 1_040, hook::MOD_CTRL, 0),
+        (VK_C, Edge::Up, 1_060, hook::MOD_CTRL, 0),
+        (VK_LCONTROL, Edge::Up, 1_080, 0, 0),
+    ];
+    assert_eq!(fires_in(mode, &copy).0, NONE, "`Ctrl+C`");
+
+    // `AltGr`: the keyboard sends a left `Ctrl` of its own, then the right `Alt`.
+    let alt_gr: Vec<At> = vec![
+        (VK_LCONTROL, Edge::Down, 1_000, 0, 0),
+        (VK_RMENU, Edge::Down, 1_000, hook::MOD_CTRL, 0),
+        (VK_LCONTROL, Edge::Up, 1_060, 0, 0),
+        (VK_RMENU, Edge::Up, 1_060, 0, 0),
+    ];
+    assert_eq!(fires_in(mode, &alt_gr).0, NONE, "`AltGr` is no tap");
+
+    let under_shift: Vec<At> = [
+        vec![(VK_LSHIFT, Edge::Down, 900, 0, 0)],
+        tap(VK_LCONTROL, 1_000, 1_080).to_vec(),
+        vec![(VK_LSHIFT, Edge::Up, 1_100, 0, 0)],
+    ]
+    .concat();
+    assert_eq!(
+        fires_in(mode, &under_shift).0,
+        NONE,
+        "`Ctrl` under a held `Shift` is the switcher of Windows"
+    );
+
+    for held in [hook::MOD_ALT, hook::MOD_WIN, hook::MOD_CTRL] {
+        let events = [
+            (VK_LCONTROL, Edge::Down, 1_000, held, 0),
+            (VK_LCONTROL, Edge::Up, 1_080, held, 0),
+        ];
+        assert_eq!(fires_in(mode, &events).0, NONE, "held {held:#06x}");
+    }
+
+    let click = [
+        (VK_LCONTROL, Edge::Down, 1_000, 0, 7),
+        (VK_LCONTROL, Edge::Up, 1_080, 0, 8),
+    ];
+    assert_eq!(fires_in(mode, &click).0, NONE, "`Ctrl` and a click");
+
+    // The auto-repeat of a held `Ctrl` is no new press: held 600 ms, it is a hold.
+    let repeated: Vec<At> = vec![
+        (VK_LCONTROL, Edge::Down, 1_000, 0, 0),
+        (VK_LCONTROL, Edge::Down, 1_300, 0, 0),
+        (VK_LCONTROL, Edge::Down, 1_500, 0, 0),
+        (VK_LCONTROL, Edge::Up, 1_600, 0, 0),
+    ];
+    assert_eq!(fires_in(mode, &repeated).0, NONE, "a held `Ctrl` repeats");
+}
+
+/// **FR-84, FR-90, FR-99 for both keys**: an excluded process gets both keys, a suspended or a
+/// fail-safe program suppresses neither and fires nothing.
+#[test]
+fn both_keys_yield_in_an_excluded_process_and_rest_when_suspended() {
+    let base = armed_on_two((VK_PAUSE, 0), (VK_SCROLL, 0));
+
+    for mode in [
+        Mode {
+            hotkey_yields: true,
+            ..base
+        },
+        Mode {
+            active: false,
+            ..base
+        },
+        Mode {
+            fail_safe: true,
+            ..base
+        },
+    ] {
+        let events = [press(VK_PAUSE, 0, 50, 0), press(VK_SCROLL, 100, 150, 0)].concat();
+        let (fires, decisions) = fires_in(mode, &events);
+        assert_eq!(fires, NONE, "{mode:?}");
+        assert_eq!(decisions, [Decision::Pass; 4], "{mode:?}");
+    }
+
+    let excluded = Mode {
+        hotkey_yields: true,
+        ..armed_on_pause_and_ctrl_tap(VK_RCONTROL)
+    };
+    assert_eq!(
+        fires_in(excluded, &tap(VK_RCONTROL, 1_000, 1_080)).0,
+        NONE,
+        "a tap in an excluded process fires nothing"
+    );
+}
+
+/// **A capture suspends both keys** — the word published with `(0, 0)` in both halves: no key is
+/// swallowed, nothing fires (FR-94).
+#[test]
+fn a_capture_suspends_both_keys() {
+    let mode = armed_on_two((0, 0), (0, 0));
+    let events = [
+        press(VK_PAUSE, 0, 50, 0),
+        press(VK_SCROLL, 100, 150, 0),
+        tap(VK_RCONTROL, 1_000, 1_080),
+        tap(VK_LSHIFT, 2_000, 2_080),
+        tap(VK_LSHIFT, 2_200, 2_280),
+    ]
+    .concat();
+    let (fires, decisions) = fires_in(mode, &events);
+
+    assert_eq!(fires, NONE);
+    assert!(decisions.iter().all(|decision| *decision == Decision::Pass));
+}
+
+/// **Both keys are one publication** — решение 208.228: one store writes both halves, one load
+/// reads both, and `current_mode` takes the second from the same load as the first.
+#[test]
+fn both_keys_are_published_as_one_word() {
+    let restore = hook::hotkeys();
+
+    hook::set_hotkeys((VK_PAUSE, 0), (VK_RCONTROL, hook::SINGLE_TAP));
+    assert_eq!(
+        hook::hotkeys(),
+        ((VK_PAUSE, 0), (VK_RCONTROL, hook::SINGLE_TAP))
+    );
+    assert_eq!(hook::switch_hotkey(), (VK_RCONTROL, hook::SINGLE_TAP));
+
+    let mode = hook::current_mode();
+    assert_eq!(mode.hotkey_vk, VK_PAUSE);
+    assert_eq!(
+        mode.switch,
+        hook::SwitchKey {
+            vk: VK_RCONTROL,
+            modifiers: 0,
+            double_tap: false,
+            tap: true,
+        }
+    );
+
+    // The first key alone keeps the second as it stands.
+    hook::set_hotkey(VK_F12, hook::MOD_CTRL);
+    assert_eq!(
+        hook::hotkeys(),
+        ((VK_F12, hook::MOD_CTRL), (VK_RCONTROL, hook::SINGLE_TAP))
+    );
+
+    hook::set_hotkeys(restore.0, restore.1);
+    assert_eq!(hook::hotkeys(), restore);
 }

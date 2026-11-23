@@ -1757,6 +1757,49 @@ pub const IDS_HINT_OPEN: u16 = 3277;
 /// The text of the hint on Windows 10 — Z11 of AUDIT-180 (решение 208.209): the path to «Выберите
 /// значки, отображаемые в панели задач»; [`IDS_HINT_TEXT`] holds Windows 11's.
 pub const IDS_HINT_TEXT_10: u16 = 3340;
+
+// The second hotkey, «Переключить раскладку» — решение 208.228, 3360…3377 (3342…3359 are the
+// block of the window of the fixes of 1.8.0). The twelve of the mock-up (В-5), the four of the
+// warning about a single `Ctrl` (В-4) and the two sides of `Ctrl`.
+
+/// «Одна клавиша» — the first segment of the mode of the section «Горячая клавиша».
+pub const IDS_HOTKEY_MODE_ONE: u16 = 3360;
+/// «Две клавиши» — the second segment.
+pub const IDS_HOTKEY_MODE_TWO: u16 = 3361;
+/// «Одна клавиша исправляет набранный текст, другая переключает раскладку» — the subtitle of the
+/// section in the mode of two keys.
+pub const IDS_SECTION_HOTKEY_SUB_TWO: u16 = 3362;
+/// «Исправить набранное:» — the label of the first field in the mode of two keys.
+pub const IDS_HOTKEY_FIX_LABEL: u16 = 3363;
+/// «Переключить раскладку:» — the label of the second field (В-3).
+pub const IDS_HOTKEY_SWITCH_LABEL: u16 = 3364;
+/// «Не задана» — the second field while no key is set.
+pub const IDS_SWITCH_KEY_NONE: u16 = 3365;
+/// «Только переключает раскладку, набранное не трогает.» — the line under the second field.
+pub const IDS_SWITCH_KEY_HINT: u16 = 3366;
+/// «Эта клавиша уже исправляет набранное — выберите другую.» — a capture of the second key refused.
+pub const IDS_CAPTURE_TAKEN_FIX: u16 = 3367;
+/// «Эта клавиша уже переключает раскладку — выберите другую.» — a capture of the first key refused.
+pub const IDS_CAPTURE_TAKEN_SWITCH: u16 = 3368;
+/// «Вторая клавиша в файле настроек не годится — она не действует.» — the note of the section.
+pub const IDS_NOTE_SWITCH_INVALID: u16 = 3369;
+/// «Переключить раскладку, ничего не исправляя, — нажмите {0}.» — the seventh row of «Как
+/// пользоваться» in the mode of two keys; {0} the second key.
+pub const IDS_ABOUT_HELP_7: u16 = 3370;
+/// «Переключение раскладки: {0}» — the line of «Состояние» under «Клавиша: {0}».
+pub const IDS_STATUS_SWITCH_KEY: u16 = 3371;
+/// «Одиночный Ctrl может мешать работе» — the title of the warning (В-4).
+pub const IDS_CTRL_WARN_TITLE: u16 = 3372;
+/// What a single `Ctrl` may break and what it touches — the text of the warning (В-4).
+pub const IDS_CTRL_WARN_TEXT: u16 = 3373;
+/// «Всё равно установить» — the button of the warning that sets the tap of `Ctrl`.
+pub const IDS_CTRL_WARN_SET: u16 = 3374;
+/// «Выбрать другую клавишу» — the button of the warning that arms the capture again.
+pub const IDS_CTRL_WARN_OTHER: u16 = 3375;
+/// «Левый Ctrl» — the name of the tap of the left `Ctrl` in the windows.
+pub const IDS_KEY_LEFT_CTRL: u16 = 3376;
+/// «Правый Ctrl» — the name of the tap of the right `Ctrl`.
+pub const IDS_KEY_RIGHT_CTRL: u16 = 3377;
 /// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
 pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
@@ -3588,6 +3631,58 @@ pub fn hotkey_note(hotkey: &Hotkey) -> Option<u16> {
         Some((vk, modifiers)) if types_a_character(vk, modifiers) => Some(IDS_NOTE_TEXT_KEY),
         Some(_) => None,
     }
+}
+
+/// **The note of the second hotkey** — решение 208.228, §4 of the design. In the mode of two keys,
+/// a key written in `[switch_hotkey]` that is not in force — an unknown name, a lawless trigger, the
+/// main key of `[hotkey]` — is [`IDS_NOTE_SWITCH_INVALID`]; a text key is the warning of FR-95 the
+/// first key gets. No key written is «не задана» and says nothing.
+pub fn switch_hotkey_note(config: &Config) -> Option<u16> {
+    let switch = &config.switch_hotkey;
+
+    if !switch.enabled || !switch.is_set() {
+        return None;
+    }
+
+    match config.switch_binding() {
+        None => Some(IDS_NOTE_SWITCH_INVALID),
+        Some((vk, modifiers))
+            if modifiers & crate::hook::SINGLE_TAP == 0 && types_a_character(vk, modifiers) =>
+        {
+            Some(IDS_NOTE_TEXT_KEY)
+        }
+        Some(_) => None,
+    }
+}
+
+/// **The name of the second hotkey in a window** — решение 208.228: «Левый Ctrl» and «Правый Ctrl»
+/// for a tap, in the language of the window; any other key as [`effective_hotkey_name`] names the
+/// first; «Не задана» when no second key is in force.
+pub fn switch_hotkey_name_in(language: Language, config: &Config) -> String {
+    match config.switch_binding() {
+        None => text_in(language, IDS_SWITCH_KEY_NONE),
+        Some((vk, set)) if set & crate::hook::SINGLE_TAP != 0 => text_in(
+            language,
+            if vk == VK_RCONTROL.0 {
+                IDS_KEY_RIGHT_CTRL
+            } else {
+                IDS_KEY_LEFT_CTRL
+            },
+        ),
+        Some(_) => effective_hotkey_name(&config.switch_hotkey.as_hotkey()),
+    }
+}
+
+/// The second hotkey as the lines for the author name it — not translated: `RightCtrl`, `Pause`,
+/// `Ctrl + F12`, `Shift, Shift`; `None` when none is in force (решение 208.228, §7 of the design).
+pub fn switch_hotkey_technical_name(config: &Config) -> Option<String> {
+    let (_, set) = config.switch_binding()?;
+
+    Some(if set & crate::hook::SINGLE_TAP != 0 {
+        config.switch_hotkey.key.trim().to_owned()
+    } else {
+        effective_hotkey_name(&config.switch_hotkey.as_hotkey())
+    })
 }
 
 /// Whether `vk` pressed with `modifiers` types a character — task T-93-1, **157.10** (вариант 1

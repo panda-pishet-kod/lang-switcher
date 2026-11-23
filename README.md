@@ -166,6 +166,25 @@ modifiers = ["Ctrl"]    # any of "Ctrl", "Alt", "Shift"; [] for the key alone
 trigger   = "press"     # press, or double_tap (with key = "Shift" only)
 ```
 
+**One key or two.** «One key», the default, fixes the typed word and switches the layout, as before.
+With «Two keys» in the section «Hotkey» each key has one job. «Fix typed text» only fixes: with
+nothing typed or selected it does nothing and knocks. «Switch layout» only switches to the next
+layout of the program and leaves the text, the selection and the clipboard as they are — after a word
+and a space it switches the layout for the next word. The second key is set the way the first one is;
+the double tap of `Shift` can belong to one of the two. The second key alone can also be a single tap
+of the left or the right `Ctrl`: the program first says what that can break — `Ctrl` shortcuts,
+games, remote desktop — and offers «Set it anyway» or «Choose another key».
+
+```toml
+[switch_hotkey]
+enabled = true          # «Two keys»; false — one key (the second key is kept for later)
+key     = "ScrollLock"  # names as in [hotkey]; "LeftCtrl" or "RightCtrl" with trigger = "tap"
+trigger = "press"       # press, double_tap (Shift) or tap (a single Ctrl)
+```
+
+An older version of the program does not know this section: it works with one key and forgets the
+second one when it saves its settings.
+
 ## Security and trust
 
 A program that sees every key you press has to earn trust. What it does and does not do, in short;

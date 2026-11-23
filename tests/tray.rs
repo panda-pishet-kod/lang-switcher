@@ -7435,6 +7435,263 @@ mod window_of_the_settings {
             "and the name of the author under the sections"
         );
     }
+
+    // ---------------------------------------------------------------------------------------
+    // Решение 208.228 — «Одна клавиша | Две клавиши», the second key and the warning about Ctrl
+    // ---------------------------------------------------------------------------------------
+
+    /// `VK_PAUSE`, `VK_SCROLL`, `VK_RCONTROL`.
+    const PAUSE: u16 = 0x13;
+    const SCROLL: u16 = 0x91;
+    const RCONTROL: u16 = 0xA3;
+
+    /// **The segment puts the mode in force and back; the second key is kept** — the moments
+    /// «Одна клавиша» and «Две клавиши, не задана» of the mock-up: the field says «Не задана» as a
+    /// hint, the subtitle says what each key does, no capture is armed.
+    #[test]
+    fn the_segment_of_the_mode_puts_two_keys_in_force_and_back() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+
+        let one = shown(&window);
+        assert!(
+            one.contains("HotkeyMode"),
+            "the segment stands in the section"
+        );
+        assert!(!one.contains("SwitchKey"), "one key: no second field");
+        assert!(one.contains(&ru(settings::IDS_SECTION_HOTKEY_SUB)));
+
+        window.event(Event::Selected(Id::HotkeyMode, 1));
+        let two = shown(&window);
+        assert_eq!(
+            applied
+                .borrow()
+                .last()
+                .map(|config| config.switch_hotkey.enabled),
+            Some(true),
+            "«Две клавиши» is in force at once"
+        );
+        assert!(!window.capturing(), "and arms no capture");
+        assert!(two.contains("SwitchKey"), "the second field is there");
+        assert!(two.contains(&format!("hint: {:?}", ru(settings::IDS_SWITCH_KEY_NONE))));
+        assert!(two.contains(&ru(settings::IDS_SECTION_HOTKEY_SUB_TWO)));
+        assert!(two.contains(&ru(settings::IDS_HOTKEY_FIX_LABEL)));
+        assert!(two.contains(&ru(settings::IDS_HOTKEY_SWITCH_LABEL)));
+        // 208.234 (А): with two keys the line of the ways under the first field stands aside at
+        // rest; with one key it is there, and under the second field its own line stays.
+        let ways = ru(settings::IDS_HOTKEY_HINT);
+        assert!(one.contains(&ways), "one key: the line of the ways");
+        assert!(
+            !two.contains(&ways),
+            "two keys: no line of the ways at rest"
+        );
+        assert!(two.contains(&ru(settings::IDS_SWITCH_KEY_HINT)));
+        window.event(Event::Pressed(Id::HotkeySet));
+        assert!(
+            shown(&window).contains(&ru(settings::IDS_CAPTURE_HINT)),
+            "two keys: the capture of the first key keeps its line"
+        );
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: ESCAPE,
+        });
+
+        window.config.switch_hotkey.key = "ScrollLock".to_owned();
+        window.event(Event::Selected(Id::HotkeyMode, 0));
+        let back = applied.borrow().last().cloned().expect("a change");
+        assert!(!back.switch_hotkey.enabled, "«Одна клавиша»");
+        assert_eq!(
+            back.switch_hotkey.key, "ScrollLock",
+            "the second key is kept"
+        );
+    }
+
+    /// **«Состояние» names both keys on one line** — 208.234: «Клавиша: Pause · Переключение
+    /// раскладки: ScrollLock»; with one key the line is the first key's alone.
+    #[test]
+    fn the_state_names_both_keys_on_one_line() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Diagnostics;
+        window.showing_program(lang_switcher::ui::windows::settings::Program::default());
+        let first = ru(settings::IDS_STATUS_HOTKEY).replace("{0}", "Pause");
+        let second = ru(settings::IDS_STATUS_SWITCH_KEY).replace("{0}", "ScrollLock");
+
+        let one = shown(&window);
+        assert!(
+            one.contains(&format!("{first:?}")),
+            "one key: the line alone"
+        );
+
+        window.config.switch_hotkey.enabled = true;
+        window.config.switch_hotkey.key = "ScrollLock".to_owned();
+        let two = shown(&window);
+        assert!(
+            two.contains(&format!("{:?}", format!("{first} · {second}"))),
+            "two keys: one line, the second key after the first"
+        );
+    }
+
+    /// **The capture of the second key**: both keys suspended, the key of the first refused with
+    /// «уже исправляет», the next key taken into `[switch_hotkey]` — the moments «Захват»,
+    /// «Конфликт», «Обе заданы».
+    #[test]
+    fn the_second_key_is_captured_and_the_first_ones_refused() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        window.config.switch_hotkey.enabled = true;
+        let before = hook::hotkeys();
+
+        window.event(Event::Pressed(Id::SwitchKeySet));
+        assert!(window.capturing());
+        assert_eq!(hook::hotkeys(), ((0, 0), (0, 0)), "both keys are suspended");
+
+        window.event(Event::KeyDown {
+            id: Id::SwitchKey,
+            vk: PAUSE,
+        });
+        assert!(window.capturing(), "the refusal leaves the capture armed");
+        assert!(shown(&window).contains(&ru(settings::IDS_CAPTURE_TAKEN_FIX)));
+
+        window.event(Event::KeyDown {
+            id: Id::SwitchKey,
+            vk: SCROLL,
+        });
+        assert!(!window.capturing());
+        assert_eq!(hook::hotkeys(), before, "the capture gave both back");
+        let taken = applied
+            .borrow()
+            .last()
+            .cloned()
+            .expect("the key went in force");
+        assert_eq!(taken.switch_binding(), Some((SCROLL, 0)));
+        assert_eq!(
+            taken.hotkey,
+            settings::Hotkey::default(),
+            "the first key untouched"
+        );
+        assert!(shown(&window).contains("ScrollLock"));
+    }
+
+    /// ⭐ **No single `Ctrl` with one key, and none for the fixing key** (208.231). In the mode of
+    /// one key the capture refuses a lone `Ctrl` with the line of a modifier and asks no warning,
+    /// and «Задать» of the second key — which is not on the screen — arms nothing; in the mode of two
+    /// keys the capture of «Исправить набранное» does the same.
+    #[test]
+    fn a_lone_ctrl_is_refused_for_the_fixing_key_and_with_one_key() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+
+        for two in [false, true] {
+            let (mut window, applied) = recorded(&[]);
+            window.section = Section::Hotkey;
+            window.config.switch_hotkey.enabled = two;
+
+            window.event(Event::Pressed(Id::HotkeySet));
+            window.event(Event::KeyDown {
+                id: Id::Hotkey,
+                vk: RCONTROL,
+            });
+            window.event(Event::KeyUp {
+                id: Id::Hotkey,
+                vk: RCONTROL,
+            });
+            let shown_now = shown(&window);
+            assert!(window.capturing(), "two={two}: the capture waits on");
+            assert!(
+                shown_now.contains(&ru(settings::IDS_CAPTURE_MODIFIER)),
+                "two={two}: the refusal of a modifier on its own, as before"
+            );
+            assert!(
+                !shown_now.contains("CtrlWarnSet"),
+                "two={two}: no warning for the fixing key"
+            );
+            assert!(applied.borrow().is_empty(), "two={two}: nothing set");
+
+            if !two {
+                window.event(Event::KeyDown {
+                    id: Id::Hotkey,
+                    vk: ESCAPE,
+                });
+                window.event(Event::Pressed(Id::SwitchKeySet));
+                assert!(
+                    !window.capturing(),
+                    "one key: the second key has no capture"
+                );
+                window.event(Event::Pressed(Id::CtrlWarnSet));
+                assert!(applied.borrow().is_empty(), "one key: nothing is set");
+            }
+        }
+    }
+
+    /// **A lone `Ctrl` asks first** (В-4): the warning with its two buttons; «Выбрать другую
+    /// клавишу» arms the capture again and changes nothing, «Всё равно установить» sets the tap
+    /// of the side that was tapped.
+    #[test]
+    fn a_lone_ctrl_shows_the_warning_and_the_person_chooses() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+        let (mut window, applied) = recorded(&[]);
+        window.section = Section::Hotkey;
+        window.config.switch_hotkey.enabled = true;
+
+        let tap = |window: &mut Settings| {
+            window.event(Event::Pressed(Id::SwitchKeySet));
+            window.event(Event::KeyDown {
+                id: Id::SwitchKey,
+                vk: RCONTROL,
+            });
+            window.event(Event::KeyUp {
+                id: Id::SwitchKey,
+                vk: RCONTROL,
+            });
+        };
+
+        tap(&mut window);
+        let warned = shown(&window);
+        assert!(
+            !window.capturing(),
+            "the capture ends — the hotkeys come back"
+        );
+        assert!(warned.contains(&ru(settings::IDS_CTRL_WARN_TITLE)));
+        assert!(warned.contains(&ru(settings::IDS_CTRL_WARN_TEXT)));
+        assert!(warned.contains("CtrlWarnSet") && warned.contains("CtrlWarnOther"));
+        assert!(
+            applied.borrow().is_empty(),
+            "nothing is set before the choice"
+        );
+
+        window.event(Event::Pressed(Id::CtrlWarnOther));
+        assert!(
+            window.capturing(),
+            "«Выбрать другую клавишу» — the capture again"
+        );
+        assert!(!shown(&window).contains("CtrlWarnSet"), "the warning went");
+        assert!(applied.borrow().is_empty());
+        window.event(Event::Pressed(Id::SwitchKeySet));
+
+        tap(&mut window);
+        window.event(Event::Pressed(Id::CtrlWarnSet));
+        let set = applied
+            .borrow()
+            .last()
+            .cloned()
+            .expect("«Всё равно установить»");
+        assert_eq!(set.switch_hotkey.key, "RightCtrl");
+        assert_eq!(set.switch_hotkey.trigger, settings::TRIGGER_TAP);
+        assert!(set.switch_hotkey.enabled);
+        assert_eq!(set.switch_binding(), Some((RCONTROL, hook::SINGLE_TAP)));
+        let after = shown(&window);
+        assert!(!after.contains("CtrlWarnSet"), "the warning went");
+        assert!(
+            after.contains(&ru(settings::IDS_KEY_RIGHT_CTRL)),
+            "«Правый Ctrl»"
+        );
+    }
 }
 
 /// Presses the `index`-th part whose printed form begins with `part` that the layout of `hwnd` placed — the sections of the

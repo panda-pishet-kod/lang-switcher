@@ -2293,11 +2293,17 @@ fn the_capture_no_longer_promises_to_stop_the_typing_buffer() {
     // T-36-6 was told not to change. ⚠ Task T-93-1 moved the needles and not the property: the
     // session remembers the whole `[hotkey]` since the modifiers joined it, and the code goes out
     // with its modifier set in one store (`hook::set_hotkey`, вопрос 157).
-    let arm = function_body(&source, "pub fn arm(previous: Hotkey) -> Self {");
+    //
+    // ⚠ Решение 208.228 moved them once more: arming is `arm_for` (`arm` is the capture of the
+    // first key and calls it), and it suspends **both** hotkeys in the one store of the word.
+    let arm = function_body(
+        &source,
+        "pub fn arm_for(target: CaptureTarget, previous: Hotkey, other: Option<(u16, u16)>) -> Self {",
+    );
 
     assert!(
-        arm.contains("set_hotkey(NO_HOTKEY_VK, 0)"),
-        "arming still publishes a code no keyboard produces"
+        arm.contains("set_hotkeys((NO_HOTKEY_VK, 0), (NO_HOTKEY_VK, 0))"),
+        "arming still publishes a code no keyboard produces — for both keys"
     );
     assert!(
         arm.contains("set_active(false)"),
@@ -5142,6 +5148,7 @@ fn the_line_over_the_title_of_about_is_the_name_and_the_version_of_the_file() {
         let about = About {
             language,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::Light,
         };
         let window = about.describe();
@@ -10472,7 +10479,7 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
         let _open = AboutSession::open();
         AboutSession::record(a_handle_that_names_no_window());
 
-        let second = about::open(owner, ThemeSetting::Dark, &bare("Pause"));
+        let second = about::open(owner, ThemeSetting::Dark, &bare("Pause"), None);
 
         println!("over an about window: {second:?}");
 
@@ -10491,7 +10498,7 @@ fn a_second_about_window_turns_round_at_the_door_before_anything_is_made() {
     {
         let _dialog = settings::DialogSession::open();
 
-        let over = about::open(owner, ThemeSetting::Dark, &bare("Pause"));
+        let over = about::open(owner, ThemeSetting::Dark, &bare("Pause"), None);
 
         println!("over the settings dialog: {over:?}");
 
@@ -15060,6 +15067,7 @@ fn the_items_of_about_name_the_key_in_bold() {
         let about = About {
             language,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::Light,
         };
         let window = about.describe();
@@ -15099,5 +15107,591 @@ fn the_items_of_about_name_the_key_in_bold() {
             named += usize::from(line.contains("{0}"));
         }
         assert!(named >= 3, "{language:?}: the items name the key ({named})");
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// Решение 208.228 — the second hotkey «Переключить раскладку»: the file, the capture, the press
+// -----------------------------------------------------------------------------------------
+
+mod second_hotkey {
+    use super::*;
+    use lang_switcher::app::{self, Press, PressAct};
+    use lang_switcher::inject::EmptySwitch;
+    use lang_switcher::settings::{CaptureEvent, CaptureSession, CaptureStep, CaptureTarget};
+    use lang_switcher::settings::{Modifiers, Refusal, SwitchHotkey};
+
+    const PAUSE: u16 = 0x13;
+    const SCROLL: u16 = 0x91;
+    const F9: u16 = 0x78;
+    const F12: u16 = 0x7B;
+    const LSHIFT: u16 = 0xA0;
+    const CONTROL: u16 = 0x11;
+    const LCONTROL: u16 = 0xA2;
+    const RCONTROL: u16 = 0xA3;
+
+    /// The file of `body` after the stamp of schema 10, read.
+    fn read(body: &str) -> Config {
+        let text = format!("schema_version = 10\n\n{body}");
+        let (config, outcome) = Config::from_toml_str(&text).expect("the file parses");
+        assert_eq!(
+            outcome,
+            ReadOutcome::Current,
+            "a file of schema 10 is current"
+        );
+        config
+    }
+
+    /// `[switch_hotkey]` in the mode of two keys with `key`, `modifiers` and `trigger`.
+    fn two_keys(key: &str, modifiers: &[&str], trigger: &str) -> Config {
+        let modifiers: Vec<String> = modifiers.iter().map(|name| format!("\"{name}\"")).collect();
+        read(&format!(
+            "[switch_hotkey]\nenabled = true\nkey = \"{key}\"\nmodifiers = [{}]\ntrigger = \
+             \"{trigger}\"\n",
+            modifiers.join(", ")
+        ))
+    }
+
+    /// **A file without the section is one key, as it always was; the section is always written,
+    /// and the schema stays 10** (В-6).
+    #[test]
+    fn a_file_without_the_section_is_one_key_and_the_schema_stays_ten() {
+        assert_eq!(
+            CURRENT_SCHEMA_VERSION, 10,
+            "В-6: the second key raises no schema"
+        );
+
+        let config = read("[hotkey]\nkey = \"Pause\"\n");
+        assert_eq!(config.switch_hotkey, SwitchHotkey::default());
+        assert_eq!(config.switch_binding(), None);
+        assert!(!config.two_keys());
+        assert_eq!(settings::switch_hotkey_note(&config), None);
+
+        let written = Config::default().to_toml_string().expect("it writes");
+        assert!(written.contains("[switch_hotkey]"), "{written}");
+        let back = Config::from_toml_str(&written).expect("and reads back").0;
+        assert_eq!(back, Config::default(), "the round trip");
+    }
+
+    /// **The second key in force** — a key, a combination, the double press, a tap of either
+    /// `Ctrl`; and the mode of one key keeps the key written, in force nowhere.
+    #[test]
+    fn the_second_key_reads_as_the_first_does_and_a_tap_of_ctrl_besides() {
+        assert_eq!(
+            two_keys("ScrollLock", &[], "press").switch_binding(),
+            Some((SCROLL, 0))
+        );
+        assert_eq!(
+            two_keys("F12", &["ctrl"], "press").switch_binding(),
+            Some((F12, hook::MOD_CTRL)),
+            "names in any case, as `[hotkey]`"
+        );
+        assert_eq!(
+            two_keys("Shift", &[], "double_tap").switch_binding(),
+            Some((0x10, hook::DOUBLE_TAP))
+        );
+        assert_eq!(
+            two_keys("RightCtrl", &[], "tap").switch_binding(),
+            Some((RCONTROL, hook::SINGLE_TAP))
+        );
+        assert_eq!(
+            two_keys("leftctrl", &[], "TAP").switch_binding(),
+            Some((LCONTROL, hook::SINGLE_TAP))
+        );
+        assert!(
+            two_keys("RightCtrl", &[], "tap")
+                .switch_hotkey
+                .is_ctrl_tap()
+        );
+
+        let one = read("[switch_hotkey]\nenabled = false\nkey = \"ScrollLock\"\n");
+        assert_eq!(
+            one.switch_binding(),
+            None,
+            "one key: the second is kept, not in force"
+        );
+        assert_eq!(one.switch_hotkey.key, "ScrollLock");
+        assert_eq!(settings::switch_hotkey_note(&one), None);
+    }
+
+    /// **A second key that is no good is no key — never the default `Pause`** — and the section
+    /// says so; no key written says nothing (§4 of the design).
+    #[test]
+    fn a_second_key_that_is_no_good_is_no_key() {
+        let empty = two_keys("", &[], "press");
+        assert_eq!(empty.switch_binding(), None);
+        assert_eq!(
+            settings::switch_hotkey_note(&empty),
+            None,
+            "«не задана» is no fault"
+        );
+
+        for (config, why) in [
+            (two_keys("Wobble", &[], "press"), "an unknown name"),
+            (two_keys("F12", &["Hyper"], "press"), "an unknown modifier"),
+            (
+                two_keys("F12", &[], "double_tap"),
+                "a double press of anything but Shift",
+            ),
+            (two_keys("F12", &[], "hold"), "an unknown trigger"),
+            (two_keys("Ctrl", &[], "tap"), "a tap of a Ctrl with no side"),
+            (two_keys("F12", &[], "tap"), "a tap of anything but Ctrl"),
+            (
+                two_keys("RightCtrl", &["Alt"], "tap"),
+                "a tap with modifiers",
+            ),
+            (two_keys("Pause", &[], "press"), "the first key's own"),
+            (
+                two_keys("Pause", &["Shift"], "press"),
+                "the first key's main key with a set",
+            ),
+        ] {
+            assert_eq!(config.switch_binding(), None, "{why}");
+            assert!(!config.two_keys(), "{why}");
+            assert_eq!(
+                settings::switch_hotkey_note(&config),
+                Some(settings::IDS_NOTE_SWITCH_INVALID),
+                "{why}"
+            );
+        }
+
+        // The first key compared as it is published: a name nobody knows is `Pause`.
+        let mut unknown_first = two_keys("Pause", &[], "press");
+        unknown_first.hotkey.key = "Wobble".to_owned();
+        assert_eq!(
+            unknown_first.switch_binding(),
+            None,
+            "`Pause` stands for the first"
+        );
+
+        // Both double presses: one of the two at most.
+        let mut both_double = two_keys("Shift", &[], "double_tap");
+        both_double.hotkey = settings::Hotkey::double_shift();
+        assert_eq!(both_double.switch_binding(), None);
+
+        // A text key is the warning of FR-95, as for the first.
+        assert_eq!(
+            settings::switch_hotkey_note(&two_keys("Q", &[], "press")),
+            Some(settings::IDS_NOTE_TEXT_KEY)
+        );
+        // `[hotkey]` has no tap.
+        let tap_first = settings::Hotkey {
+            key: "RightCtrl".to_owned(),
+            modifiers: Vec::new(),
+            trigger: settings::TRIGGER_TAP.to_owned(),
+        };
+        assert_eq!(
+            tap_first.binding(),
+            None,
+            "the first key is never a single Ctrl (208.4)"
+        );
+    }
+
+    /// **The names**: «Правый Ctrl» in the windows, `RightCtrl` for the author, the key's own name
+    /// otherwise, «Не задана» with none.
+    #[test]
+    fn the_second_key_is_named_in_the_windows_and_for_the_author() {
+        let tap = two_keys("RightCtrl", &[], "tap");
+        assert_eq!(
+            settings::switch_hotkey_technical_name(&tap).as_deref(),
+            Some("RightCtrl")
+        );
+        let combo = two_keys("f12", &["Shift", "Ctrl"], "press");
+        assert_eq!(
+            settings::switch_hotkey_technical_name(&combo).as_deref(),
+            Some("Ctrl + Shift + F12")
+        );
+        assert_eq!(
+            settings::switch_hotkey_name_in(Language::En, &combo),
+            "Ctrl + Shift + F12"
+        );
+        assert_eq!(
+            settings::switch_hotkey_technical_name(&Config::default()),
+            None
+        );
+    }
+
+    /// One press of a capture at `time`.
+    fn down(session: &mut CaptureSession, vk: u16, held: Modifiers, time: u32) -> CaptureStep {
+        session.step(CaptureEvent::KeyDown(vk, held), time)
+    }
+
+    fn up(session: &mut CaptureSession, vk: u16, time: u32) -> CaptureStep {
+        session.step(CaptureEvent::KeyUp(vk), time)
+    }
+
+    const NOTHING: Modifiers = Modifiers {
+        ctrl: false,
+        alt: false,
+        shift: false,
+        win: false,
+    };
+    const CTRL: Modifiers = Modifiers {
+        ctrl: true,
+        ..NOTHING
+    };
+    const SHIFT: Modifiers = Modifiers {
+        shift: true,
+        ..NOTHING
+    };
+
+    /// **A capture suspends both keys and gives both back**, in the one word.
+    #[test]
+    fn a_capture_of_either_key_suspends_both() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+        hook::set_hotkeys((PAUSE, 0), (SCROLL, 0));
+
+        for target in [CaptureTarget::Fix, CaptureTarget::Switch] {
+            let session = CaptureSession::arm_for(target, settings::Hotkey::default(), None);
+            assert_eq!(
+                hook::hotkeys(),
+                ((0, 0), (0, 0)),
+                "{target:?}: both suspended"
+            );
+            assert_eq!(session.published_both(), ((PAUSE, 0), (SCROLL, 0)));
+            drop(session);
+            assert_eq!(
+                hook::hotkeys(),
+                ((PAUSE, 0), (SCROLL, 0)),
+                "{target:?}: both back"
+            );
+        }
+
+        hook::set_hotkeys(before.0, before.1);
+    }
+
+    /// **«Эта клавиша уже …»** — in both directions, for the main key with any set and for the
+    /// double press; the capture stays armed and takes the next key (the moment «Конфликт»).
+    #[test]
+    fn a_capture_refuses_the_main_key_of_the_other_hotkey() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+
+        let mut second =
+            CaptureSession::arm_for(CaptureTarget::Switch, Default::default(), Some((PAUSE, 0)));
+        assert_eq!(
+            down(&mut second, PAUSE, NOTHING, 0),
+            CaptureStep::Refuse(Refusal::TakenByFix)
+        );
+        assert_eq!(
+            down(&mut second, PAUSE, SHIFT, 10),
+            CaptureStep::Refuse(Refusal::TakenByFix),
+            "`Shift+Pause` beside `Pause` — one main key, one purpose"
+        );
+        assert!(matches!(
+            down(&mut second, SCROLL, NOTHING, 20),
+            CaptureStep::Take(hotkey) if hotkey.key == "ScrollLock"
+        ));
+        drop(second);
+
+        let mut first =
+            CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), Some((SCROLL, 0)));
+        assert_eq!(
+            down(&mut first, SCROLL, NOTHING, 0),
+            CaptureStep::Refuse(Refusal::TakenBySwitch)
+        );
+        assert!(matches!(
+            down(&mut first, F9, NOTHING, 10),
+            CaptureStep::Take(_)
+        ));
+        drop(first);
+
+        let mut double = CaptureSession::arm_for(
+            CaptureTarget::Switch,
+            Default::default(),
+            Some((0x10, hook::DOUBLE_TAP)),
+        );
+        let _ = down(&mut double, LSHIFT, NOTHING, 1_000);
+        let _ = up(&mut double, LSHIFT, 1_080);
+        let _ = down(&mut double, LSHIFT, NOTHING, 1_200);
+        assert_eq!(
+            up(&mut double, LSHIFT, 1_280),
+            CaptureStep::Refuse(Refusal::TakenByFix),
+            "two double presses — one of the two keys at most"
+        );
+        drop(double);
+
+        assert_eq!(
+            Refusal::TakenByFix.string_id(),
+            settings::IDS_CAPTURE_TAKEN_FIX
+        );
+        assert_eq!(
+            Refusal::TakenBySwitch.string_id(),
+            settings::IDS_CAPTURE_TAKEN_SWITCH
+        );
+        hook::set_hotkeys(before.0, before.1);
+    }
+
+    /// **A lone `Ctrl` tapped in a capture of the second key asks the warning** (В-4), its side
+    /// kept; held too long, or under `Shift`, it is the refusal of a modifier; with a key it is a
+    /// combination. In a capture of the first key a lone `Ctrl` stays refused (примечание к FR-94).
+    #[test]
+    fn a_lone_ctrl_is_the_second_keys_alone_and_asks_first() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+        let arm =
+            || CaptureSession::arm_for(CaptureTarget::Switch, Default::default(), Some((PAUSE, 0)));
+
+        let mut tap = arm();
+        assert_eq!(down(&mut tap, RCONTROL, CTRL, 1_000), CaptureStep::Ignore);
+        assert_eq!(
+            down(&mut tap, RCONTROL, CTRL, 1_030),
+            CaptureStep::Ignore,
+            "a repeat"
+        );
+        assert_eq!(
+            up(&mut tap, RCONTROL, 1_080),
+            CaptureStep::CtrlTapped(RCONTROL)
+        );
+        drop(tap);
+
+        let mut left = arm();
+        let _ = down(&mut left, LCONTROL, CTRL, 1_000);
+        assert_eq!(
+            up(&mut left, LCONTROL, 1_100),
+            CaptureStep::CtrlTapped(LCONTROL)
+        );
+        drop(left);
+
+        let mut long = arm();
+        let _ = down(&mut long, RCONTROL, CTRL, 1_000);
+        assert_eq!(
+            up(&mut long, RCONTROL, 1_000 + hook::DOUBLE_TAP_MS + 1),
+            CaptureStep::Ignore,
+            "a hold is no tap, and the capture waits on"
+        );
+        drop(long);
+
+        let mut under_shift = arm();
+        assert_eq!(
+            down(
+                &mut under_shift,
+                LCONTROL,
+                Modifiers {
+                    ctrl: true,
+                    ..SHIFT
+                },
+                1_000
+            ),
+            CaptureStep::Refuse(Refusal::Modifier)
+        );
+        assert_ne!(
+            up(&mut under_shift, LCONTROL, 1_050),
+            CaptureStep::CtrlTapped(LCONTROL),
+            "`Ctrl` under `Shift` is the switcher of Windows"
+        );
+        drop(under_shift);
+
+        let mut combination = arm();
+        let _ = down(&mut combination, RCONTROL, CTRL, 1_000);
+        assert!(matches!(
+            down(&mut combination, F12, CTRL, 1_040),
+            CaptureStep::Take(hotkey) if hotkey.modifiers == ["Ctrl"] && hotkey.key == "F12"
+        ));
+        drop(combination);
+
+        let mut first = CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), None);
+        assert_eq!(
+            down(&mut first, CONTROL, CTRL, 1_000),
+            CaptureStep::Refuse(Refusal::Modifier),
+            "the first key: the refusal of 208.4 stands"
+        );
+        assert_eq!(up(&mut first, CONTROL, 1_050), CaptureStep::Ignore);
+        drop(first);
+
+        hook::set_hotkeys(before.0, before.1);
+    }
+
+    /// ⭐ **A single `Ctrl` is never the fixing key — with one key or with two** (208.231: «только
+    /// для момента когда у нас две горячих клавиши и только для клавиши переключения раскладки»).
+    /// The capture of the first key refuses a lone `Ctrl` of either side as before (примечание к
+    /// FR-94, 208.4), and a tap of it asks nothing: no warning is ever begun there.
+    #[test]
+    fn a_lone_ctrl_is_never_the_fixing_key() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+
+        for (mode, other) in [("one key", None), ("two keys", Some((SCROLL, 0)))] {
+            for side in [CONTROL, LCONTROL, RCONTROL] {
+                let mut first = if other.is_none() {
+                    CaptureSession::arm(bare("Pause"))
+                } else {
+                    CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), other)
+                };
+                assert_eq!(first.target(), CaptureTarget::Fix);
+                assert_eq!(
+                    down(&mut first, side, CTRL, 1_000),
+                    CaptureStep::Refuse(Refusal::Modifier),
+                    "{mode}, {side:#04x}: the refusal of a modifier on its own"
+                );
+                let released = up(&mut first, side, 1_060);
+                assert_eq!(
+                    released,
+                    CaptureStep::Ignore,
+                    "{mode}, {side:#04x}: the tap is no hotkey and asks no warning"
+                );
+                drop(first);
+            }
+        }
+
+        hook::set_hotkeys(before.0, before.1);
+    }
+
+    /// **«Исправить набранное» with nothing to fix knocks in the mode of two keys** (В-2): every
+    /// press `press_act` answers with a switch becomes the knock; nothing else moves, and nothing
+    /// at all in the mode of one key (208.5).
+    #[test]
+    fn the_fixing_key_with_nothing_to_fix_knocks_with_two_keys() {
+        for act in [
+            PressAct::Nothing,
+            PressAct::Replace,
+            PressAct::Switch,
+            PressAct::Refuse,
+        ] {
+            assert_eq!(
+                app::fixing_act(act, false),
+                act,
+                "one key: {act:?} as it was"
+            );
+            let two = app::fixing_act(act, true);
+            if act == PressAct::Switch {
+                assert_eq!(two, PressAct::Knock);
+            } else {
+                assert_eq!(two, act, "two keys: {act:?} untouched");
+            }
+        }
+
+        // Nothing typed, nothing selected; a password field — the rows of 208.5 and 208.5а.
+        let empty = app::press_act(
+            true,
+            true,
+            true,
+            lang_switcher::guard::Field::Ordinary,
+            false,
+        );
+        assert_eq!(app::fixing_act(empty, true), PressAct::Knock);
+        let password = app::press_act(
+            false,
+            false,
+            true,
+            lang_switcher::guard::Field::Password,
+            false,
+        );
+        assert_eq!(app::fixing_act(password, true), PressAct::Knock);
+    }
+
+    /// **What the second key answers** — the tones of a switch over nothing; an excluded process
+    /// is silent and not switched.
+    #[test]
+    fn the_second_key_switches_with_the_tones_of_a_switch() {
+        assert_eq!(
+            app::switch_key_outcome(false, || Some(EmptySwitch::Took)),
+            Some(Press::Replaced)
+        );
+        assert_eq!(
+            app::switch_key_outcome(false, || Some(EmptySwitch::Refused)),
+            Some(Press::Refused)
+        );
+        assert_eq!(
+            app::switch_key_outcome(false, || Some(EmptySwitch::Late)),
+            None
+        );
+        assert_eq!(app::switch_key_outcome(false, || None), Some(Press::Idle));
+        assert_eq!(
+            app::switch_key_outcome(true, || panic!("an excluded process is not switched")),
+            None
+        );
+    }
+
+    /// **The publication puts the second key in the word, and takes it out** — one key, a key that
+    /// is no good, the mode of one key: `(0, 0)`.
+    #[test]
+    fn the_publication_puts_the_second_key_beside_the_first() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+
+        app::publish_configuration(&two_keys("ScrollLock", &[], "press"));
+        assert_eq!(hook::hotkeys(), ((PAUSE, 0), (SCROLL, 0)));
+
+        app::publish_configuration(&two_keys("RightCtrl", &[], "tap"));
+        assert_eq!(hook::switch_hotkey(), (RCONTROL, hook::SINGLE_TAP));
+
+        for (config, why) in [
+            (two_keys("Pause", &[], "press"), "the first key's own"),
+            (two_keys("Wobble", &[], "press"), "no good"),
+            (
+                read("[switch_hotkey]\nenabled = false\nkey = \"ScrollLock\"\n"),
+                "one key",
+            ),
+        ] {
+            app::publish_configuration(&config);
+            assert_eq!(hook::switch_hotkey(), (0, 0), "{why}");
+            assert_eq!(hook::hotkey(), (PAUSE, 0), "{why}: the first stays");
+        }
+
+        app::publish_configuration(&Config::default());
+        hook::set_hotkeys(before.0, before.1);
+    }
+
+    /// The source of `app.rs` without its comment lines.
+    fn app_code() -> String {
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join("app.rs"),
+        )
+        .expect("src/app.rs must be readable")
+        .replace("\r\n", "\n")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+
+    /// **The input window answers the second key by a switch and by nothing else, and the first
+    /// key's press passes through `fixing_act`** — the wiring in `window_proc`, which no test can
+    /// call. Comments dropped: a call turned into a comment must not count (the lesson of Э95).
+    #[test]
+    fn the_input_window_answers_the_second_key_by_a_switch_alone() {
+        let code = app_code();
+        let gate = "if message == crate::hook::WM_APP_SWITCH_KEY && is_input_window(hwnd) {";
+        let start = code
+            .find(gate)
+            .expect("the input window has an arm for the second key, gated on the input window");
+        let arm = &code[start..];
+        let arm = &arm[..arm.find("\n            }\n").expect("the arm closes")];
+
+        for needed in [
+            "crate::inject::send_switch_menu_mask();",
+            "switch_key_outcome(excluded, crate::inject::switch_on_empty_press)",
+            "sound_message_for(press)",
+        ] {
+            assert!(
+                arm.contains(needed),
+                "the arm of the second key: {needed:?}\n{arm}"
+            );
+        }
+        for never in [
+            "on_hotkey",
+            "wants_selection_path",
+            "clipboard",
+            "buffer::reset",
+        ] {
+            assert!(
+                !arm.contains(never),
+                "the second key never reaches {never:?}"
+            );
+        }
+
+        let packed: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            packed.contains("buffer_path_outcome(fixing_act(press_act("),
+            "the press of the first key passes through `fixing_act` (В-2)"
+        );
+        assert!(
+            packed.contains("lettwo_keys=crate::hook::switch_hotkey().0!=0;"),
+            "and the mode of two keys is the second key in the word of the hook"
+        );
     }
 }
