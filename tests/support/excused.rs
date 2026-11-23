@@ -33,21 +33,7 @@ pub struct Excuse {
 }
 
 /// **The windows excused from fitting** (208.175), each with its category and its term.
-pub const EXCUSED: &[Excuse] = &[
-    // AUDIT-180 А1 (208.211): the title of «От автора» is the first sentence of the owner's text and
-    // the card says the rest. The wave split the old translation of every language the same way
-    // (L10N-180b, without a word lost); these languages still do not fit the window of 900 × 540
-    // even at 12 points: the owner's text is not cut (the owner was promised), so the owner decides.
-    Excuse {
-        window: "author",
-        class: Class::Ordinary,
-        languages: &["hy", "ka", "ml", "te", "uz", "uz-Cyrl"],
-        category: Some(Category::Wave),
-        until: "волна переводов 1.8.0: «От автора» не влезает при кегле 12 — решает владелец (L10N-180b)",
-        decision: None,
-        why: "заголовок (hy, ka, ml) или текст карточки (te, uz, uz-Cyrl) длиннее окна; текст не режется",
-    },
-];
+pub const EXCUSED: &[Excuse] = &[];
 
 /// The excuse of `window` at `class` in the language `tag`, if there is one.
 pub fn excused(window: &str, class: Class, tag: &str) -> Option<&'static Excuse> {
