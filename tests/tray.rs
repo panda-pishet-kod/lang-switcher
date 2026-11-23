@@ -7317,7 +7317,10 @@ mod window_of_the_settings {
         // rest; with one key it is there, and under the second field its own line stays.
         let ways = ru(settings::IDS_HOTKEY_HINT);
         assert!(one.contains(&ways), "one key: the line of the ways");
-        assert!(!two.contains(&ways), "two keys: no line of the ways at rest");
+        assert!(
+            !two.contains(&ways),
+            "two keys: no line of the ways at rest"
+        );
         assert!(two.contains(&ru(settings::IDS_SWITCH_KEY_HINT)));
         window.event(Event::Pressed(Id::HotkeySet));
         assert!(
@@ -7351,7 +7354,10 @@ mod window_of_the_settings {
         let second = ru(settings::IDS_STATUS_SWITCH_KEY).replace("{0}", "ScrollLock");
 
         let one = shown(&window);
-        assert!(one.contains(&format!("{first:?}")), "one key: the line alone");
+        assert!(
+            one.contains(&format!("{first:?}")),
+            "one key: the line alone"
+        );
 
         window.config.switch_hotkey.enabled = true;
         window.config.switch_hotkey.key = "ScrollLock".to_owned();
