@@ -1543,6 +1543,12 @@ mod gdi {
         let style = laid.style();
         let rtl = laid.direction() == Direction::RightToLeft;
         let mut wide: Vec<u16> = laid.shown().encode_utf16().collect();
+        // Nothing to draw. ⚠ An empty slice reaches `DrawTextW` as a dangling pointer with a count
+        // of 0, and `DrawTextW` reads it all the same: the process fell on an empty field or label
+        // in the plain look (Z15, 208.210 — «Раскладки» in the settings, the last step of the wizard).
+        if wide.is_empty() {
+            return;
+        }
         let mut flags = DT_NOPREFIX | DT_NOCLIP;
         flags |= match laid.wrap() {
             Wrap::Words => DT_WORDBREAK,

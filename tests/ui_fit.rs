@@ -1178,3 +1178,61 @@ fn every_entry_of_its_cap_fits_its_letter() {
         wrong.join("\n")
     );
 }
+
+/// **Every window of the catalogue draws in the plain look, in every state of its elements** (Z15,
+/// 208.210): the look a machine falls back to when Direct2D does not come up is never seen on the
+/// stand, and an empty field or label in it brought the process down. The windows as the product
+/// gives them — an empty string stays empty, no stand-in — in a straight language and the mirror,
+/// in the narrow and the ordinary class, laid out as the product lays them out.
+#[test]
+fn every_window_draws_in_the_plain_look_in_every_state() {
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::tokens::{Color, Theme};
+
+    with_product_strings();
+    for language in [Language::Ru, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        for (name, window) in catalogue(language) {
+            for (class, w, h) in &CLASSES[..2] {
+                let size = client_size(*w, *h);
+                let layout = fit::emergency(
+                    &window,
+                    size,
+                    fit::k_for(language.tag(), *class),
+                    rtl,
+                    &text,
+                );
+                let look = Look {
+                    theme: Theme::Light,
+                    rtl,
+                    b: layout.b,
+                    h: size.h,
+                    text: &text,
+                };
+                let mut canvas =
+                    Canvas::in_memory(size.w, size.h, 1.0, Mode::Gdi).expect("a canvas");
+                let drawn = canvas.frame(|painter| {
+                    painter.clear(Color::Bg.get(Theme::Light));
+                    for item in &layout.items {
+                        for state in State::ALL {
+                            elements::draw(painter, &look, &item.part, item.rect, *state);
+                        }
+                    }
+                });
+                assert_eq!(
+                    drawn,
+                    Mode::Gdi,
+                    "{name} {}: the plain look",
+                    language.tag()
+                );
+            }
+        }
+    }
+}

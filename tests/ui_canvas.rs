@@ -353,6 +353,36 @@ fn the_plain_look_draws_text_where_direct2d_does_and_start_is_the_right_edge_in_
     }
 }
 
+/// **An empty line draws nothing, and the plain look stands it** (Z15, 208.210): an empty label or
+/// field reached `DrawTextW` as a dangling pointer, and the process fell with an access violation —
+/// in the settings on «Раскладки», on the last step of the wizard.
+#[test]
+fn an_empty_line_draws_nothing_in_either_look() {
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let text = Text::new("ru-RU", Direction::LeftToRight).expect("DirectWrite");
+    for wrap in [Wrap::OneLine, Wrap::Words, Wrap::Ellipsis] {
+        let laid = text
+            .lay(
+                "",
+                Style::of(Role::Body, 14.0, 512.0),
+                wrap,
+                Align::Start,
+                180.0,
+            )
+            .expect("a layout");
+        for mode in [Mode::Direct2D, Mode::Gdi] {
+            let mut canvas = Canvas::in_memory(200.0, 40.0, 1.0, mode).expect("a canvas");
+            canvas.frame(|painter| {
+                painter.clear(bg);
+                painter.text(&laid, 10.0, 10.0, Color::Text.get(theme));
+            });
+            let image = canvas.image().expect("pixels");
+            assert_eq!(ink(&image, bg), None, "{mode:?} {wrap:?}: no ink");
+        }
+    }
+}
+
 /// The ring around a picture of the panda is `bg` and 6 points wide: 6 pixels at 100 %, 12 at
 /// 200 % (passport §3).
 #[test]
