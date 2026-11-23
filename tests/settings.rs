@@ -15487,6 +15487,41 @@ mod second_hotkey {
         hook::set_hotkeys(before.0, before.1);
     }
 
+    /// ⭐ **A single `Ctrl` is never the fixing key — with one key or with two** (208.231: «только
+    /// для момента когда у нас две горячих клавиши и только для клавиши переключения раскладки»).
+    /// The capture of the first key refuses a lone `Ctrl` of either side as before (примечание к
+    /// FR-94, 208.4), and a tap of it asks nothing: no warning is ever begun there.
+    #[test]
+    fn a_lone_ctrl_is_never_the_fixing_key() {
+        let _gate = publishing();
+        let before = hook::hotkeys();
+
+        for (mode, other) in [("one key", None), ("two keys", Some((SCROLL, 0)))] {
+            for side in [CONTROL, LCONTROL, RCONTROL] {
+                let mut first = if other.is_none() {
+                    CaptureSession::arm(bare("Pause"))
+                } else {
+                    CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), other)
+                };
+                assert_eq!(first.target(), CaptureTarget::Fix);
+                assert_eq!(
+                    down(&mut first, side, CTRL, 1_000),
+                    CaptureStep::Refuse(Refusal::Modifier),
+                    "{mode}, {side:#04x}: the refusal of a modifier on its own"
+                );
+                let released = up(&mut first, side, 1_060);
+                assert_eq!(
+                    released,
+                    CaptureStep::Ignore,
+                    "{mode}, {side:#04x}: the tap is no hotkey and asks no warning"
+                );
+                drop(first);
+            }
+        }
+
+        hook::set_hotkeys(before.0, before.1);
+    }
+
     /// **«Исправить набранное» with nothing to fix knocks in the mode of two keys** (В-2): every
     /// press `press_act` answers with a switch becomes the knock; nothing else moves, and nothing
     /// at all in the mode of one key (208.5).

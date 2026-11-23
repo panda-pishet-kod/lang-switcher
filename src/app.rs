@@ -3177,7 +3177,7 @@ pub fn publish_configuration(config: &settings::Config) {
     // that stands in the word.
     let binding = config.hotkey.binding();
     let switch = config.switch_binding().unwrap_or((0, 0));
-    let fix = binding.unwrap_or_else(|| crate::hook::hotkey());
+    let fix = binding.unwrap_or_else(crate::hook::hotkey);
 
     crate::hook::set_hotkeys(fix, switch);
 

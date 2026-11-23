@@ -7367,6 +7367,57 @@ mod window_of_the_settings {
         assert!(shown(&window).contains("ScrollLock"));
     }
 
+    /// ⭐ **No single `Ctrl` with one key, and none for the fixing key** (208.231). In the mode of
+    /// one key the capture refuses a lone `Ctrl` with the line of a modifier and asks no warning,
+    /// and «Задать» of the second key — which is not on the screen — arms nothing; in the mode of two
+    /// keys the capture of «Исправить набранное» does the same.
+    #[test]
+    fn a_lone_ctrl_is_refused_for_the_fixing_key_and_with_one_key() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+
+        for two in [false, true] {
+            let (mut window, applied) = recorded(&[]);
+            window.section = Section::Hotkey;
+            window.config.switch_hotkey.enabled = two;
+
+            window.event(Event::Pressed(Id::HotkeySet));
+            window.event(Event::KeyDown {
+                id: Id::Hotkey,
+                vk: RCONTROL,
+            });
+            window.event(Event::KeyUp {
+                id: Id::Hotkey,
+                vk: RCONTROL,
+            });
+            let shown_now = shown(&window);
+            assert!(window.capturing(), "two={two}: the capture waits on");
+            assert!(
+                shown_now.contains(&ru(settings::IDS_CAPTURE_MODIFIER)),
+                "two={two}: the refusal of a modifier on its own, as before"
+            );
+            assert!(
+                !shown_now.contains("CtrlWarnSet"),
+                "two={two}: no warning for the fixing key"
+            );
+            assert!(applied.borrow().is_empty(), "two={two}: nothing set");
+
+            if !two {
+                window.event(Event::KeyDown {
+                    id: Id::Hotkey,
+                    vk: ESCAPE,
+                });
+                window.event(Event::Pressed(Id::SwitchKeySet));
+                assert!(
+                    !window.capturing(),
+                    "one key: the second key has no capture"
+                );
+                window.event(Event::Pressed(Id::CtrlWarnSet));
+                assert!(applied.borrow().is_empty(), "one key: nothing is set");
+            }
+        }
+    }
+
     /// **A lone `Ctrl` asks first** (В-4): the warning with its two buttons; «Выбрать другую
     /// клавишу» arms the capture again and changes nothing, «Всё равно установить» sets the tap
     /// of the side that was tapped.

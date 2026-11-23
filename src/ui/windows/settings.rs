@@ -1127,6 +1127,12 @@ impl Content for Settings {
                 } else {
                     CaptureTarget::Switch
                 };
+                // ⭐ 208.231: the second key — and the single `Ctrl` with it — exists only in the
+                // mode of two keys; with one key nothing arms its capture.
+                if target == CaptureTarget::Switch && !self.config.switch_hotkey.enabled {
+                    self.ctrl_warning = None;
+                    return Reply::Stay;
+                }
                 let armed = self.capture.take().map(|capture| capture.session.target());
                 if armed != Some(target) || id == Id::CtrlWarnOther {
                     self.arm_capture(target);
@@ -1135,7 +1141,9 @@ impl Content for Settings {
             }
             Event::Pressed(Id::CtrlWarnSet) => {
                 self.capture = None;
+                // 208.231: «Всё равно установить» sets the second key, in the mode of two keys only.
                 if let Some(side) = self.ctrl_warning.take()
+                    && self.config.switch_hotkey.enabled
                     && let Some(tap) = self.config.switch_hotkey.ctrl_tap(side)
                 {
                     self.change(|config| config.switch_hotkey = tap);
