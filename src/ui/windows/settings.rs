@@ -16,12 +16,12 @@ use crate::settings::{
     IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_NOT_PICKED, IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_COUNT,
     IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE, IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS,
     IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY, IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET,
-    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_OPEN,
-    IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
-    IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
-    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRANSLATION_REPORT,
-    IDS_TRAY_FLAG, IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode,
-    LayoutRow, Modifiers, Refusal,
+    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_HINT,
+    IDS_LOG_OPEN, IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR,
+    IDS_NEW_BADGE, IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED,
+    IDS_SOUND, IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM,
+    IDS_TRANSLATION_REPORT, IDS_TRAY_FLAG, IDS_TRAY_FLAG_HINT, IDS_UPDATES_SWITCH,
+    IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow, Modifiers, Refusal,
 };
 use crate::settings::{
     IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
@@ -34,7 +34,7 @@ use crate::settings::{
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
 use crate::ui::scene::{
-    Art, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
+    Art, Brand, ButtonKind, Event, FieldKind, ListItem, Node, Role, Surface, Window, WindowKind,
 };
 use crate::ui::windows::tray_menu;
 use ::windows::Win32::Foundation::HWND;
@@ -72,6 +72,16 @@ pub enum Id {
     Write,
     Details,
     Close,
+    /// The address under the sections, in the panel (AUDIT-180 Н2).
+    Site,
+}
+
+/// The name of the author's site under the sections, as in «О программе» and «От автора»: the host
+/// of the program's page, read out of `letters::links`.
+fn site() -> String {
+    let page = crate::letters::links::PROGRAM_URL;
+    let rest = page.strip_prefix("https://").unwrap_or(page);
+    rest.split('/').next().unwrap_or(rest).to_owned()
 }
 
 /// The sections, in their order.
@@ -286,7 +296,8 @@ impl Settings {
 
     fn general(&self) -> Vec<Node<Id>> {
         let language = self.config.general.language.in_force();
-        let mut nodes = vec![
+        // The switches in one group of rows (208.209, AUDIT-180 Н3), a line between two of them.
+        let mut nodes = vec![Node::Group(vec![
             toggle(
                 Id::Autostart,
                 self.line(IDS_AUTOSTART),
@@ -301,7 +312,8 @@ impl Settings {
             Node::Toggle {
                 id: Id::TrayFlag,
                 label: self.line(IDS_TRAY_FLAG),
-                hint: None,
+                // What the flag is, under its label (Н4, the mock-up of the window).
+                hint: Some(self.line(IDS_TRAY_FLAG_HINT)),
                 on: self.config.general.tray_flag,
                 // The setting came with 1.7.0 (T-119-2); the badge «новое» stays while the
                 // window is the window of 1.8.0 (T-120-20, passport §6).
@@ -314,36 +326,41 @@ impl Settings {
                 self.line(IDS_UPDATES_SWITCH),
                 self.config.letters.release_window,
             ),
-            Node::Choice {
-                id: Id::Language,
-                label: self.line(IDS_LANGUAGE_LABEL),
-                options: self
-                    .languages
-                    .languages
-                    .iter()
-                    .map(|language| language.native_name().to_owned())
-                    .collect(),
-                selected: self
-                    .languages
-                    .languages
-                    .iter()
-                    .position(|candidate| *candidate == language)
-                    .unwrap_or(0),
-            },
-        ];
+        ])];
+        let mut language_column = vec![Node::Choice {
+            id: Id::Language,
+            label: self.line(IDS_LANGUAGE_LABEL),
+            options: self
+                .languages
+                .languages
+                .iter()
+                .map(|language| language.native_name().to_owned())
+                .collect(),
+            selected: self
+                .languages
+                .languages
+                .iter()
+                .position(|candidate| *candidate == language)
+                .unwrap_or(0),
+        }];
         // T-120-22: under «Язык интерфейса», the quiet «Нашли ошибку в переводе?» — in every
         // language of the window but Russian, the language the others are translated from.
         // ⚠ Not while the note of a refused write stands over the section (C6 of the sheet, (г)):
         // with the note, the button pushes «Общие» of the narrow window out of it in ta, ml, tt
         // and ka; the note goes with the next change, and the button comes back with it.
         if self.language != Language::Ru && !self.refused {
-            nodes.push(Node::Buttons(vec![Node::Button {
+            language_column.push(Node::Buttons(vec![Node::Button {
                 id: Id::Translation,
                 label: self.line(IDS_TRANSLATION_REPORT),
                 kind: ButtonKind::Quiet,
                 browser: false,
             }]));
         }
+        // «Язык интерфейса», then «Оформление» on a line of its own across the column, their labels
+        // over them (208.209, AUDIT-180 Н5, О5). Not a pair: three segments are wider than half the
+        // column at the type of the window, and in a half they turned into a choice field (the
+        // frame of the stand, 23.11) — the rule of the segments comes first.
+        nodes.extend(language_column);
         nodes.push(Node::Segments {
             id: Id::Theme,
             label: self.line(IDS_THEME_LABEL),
@@ -413,18 +430,21 @@ impl Settings {
         }];
         let labels = settings::layout_labels(&self.session, &self.session);
         if self.config.layouts.mode == LayoutMode::Pair {
-            nodes.push(Node::Choice {
-                id: Id::PairSource,
-                label: self.line(IDS_PAIR_SOURCE),
-                options: labels.clone(),
-                selected: self.layout_index(&self.config.layouts.pair_source),
-            });
-            nodes.push(Node::Choice {
-                id: Id::PairTarget,
-                label: self.line(IDS_PAIR_TARGET),
-                options: labels,
-                selected: self.layout_index(&self.config.layouts.pair_target),
-            });
+            // «Источник» and «Цель» as a pair, their labels over them (208.209, AUDIT-180 Н9).
+            nodes.push(Node::Pair(
+                Box::new(Node::Choice {
+                    id: Id::PairSource,
+                    label: self.line(IDS_PAIR_SOURCE),
+                    options: labels.clone(),
+                    selected: self.layout_index(&self.config.layouts.pair_source),
+                }),
+                Box::new(Node::Choice {
+                    id: Id::PairTarget,
+                    label: self.line(IDS_PAIR_TARGET),
+                    options: labels,
+                    selected: self.layout_index(&self.config.layouts.pair_target),
+                }),
+            ));
         } else {
             let names: Vec<LayoutId> = self.rows.iter().map(|row| row.layout).collect();
             let row_labels = settings::layout_labels(&names, &self.session);
@@ -510,11 +530,14 @@ impl Settings {
             IDS_LOG_SAVE
         };
         let mut nodes = vec![
-            toggle(
-                Id::Log,
-                self.line(IDS_LOG_ENABLED),
-                self.config.diagnostics.log_enabled,
-            ),
+            // «Вести журнал» in a frame, what the journal holds under it (208.209, AUDIT-180 Н10).
+            Node::Group(vec![Node::Toggle {
+                id: Id::Log,
+                label: self.line(IDS_LOG_ENABLED),
+                hint: Some(self.line(IDS_LOG_HINT)),
+                on: self.config.diagnostics.log_enabled,
+                badge: None,
+            }]),
             Node::Line(Role::FieldLabel, self.line(IDS_LOG_DIR_LABEL)),
             Node::Line(Role::Code, folder),
             Node::Buttons(vec![
@@ -858,8 +881,14 @@ impl Content for Settings {
 
         Window {
             kind: WindowKind::Settings,
-            art: Some(Art::About),
-            brand: None,
+            // The scene of its own (208.163, AUDIT-180 Н1) and the name and the address under the
+            // sections, as under the picture of the other windows (Н2).
+            art: Some(Art::Settings),
+            brand: Some(Brand {
+                name: "Panda Koder".to_owned(),
+                address: site(),
+                link: Id::Site,
+            }),
             body: Node::Column(body),
             buttons: vec![Node::Button {
                 id: Id::Close,
@@ -1107,6 +1136,14 @@ impl Content for Product {
         let reply = match event {
             Event::Pressed(Id::Write) => {
                 crate::letters::open_wizard(self.owner);
+                Reply::Stay
+            }
+            // The address under the sections opens the page of the program in the language of the
+            // window, through the gate of `letters::open_link`, as in «О программе».
+            Event::Pressed(Id::Site) => {
+                crate::letters::open_link(crate::letters::links::program_url(
+                    self.settings.language,
+                ));
                 Reply::Stay
             }
             // T-120-22: the wizard on the page of the idea, marked with the language read here.

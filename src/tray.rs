@@ -182,8 +182,9 @@ pub const MENU_ENTRY_COUNT: i32 = 8;
 // Private constants
 // ---------------------------------------------------------------------------------------
 
-/// Resource identifier of the "active" icon in `app.rc`.
-const IDI_APP_ACTIVE: u16 = 101;
+/// Resource identifier of the "active" icon in `app.rc` — also the icon on the caption of every
+/// window of the shell (`ui::host`, Б1 of AUDIT-180).
+pub(crate) const IDI_APP_ACTIVE: u16 = 101;
 
 /// Resource identifier of the "suspended" icon in `app.rc`.
 const IDI_APP_PAUSED: u16 = 102;
@@ -4043,6 +4044,12 @@ pub(crate) fn metric_at_window_dpi(
     index: SYSTEM_METRICS_INDEX,
     at_96: i32,
 ) -> i32 {
+    metric_at_dpi(index, at_96, window_dpi(hwnd))
+}
+
+/// One system metric at `dpi` — the body of [`metric_at_window_dpi`], for a caller that knows the
+/// DPI of its window already (the windows of the shell ask `GetDpiForWindow`).
+fn metric_at_dpi(index: SYSTEM_METRICS_INDEX, at_96: i32, dpi: i32) -> i32 {
     // SAFETY: `GetSystemMetrics` reads a system-wide value, takes no pointer and touches no
     // memory of ours. It returns zero for an index the system does not know, which is why the
     // result is examined rather than passed on (NFR-13): a zero would ask `LoadImageW` for the
@@ -4052,7 +4059,24 @@ pub(crate) fn metric_at_window_dpi(
     // The documented value at 100 % is the fallback for a refused metric.
     let base = if measured > 0 { measured } else { at_96 };
 
-    (base * window_dpi(hwnd) + 48) / 96
+    (base * dpi + 48) / 96
+}
+
+/// The small and the big icon of the system at `dpi`: the two frames of the icon on the caption of
+/// a window of the shell (`ui::host`, Б1 of AUDIT-180) — the sizes [`small_icon_size`] and
+/// [`large_icon_size`] answer, at the DPI of that window.
+pub(crate) fn caption_icon_sizes(dpi: u32) -> [(i32, i32); 2] {
+    let dpi = i32::try_from(dpi).unwrap_or(96);
+    [
+        (
+            metric_at_dpi(SM_CXSMICON, 16, dpi),
+            metric_at_dpi(SM_CYSMICON, 16, dpi),
+        ),
+        (
+            metric_at_dpi(SM_CXICON, 32, dpi),
+            metric_at_dpi(SM_CYICON, 32, dpi),
+        ),
+    ]
 }
 
 /// The size the shell wants a notification-area icon in — FR-90.

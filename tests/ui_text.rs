@@ -455,3 +455,131 @@ fn the_tall_scripts_are_not_cut_by_a_button() {
     }
     println!("{}", report.join("\n"));
 }
+
+/// **A strong run inside a line** (208.209, AUDIT-180 П2): the marks are not shown, the run is set
+/// in the weight of the strong role — wider than the same words in the weight of the body — and the
+/// words around it keep theirs. The stand-in measure does not count the marks.
+#[test]
+fn a_strong_run_is_bold_inside_the_line_and_its_marks_are_not_shown() {
+    use lang_switcher::ui::scene::{STRONG_BEGIN, STRONG_END, strong};
+
+    let text = Text::new("ru-RU", Direction::LeftToRight).expect("DirectWrite");
+    let style = Style::of(Role::Body, 14.0, 512.0);
+    let marked = format!("Нажмите {} ещё раз", strong("Pause"));
+    let lay = |line: &str| {
+        text.lay(line, style, Wrap::OneLine, Align::Start, 400.0)
+            .expect("a layout")
+    };
+
+    let bold = lay(&marked);
+    let plain = lay("Нажмите Pause ещё раз");
+    assert_eq!(
+        bold.shown(),
+        "Нажмите Pause ещё раз",
+        "the marks are taken out"
+    );
+    assert!(
+        !bold.shown().contains([STRONG_BEGIN, STRONG_END]),
+        "no mark is laid"
+    );
+    let (wide, narrow) = (bold.size().width, plain.size().width);
+    assert!(
+        wide > narrow + 0.5,
+        "Pause in bold: {wide} against {narrow}"
+    );
+
+    // The words before the run stand where they stood: «Нажмите » is not bold.
+    let at = |laid: &Laid, position: u32| laid.place_of(position).expect("a place").left;
+    assert!(
+        (at(&bold, 8) - at(&plain, 8)).abs() < 0.01,
+        "the run starts where the plain word starts"
+    );
+
+    assert_eq!(
+        FixedAdvance(0.5)
+            .measure(&marked, style, Wrap::OneLine, 1000.0)
+            .width,
+        FixedAdvance(0.5)
+            .measure("Нажмите Pause ещё раз", style, Wrap::OneLine, 1000.0)
+            .width,
+        "the stand-in measure does not count the marks"
+    );
+}
+
+/// **208.217, AUDIT-180 Пс2: the link inside a paragraph** — its marks are not shown, and its words
+/// stand where DirectWrite set them: at the end of a line that reads left to right, at the left end
+/// of one that reads right to left (the paragraph's own text is not mirrored).
+#[test]
+fn the_words_of_a_link_stand_where_the_line_sets_them_and_its_marks_are_not_shown() {
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END};
+
+    let style = Style::of(Role::Body, 14.0, 512.0);
+    let width = 400.0;
+    let cases = [
+        ("en-US", Direction::LeftToRight, "Say so", "in the group"),
+        ("ar-SA", Direction::RightToLeft, "أخبرنا", "في المجموعة"),
+    ];
+    for (locale, direction, before, link) in cases {
+        let text = Text::new(locale, direction).expect("DirectWrite");
+        let marked = format!("{before} {LINK_BEGIN}{link}{LINK_END}");
+        let laid = text
+            .lay(&marked, style, Wrap::Words, Align::Start, width)
+            .expect("a layout");
+        let plain = text
+            .lay(
+                &format!("{before} {link}"),
+                style,
+                Wrap::Words,
+                Align::Start,
+                width,
+            )
+            .expect("a layout");
+        let areas = laid.link_areas();
+        let alone = text
+            .lay(link, style, Wrap::OneLine, Align::Start, width)
+            .expect("a layout")
+            .size()
+            .width;
+
+        assert_eq!(
+            laid.shown(),
+            format!("{before} {link}"),
+            "{locale}: no mark is shown"
+        );
+        assert!(
+            (laid.size().width - plain.size().width).abs() < 0.01,
+            "{locale}: the marks take no room"
+        );
+        assert_eq!(areas.len(), 1, "{locale}: one line: {areas:?}");
+        let area = areas[0];
+        assert!(
+            (area.w - alone).abs() < 1.0,
+            "{locale}: the area is as wide as the words of the link: {area:?}, {alone:.2}"
+        );
+        let line = laid.size().width;
+        match direction {
+            Direction::LeftToRight => assert!(
+                (area.x + area.w - line).abs() < 1.0,
+                "{locale}: the end of the line: {area:?}, the line {line:.2}"
+            ),
+            Direction::RightToLeft => assert!(
+                (area.x - (width - line)).abs() < 1.0,
+                "{locale}: the left end of a line set at the right: {area:?}, the line {line:.2}"
+            ),
+        }
+    }
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let none = text
+        .lay(
+            "Say so in the group",
+            style,
+            Wrap::Words,
+            Align::Start,
+            width,
+        )
+        .expect("a layout");
+    assert!(
+        none.link_areas().is_empty(),
+        "the control: no link, no area"
+    );
+}

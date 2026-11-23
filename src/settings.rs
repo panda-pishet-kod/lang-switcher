@@ -1693,6 +1693,32 @@ pub const IDS_AUTHOR_CHANNEL: u16 = 3306;
 /// «Получено сайтом автора» — the line of the state of the page «Обращение отправлено» of the
 /// wizard (T-120-19); shown only when the site answered with success.
 pub const IDS_WIZARD_RECEIVED: u16 = 3313;
+/// The hint under «Флаг раскладки в трее» in «Общие» — AUDIT-180 Н4 (решение 208.209), the line of
+/// the mock-up of the window.
+pub const IDS_TRAY_FLAG_HINT: u16 = 3314;
+/// The hint under «Вести журнал» in «Диагностика» — AUDIT-180 Н10 (решение 208.209), the line of the
+/// mock-up: what the journal holds.
+pub const IDS_LOG_HINT: u16 = 3315;
+/// The third line of the first card of the wizard — where it leads (AUDIT-180 М2, решение 208.132):
+/// «Дальше: где, что делали, что приложить, проверка».
+pub const IDS_WIZARD_CARD_WRONG_NEXT: u16 = 3316;
+/// The same of the card of the idea: «Дальше: идея и проверка».
+pub const IDS_WIZARD_CARD_IDEA_NEXT: u16 = 3317;
+/// The state in the head of the menu of the icon, in small letters as the mock-up of the menu has
+/// it (AUDIT-180 Мн1): «работает», «приостановлена», «нужен перезапуск». The block «Состояние» of
+/// the settings keeps [`IDS_STATUS_WORKING`] and its two, which begin a line.
+pub const IDS_MENU_WORKING: u16 = 3318;
+pub const IDS_MENU_SUSPENDED: u16 = 3319;
+pub const IDS_MENU_RESTART: u16 = 3320;
+/// The title of «От автора» — the first sentence of the owner's text, without its full stop
+/// (AUDIT-180 А1, решение 208.211: «разбить без потерь»); the rest is [`IDS_AUTHOR_TEXT`], word for
+/// word.
+pub const IDS_AUTHOR_TITLE: u16 = 3321;
+/// The sentence at the end of the lead of «Спасибо» that carries its link (AUDIT-180 Пс2, решение
+/// 208.217): the first sentence of the old [`IDS_THANKS_PARA`]; the words of the link between
+/// `<a>` and `</a>` (`ui::scene::linked`) — the group or GitHub Issues,
+/// `letters::links::feedback_url` of the language.
+pub const IDS_THANKS_SAY: u16 = 3322;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2009,9 +2035,8 @@ pub const IDS_EXCLUSION_ALREADY: u16 = 3240;
 pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
 // Task T-103-2, решение 181.1: the button of «Спасибо» that sends a person where they can write —
 // the first free number when the task wrote it, in the block 3232…3247.
-/// «Открыть группу» / «Open GitHub Issues» — the panel of «Спасибо», `letters::links::feedback_url`
-/// of the language of the letter. `IDS_CHANNEL_OPEN` stays with «Что нового» and FR-103.
-pub const IDS_FEEDBACK_OPEN: u16 = 3242;
+// 3242 — «Открыть группу» / «Open GitHub Issues», the link under «Спасибо» until AUDIT-180 Пс2
+// (решение 208.217): the link went into the lead, [`IDS_THANKS_SAY`]. A hole, never to be taken.
 // Task T-103-7, решение 181.6: the last step of an appeal about a trouble — a letter to the author;
 // since task T-107-3 (решение 199.3) the letter of any appeal the site did not take. 3243…3247
 // close the block 3232…3247, 3248 opens the next. The address is `{0}` in every one of them: the
@@ -2129,11 +2154,10 @@ pub const IDS_WIZARD_WHAT_NOTE: u16 = 3160;
 pub const IDS_WIZARD_CARD_WRONG: u16 = 3161;
 /// Its second line.
 pub const IDS_WIZARD_CARD_WRONG_SUB: u16 = 3162;
-/// The second card: «Ничего не произошло».
-pub const IDS_WIZARD_CARD_NOTHING: u16 = 3163;
-/// Its second line.
-pub const IDS_WIZARD_CARD_NOTHING_SUB: u16 = 3164;
-/// The third card: «Хочу предложить улучшение» — the short road.
+// ⚠ **3163 and 3164 are retired, not free** — AUDIT-180 Z8, решение 208.131: the card «Ничего не
+// произошло» and its line went into the first one («…или ничего не произошло»). The numbers stay
+// holes, as 3004 does: a key of an old translation must not come back meaning something else.
+/// The second card: «Хочу предложить улучшение» — the short road.
 pub const IDS_WIZARD_CARD_IDEA: u16 = 3165;
 /// Its second line.
 pub const IDS_WIZARD_CARD_IDEA_SUB: u16 = 3166;
@@ -2279,8 +2303,8 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// brought eight, [`IDS_EXCLUSION_AUTO`] … [`IDS_EXCLUSION_NOT_PICKED`] (3234…3241).
 ///
 /// ⚠ **Two hundred and twenty-nine since task T-103-2** — вопрос 181, решение 181.1: «Спасибо» sends
-/// a person where they can write, and its button got a word of its own, [`IDS_FEEDBACK_OPEN`]
-/// (3242).
+/// a person where they can write, and its button got a word of its own, `IDS_FEEDBACK_OPEN`
+/// (3242; gone with AUDIT-180 Пс2).
 ///
 /// ⚠ **Two hundred and thirty-five since task T-103-7** — решение 181.6: an appeal about a trouble goes
 /// to the author by letter, and its last step got six words of its own, [`IDS_WIZARD_MAIL_NOTE`] …
@@ -2341,13 +2365,32 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ **Two hundred and seventy-five since task T-120-19** — the line of the state of the
 /// thanks of the wizard, [`IDS_WIZARD_RECEIVED`] (3313). 274 + 1.
 ///
-/// ⚠ **Two hundred and seventy-six since Z11 of AUDIT-180** (решение 208.209) — the text of the
-/// hint of the flag on Windows 10, [`IDS_HINT_TEXT_10`] (3340). 275 + 1.
+/// ⚠ **Two hundred and seventy-seven since AUDIT-180 Z6** — the hints of the flag and of the
+/// journal, [`IDS_TRAY_FLAG_HINT`] (3314) and [`IDS_LOG_HINT`] (3315). 275 + 2.
+///
+/// ⚠ **Two hundred and seventy-seven again since AUDIT-180 Z8** — the card «Ничего не произошло» and
+/// its line (3163, 3164) went into the first card (208.131), and the two cards took the line of
+/// where they lead, [`IDS_WIZARD_CARD_WRONG_NEXT`] (3316) and [`IDS_WIZARD_CARD_IDEA_NEXT`] (3317)
+/// (208.132). 277 − 2 + 2.
+///
+/// ⚠ **Two hundred and eighty since AUDIT-180 Z14** — the state in the head of the menu in small
+/// letters, [`IDS_MENU_WORKING`] and its two (3318…3320). 277 + 3.
+///
+/// ⚠ **Two hundred and eighty-one since AUDIT-180 Z4 (А1)** — the title of «От автора»,
+/// [`IDS_AUTHOR_TITLE`] (3321), the first sentence of the owner's text (208.211). 280 + 1.
+///
+/// ⚠ **Two hundred and eighty-one again since AUDIT-180 Пс2** (решение 208.217) — the link of
+/// «Спасибо» went into its lead: `IDS_FEEDBACK_OPEN` (3242) left, [`IDS_THANKS_SAY`] (3322)
+/// came. 281 − 1 + 1.
+///
+/// ⚠ **Two hundred and eighty-two since the merge of the fixes of AUDIT-180** — Z11 (решение
+/// 208.209), made beside them: the text of the hint of the flag on Windows 10,
+/// [`IDS_HINT_TEXT_10`] (3340). 281 + 1.
 ///
 /// ⚠ The knock of «Спасибо» names its second button with the letter's own [`IDS_THANKS_SNOOZE`]
 /// (решение 208.112 п. 1: the knock and the letter name their buttons alike) — the 3341 of Z13
 /// left before any release, a hole.
-pub const INTERFACE_STRINGS: [u16; 276] = [
+pub const INTERFACE_STRINGS: [u16; 282] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2521,8 +2564,6 @@ pub const INTERFACE_STRINGS: [u16; 276] = [
     IDS_WIZARD_WHAT_NOTE,
     IDS_WIZARD_CARD_WRONG,
     IDS_WIZARD_CARD_WRONG_SUB,
-    IDS_WIZARD_CARD_NOTHING,
-    IDS_WIZARD_CARD_NOTHING_SUB,
     IDS_WIZARD_CARD_IDEA,
     IDS_WIZARD_CARD_IDEA_SUB,
     IDS_WIZARD_WHERE_TITLE,
@@ -2585,7 +2626,6 @@ pub const INTERFACE_STRINGS: [u16; 276] = [
     IDS_EXCLUSION_ADDED,
     IDS_EXCLUSION_ALREADY,
     IDS_EXCLUSION_NOT_PICKED,
-    IDS_FEEDBACK_OPEN,
     IDS_WIZARD_MAIL_ADDRESS,
     IDS_WIZARD_COPY_TEXT,
     IDS_WIZARD_COPY_ADDRESS,
@@ -2611,6 +2651,15 @@ pub const INTERFACE_STRINGS: [u16; 276] = [
     IDS_AUTHOR_SUPPORT,
     IDS_AUTHOR_CHANNEL,
     IDS_WIZARD_RECEIVED,
+    IDS_TRAY_FLAG_HINT,
+    IDS_LOG_HINT,
+    IDS_WIZARD_CARD_WRONG_NEXT,
+    IDS_WIZARD_CARD_IDEA_NEXT,
+    IDS_MENU_WORKING,
+    IDS_MENU_SUSPENDED,
+    IDS_MENU_RESTART,
+    IDS_AUTHOR_TITLE,
+    IDS_THANKS_SAY,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,
@@ -2681,8 +2730,9 @@ pub fn set_resource_module(module: HMODULE) {
     RESOURCE_MODULE.store(module.0 as usize, Ordering::Relaxed);
 }
 
-/// The module [`text`] reads from.
-fn resource_module() -> HMODULE {
+/// The module [`text`] reads from — and the icon on the caption of the windows of the shell
+/// (`ui::host`), which lives in the same resources.
+pub(crate) fn resource_module() -> HMODULE {
     let stored = RESOURCE_MODULE.load(Ordering::Relaxed);
 
     if stored != 0 {

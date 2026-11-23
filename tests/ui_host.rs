@@ -705,8 +705,10 @@ impl Content for Choices {
         body.extend((0..3).map(|n| Node::ChoiceCard {
             id: Pick::Card(n),
             title: format!("Card {n}"),
-            words: "The words of the card".to_owned(),
+            words: Some("The words of the card".to_owned()),
             selected: self.card.get() == n,
+            next: None,
+            icon: None,
         }));
         body.extend((0..2).map(|n| Node::Radio {
             id: Pick::Radio(n),
@@ -827,5 +829,420 @@ fn the_arrows_choose_inside_a_group_of_cards_and_of_radio_buttons() {
 
         // SAFETY: a window of this thread.
         unsafe { SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0))) };
+    }
+}
+
+/// The resources of the product binary, opened as data: the icon of the caption lives there, and a
+/// test executable carries no resources (as `ui_fit` reads the strings).
+#[cfg(feature = "testing")]
+fn with_product_resources() {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::sync::OnceLock;
+    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::System::LibraryLoader::{LOAD_LIBRARY_AS_DATAFILE, LoadLibraryExW};
+    use windows::core::PCWSTR;
+
+    static PRODUCT: OnceLock<usize> = OnceLock::new();
+    let raw = *PRODUCT.get_or_init(|| {
+        let exe = std::env::current_exe()
+            .expect("the test executable has a path")
+            .parent()
+            .and_then(Path::parent)
+            .expect("the test executable lives in <target>\\debug\\deps")
+            .join("LangSwitcher.exe");
+        let path: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: a path ending in a zero; the module is kept open for the process.
+        let module =
+            unsafe { LoadLibraryExW(PCWSTR(path.as_ptr()), None, LOAD_LIBRARY_AS_DATAFILE) }
+                .expect("the product binary opens as a data file");
+        module.0 as usize
+    });
+    lang_switcher::settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
+}
+
+/// The side in pixels of the icon `which` the caption of `hwnd` shows; none when it shows none.
+#[cfg(feature = "testing")]
+fn caption_icon_side(hwnd: HWND, which: u32) -> Option<i32> {
+    use windows::Win32::Graphics::Gdi::{BITMAP, DeleteObject, GetObjectW};
+    use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, HICON, ICONINFO, WM_GETICON};
+
+    // SAFETY: a window of this thread; the answer is the icon it shows, owned by the window.
+    let icon = unsafe { SendMessageW(hwnd, WM_GETICON, Some(WPARAM(which as usize)), None) };
+    if icon.0 == 0 {
+        return None;
+    }
+    let mut info = ICONINFO::default();
+    // SAFETY: an icon handle by value; the out parameter is a local.
+    unsafe { GetIconInfo(HICON(icon.0 as *mut _), &mut info) }.expect("the icon's bitmaps");
+    let mut bitmap = BITMAP::default();
+    // SAFETY: the mask bitmap the call made, read into a local of its size.
+    let read = unsafe {
+        GetObjectW(
+            info.hbmMask.into(),
+            size_of::<BITMAP>() as i32,
+            Some((&raw mut bitmap).cast()),
+        )
+    };
+    // SAFETY: the two bitmaps `GetIconInfo` made for the caller.
+    unsafe {
+        let _ = DeleteObject(info.hbmMask.into());
+        let _ = DeleteObject(info.hbmColor.into());
+    }
+    (read > 0).then_some(bitmap.bmWidth)
+}
+
+/// **Б1 of AUDIT-180 — the icon of the program on the caption.** The class of the windows of the
+/// shell carries no icon, and the caption of every one showed the empty icon of Windows. Each window
+/// with a caption shows both frames of the program's icon at the scale of its screen, and the
+/// frames of the new one when the scale changes; a popup has no caption and is given none.
+#[cfg(feature = "testing")]
+#[test]
+fn the_caption_shows_the_icon_of_the_program_at_the_scale_of_the_window() {
+    use windows::Win32::UI::WindowsAndMessaging::{ICON_BIG, ICON_SMALL};
+
+    with_product_resources();
+    host::answer_dpi(Some(96));
+    let at_100 = Open::new();
+    host::answer_dpi(Some(144));
+    let at_150 = Open::new();
+    host::answer_dpi(None);
+
+    let small = caption_icon_side(at_100.hwnd, ICON_SMALL).expect("a small icon at 100 %");
+    let big = caption_icon_side(at_100.hwnd, ICON_BIG).expect("a big icon at 100 %");
+    assert!(small < big, "the small frame {small} under the big {big}");
+    let at = |side: i32, dpi: i32| (side * dpi + 48) / 96;
+    assert_eq!(
+        (
+            caption_icon_side(at_150.hwnd, ICON_SMALL),
+            caption_icon_side(at_150.hwnd, ICON_BIG)
+        ),
+        (Some(at(small, 144)), Some(at(big, 144))),
+        "the frames of a window opened at 150 %"
+    );
+
+    let mut window = RECT::default();
+    // SAFETY: the out parameter is a local.
+    unsafe { GetWindowRect(at_100.hwnd, &mut window) }.expect("the window's rectangle");
+    at_100.send(
+        WM_DPICHANGED,
+        192 | (192 << 16),
+        (&raw const window) as isize,
+    );
+    assert_eq!(
+        caption_icon_side(at_100.hwnd, ICON_SMALL),
+        Some(at(small, 192)),
+        "the small frame after the scale changed to 200 %"
+    );
+
+    let popup = host::create_popup(
+        Probe {
+            events: Rc::new(RefCell::new(Vec::new())),
+            theme: Rc::new(Cell::new(ThemeSetting::Light)),
+            segment: 0,
+            section: 0,
+        },
+        None,
+    )
+    .expect("the popup of the shell");
+    assert_eq!(
+        caption_icon_side(popup, ICON_SMALL),
+        None,
+        "a popup has no caption and no icon"
+    );
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(popup, WM_CLOSE, None, None) };
+}
+
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StepId {
+    Next,
+    First,
+    Second,
+    Third,
+}
+
+/// Steps, as the wizard has: «Next» on the first one shows the second, which has more elements, so
+/// the index «Next» had belongs to another element there; the steps after it are as the second.
+#[cfg(feature = "testing")]
+struct Steps {
+    step: usize,
+}
+
+#[cfg(feature = "testing")]
+impl Content for Steps {
+    type Id = StepId;
+
+    fn describe(&self) -> Window<StepId> {
+        let toggle = |id, label: &str| Node::Toggle {
+            id,
+            label: label.to_owned(),
+            hint: None,
+            on: false,
+            badge: None,
+        };
+        let mut body = vec![Node::Header {
+            eyebrow: None,
+            title: format!("Step {}", self.step.min(1) + 1),
+            subtitle: None,
+        }];
+        if self.step > 0 {
+            body.extend([
+                toggle(StepId::First, "First"),
+                toggle(StepId::Second, "Second"),
+                toggle(StepId::Third, "Third"),
+            ]);
+        }
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(body),
+            buttons: vec![Node::Button {
+                id: StepId::Next,
+                label: "Next".to_owned(),
+                kind: ButtonKind::Primary,
+                browser: false,
+            }],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<StepId>) -> Reply {
+        if event == Event::Pressed(StepId::Next) {
+            self.step += 1;
+        }
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Steps".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        ("en-US".to_owned(), false)
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Light
+    }
+}
+
+/// The index in the layout of the element `id`, and its rectangle.
+#[cfg(feature = "testing")]
+fn index_of(hwnd: HWND, id: &str) -> (usize, lang_switcher::ui::canvas::Rect) {
+    // SAFETY: a window of this thread; a frame lays it out.
+    unsafe { SendMessageW(hwnd, WM_PAINT, None, None) };
+    host::probe(hwnd)
+        .expect("a live host")
+        .items
+        .into_iter()
+        .enumerate()
+        .find(|(_, (_, item, _))| item.as_deref() == Some(id))
+        .map(|(index, (_, _, rect))| (index, rect))
+        .unwrap_or_else(|| panic!("the element {id}"))
+}
+
+/// **Б5 of AUDIT-180 — a new description marks only what the mouse is over.** The marks of the mouse
+/// are indexes of the layout; kept across a change of what the window shows, they drew an element
+/// of the new step under the mouse — the field of the next step of the wizard grey with no mouse
+/// over it. After the step changes nothing is marked while the mouse is over no element of the
+/// window, and the element under it is marked when it is over one.
+///
+/// ⚠ Control: the index «Next» had is an element of the second step too — the old mark would land.
+#[cfg(feature = "testing")]
+#[test]
+fn a_new_description_marks_only_what_the_mouse_is_over() {
+    use windows::Win32::UI::WindowsAndMessaging::WM_MOUSEMOVE;
+
+    let hwnd = host::create(Steps { step: 0 }, None).expect("the window of the shell");
+    let (next, rect) = index_of(hwnd, "Next");
+    let (x, y) = (
+        (rect.x + rect.w / 2.0) as i32,
+        (rect.y + rect.h / 2.0) as i32,
+    );
+    let point = LPARAM((((y & 0xFFFF) << 16) | (x & 0xFFFF)) as isize);
+    // SAFETY: a move of the mouse to a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_MOUSEMOVE, Some(WPARAM(0)), Some(point)) };
+    assert_eq!(
+        host::probe(hwnd).expect("alive").hover,
+        Some(next),
+        "«Next» under the mouse before the press"
+    );
+
+    click_at(hwnd, rect);
+    let (first, first_rect) = index_of(hwnd, "First");
+    let after = host::probe(hwnd).expect("alive");
+    assert!(
+        next < after.items.len() && after.items[next].1.as_deref() != Some("Next"),
+        "control: the index of «Next» is another element of the second step"
+    );
+    assert_eq!(
+        (after.hover, after.pressed),
+        (None, None),
+        "the mouse is over no element of the window (it is the person's, and the window is not \
+         shown): nothing is marked"
+    );
+
+    host::answer_mouse(Some((
+        (first_rect.x + first_rect.w / 2.0) as i32,
+        (first_rect.y + first_rect.h / 2.0) as i32,
+    )));
+    click_at(hwnd, index_of(hwnd, "Next").1);
+    // The press went to «Next»; the third step shows what the second did, the mouse is on «First».
+    let (first_after, _) = index_of(hwnd, "First");
+    let marked = host::probe(hwnd).expect("alive").hover;
+    host::answer_mouse(None);
+    assert_eq!(
+        (marked, first_after),
+        (Some(first), first),
+        "the element the mouse is over is marked after the change"
+    );
+    // SAFETY: a window of this thread.
+    unsafe { SendMessageW(hwnd, WM_CLOSE, None, None) };
+}
+
+/// A paragraph with a link inside (208.217, Пс2), in a language read right to left when `rtl`.
+struct Paragraph {
+    events: Rc<RefCell<Vec<Event<Id>>>>,
+    rtl: bool,
+}
+
+impl Content for Paragraph {
+    type Id = Id;
+
+    fn describe(&self) -> Window<Id> {
+        use lang_switcher::ui::scene::linked;
+
+        let words = if self.rtl {
+            format!("أخبرنا {}", linked("<a>في المجموعة</a>."))
+        } else {
+            format!(
+                "If you liked it, {}",
+                linked("say so <a>in GitHub Issues</a>.")
+            )
+        };
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(vec![Node::Linked {
+                role: Role::Lead,
+                words,
+                id: Id::Site,
+            }]),
+            buttons: vec![Node::Button {
+                id: Id::Close,
+                label: "Close".to_owned(),
+                kind: ButtonKind::Primary,
+                browser: false,
+            }],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<Id>) -> Reply {
+        self.events.borrow_mut().push(event);
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Paragraph".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        if self.rtl {
+            ("ar-SA".to_owned(), true)
+        } else {
+            ("en-US".to_owned(), false)
+        }
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Light
+    }
+
+    fn least(&self) -> bool {
+        true
+    }
+}
+
+/// **208.217, AUDIT-180 Пс2: the words of the link in a paragraph are pressed like a link** — a click
+/// on them presses the paragraph's element, the cursor over them is the hand's part, Tab stops on
+/// them once; in a window read right to left too. A click on the paragraph beside them presses
+/// nothing (the control).
+#[test]
+fn a_click_on_the_words_of_a_link_in_a_paragraph_presses_it() {
+    for rtl in [false, true] {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let hwnd = host::create(
+            Paragraph {
+                events: events.clone(),
+                rtl,
+            },
+            None,
+        )
+        .expect("the window of the shell");
+        let link = rect_of(hwnd, "Site");
+        let parts = host::probe(hwnd).expect("a live host").items;
+        let (text, _, paragraph) = parts
+            .iter()
+            .find(|(part, _, _)| part.starts_with("Text"))
+            .cloned()
+            .expect("the paragraph");
+        let named: Vec<&String> = parts
+            .iter()
+            .filter(|(_, id, _)| id.as_deref() == Some("Site"))
+            .map(|(part, _, _)| part)
+            .collect();
+
+        // Beside the words: the first or the last tenth of the paragraph, away from the link.
+        let beside = lang_switcher::ui::canvas::Rect::new(
+            if link.x > paragraph.x + paragraph.w / 2.0 {
+                paragraph.x
+            } else {
+                paragraph.right() - paragraph.w / 10.0
+            },
+            link.y,
+            paragraph.w / 10.0,
+            link.h,
+        );
+        // Tab goes round the two: the link once, then the button.
+        let stops: Vec<Option<String>> = (0..3)
+            .map(|_| {
+                // SAFETY: a key to a window of this thread.
+                unsafe {
+                    SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(usize::from(VK_TAB.0))), None)
+                };
+                host::probe(hwnd).expect("a live host").focus
+            })
+            .collect();
+        click_at(hwnd, beside);
+        let pressed_beside = events.borrow().contains(&Event::Pressed(Id::Site));
+        click_at(hwnd, link);
+        let pressed = events.borrow().contains(&Event::Pressed(Id::Site));
+        println!(
+            "rtl {rtl}: {} {paragraph:?}, the link {link:?}, beside {beside:?}",
+            &text[..text.len().min(40)]
+        );
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(hwnd) };
+
+        assert!(
+            !named.is_empty() && named.iter().all(|part| part.as_str() == "InlineLink"),
+            "rtl {rtl}: the parts of the link: {named:?}"
+        );
+        assert!(
+            !pressed_beside,
+            "rtl {rtl}: the control — beside the words nothing is pressed"
+        );
+        assert!(pressed, "rtl {rtl}: a click on the words presses the link");
+        assert!(
+            stops.contains(&Some("Site".to_owned()))
+                && stops[0] != stops[1]
+                && stops[2] == stops[0],
+            "rtl {rtl}: Tab stops on the link once in its round: {stops:?}"
+        );
     }
 }

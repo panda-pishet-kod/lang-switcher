@@ -18,6 +18,48 @@
 /// values (a description does not reach `tokens`, `testsI_guard.rs` rule 2).
 pub use crate::ui::tokens::Role;
 
+/// The marks of a strong run inside a line of text (208.209, AUDIT-180 П2: the name of the key in
+/// bold inside «Как пользоваться»). Set by the program around words it puts into a string — never by
+/// a translation — and taken out when the line is laid (`text.rs`): the run between them is set in
+/// the weight of [`Role::Strong`]. The plain look draws the line without them, all in one weight.
+pub const STRONG_BEGIN: char = '\u{2}';
+pub const STRONG_END: char = '\u{3}';
+
+/// `words` as a strong run of a line: between [`STRONG_BEGIN`] and [`STRONG_END`].
+pub fn strong(words: &str) -> String {
+    format!("{STRONG_BEGIN}{words}{STRONG_END}")
+}
+
+/// The marks of the link inside a paragraph (208.217, AUDIT-180 Пс2: «в группе» in the paragraph of
+/// «Спасибо»): the run between them is underlined and in the colour of a link, and a press on it is
+/// the press of the paragraph's element ([`Node::Linked`]). The plain look draws it as the rest.
+pub const LINK_BEGIN: char = '\u{4}';
+pub const LINK_END: char = '\u{5}';
+
+/// How a translation marks the words of its link: `<a>` before them, `</a>` after.
+pub const LINK_OPEN_TAG: &str = "<a>";
+pub const LINK_CLOSE_TAG: &str = "</a>";
+
+/// A sentence of a translation with its link marked for the layout: `<a>`…`</a>` become
+/// [`LINK_BEGIN`]…[`LINK_END`]. A sentence without the tags is a link from end to end — a press
+/// still goes where it should.
+pub fn linked(sentence: &str) -> String {
+    match (sentence.find(LINK_OPEN_TAG), sentence.find(LINK_CLOSE_TAG)) {
+        (Some(open), Some(close)) if open < close => format!(
+            "{}{LINK_BEGIN}{}{LINK_END}{}",
+            &sentence[..open],
+            &sentence[open + LINK_OPEN_TAG.len()..close],
+            &sentence[close + LINK_CLOSE_TAG.len()..]
+        ),
+        _ => format!(
+            "{LINK_BEGIN}{}{LINK_END}",
+            sentence
+                .replace(LINK_OPEN_TAG, "")
+                .replace(LINK_CLOSE_TAG, "")
+        ),
+    }
+}
+
 /// The look of a button: one per kind (passport §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonKind {
@@ -53,6 +95,9 @@ pub enum Art {
     News,
     Update,
     Wizard,
+    /// The scene of the window of the settings — the panda, a switch and gears (`settings.svg` of
+    /// the site window, S-95, variant А of the mock-up; 208.163, AUDIT-180 Н1).
+    Settings,
 }
 
 impl Art {
@@ -66,6 +111,7 @@ impl Art {
             Art::News => "news",
             Art::Update => "update",
             Art::Wizard => "wizard",
+            Art::Settings => "settings",
         }
     }
 }
@@ -124,6 +170,10 @@ pub enum Node<I> {
     Fill(Box<Node<I>>),
     /// A surface with the padding of its kind around what it holds.
     Surface(Surface, Box<Node<I>>),
+    /// A group of rows (passport §3 «Группа строк», 208.209, AUDIT-180 О3): the rows in one frame of
+    /// a block, a line `line` between two of them — the switches of a section of the settings, the
+    /// list of what goes into an appeal.
+    Group(Vec<Node<I>>),
     /// The steps of a wizard: the current one is shown, the height is the tallest one's.
     Steps(usize, Vec<Node<I>>),
     /// The head of a window: the line over the title, the title, the line under it. In a narrow
@@ -135,6 +185,9 @@ pub enum Node<I> {
     },
     /// A paragraph in a role, wrapped by words.
     Text(Role, String),
+    /// A paragraph with a link inside, between [`LINK_BEGIN`] and [`LINK_END`] (see [`linked`]): a
+    /// press on the words of the link is `id`'s.
+    Linked { role: Role, words: String, id: I },
     /// One line in a role, cut with an ellipsis.
     Line(Role, String),
     /// A button; `browser` — it opens the browser and carries the sign ↗.
@@ -179,8 +232,14 @@ pub enum Node<I> {
     ChoiceCard {
         id: I,
         title: String,
-        words: String,
+        /// The line under the title; none for a card of a title alone (an empty string would be a
+        /// string the language lacks to the instrument of fitting).
+        words: Option<String>,
         selected: bool,
+        /// A third line in `small`: where the choice leads («Дальше: …», 208.132, AUDIT-180 М2).
+        next: Option<String>,
+        /// An icon of `resarticons` on a plate at the end of the card (208.132).
+        icon: Option<&'static str>,
     },
     /// A label and a segmented switch; the switch takes a line of its own when it does not fit
     /// beside the label, and becomes a choice field when it does not fit even there.
@@ -322,6 +381,7 @@ impl<I> Node<I> {
         match self {
             Node::Column(nodes) => Node::Column(all(nodes)),
             Node::Rows(nodes) => Node::Rows(all(nodes)),
+            Node::Group(nodes) => Node::Group(all(nodes)),
             Node::Row(nodes) => Node::Row(all(nodes)),
             Node::Pair(a, b) => Node::Pair(one(a), one(b)),
             Node::Triple(a, b, c) => Node::Triple(one(a), one(b), one(c)),
@@ -338,6 +398,11 @@ impl<I> Node<I> {
                 subtitle,
             },
             Node::Text(role, text) => Node::Text(role, text),
+            Node::Linked { role, words, id } => Node::Linked {
+                role,
+                words,
+                id: f(id),
+            },
             Node::Line(role, text) => Node::Line(role, text),
             Node::Button {
                 id,
@@ -395,11 +460,15 @@ impl<I> Node<I> {
                 title,
                 words,
                 selected,
+                next,
+                icon,
             } => Node::ChoiceCard {
                 id: f(id),
                 title,
                 words,
                 selected,
+                next,
+                icon,
             },
             Node::Segments {
                 id,
@@ -506,6 +575,7 @@ impl<I> Node<I> {
         match self {
             Node::Column(nodes)
             | Node::Rows(nodes)
+            | Node::Group(nodes)
             | Node::Row(nodes)
             | Node::Steps(_, nodes)
             | Node::Buttons(nodes) => {
@@ -535,6 +605,7 @@ impl<I> Node<I> {
                 }
             }
             Node::Text(role, text) | Node::Line(role, text) => f(*role, text),
+            Node::Linked { role, words, .. } => f(*role, words),
             Node::Button { label, .. } => f(Role::Button, label),
             Node::Action {
                 title,
@@ -564,9 +635,16 @@ impl<I> Node<I> {
             }
             Node::Radio { label, .. } => f(Role::Body, label),
             Node::Progress { .. } => {}
-            Node::ChoiceCard { title, words, .. } => {
+            Node::ChoiceCard {
+                title, words, next, ..
+            } => {
                 f(Role::Strong, title);
-                f(Role::Small, words);
+                if let Some(words) = words {
+                    f(Role::Small, words);
+                }
+                if let Some(next) = next {
+                    f(Role::Small, next);
+                }
             }
             Node::Segments { label, options, .. } => {
                 f(Role::Body, label);
@@ -764,9 +842,11 @@ impl<I: PartialEq> Node<I> {
                 selected,
                 ..
             } if own == id => Some((options, *selected)),
-            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) | Node::Steps(_, nodes) => {
-                nodes.iter().find_map(|node| node.options(id))
-            }
+            Node::Column(nodes)
+            | Node::Rows(nodes)
+            | Node::Group(nodes)
+            | Node::Row(nodes)
+            | Node::Steps(_, nodes) => nodes.iter().find_map(|node| node.options(id)),
             Node::Pair(a, b) => a.options(id).or_else(|| b.options(id)),
             Node::Triple(a, b, c) => a
                 .options(id)

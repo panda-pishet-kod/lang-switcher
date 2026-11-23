@@ -724,6 +724,12 @@ pub const CHECK_BORDER: Pt = Pt(1.5);
 pub const CHOICE_PAD: Pad = Pad::em(0.7, 1.0);
 /// Карточка выбора в списке вариантов — поля.
 pub const CHOICE_IN_LIST_PAD: Pad = Pad::em(0.4, 0.8);
+/// Карточка выбора — плашка значка справа (208.132, AUDIT-180 М2), сторона.
+pub const CHOICE_ICON_PLATE: Em = Em(2.6);
+/// Карточка выбора — значок на плашке, сторона.
+pub const CHOICE_ICON_GLYPH: Em = Em(1.45);
+/// Карточка выбора — строка «Дальше: …» под пояснением, отступ сверху.
+pub const CHOICE_NEXT_GAP: Em = Em(0.35);
 /// Список — поля.
 pub const LIST_PAD: Em = Em(0.3);
 /// Список — строка, поля.

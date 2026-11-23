@@ -23,9 +23,8 @@
 
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
-use crate::ui::scene::{ButtonKind, Surface};
+use crate::ui::scene::{ButtonKind, LINK_BEGIN, Surface};
 use crate::ui::text::{Align, Direction, Measure, Style, Text, Wrap};
-use crate::ui::tokens::BUTTON_PAD;
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
     ART_RING, BUTTON_PRIMARY_WEIGHT, CHECK_BORDER, CURRENT_STRIPE, Color, FIELD_PAD, FOCUS_GAP,
@@ -34,6 +33,7 @@ use crate::ui::tokens::{
     SELECTED_BORDER, STATUS_DOT, TOGGLE_GAP, TOGGLE_KNOB, Theme,
 };
 use crate::ui::tokens::{BRAND_NAME_COLOR, BRAND_NAME_WEIGHT, CORNER_CROSS, Face};
+use crate::ui::tokens::{BUTTON_PAD, CHOICE_ICON_GLYPH};
 use crate::ui::tokens::{
     ON_PICTURE_KEY_FRAME, ON_PICTURE_KEY_RADIUS, ON_PICTURE_WEIGHT, picture_colours,
 };
@@ -138,6 +138,7 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
         | Part::Card { .. }
         | Part::Button { .. }
         | Part::Link { .. }
+        | Part::InlineLink
         | Part::Segment { .. }
         | Part::Field { .. }
         | Part::Input { .. }
@@ -157,6 +158,7 @@ fn takes_ring(part: &Part) -> bool {
             | Part::Card { .. }
             | Part::Button { .. }
             | Part::Link { .. }
+            | Part::InlineLink
             | Part::Track
             | Part::Field { .. }
             | Part::Section { .. }
@@ -207,19 +209,36 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             } else {
                 role.style().color.unwrap_or(Color::Text)
             };
-            write(
-                painter,
-                look,
-                *role,
-                None,
-                text,
-                rect,
-                *wrap,
-                *align,
-                false,
-                c(colour),
-            );
+            // A paragraph with a link (208.217): the words of the link in the colour of a link,
+            // underlined by the layout of the text; the press is the parts' over them.
+            if text.contains(LINK_BEGIN) {
+                if let Ok(laid) = look.text.lay(
+                    text,
+                    Style::of(*role, look.b, look.h),
+                    *wrap,
+                    *align,
+                    rect.w,
+                ) {
+                    painter.tint_links(&laid, c(Color::Accent));
+                    painter.text(&laid, rect.x, rect.y, c(colour));
+                }
+            } else {
+                write(
+                    painter,
+                    look,
+                    *role,
+                    None,
+                    text,
+                    rect,
+                    *wrap,
+                    *align,
+                    false,
+                    c(colour),
+                );
+            }
         }
+        // The paragraph draws the words; the part answers the press and takes the ring.
+        Part::InlineLink => {}
         Part::Button { kind, label } => button(painter, look, *kind, label, rect, state),
         Part::ButtonRule | Part::Divider => painter.fill_rect(rect, 0.0, c(Color::Line)),
         Part::Toggle { on } => {
@@ -276,6 +295,24 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 Color::Ink2
             };
             painter.menu_icon(name, rect, c(colour));
+        }
+        // The icon of a choice card (208.132): a plate of `surface2`, the icon `accent` in its
+        // middle; grey with the card when it is unavailable.
+        Part::CardIcon { name } => {
+            painter.fill_rect(rect, RADIUS_MEDIUM.0, c(Color::Surface2));
+            let side = CHOICE_ICON_GLYPH.at(look.b);
+            let glyph = Rect::new(
+                rect.x + (rect.w - side) / 2.0,
+                rect.y + (rect.h - side) / 2.0,
+                side,
+                side,
+            );
+            let colour = if state.disabled {
+                Color::Ink3
+            } else {
+                Color::Accent
+            };
+            painter.menu_icon(name, glyph, c(colour));
         }
         Part::Taskbar(picture) => crate::ui::picture::draw(painter, look, picture, rect),
         Part::Cross => {
@@ -379,9 +416,12 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             field(painter, look, rect, state);
             let pad = FIELD_PAD.h.at(look.b);
             let mark = CHEVRON.at(look.b);
-            let text = Rect::new(rect.x + pad, rect.y, rect.w - pad * 2.0 - mark, rect.h);
+            // The value ends a padding short of the corner mark, cut with an ellipsis: a long
+            // name ran into the mark (Б6 of AUDIT-180, «English (United States)» of «Источник»).
+            let room = (rect.w - pad * 2.0 - pad - mark).max(0.0);
+            let text = Rect::new(rect.x + pad, rect.y, room, rect.h);
             let text = if look.rtl {
-                Rect::new(rect.x + pad + mark, rect.y, text.w, rect.h)
+                Rect::new(rect.x + pad * 2.0 + mark, rect.y, room, rect.h)
             } else {
                 text
             };
@@ -397,7 +437,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 None,
                 value,
                 text,
-                Wrap::OneLine,
+                Wrap::Ellipsis,
                 Align::Start,
                 true,
                 c(colour),

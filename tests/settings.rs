@@ -6528,7 +6528,7 @@ impl Drop for ProductImage {
 /// `Shift` and the line after the double press — 218 + 2, row for row.
 ///
 /// ⚠ **229 since task T-103-2** — вопрос 181: the button of «Спасибо» that sends a person where they
-/// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row.
+/// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row (gone with AUDIT-180 Пс2, 208.217).
 ///
 /// ⚠ **235 since task T-103-7** — решение 181.6: the six words of the last step of a trouble, which
 /// goes to the author by letter — 229 + 6, row for row.
@@ -6561,8 +6561,22 @@ impl Drop for ProductImage {
 ///
 /// ⚠ **275 since task T-120-19** — the line of the state of the thanks of the wizard (3313).
 ///
-/// ⚠ **276 since Z11 of AUDIT-180** — the text of the hint of the flag on Windows 10 (3340).
-const FR_94_STRINGS: [(u16, &str, &str); 276] = [
+/// ⚠ **277 since AUDIT-180 Z6** — the hints of the flag and of the journal (3314, 3315).
+///
+/// ⚠ **277 again since AUDIT-180 Z8** — the card «Ничего не произошло» and its line (3163, 3164)
+/// left, the lines of where the two cards lead (3316, 3317) came (208.131, 208.132).
+///
+/// ⚠ **280 since AUDIT-180 Z14** — the state in the head of the menu in small letters (3318…3320).
+///
+/// ⚠ **281 since AUDIT-180 Z4 (А1)** — the title of «От автора», the first sentence of the owner's
+/// text (3321, 208.211).
+///
+/// ⚠ **281 again since AUDIT-180 Пс2** — the link of «Спасибо» went into its lead: 3242 left, the
+/// sentence that carries it came (3322, 208.217).
+///
+/// ⚠ **282 since the merge of the fixes of AUDIT-180** — Z11, made beside them: the text of the
+/// hint of the flag on Windows 10 (3340).
+const FR_94_STRINGS: [(u16, &str, &str); 282] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7074,12 +7088,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
     (settings::IDS_AUTHOR_PANEL, "Автор", "The author"),
     (
         settings::IDS_AUTHOR_TEXT,
-        "Программу делает один человек в свободное время. Программа бесплатная и останется \
-         такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько \
-         способов. Классно, что вы цените чужой труд ♥",
-        "The program is made by one person in their spare time. It is free and will stay that \
-         way. If you would like to say thank you in deed, the support page lists a few ways. It \
-         is good that you value somebody else's work ♥",
+        // А1, решение 208.211: the first sentence went into the title (IDS_AUTHOR_TITLE), the rest
+        // stays word for word.
+        "Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице \
+         поддержки есть несколько способов. Классно, что вы цените чужой труд ♥",
+        "It is free and will stay that way. If you would like to say thank you in deed, the support \
+         page lists a few ways. It is good that you value somebody else's work ♥",
     ),
     (
         settings::IDS_NEWS_PANEL,
@@ -7283,18 +7297,9 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
     ),
     (
         settings::IDS_WIZARD_CARD_WRONG_SUB,
-        "слово исправилось не так, пропали буквы, раскладка не та",
-        "the fix came out wrong, letters went missing, the layout was not the one",
-    ),
-    (
-        settings::IDS_WIZARD_CARD_NOTHING,
-        "Ничего не произошло",
-        "Nothing happened",
-    ),
-    (
-        settings::IDS_WIZARD_CARD_NOTHING_SUB,
-        "нажали клавишу, а текст остался как был",
-        "you pressed the key and the text stayed as it was",
+        // AUDIT-180 Z8 (208.131): «Ничего не произошло» went into this card.
+        "слово исправилось не так, пропали буквы, раскладка не та или ничего не произошло",
+        "the fix came out wrong, letters went missing, the layout was not the one, or nothing happened",
     ),
     (
         settings::IDS_WIZARD_CARD_IDEA,
@@ -7569,13 +7574,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
         "Окно не выбрано",
         "No window picked",
     ),
-    // Task T-103-2, решение 181.1: where «Спасибо» sends a person to write — the group, GitHub
-    // Issues. `IDS_CHANNEL_OPEN` above stays with «Что нового» and FR-103.
-    (
-        settings::IDS_FEEDBACK_OPEN,
-        "Открыть группу",
-        "Open GitHub Issues",
-    ),
     // Task T-103-7, решение 181.6: an appeal about a trouble goes to the author by letter — the
     // table of the addendum to TZ-E103, word for word; the address is `{0}`. Since stage E107
     // (решение 199.3) the letter of any appeal the site did not take; IDS_WIZARD_MAIL_NOTE left.
@@ -7659,6 +7657,49 @@ const FR_94_STRINGS: [(u16, &str, &str); 276] = [
         settings::IDS_WIZARD_RECEIVED,
         "Получено сайтом автора",
         "Received by the author’s site",
+    ),
+    // AUDIT-180 Z6 (208.209): the hints of the flag and of the journal in the settings.
+    (
+        settings::IDS_TRAY_FLAG_HINT,
+        "Значок программы показывает флаг текущей раскладки",
+        "The icon of the program shows the flag of the current layout",
+    ),
+    (
+        settings::IDS_LOG_HINT,
+        "Только имена операций и коды ошибок, ни одной клавиши",
+        "Only operation names and error codes, not a single keystroke",
+    ),
+    // AUDIT-180 Z8 (208.132): where the two cards of the first step of the wizard lead.
+    (
+        settings::IDS_WIZARD_CARD_WRONG_NEXT,
+        "Дальше: где, что делали, что приложить, проверка",
+        "Next: where, what you were doing, what to attach, the check",
+    ),
+    (
+        settings::IDS_WIZARD_CARD_IDEA_NEXT,
+        "Дальше: идея и проверка",
+        "Next: the idea and the check",
+    ),
+    // AUDIT-180 Z14 (Мн1): the state in the head of the menu, in small letters.
+    (settings::IDS_MENU_WORKING, "работает", "working"),
+    (settings::IDS_MENU_SUSPENDED, "приостановлена", "suspended"),
+    (
+        settings::IDS_MENU_RESTART,
+        "нужен перезапуск",
+        "restart needed",
+    ),
+    // AUDIT-180 Z4 (А1, 208.211): the title of «От автора» — the first sentence of the owner's text.
+    (
+        settings::IDS_AUTHOR_TITLE,
+        "Программу делает один человек в свободное время",
+        "The program is made by one person in their spare time",
+    ),
+    // AUDIT-180 Пс2 (208.217): the link of «Спасибо» in its lead — where it sends a person to write
+    // (решение 181.1), the first sentence of the old IDS_THANKS_PARA.
+    (
+        settings::IDS_THANKS_SAY,
+        "Если понравилось, расскажите об этом <a>в группе</a>.",
+        "If you liked it, say so <a>in GitHub Issues</a>.",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -8077,7 +8118,7 @@ fn the_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
 /// issues out of the wizard — the two of «Спасибо» stay.
 const STRINGS_OF_THE_PLACE: [(u16, &str); 2] = [
     (settings::IDS_THANKS_PARA, "IDS_THANKS_PARA"),
-    (settings::IDS_FEEDBACK_OPEN, "IDS_FEEDBACK_OPEN"),
+    (settings::IDS_THANKS_SAY, "IDS_THANKS_SAY"),
 ];
 
 /// The words of the last step of the wizard and of its thanks — stage E107, решение 199.3: not one
@@ -8209,7 +8250,7 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
             control_caught += 1;
         }
 
-        if names_the_group_or_the_issues(&settings::text(settings::IDS_FEEDBACK_OPEN)) {
+        if names_the_group_or_the_issues(&settings::text(settings::IDS_THANKS_SAY)) {
             place_caught += 1;
         }
     }
@@ -8224,7 +8265,7 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
     assert_eq!(
         place_caught,
         THE_CHANNEL.len(),
-        "the control: «Открыть группу» / «Open GitHub Issues» must be caught in every language of \
+        "the control: the link of «Спасибо» (IDS_THANKS_SAY) must be caught in every language of \
          1.0.0"
     );
     assert!(
@@ -12162,9 +12203,11 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     // T-119-10 (решение 208.119): the switch of the feed and the line under it (3123, 3124); task
     // T-119-9 (решение 208.99): the balloon of «Обновление» and its two old words (3137, 3138, 3140,
     // 3143).
-    const RETIRED_E119: [u16; 17] = [
+    // AUDIT-180 Z8 (решение 208.131): the card «Ничего не произошло» of the wizard and its line
+    // (3163, 3164) went into the first card — two more holes, held by the same checks.
+    const RETIRED_E119: [u16; 20] = [
         3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124, 3137, 3138,
-        3140, 3143,
+        3140, 3143, 3163, 3164, 3242,
     ];
 
     assert!(
@@ -12206,16 +12249,25 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     for hole in RETIRED_E119 {
         assert!(
             !settings::INTERFACE_STRINGS.contains(&hole),
-            "{hole} left the vocabulary with task T-119-8, T-119-9 or T-119-10 and must not come back into it"
+            "{hole} left the vocabulary with task T-119-8, T-119-9, T-119-10, AUDIT-180 Z8 or Пс2 and must not come back into it"
         );
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        276,
-        "two hundred and SEVENTY-SIX identifiers in use since Z11 of AUDIT-180: the text of the hint \
-         of the flag on Windows 10 (3340); the knock of «Спасибо» names its second button with the \
-         letter's own string (решение 208.112). Two hundred and seventy-five since task T-120-19: the line \
-         of the state of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
+        282,
+        "two hundred and EIGHTY-TWO identifiers in use since the merge of the fixes of AUDIT-180: Z11, \
+         made beside them, the text of the hint of the flag on Windows 10 (3340); the knock of \
+         «Спасибо» names its second button with the letter's own string (решение 208.112). Two \
+         hundred and eighty-one since AUDIT-180 Z4 (А1) and again since Пс2 (3242 left, 3322 came): the title of «От \
+         автора» (3321). Two hundred and eighty since AUDIT-180 Z14: the state in the head of the \
+         menu in small letters (3318…3320). Two hundred and seventy-seven again since AUDIT-180 Z8: \
+         the card «Ничего \
+         не произошло» and its line left (3163, 3164), the lines of where the two cards lead came \
+         (3316, 3317). Two hundred and seventy-seven since AUDIT-180 \
+         Z6: the hints of the flag \
+         and of the journal (3314, 3315). Two hundred and seventy-five since task T-120-19: the line \
+         of the state \
+         of the thanks of the wizard (3313). Two hundred and seventy-four since the merge of the shell \
          after Б: \
          the two buttons of the card «Поддержать автора» of «От автора» (3305, 3306, task \
          T-120-17). \
@@ -14976,3 +15028,60 @@ fn every_locale_carries_the_strings_of_the_two_ways() {
 // (остается активной) даже если в настройках программы не было сделано никаких изменений».
 // Слово владельца 208.77: «А — серая без изменений».
 // =========================================================================================
+
+/// **П2 of AUDIT-180 (208.209): the name of the key in «Как пользоваться» is in bold** — every item
+/// that names the key carries it as a strong run, in every language, and nothing else of the item
+/// is marked.
+#[test]
+fn the_items_of_about_name_the_key_in_bold() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Node;
+    use lang_switcher::ui::scene::strong;
+    use lang_switcher::ui::windows::about::About;
+
+    let _guard = with_product_strings();
+    for language in Language::ALL {
+        let about = About {
+            language,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        };
+        let window = about.describe();
+        let words = format!("{:?}", window.body);
+        let Node::Column(nodes) = &window.body else {
+            panic!("the body of «О программе» is a column");
+        };
+        let items: Vec<&String> = nodes
+            .iter()
+            .filter_map(|node| match node {
+                Node::Rows(rows) => Some(rows),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|node| match node {
+                Node::Numbered(items) => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(items.len(), 6, "{language:?}: six items: {words}");
+        let mut named = 0;
+        for (item, id) in items.iter().zip([
+            settings::IDS_ABOUT_HELP_1,
+            settings::IDS_ABOUT_HELP_2,
+            settings::IDS_ABOUT_HELP_3,
+            settings::IDS_ABOUT_HELP_4,
+            settings::IDS_ABOUT_HELP_5,
+            settings::IDS_ABOUT_HELP_6,
+        ]) {
+            let line = settings::text_in(language, id);
+            assert_eq!(
+                **item,
+                line.replace("{0}", &strong("Pause")),
+                "{language:?}: the key in bold, the rest as the string says"
+            );
+            named += usize::from(line.contains("{0}"));
+        }
+        assert!(named >= 3, "{language:?}: the items name the key ({named})");
+    }
+}

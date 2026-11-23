@@ -228,8 +228,10 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
             Node::ChoiceCard {
                 id: 1,
                 title: word("IDS_THEME_SYSTEM"),
-                words: word("IDS_THEME_LABEL"),
+                words: Some(word("IDS_THEME_LABEL")),
                 selected,
+                next: None,
+                icon: None,
             },
         );
     }
@@ -317,14 +319,12 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         false,
         wide,
         Class::Ordinary,
-        Node::Surface(
-            Surface::Block,
-            Box::new(Node::Action {
-                title: word("IDS_GROUP_HOTKEY"),
-                words: word("IDS_AUTOSTART"),
-                buttons: vec![button(word("IDS_LOG_SAVE"), ButtonKind::Normal, false)],
-            }),
-        ),
+        // The card draws the frame of its block itself (208.209, AUDIT-180 О3).
+        Node::Action {
+            title: word("IDS_GROUP_HOTKEY"),
+            words: word("IDS_AUTOSTART"),
+            buttons: vec![button(word("IDS_LOG_SAVE"), ButtonKind::Normal, false)],
+        },
     );
     node(
         "Карточка письма",

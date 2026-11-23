@@ -1156,6 +1156,9 @@ pub struct LetterPlan {
     pub cards: Vec<Card>,
     /// A link to the site under the body.
     pub link: Option<Button>,
+    /// The link is the last sentence of the lead, its words between `<a>` and `</a>` of its label
+    /// (AUDIT-180 Пс2, решение 208.217), and not a line of its own.
+    pub link_in_lead: bool,
     /// The line under the body — what the buttons do to the letter.
     pub foot: String,
     /// The first button of the row.
@@ -1210,12 +1213,12 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
 pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
         IDS_CLOSE, IDS_FALLBACK_NOTICE, IDS_FALLBACK_REPEATS, IDS_FALLBACK_SUB, IDS_FALLBACK_TITLE,
-        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT,
-        IDS_HELLO_DEMO_CAP, IDS_HELLO_FOOT, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL,
-        IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE,
-        IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
-        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
-        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE,
+        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT, IDS_HELLO_DEMO_CAP,
+        IDS_HELLO_FOOT, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1,
+        IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION,
+        IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
+        IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL,
+        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SAY, IDS_THANKS_SNOOZE,
         IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2,
         IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR,
     };
@@ -1289,12 +1292,14 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
                 },
             ],
             // Решение 181.1: «Если понравилось, расскажите об этом» — where a person can write,
-            // by language: the group, or GitHub Issues. A link, because it only goes to the site.
+            // by language: the group, or GitHub Issues. A link, because it only goes to the site;
+            // the last sentence of the lead, its words of the place the link (208.217, Пс2).
             link: Some(Button::link(
-                text(IDS_FEEDBACK_OPEN),
+                text(IDS_THANKS_SAY),
                 Action::OpenFeedback,
                 links::feedback_url(language),
             )),
+            link_in_lead: true,
             // FR-101: the snooze is offered once, and the second showing has no button where
             // it stood — not a disabled one. A disabled «Напомнить позже» would say the program
             // is refusing; an absent one says the letter is on its last showing, which is what
@@ -2058,7 +2063,13 @@ impl Wizard {
     /// in «Общие» (T-120-22, C3 of the controller): «Опишите идею» does not go with «Что написано
     /// сейчас?» and «Как правильно?». The explanation under it stays.
     pub fn words(&self) -> StepWords {
-        let step = self.current();
+        self.words_of(self.current())
+    }
+
+    /// The words of `step` as the head of the window says them on it — [`Wizard::words`] asked of
+    /// any step of the road: the head of the wizard is as tall as the tallest head of its road, so
+    /// that the progress stands at one height on every step (AUDIT-180 М3, решение 208.133).
+    pub fn words_of(&self, step: Step) -> StepWords {
         let mut words = step_words(step, self.post);
         if step == Step::Idea && self.draft.reports_translation().is_some() {
             words.title = settings::IDS_TRANSLATION_REPORT;
@@ -2809,7 +2820,8 @@ thread_local! {
 /// yet, and a feed that has never said anything is not something to turn off.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorView {
-    /// The title of the head — `IDS_ABOUT_LINE_1`, задача T-81-3. The second line of the head
+    /// The title of the head — `IDS_AUTHOR_TITLE` since AUDIT-180 А1 (решение 208.211: the first
+    /// sentence of the owner's text; till then `IDS_ABOUT_LINE_1` of «О программе», T-81-3). The second line of the head
     /// of «О программе», `IDS_ABOUT_LINE_2`, is not in «От автора» since C6 of T-120-17
     /// (решение контролёра по слову 208.178: in the mock-up of the window there is none).
     pub line_1: String,
@@ -2873,7 +2885,7 @@ pub fn author_view_in(
     feed: FeedView<'_>,
 ) -> AuthorView {
     use crate::settings::{
-        IDS_ABOUT_LINE_1, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
+        IDS_AUTHOR_TEXT, IDS_AUTHOR_TITLE, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
         IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST, IDS_NEWS_NEVER_READ,
         IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON,
     };
@@ -2900,9 +2912,9 @@ pub fn author_view_in(
     // `IDS_ABOUT_VERSION`; у окна оболочки нет имени, под которым ей стоять, и номер версии
     // стоит в строке состояния (`IDS_NEWS_LATEST`, `IDS_NEWS_AVAILABLE`).
     AuthorView {
-        // Заголовок общей шапки — те же слова, что в «О программе», из той же строки; подписи
-        // под ним у «От автора» нет (C6 T-120-17).
-        line_1: text(IDS_ABOUT_LINE_1),
+        // Заголовок — первая фраза текста владельца, остаток — текст карточки «Поддержать автора»
+        // (А1, решение 208.211: «разбить без потерь»); подписи под ним у «От автора» нет (C6 T-120-17).
+        line_1: text(IDS_AUTHOR_TITLE),
         author_text: text(IDS_AUTHOR_TEXT),
         // The sentence about the feed moves under the switch once there is one — it is the
         // same sentence, and two copies of it on one panel would be a stutter.
@@ -4888,14 +4900,14 @@ pub fn language_changed(owner: HWND) {
 pub mod report {
     use crate::settings::{self, Language};
 
-    /// The three cards of the first step — which of them is chosen decides the shape of the
-    /// whole wizard: five steps for the two troubles, three for the idea.
+    /// The two cards of the first step — which of them is chosen decides the shape of the whole
+    /// wizard: five steps for the trouble, three for the idea. «Ничего не произошло» was a card of
+    /// its own till AUDIT-180 Z8 (решение 208.131): it is a trouble of the first card now, which
+    /// says so («…или ничего не произошло»).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Trouble {
         /// «Программа сделала не то».
         WrongResult,
-        /// «Ничего не произошло».
-        NothingHappened,
         /// «Хочу предложить улучшение» — the short road.
         Idea,
     }
@@ -5079,12 +5091,12 @@ pub mod report {
     pub fn build(draft: &Draft, facts: &Facts) -> String {
         use settings::{
             IDS_WIZARD_ATTACH_JOURNAL, IDS_WIZARD_ATTACH_LAYOUTS, IDS_WIZARD_ATTACH_MACHINE,
-            IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_NOTHING,
-            IDS_WIZARD_CARD_WRONG, IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL,
-            IDS_WIZARD_FIELD_PASSWORD, IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT,
-            IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT, IDS_WIZARD_REPEAT_ALWAYS,
-            IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES, IDS_WIZARD_TRANSLATION_LINE,
-            IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHAT_TITLE, IDS_WIZARD_WHERE_FIELD, text,
+            IDS_WIZARD_ATTACH_SETTINGS, IDS_WIZARD_CARD_IDEA, IDS_WIZARD_CARD_WRONG,
+            IDS_WIZARD_EXPECTED, IDS_WIZARD_FIELD_NORMAL, IDS_WIZARD_FIELD_PASSWORD,
+            IDS_WIZARD_FIELD_UNKNOWN, IDS_WIZARD_GOT, IDS_WIZARD_PROGRAM, IDS_WIZARD_REPEAT,
+            IDS_WIZARD_REPEAT_ALWAYS, IDS_WIZARD_REPEAT_ONCE, IDS_WIZARD_REPEAT_SOMETIMES,
+            IDS_WIZARD_TRANSLATION_LINE, IDS_WIZARD_TYPED_IN, IDS_WIZARD_WHAT_TITLE,
+            IDS_WIZARD_WHERE_FIELD, text,
         };
 
         let mut out = String::with_capacity(1024);
@@ -5114,7 +5126,6 @@ pub mod report {
             &text(IDS_WIZARD_WHAT_TITLE),
             &text(match draft.trouble {
                 Trouble::WrongResult => IDS_WIZARD_CARD_WRONG,
-                Trouble::NothingHappened => IDS_WIZARD_CARD_NOTHING,
                 Trouble::Idea => IDS_WIZARD_CARD_IDEA,
             }),
         );

@@ -504,3 +504,199 @@ fn the_note_of_a_refused_write_takes_the_place_of_the_translation_button() {
         "with the note, the button is not"
     );
 }
+
+/// **208.209, AUDIT-180 Н3, Н4, Н10 — the switches in a group of rows, with their hints.** In
+/// «Общие» the five switches stand in one group of rows (passport §3), the flag with its hint under
+/// its label; in «Диагностика» «Вести журнал» stands in a group of its own with the hint of what the
+/// journal holds.
+#[test]
+fn the_switches_of_the_settings_stand_in_groups_of_rows_with_their_hints() {
+    with_product_strings();
+    let states = window_of_settings::states(Language::Ru);
+    let body = |name: &str| {
+        let (_, window) = states
+            .iter()
+            .find(|(state, _)| state == name)
+            .unwrap_or_else(|| panic!("the window has the state {name}"));
+        format!("{:?}", window.body)
+    };
+    let quoted = |id| format!("{:?}", settings::text_in(Language::Ru, id));
+
+    let general = body("settings General");
+    let group = general.find("Group([").expect("«Общие»: a group of rows");
+    // The group ends where «Язык интерфейса» begins (its own line since 06b7c9c, not a pair).
+    let end = general
+        .find("id: Language")
+        .expect("«Общие»: the choice of the language under the group");
+    let rows = &general[group..end];
+    for id in [
+        "id: Autostart",
+        "id: Sound",
+        "id: Selection",
+        "id: TrayFlag",
+        "id: Updates",
+    ] {
+        assert!(rows.contains(id), "«Общие»: {id} in the group: {rows}");
+    }
+    assert!(
+        rows.contains(&format!(
+            "hint: Some({})",
+            quoted(settings::IDS_TRAY_FLAG_HINT)
+        )),
+        "«Общие»: the hint of the flag: {rows}"
+    );
+
+    let diagnostics = body("settings Diagnostics");
+    let at = diagnostics
+        .find("Group([Toggle { id: Log")
+        .expect("«Диагностика»: «Вести журнал» in a group of its own");
+    assert!(
+        diagnostics[at..].contains(&format!("hint: Some({})", quoted(settings::IDS_LOG_HINT))),
+        "«Диагностика»: the hint of the journal"
+    );
+}
+
+/// **The stand of 23.11 (208.209, AUDIT-180 О5, Н5) — «Оформление» stays a segmented switch.** In a
+/// half of a pair beside «Язык интерфейса» its three segments did not fit and turned into a choice
+/// field; on a line of its own across the column, under the language, they are segments — in the
+/// window of 900 × 540 and in the narrowest one, in Russian and German.
+#[test]
+fn the_theme_of_the_settings_stays_a_segmented_switch_under_the_language() {
+    use lang_switcher::ui::layout::Part;
+
+    with_product_strings();
+    for language in [Language::Ru, Language::De] {
+        let text = Text::new(language.tag(), Direction::LeftToRight).expect("DirectWrite");
+        let (_, window) = window_of_settings::states(language)
+            .into_iter()
+            .find(|(name, _)| name == "settings General")
+            .expect("the state of «Общие»");
+        for size in [client_size(900.0, 540.0), client_size(620.0, 500.0)] {
+            let layout = fit::emergency(
+                &window,
+                size,
+                fit::k_for(language.tag(), size.class),
+                false,
+                &text,
+            );
+            let track = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::Track))
+                .map(|item| item.rect);
+            let language_field = layout
+                .items
+                .iter()
+                .find(|item| matches!(item.part, Part::Field { .. }))
+                .map(|item| item.rect)
+                .expect("the choice field of the language");
+            let track = track.unwrap_or_else(|| {
+                panic!(
+                    "{language:?} {size:?}: «Оформление» is a segmented switch, not a choice field"
+                )
+            });
+            assert!(
+                track.y > language_field.bottom() && track.w >= language_field.w,
+                "{language:?} {size:?}: the segments under the language, across the column: \
+                 {track:?} {language_field:?}"
+            );
+        }
+    }
+}
+
+/// **AUDIT-180 Мн1 — the state in the head of the menu in small letters.** The head of the menu of
+/// the icon says «работает», «приостановлена», «нужен перезапуск» after its dot, as the mock-up of
+/// the menu has it; the block «Состояние» of the settings keeps the words that begin a line.
+#[test]
+fn the_head_of_the_menu_says_the_state_in_small_letters() {
+    use lang_switcher::ui::windows::tray_menu;
+
+    with_product_strings();
+    let menus = tray_menu::states(Language::Ru);
+    for (name, enabled, fail_safe) in [
+        ("menu", true, false),
+        ("menu-paused", false, false),
+        ("menu-restart", false, true),
+    ] {
+        let (dot, block) = tray_menu::status(enabled, fail_safe);
+        let head = settings::text_in(Language::Ru, tray_menu::head_words(dot));
+        let block = settings::text_in(Language::Ru, block);
+        let (_, window) = menus
+            .iter()
+            .find(|(state, _)| state == name)
+            .unwrap_or_else(|| panic!("the menu has the state {name}"));
+        let body = format!("{:?}", window.body);
+        assert!(
+            body.contains(&format!("MenuHead {{ state: {dot:?}, words: {head:?} }}")),
+            "{name}: the head says {head:?}: {}",
+            &body[..body.len().min(120)]
+        );
+        assert!(
+            head.chars().next().is_some_and(char::is_lowercase)
+                && block.chars().next().is_some_and(char::is_uppercase)
+                && head == block.to_lowercase(),
+            "{name}: the head {head:?} is the block's {block:?} in small letters"
+        );
+    }
+}
+
+/// **Z16 (208.210): a tab of a section holds its whole label, the chosen one in its bold** — on a
+/// screen of 800 × 600 the sections stand in a row of tabs, and the chosen «Общие», drawn bold in a
+/// tab measured for the regular type, was cut to «Общ…» with room to spare. Every section chosen in
+/// turn (a state of the catalogue each), in the languages of C3, on the small screen and in the
+/// least window, measured by DirectWrite in the weight each tab is drawn in.
+#[test]
+fn a_tab_of_a_section_holds_its_label_in_the_weight_it_is_drawn_in() {
+    use lang_switcher::ui::layout::Part;
+    use lang_switcher::ui::text::{Measure, Style, Wrap};
+    use lang_switcher::ui::tokens::{Role, SECTION_PAD};
+
+    with_product_strings();
+    // The work area of an 800 × 600 screen over a taskbar of 48, and the least window.
+    let sizes = [window_size(800.0, 552.0), client_size(620.0, 500.0)];
+    let mut cut = Vec::new();
+    let mut tabs_seen = 0;
+    for language in LANGUAGES {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        for (state, window) in lang_switcher::ui::windows::catalogue(language)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("settings"))
+        {
+            for size in sizes {
+                let k = fit::k_for(language.tag(), size.class);
+                let layout = fit::emergency(&window, size, k, rtl, &text);
+                let pad = SECTION_PAD.h.at(layout.b);
+                for item in &layout.items {
+                    let Part::Section { current, label, .. } = &item.part else {
+                        continue;
+                    };
+                    tabs_seen += 1;
+                    let role = if *current { Role::Strong } else { Role::Body };
+                    let style = Style::of(role, layout.b, layout.size.h);
+                    let need = text.measure(label, style, Wrap::OneLine, f32::MAX).width;
+                    let room = item.rect.w - pad * 2.0;
+                    if need > room + 0.01 {
+                        cut.push(format!(
+                            "{} {state} {:.0}x{:.0}: «{label}» {role:?} needs {need:.1}, has {room:.1}",
+                            language.tag(),
+                            size.w,
+                            size.h
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(tabs_seen > 0, "the states show their sections");
+    assert!(
+        cut.is_empty(),
+        "labels cut in their tabs:\n{}",
+        cut.join("\n")
+    );
+}

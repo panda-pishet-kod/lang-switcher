@@ -1022,6 +1022,26 @@ impl Painter<'_, '_> {
         }
     }
 
+    /// The words of the links of `laid` in `value` when it is drawn next (208.217, Пс2): a brush of
+    /// their own as the drawing effect of their runs. The plain look draws them as the rest.
+    pub fn tint_links(&mut self, laid: &Laid, value: Rgb) {
+        let Kind::Direct2D { target, .. } = self.kind else {
+            return;
+        };
+        if laid.links().is_empty() {
+            return;
+        }
+        // SAFETY: inside a frame; the colour outlives the call. The layout keeps the brush for as
+        // long as it lives.
+        let Ok(brush) = (unsafe { target.CreateSolidColorBrush(&colour(value), None) }) else {
+            return;
+        };
+        for run in laid.links() {
+            // SAFETY: a range of the layout's own text.
+            let _ = unsafe { laid.layout().SetDrawingEffect(&brush, *run) };
+        }
+    }
+
     /// The picture `name` in the circle of `radius` centred on `x`, `y`. Without pictures (before
     /// `art.rs` is in, a picture it does not have, the plain look) — the ground of the pictures
     /// alone: a work stand-in, not the look.
@@ -1543,10 +1563,20 @@ mod gdi {
         let style = laid.style();
         let rtl = laid.direction() == Direction::RightToLeft;
         let mut wide: Vec<u16> = laid.shown().encode_utf16().collect();
+        // Nothing to draw. ⚠ An empty slice reaches `DrawTextW` as a dangling pointer with a count
+        // of 0, and `DrawTextW` reads it all the same: the process fell on an empty field or label
+        // in the plain look (Z15, 208.210 — «Раскладки» in the settings, the last step of the wizard).
+        if wide.is_empty() {
+            return;
+        }
         let mut flags = DT_NOPREFIX | DT_NOCLIP;
         flags |= match laid.wrap() {
             Wrap::Words => DT_WORDBREAK,
-            Wrap::OneLine | Wrap::Ellipsis => DT_SINGLELINE | DT_END_ELLIPSIS,
+            // The ellipsis only where DirectWrite cut the line itself: GDI sets the same font a
+            // little wider, and in a box laid to the width of the line it cut what fits —
+            // «Panda K…» and the address under the panda (208.217).
+            Wrap::OneLine | Wrap::Ellipsis if laid.is_cut() => DT_SINGLELINE | DT_END_ELLIPSIS,
+            Wrap::OneLine | Wrap::Ellipsis => DT_SINGLELINE,
         };
         flags |= match (laid.align(), rtl) {
             (Align::Centre, _) => DT_CENTER,

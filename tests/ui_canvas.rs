@@ -353,6 +353,103 @@ fn the_plain_look_draws_text_where_direct2d_does_and_start_is_the_right_edge_in_
     }
 }
 
+/// **An empty line draws nothing, and the plain look stands it** (Z15, 208.210): an empty label or
+/// field reached `DrawTextW` as a dangling pointer, and the process fell with an access violation —
+/// in the settings on «Раскладки», on the last step of the wizard.
+#[test]
+fn an_empty_line_draws_nothing_in_either_look() {
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let text = Text::new("ru-RU", Direction::LeftToRight).expect("DirectWrite");
+    for wrap in [Wrap::OneLine, Wrap::Words, Wrap::Ellipsis] {
+        let laid = text
+            .lay(
+                "",
+                Style::of(Role::Body, 14.0, 512.0),
+                wrap,
+                Align::Start,
+                180.0,
+            )
+            .expect("a layout");
+        for mode in [Mode::Direct2D, Mode::Gdi] {
+            let mut canvas = Canvas::in_memory(200.0, 40.0, 1.0, mode).expect("a canvas");
+            canvas.frame(|painter| {
+                painter.clear(bg);
+                painter.text(&laid, 10.0, 10.0, Color::Text.get(theme));
+            });
+            let image = canvas.image().expect("pixels");
+            assert_eq!(ink(&image, bg), None, "{mode:?} {wrap:?}: no ink");
+        }
+    }
+}
+
+/// **The plain look puts the ellipsis only where DirectWrite cut the line** (208.217): GDI sets the
+/// same font a little wider, and in a box laid to the width of the line — the name of the author
+/// beside the panda, the address under it — it came out «Panda K…». A line DirectWrite did cut keeps
+/// its ellipsis and stays in its box.
+#[test]
+fn the_plain_look_cuts_a_line_only_where_directwrite_cut_it() {
+    use lang_switcher::ui::text::Laid;
+    use lang_switcher::ui::tokens::{BRAND_NAME_WEIGHT, Face};
+
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let (left, top, w, h) = (10.0_f32, 10.0_f32, 400.0_f32, 40.0_f32);
+    let drawn = |laid: &Laid| {
+        let mut canvas = Canvas::in_memory(w, h, 1.0, Mode::Gdi).expect("a canvas");
+        canvas.frame(|painter| {
+            painter.clear(bg);
+            painter.text(laid, left, top, Color::Text.get(theme));
+        });
+        let image = canvas.image().expect("pixels");
+        let pixels: Vec<Rgb> = (0..image.height)
+            .flat_map(|y| (0..image.width).map(move |x| (x, y)))
+            .map(|(x, y)| image.at(x, y))
+            .collect();
+        (ink(&image, bg).expect("ink"), pixels)
+    };
+    let name = Style {
+        face: Face::Main,
+        weight: BRAND_NAME_WEIGHT,
+        ..Style::of(Role::Brand, 14.0, 512.0)
+    };
+    let address = Style::of(Role::Brand, 14.0, 512.0);
+
+    for (line, style) in [("Panda Koder", name), ("panda-pishet-kod.dev", address)] {
+        let lay = |width| {
+            text.lay(line, style, Wrap::OneLine, Align::Start, width)
+                .expect("a layout")
+        };
+        let free = lay(w);
+        let own = free.size().width;
+        let tight = lay(own);
+        assert!(
+            !tight.is_cut(),
+            "{line}: DirectWrite keeps it whole in its own width"
+        );
+        let (whole, cut) = (drawn(&free), drawn(&tight));
+        assert_eq!(
+            cut.0, whole.0,
+            "{line}: in a box of its own width the plain look draws the whole line, {own:.2} pt"
+        );
+        assert!(cut.1 == whole.1, "{line}: pixel for pixel");
+
+        let half = lay(own / 2.0);
+        assert!(
+            half.is_cut(),
+            "{line}: the control — DirectWrite cuts it in half the width"
+        );
+        let ((_, _, right, _), _) = drawn(&half);
+        assert!(
+            right as f32 <= left + own / 2.0 + 1.0,
+            "{line}: a line DirectWrite cut keeps its ellipsis in the plain look: ink to {right} px, \
+             the box to {:.1}",
+            left + own / 2.0
+        );
+    }
+}
+
 /// The ring around a picture of the panda is `bg` and 6 points wide: 6 pixels at 100 %, 12 at
 /// 200 % (passport §3).
 #[test]
@@ -497,4 +594,80 @@ fn the_picture_is_drawn_again_for_a_new_size_or_scale_and_not_for_a_repeated_fra
     drop(canvas);
     // SAFETY: the window made above.
     let _ = unsafe { DestroyWindow(hwnd) };
+}
+
+/// **208.217, AUDIT-180 Пс2: the words of a link in a paragraph are in the colour of a link and
+/// underlined; the rest of the paragraph is not.** Drawn in memory by the painter of the shell: the
+/// green of the accent only over the words of the link, and under them a line of it across their
+/// width.
+#[test]
+fn the_words_of_a_link_in_a_paragraph_are_green_and_underlined() {
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END};
+
+    let theme = Theme::Light;
+    let (bg, ink, accent) = (
+        Color::Bg.get(theme),
+        Color::Text.get(theme),
+        Color::Accent.get(theme),
+    );
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let laid = text
+        .lay(
+            &format!("Say so {LINK_BEGIN}in the group{LINK_END}, please."),
+            Style::of(Role::Body, 14.0, 512.0),
+            Wrap::Words,
+            Align::Start,
+            380.0,
+        )
+        .expect("a layout");
+    let (left, top) = (10.0_f32, 10.0_f32);
+    let mut canvas = Canvas::in_memory(400.0, 40.0, 1.0, Mode::Direct2D).expect("a canvas");
+    canvas.frame(|painter| {
+        painter.clear(bg);
+        painter.tint_links(&laid, accent);
+        painter.text(&laid, left, top, ink);
+    });
+    let image = canvas.image().expect("pixels");
+    // Green: the green of the pixel well above its red — the accent and its blends with the ground,
+    // never the ink of the text or the ground.
+    let green = |x: u32, y: u32| {
+        let p = image.at(x, y);
+        i32::from(p.g) - i32::from(p.r) > 40
+    };
+    let areas = laid.link_areas();
+    assert_eq!(areas.len(), 1, "one line: {areas:?}");
+    let a = areas[0];
+    let (x0, x1) = ((left + a.x) as u32, (left + a.x + a.w).ceil() as u32);
+    let (y0, y1) = ((top + a.y) as u32, (top + a.y + a.h).ceil() as u32);
+    let inside = |x: u32, y: u32| (x0..x1).contains(&x) && (y0..y1).contains(&y);
+
+    let mut over = 0;
+    let mut outside = 0;
+    for y in 0..image.height {
+        for x in 0..image.width {
+            if green(x, y) {
+                if inside(x, y) {
+                    over += 1
+                } else {
+                    outside += 1
+                }
+            }
+        }
+    }
+    let widest_row = (y0..y1)
+        .map(|y| (x0..x1).filter(|x| green(*x, y)).count())
+        .max()
+        .unwrap_or(0);
+    println!(
+        "green over the link {over}, elsewhere {outside}; the widest green row {widest_row} of {}",
+        x1 - x0
+    );
+
+    assert!(over > 50, "the words of the link are green: {over} pixels");
+    assert_eq!(outside, 0, "nothing else is green");
+    assert!(
+        widest_row as f32 >= 0.8 * a.w,
+        "a line under the words across their width: {widest_row} of {:.1}",
+        a.w
+    );
 }

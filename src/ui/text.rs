@@ -22,6 +22,7 @@
 //!
 //! Knows nothing of windows.
 
+use crate::ui::scene::{LINK_BEGIN, LINK_END, STRONG_BEGIN, STRONG_END};
 use crate::ui::tokens::{self, Face, Role};
 use ::windows::Win32::Foundation::{HMODULE, LPARAM};
 use ::windows::Win32::Globalization::{LCMAP_LINGUISTIC_CASING, LCMAP_UPPERCASE, LCMapStringEx};
@@ -48,6 +49,49 @@ pub const MONO_FACES: [&str; 2] = ["Cascadia Mono", "Consolas"];
 
 /// A layout's height when nothing bounds it: far beyond any window.
 const UNBOUNDED: f32 = 1.0e6;
+
+/// Whether `ch` is a mark of a run — strong or a link — and not a character shown.
+fn is_mark(ch: char) -> bool {
+    matches!(ch, STRONG_BEGIN | STRONG_END | LINK_BEGIN | LINK_END)
+}
+
+/// `text` without the marks of its runs, and the runs — strong ones and links: their start and
+/// length in UTF-16 units of what is left. A mark without its pair runs to the end of the line.
+fn marked_runs(text: &str) -> (String, Vec<DWRITE_TEXT_RANGE>, Vec<DWRITE_TEXT_RANGE>) {
+    let mut plain = String::with_capacity(text.len());
+    let (mut strong, mut links) = (Vec::new(), Vec::new());
+    let (mut at, mut open_strong, mut open_link) = (0u32, None, None);
+    let run = |start: u32, at: u32| DWRITE_TEXT_RANGE {
+        startPosition: start,
+        length: at - start,
+    };
+    for ch in text.chars() {
+        match ch {
+            STRONG_BEGIN => open_strong = open_strong.or(Some(at)),
+            LINK_BEGIN => open_link = open_link.or(Some(at)),
+            STRONG_END => strong.extend(open_strong.take().map(|start| run(start, at))),
+            LINK_END => links.extend(open_link.take().map(|start| run(start, at))),
+            _ => {
+                plain.push(ch);
+                at += ch.len_utf16() as u32;
+            }
+        }
+    }
+    strong.extend(open_strong.map(|start| run(start, at)));
+    links.extend(open_link.map(|start| run(start, at)));
+    strong.retain(|run| run.length > 0);
+    links.retain(|run| run.length > 0);
+    (plain, strong, links)
+}
+
+/// A rectangle of the words of a link, in points from the top left of its paragraph's box.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Area {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
 
 /// The reading direction of the program's language.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +175,11 @@ pub struct Size {
 pub trait Measure {
     /// `text` set in `style` within `width` points.
     fn measure(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Size;
+
+    /// Where the words of the link of `text` (between [`LINK_BEGIN`] and [`LINK_END`]) stand when
+    /// it is set as [`Measure::measure`] sets it: one rectangle per line they take, from the top
+    /// left of the box; none when there is no link.
+    fn link_areas(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Vec<Area>;
 }
 
 /// A stand-in measure: every character advances its share of the size; lines break between words,
@@ -141,7 +190,7 @@ pub struct FixedAdvance(pub f32);
 impl Measure for FixedAdvance {
     fn measure(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Size {
         let advance = self.0 * style.size;
-        let length = |word: &str| word.chars().count() as f32 * advance;
+        let length = |word: &str| word.chars().filter(|ch| !is_mark(*ch)).count() as f32 * advance;
 
         if wrap != Wrap::Words || text.is_empty() {
             return Size {
@@ -177,6 +226,60 @@ impl Measure for FixedAdvance {
             height: style.line_height() * lines as f32,
             lines,
         }
+    }
+
+    /// The same greedy lines as [`Self::measure`], character by character.
+    fn link_areas(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Vec<Area> {
+        let advance = self.0 * style.size;
+        let h = style.line_height();
+        let mut areas: Vec<Area> = Vec::new();
+        let mut add = |row: u32, x: f32| {
+            let y = row as f32 * h;
+            match areas.last_mut() {
+                Some(last) if last.y == y && (last.x + last.w - x).abs() < 0.01 => {
+                    last.w += advance
+                }
+                _ => areas.push(Area {
+                    x,
+                    y,
+                    w: advance,
+                    h,
+                }),
+            }
+        };
+        let words: Vec<&str> = if wrap == Wrap::Words {
+            text.split(' ').collect()
+        } else {
+            vec![text]
+        };
+        let (mut row, mut x, mut in_link) = (0u32, 0.0_f32, false);
+        for (n, word) in words.iter().enumerate() {
+            let shown = word.chars().filter(|ch| !is_mark(*ch)).count() as f32 * advance;
+            if n > 0 {
+                if x > 0.0 && x + advance + shown > width {
+                    (row, x) = (row + 1, 0.0);
+                } else {
+                    if in_link {
+                        add(row, x);
+                    }
+                    x += advance;
+                }
+            }
+            for ch in word.chars() {
+                match ch {
+                    LINK_BEGIN => in_link = true,
+                    LINK_END => in_link = false,
+                    ch if is_mark(ch) => {}
+                    _ => {
+                        if in_link {
+                            add(row, x);
+                        }
+                        x += advance;
+                    }
+                }
+            }
+        }
+        areas
     }
 }
 
@@ -381,11 +484,12 @@ impl Text {
         align: Align,
         width: f32,
     ) -> WinResult<Laid> {
-        let shown = if style.caps {
+        let cased = if style.caps {
             upper(&self.locale, text)
         } else {
             text.to_owned()
         };
+        let (shown, strong, links) = marked_runs(&cased);
         let wide: Vec<u16> = shown.encode_utf16().collect();
         let family = self.family(style.face).to_owned();
 
@@ -452,9 +556,22 @@ impl Text {
                 )
             }?;
         }
+        if !strong.is_empty() {
+            let weight =
+                DWRITE_FONT_WEIGHT(i32::from(Role::Strong.style().weight.max(style.weight)));
+            for run in strong {
+                // SAFETY: a range of the layout's own text, counted over the same UTF-16 string.
+                unsafe { layout.SetFontWeight(weight, run) }?;
+            }
+        }
+        for run in &links {
+            // SAFETY: a range of the layout's own text, counted over the same UTF-16 string.
+            unsafe { layout.SetUnderline(true, *run) }?;
+        }
 
         Ok(Laid {
             layout,
+            links,
             shown,
             family,
             style,
@@ -479,6 +596,12 @@ impl Measure for Text {
             },
             |laid| laid.size(),
         )
+    }
+
+    fn link_areas(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Vec<Area> {
+        self.lay(text, style, wrap, Align::Start, width)
+            .map(|laid| laid.link_areas())
+            .unwrap_or_default()
     }
 }
 
@@ -543,6 +666,8 @@ pub struct Place {
 /// A run of text laid out by DirectWrite, ready for the canvas.
 pub struct Laid {
     layout: IDWriteTextLayout,
+    /// The runs of the link (`scene::LINK_BEGIN`), in UTF-16 units of [`Laid::shown`].
+    links: Vec<DWRITE_TEXT_RANGE>,
     shown: String,
     family: String,
     style: Style,
@@ -615,6 +740,61 @@ impl Laid {
                 .HitTestTextPosition(position, false, &mut x, &mut y, &mut metrics)
         }
         .is_ok_and(|()| metrics.isTrimmed.as_bool())
+    }
+
+    /// Where the words of the link stand: one rectangle per line they take, from the top left of
+    /// the layout's box (`HitTestTextRange`); none without a link.
+    pub fn link_areas(&self) -> Vec<Area> {
+        let mut areas = Vec::new();
+        for run in &self.links {
+            let mut count = 0u32;
+            // SAFETY: the first call asks the count only (no buffer).
+            let _ = unsafe {
+                self.layout.HitTestTextRange(
+                    run.startPosition,
+                    run.length,
+                    0.0,
+                    0.0,
+                    None,
+                    &mut count,
+                )
+            };
+            let mut metrics = vec![DWRITE_HIT_TEST_METRICS::default(); count as usize];
+            // SAFETY: the buffer holds `count` metrics; the out parameter is a local.
+            if count == 0
+                || unsafe {
+                    self.layout.HitTestTextRange(
+                        run.startPosition,
+                        run.length,
+                        0.0,
+                        0.0,
+                        Some(&mut metrics),
+                        &mut count,
+                    )
+                }
+                .is_err()
+            {
+                continue;
+            }
+            areas.extend(metrics.iter().take(count as usize).map(|m| Area {
+                x: m.left,
+                y: m.top,
+                w: m.width,
+                h: m.height,
+            }));
+        }
+        areas
+    }
+
+    /// The runs of the link, for the painter to colour (`Painter::tint_links`).
+    pub(crate) fn links(&self) -> &[DWRITE_TEXT_RANGE] {
+        &self.links
+    }
+
+    /// Whether the ellipsis cut the line at all: its last character is cut away.
+    pub fn is_cut(&self) -> bool {
+        let length = self.shown.encode_utf16().count() as u32;
+        length > 0 && self.is_trimmed(length - 1)
     }
 
     /// The text as it is shown: in capitals where the role asks for them.

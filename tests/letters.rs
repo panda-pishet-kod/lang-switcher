@@ -2035,7 +2035,7 @@ fn plan_arm<'a>(source: &'a str, head: &str, next: &str) -> &'a str {
 fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
     let code = squeezed_code(arm);
 
-    code.contains("text(IDS_FEEDBACK_OPEN), Action::OpenFeedback,")
+    code.contains("text(IDS_THANKS_SAY), Action::OpenFeedback,")
         && code.contains("Action::OpenFeedback, links::feedback_url(language),")
         && !code.contains("CHANNEL_URL")
         && !code.contains("Action::OpenChannel")
@@ -2099,7 +2099,7 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
 
     // The control.
     let channel_again = thanks
-        .replace("IDS_FEEDBACK_OPEN", "IDS_CHANNEL_OPEN")
+        .replace("IDS_THANKS_SAY", "IDS_CHANNEL_OPEN")
         .replace("Action::OpenFeedback", "Action::OpenChannel");
     assert_ne!(channel_again, thanks, "the control must change the arm");
     assert!(
@@ -2347,7 +2347,18 @@ fn the_page_of_a_report_about_the_translation_is_headed_with_the_words_of_its_bu
             .describe()
             .body
         );
-        let at = body.find("Header {").expect("the page has its header");
+        // The head shown: since AUDIT-180 Z8 the heads of every step stand in `Steps(shown, …)`
+        // (the head as tall as the tallest), and the shown one is the `shown`-th of them.
+        let shown: usize = body
+            .find("Steps(")
+            .and_then(|at| body[at + "Steps(".len()..].split(',').next())
+            .and_then(|number| number.trim().parse().ok())
+            .unwrap_or(0);
+        let at = body
+            .match_indices("Header {")
+            .nth(shown)
+            .map(|(at, _)| at)
+            .expect("the page has its header");
         let end = body[at..].find("}").map_or(body.len(), |end| at + end);
         body[at..end].to_owned()
     };
@@ -4801,6 +4812,132 @@ fn hello_shows_the_frame_of_its_tick() {
     }
 }
 
+/// **208.217: in the steps of «Привет» the name of the key is in bold** — so in the mock-up of the
+/// letters, by the marks of «Как пользоваться» (П2, 208.209): every step carries the key as a
+/// strong run, in every language, and nothing else of the step is marked.
+#[test]
+fn the_steps_of_hello_name_the_key_in_bold() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{Node, strong};
+    use lang_switcher::ui::windows::letter::LetterView;
+
+    fn steps<I>(node: &Node<I>, into: &mut Vec<String>) {
+        match node {
+            Node::Numbered(items) => into.extend(items.iter().cloned()),
+            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) => {
+                nodes.iter().for_each(|node| steps(node, into))
+            }
+            _ => {}
+        }
+    }
+
+    let _guard = with_product_strings();
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    for language in Language::ALL {
+        let hello = LetterView {
+            letter: Letter::Welcome,
+            plan: letters::plan_in(language, Letter::Welcome, &context),
+            key: "Pause".to_owned(),
+            tick: 0,
+            language,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        };
+        let mut shown = Vec::new();
+        steps(&hello.describe().body, &mut shown);
+        let ids = [
+            settings::IDS_HELLO_ROW_1,
+            settings::IDS_HELLO_ROW_2,
+            settings::IDS_HELLO_ROW_3,
+        ];
+        assert_eq!(shown.len(), ids.len(), "{language:?}: three steps");
+        for (step, id) in shown.iter().zip(ids) {
+            let line = settings::text_in(language, id);
+            assert!(
+                line.contains("{0}"),
+                "{language:?}: each step names the key"
+            );
+            assert_eq!(
+                *step,
+                line.replace("{0}", &strong("Pause")),
+                "{language:?}: the key in bold, the rest as the string says"
+            );
+        }
+    }
+}
+
+/// **208.217, AUDIT-180 Пс2: the link of «Спасибо» is in its lead.** The lead ends with the first
+/// sentence of the old paragraph, its words of the place a link pressing which is «Открыть группу»
+/// of before; the line of its own under the cards is gone. Every language marks exactly one run.
+#[test]
+fn the_link_of_thanks_is_the_last_sentence_of_its_lead() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END, Node, linked};
+    use lang_switcher::ui::windows::letter::{Id, LetterView};
+
+    fn nodes<I: Clone>(node: &Node<I>, into: &mut Vec<Node<I>>) {
+        into.push(node.clone());
+        if let Node::Column(children) | Node::Rows(children) | Node::Row(children) = node {
+            children.iter().for_each(|child| nodes(child, into));
+        }
+    }
+
+    let _guard = with_product_strings();
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    for language in Language::ALL {
+        let say = settings::text_in(language, settings::IDS_THANKS_SAY);
+        assert!(
+            say.matches("<a>").count() == 1
+                && say.matches("</a>").count() == 1
+                && say.find("<a>") < say.find("</a>"),
+            "{language:?}: one link marked: «{say}»"
+        );
+        let thanks = LetterView {
+            letter: Letter::Thanks,
+            plan: letters::plan_in(language, Letter::Thanks, &context),
+            key: "Pause".to_owned(),
+            tick: 0,
+            language,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        };
+        let mut all = Vec::new();
+        nodes(&thanks.describe().body, &mut all);
+        let lead = settings::text_in(language, settings::IDS_THANKS_LEAD);
+        let paragraphs: Vec<_> = all
+            .iter()
+            .filter_map(|node| match node {
+                Node::Linked { role, words, id } => Some((*role, words.clone(), *id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            paragraphs,
+            vec![(
+                lang_switcher::ui::tokens::Role::Lead,
+                format!("{lead} {}", linked(&say)),
+                Id::Do(letters::Action::OpenFeedback)
+            )],
+            "{language:?}: the lead, then the sentence with its link"
+        );
+        let words = &paragraphs[0].1;
+        let run = &words[words.find(LINK_BEGIN).unwrap()..words.find(LINK_END).unwrap()];
+        assert!(run.chars().count() > 1, "{language:?}: the link has words");
+        assert!(
+            !all.iter().any(|node| matches!(node, Node::Link { .. })),
+            "{language:?}: no line of its own for the link"
+        );
+    }
+}
+
 /// **«Обновление» dates the release in the language of its window** — the same as «От автора»
 /// below (T-120-17): `plan_in` speaks `language`, and the day of the release came out in the
 /// program's («Version 1.7.1 came out on 16 ноября» in Tamil, the list of the wave of T-120-24).
@@ -4943,6 +5080,47 @@ fn the_lines_of_the_state_of_the_author_window_say_by_their_dot_whether_they_are
             );
         }
     }
+}
+
+/// **208.209, AUDIT-180 А5 — the switch under the block of the news.** «Сообщать об обновлениях
+/// программы» is a line of its own right after the block «Новости и обновления», not a row inside
+/// it: the word of the owner moved it out of the block of the mock-up.
+#[test]
+fn the_switch_of_the_author_window_stands_under_the_block_of_the_news() {
+    use lang_switcher::letters::author_view_sample;
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{Node, Surface};
+    use lang_switcher::ui::windows::author::{Author, Id};
+
+    let _guard = with_product_strings();
+    let news = settings::text_in(Language::Ru, settings::IDS_NEWS_PANEL);
+    let window = Author {
+        view: author_view_sample(Language::Ru),
+        language: Language::Ru,
+        theme: ThemeSetting::Light,
+    }
+    .describe();
+    let Node::Column(children) = &window.body else {
+        panic!("the body of «От автора» is a column: {:?}", window.body);
+    };
+    let block = children
+        .iter()
+        .position(|node| {
+            matches!(node, Node::Surface(Surface::Block, _)) && format!("{node:?}").contains(&news)
+        })
+        .expect("the block of the news");
+    let switch = children
+        .iter()
+        .position(|node| matches!(node, Node::Toggle { id: Id::Switch, .. }))
+        .expect("the switch, a node of the column itself");
+
+    assert_eq!(switch, block + 1, "the switch right under the block");
+    assert!(
+        !format!("{:?}", children[block]).contains("Switch"),
+        "no switch inside the block: {:?}",
+        children[block]
+    );
 }
 
 /// **T-120-17, the red «before»: «От автора» is a window of the shell and fits the narrowest
@@ -5252,5 +5430,39 @@ fn the_knock_of_a_letter_goes_when_its_letter_opens() {
     assert!(
         code.contains("crate::corner::withdraw();"),
         "untold: the corner is not ended by a press"
+    );
+}
+
+/// **AUDIT-180 А1, решение 208.211 — the owner's text split without a loss.** The title of «От
+/// автора» is the first sentence of the owner's text, without its full stop; the card «Поддержать
+/// автора» says the rest word for word; together they are the text the owner wrote.
+#[test]
+fn the_title_and_the_card_of_the_author_window_are_the_owners_text_split() {
+    use lang_switcher::letters::author_view_sample;
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::author::Author;
+
+    let _guard = with_product_strings();
+    let title = settings::text_in(Language::Ru, settings::IDS_AUTHOR_TITLE);
+    let card = settings::text_in(Language::Ru, settings::IDS_AUTHOR_TEXT);
+    assert_eq!(
+        format!("{title}. {card}"),
+        "Программу делает один человек в свободное время. Программа бесплатная и останется \
+         такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько \
+         способов. Классно, что вы цените чужой труд ♥",
+        "the title and the card are the owner's text, no word lost (208.180 п. 1, 208.211)"
+    );
+    let window = Author {
+        view: author_view_sample(Language::Ru),
+        language: Language::Ru,
+        theme: ThemeSetting::Light,
+    }
+    .describe();
+    let body = format!("{:?}", window.body);
+    assert!(
+        body.contains(&format!("title: {title:?}")) && body.contains(&format!("words: {card:?}")),
+        "the head says the first sentence and the card the rest: {}",
+        &body[..body.len().min(300)]
     );
 }

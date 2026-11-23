@@ -10,7 +10,8 @@
 //! ([`tray::menu_closed`]); the switch changes the setting at once and the menu stays.
 
 use crate::settings::{
-    self, IDS_STATUS_RESTART, IDS_STATUS_SUSPENDED, IDS_STATUS_WORKING, Language,
+    self, IDS_MENU_RESTART, IDS_MENU_SUSPENDED, IDS_MENU_WORKING, IDS_STATUS_RESTART,
+    IDS_STATUS_SUSPENDED, IDS_STATUS_WORKING, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::tray::{
@@ -96,14 +97,25 @@ pub fn status(enabled: bool, fail_safe: bool) -> (MenuState, u16) {
     }
 }
 
+/// The words of the state in the head of the menu — in small letters, after the dot, as the mock-up
+/// of the menu has them (AUDIT-180 Мн1); [`status`] gives the words of the block «Состояние», which
+/// begin a line.
+pub fn head_words(state: MenuState) -> u16 {
+    match state {
+        MenuState::Working => IDS_MENU_WORKING,
+        MenuState::Paused => IDS_MENU_SUSPENDED,
+        MenuState::Restart => IDS_MENU_RESTART,
+    }
+}
+
 impl Content for TrayMenu {
     type Id = Id;
 
     fn describe(&self) -> Window<Id> {
-        let (state, words) = self.state();
+        let (state, _) = self.state();
         let mut body = vec![Node::MenuHead {
             state,
-            words: settings::text_in(self.language, words),
+            words: settings::text_in(self.language, head_words(state)),
         }];
         let mut disabled = Vec::new();
 

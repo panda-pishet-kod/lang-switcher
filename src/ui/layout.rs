@@ -23,18 +23,20 @@ use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
 use crate::ui::scene::{MenuState, OnPicture, Trailing};
 use crate::ui::text::{Align, Measure, Style, Wrap};
-use crate::ui::tokens::shape::CHEVRON;
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
     FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
     LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
-    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, Role, SECTION_GAP,
-    SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX,
-    WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE, WIZARD_BUTTON_ROW_ABOVE,
+    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, ROW_GROUP_PAD,
+    ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
+    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
+    WIZARD_BUTTON_ROW_ABOVE,
 };
-use crate::ui::tokens::{ART_RING, BADGE_GAP, TYPE_FLOOR};
+use crate::ui::tokens::{
+    ART_RING, BADGE_GAP, CHOICE_ICON_PLATE, CHOICE_IN_LIST_PAD, CHOICE_NEXT_GAP, TYPE_FLOOR,
+};
 use crate::ui::tokens::{BRAND_GAP, BRAND_NAME_WEIGHT, Face};
 use crate::ui::tokens::{
     CORNER_ART, CORNER_BUTTON, CORNER_BUTTON_GAP, CORNER_BUTTON_MIN_HEIGHT, CORNER_GAP,
@@ -201,6 +203,9 @@ pub enum Part {
         text: String,
         role: Role,
     },
+    /// Where a press counts for the link inside a paragraph (208.217, Пс2): the words of the link
+    /// on one line, over the paragraph's text, which draws them — this part draws only the ring.
+    InlineLink,
     Divider,
     /// Where a press counts for the element: the whole line of a switch or a check box.
     Hit,
@@ -244,6 +249,11 @@ pub enum Part {
     MenuIcon {
         name: String,
         emphasis: bool,
+    },
+    /// The icon of a choice card on its plate (208.132, AUDIT-180 М2): `surface2`, the icon
+    /// `accent`.
+    CardIcon {
+        name: String,
     },
     /// The picture of the taskbar in «Обновлено», at one moment.
     Taskbar(crate::ui::scene::Taskbar),
@@ -346,6 +356,7 @@ impl Part {
             Part::Field { .. } => "choice field",
             Part::Section { .. } => "section",
             Part::Link { .. } => "link",
+            Part::InlineLink => "link in a paragraph",
             Part::Divider => "divider",
             Part::Hit => "hit area",
             Part::Radio { .. } => "radio button",
@@ -358,6 +369,7 @@ impl Part {
             Part::Cross => "close cross",
             Part::Taskbar(_) => "taskbar picture",
             Part::MenuIcon { .. } => "menu icon",
+            Part::CardIcon { .. } => "card icon",
             Part::ListRow { .. } => "list row",
             Part::Progress { .. } => "wizard progress",
             Part::Key { .. } => "key",
@@ -481,9 +493,22 @@ impl<I: Copy + PartialEq> Layout<I> {
 
     /// Where `straight`'s element `item` stands in this layout when it is mirrored (passport §7):
     /// reflected in the vertical axis of the window — or, for what lies over the picture of the
-    /// panel (T-120-25), moved with the picture and not reflected in it.
+    /// panel (T-120-25), moved with the picture and not reflected in it; for the words of a link
+    /// inside a paragraph (208.217), moved with the paragraph, whose own text is not reflected.
     pub fn reflection_of(&self, straight: &Layout<I>, item: &Placed<I>) -> Rect {
         let r = item.rect;
+        if matches!(item.part, Part::InlineLink)
+            && let Some(paragraph) = straight.items.iter().find(|placed| {
+                // The paragraph the middle of the words stands in.
+                let (p, x, y) = (placed.rect, r.x + r.w * 0.5, r.y + r.h * 0.5);
+                matches!(placed.part, Part::Text { .. })
+                    && (p.x..=p.right()).contains(&x)
+                    && (p.y..=p.bottom()).contains(&y)
+            })
+        {
+            let p = paragraph.rect;
+            return Rect::new(self.size.w - p.right() + (r.x - p.x), r.y, r.w, r.h);
+        }
         let picture = |layout: &Layout<I>| {
             layout
                 .items
@@ -659,6 +684,14 @@ pub fn mirror<I>(items: &mut [Placed<I>], width: f32) {
     for item in items {
         item.rect.x = width - item.rect.x - item.rect.w;
     }
+}
+
+/// `label` without the colon at its end — the colon of every script the strings use, with the space
+/// some put before it (French, the no-break space) — for a label over a field (passport §6).
+pub fn without_colon(label: &str) -> &str {
+    label.trim_end_matches(|c: char| {
+        matches!(c, ':' | '：' | '׃' | '\u{00A0}' | '\u{202F}') || c.is_whitespace()
+    })
 }
 
 /// The dot of a line of status for the state of the program.
@@ -861,7 +894,7 @@ impl<I: Copy> Placer<'_, I> {
         if !window.buttons.is_empty() {
             let height = {
                 let (kept, over) = (self.out.len(), self.over);
-                let h = self.buttons(&window.buttons, 0.0, 0.0, column);
+                let h = self.buttons(&window.buttons, 0.0, 0.0, column, true);
                 self.out.truncate(kept);
                 self.over = over;
                 h
@@ -971,6 +1004,7 @@ impl<I: Copy> Placer<'_, I> {
                 slot.map_or(h, |slot| slot.max(h))
             }
             Node::Surface(kind, child) => self.surface(*kind, child, x, y, w, slot),
+            Node::Group(rows) => self.group(rows, x, y, w, slot),
             Node::Steps(current, steps) => {
                 let tallest = steps
                     .iter()
@@ -988,18 +1022,40 @@ impl<I: Copy> Placer<'_, I> {
                 subtitle,
             } => self.header(eyebrow.as_deref(), title, subtitle.as_deref(), x, y, w),
             Node::Text(role, text) => self.text(*role, text, x, y, w, Wrap::Words),
+            Node::Linked { role, words, id } => {
+                let h = self.text(*role, words, x, y, w, Wrap::Words);
+                let style = self.style(*role);
+                for area in self.measure.link_areas(words, style, Wrap::Words, w) {
+                    // The window is laid out straight and mirrored at the end, and the paragraph's
+                    // own text is not: a line that reads right to left stands where DirectWrite
+                    // set it once the mirror has moved the box (passport §7).
+                    let left = if self.rtl {
+                        x + w - area.x - area.w
+                    } else {
+                        x + area.x
+                    };
+                    self.push(
+                        Part::InlineLink,
+                        Rect::new(left, y + area.y, area.w, area.h),
+                        Some(*id),
+                    );
+                }
+                h
+            }
             Node::Line(role, text) => self.text(*role, text, x, y, w, Wrap::OneLine),
             Node::Button { .. } => {
                 let (bw, bh) = self.fitted_button(node, w);
                 self.button(node, Rect::new(x, y, bw, bh));
                 bh
             }
-            Node::Buttons(buttons) => self.buttons(buttons, x, y, w),
+            // A row of buttons of the content stands at the start edge (208.209, AUDIT-180 О2); only
+            // the row of the window is pressed to its end.
+            Node::Buttons(buttons) => self.buttons(buttons, x, y, w, false),
             Node::Action {
                 title,
                 words,
                 buttons,
-            } => self.action(title, words, buttons, x, y, w),
+            } => self.action(title, words, buttons, x, y, w, slot),
             Node::Toggle {
                 id,
                 label,
@@ -1076,7 +1132,18 @@ impl<I: Copy> Placer<'_, I> {
                 title,
                 words,
                 selected,
-            } => self.choice_card(*id, title, words, *selected, x, y, w),
+                next,
+                icon,
+            } => self.choice_card(
+                *id,
+                (title, words.as_deref(), next.as_deref()),
+                *icon,
+                *selected,
+                x,
+                y,
+                w,
+                slot,
+            ),
             Node::Segments {
                 id,
                 label,
@@ -1868,6 +1935,7 @@ impl<I: Copy> Placer<'_, I> {
             Node::Line(role, text) | Node::Text(role, text) => {
                 self.width_of(self.style(*role), text)
             }
+            Node::Linked { role, words, .. } => self.width_of(self.style(*role), words),
             _ => f32::MAX,
         }
     }
@@ -1928,6 +1996,39 @@ impl<I: Copy> Placer<'_, I> {
         height
     }
 
+    /// A group of rows (passport §3 «Группа строк»): the frame of a block with the paddings of the
+    /// group, each row padded above and below, a line across between two rows. Given a `slot`
+    /// taller than the rows need, the frame takes it and the rows spread evenly over it (the list of
+    /// «Что приложить», 208.133: «пункты разнесены ровно»).
+    fn group(&mut self, rows: &[Node<I>], x: f32, y: f32, w: f32, slot: Option<f32>) -> f32 {
+        let (v, h) = (self.em(ROW_GROUP_PAD.v), self.em(ROW_GROUP_PAD.h));
+        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (inner_x, inner_w) = (x + h, (w - h * 2.0).max(0.0));
+        let mut row_pad = self.em(ROW_GROUP_ROW);
+        if let Some(slot) = slot
+            && !rows.is_empty()
+        {
+            let natural = v * 2.0
+                + rows
+                    .iter()
+                    .map(|row| self.height(row, inner_w, None) + row_pad * 2.0)
+                    .sum::<f32>();
+            row_pad += (slot - natural).max(0.0) / (rows.len() * 2) as f32;
+        }
+        let mut top = y + v;
+        for (index, row) in rows.iter().enumerate() {
+            if index > 0 {
+                self.push(Part::Divider, Rect::new(x, top, w, LINE.0), None);
+            }
+            top += row_pad;
+            top += self.node(row, inner_x, top, inner_w, None);
+            top += row_pad;
+        }
+        let height = (top + v - y).max(slot.unwrap_or(0.0));
+        self.out[frame].rect.h = height;
+        height
+    }
+
     fn header(
         &mut self,
         eyebrow: Option<&str>,
@@ -1982,6 +2083,13 @@ impl<I: Copy> Placer<'_, I> {
     }
 
     fn text(&mut self, role: Role, text: &str, x: f32, y: f32, w: f32, wrap: Wrap) -> f32 {
+        // A label over a field takes no colon (passport §6, 208.209): the strings keep theirs — the
+        // appeal and the lines of «Диагностика» say «label: value» with the same words.
+        let text = if role == Role::FieldLabel {
+            without_colon(text)
+        } else {
+            text
+        };
         let style = self.style(role);
         let h = match wrap {
             Wrap::OneLine | Wrap::Ellipsis => style.line_height(),
@@ -2058,12 +2166,13 @@ impl<I: Copy> Placer<'_, I> {
             + self.em(BUTTON_GAP) * nodes.len().saturating_sub(1) as f32
     }
 
-    /// `nodes` side by side, pressed to the right of `w`; what runs over is counted.
-    fn button_row(&mut self, nodes: &[&Node<I>], x: f32, y: f32, w: f32) -> f32 {
+    /// `nodes` side by side, pressed to the end of `w` (the row of the window) or standing at its
+    /// start (a row of the content, 208.209); what runs over is counted.
+    fn button_row(&mut self, nodes: &[&Node<I>], x: f32, y: f32, w: f32, at_end: bool) -> f32 {
         let gap = self.em(BUTTON_GAP);
         let total = self.row_width(nodes);
         self.over = self.over.max(total - w);
-        let mut left = x + w - total;
+        let mut left = if at_end { x + w - total } else { x };
         let mut h = 0.0_f32;
         for node in nodes {
             let (bw, bh) = self.button_size(node);
@@ -2110,17 +2219,20 @@ impl<I: Copy> Placer<'_, I> {
                     x + first_w + gap,
                     y,
                     w - first_w - gap,
+                    true,
                 );
                 return h.max(first_h);
             }
         }
-        self.buttons(&window.buttons, x, y, w)
+        self.buttons(&window.buttons, x, y, w, true)
     }
 
-    /// A row of buttons pressed to the right, the main one the rightmost. When it does not fit —
-    /// §3а, step 1 — two rows, the main one in the lower at its edge; then one under another across
-    /// the width, the main one on top, a label wider than the width on two lines (step 5).
-    fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32) -> f32 {
+    /// A row of buttons, the main one the last: pressed to the end of `w` — the row of the window —
+    /// or standing at its start — a row in a block, a card or the content (208.209, AUDIT-180 О2).
+    /// When it does not fit — §3а, step 1 — two rows, the main one in the lower at its edge; then
+    /// one under another across the width, the main one on top, a label wider than the width on
+    /// two lines (step 5).
+    fn buttons(&mut self, buttons: &[Node<I>], x: f32, y: f32, w: f32, at_end: bool) -> f32 {
         if self.kind == WindowKind::Corner {
             return self.corner_buttons(buttons, x, y, w);
         }
@@ -2138,15 +2250,15 @@ impl<I: Copy> Placer<'_, I> {
         order.extend(buttons.iter().filter(is_primary));
 
         if self.row_width(&order) <= w || !self.gives(Concession::Buttons) {
-            return self.button_row(&order, x, y, w);
+            return self.button_row(&order, x, y, w, at_end);
         }
         if let Some((main, rest)) = order.split_last()
             && !rest.is_empty()
             && self.row_width(rest) <= w
             && self.row_width(&[*main]) <= w
         {
-            let upper = self.button_row(rest, x, y, w);
-            let lower = self.button_row(&[*main], x, y + upper + gap, w);
+            let upper = self.button_row(rest, x, y, w, at_end);
+            let lower = self.button_row(&[*main], x, y + upper + gap, w, at_end);
             return upper + gap + lower;
         }
 
@@ -2162,8 +2274,12 @@ impl<I: Copy> Placer<'_, I> {
         top - y
     }
 
-    /// An action card: the title and the text, the buttons under them — or beside them, §3а step 3,
-    /// in a pair standing side by side when this makes the card lower.
+    /// An action card (passport §6, 208.209): in the frame of a block (AUDIT-180 О3), the title and
+    /// the text, the buttons under them at the start edge (О2) — at the foot of the card when its
+    /// `slot` is taller than what it holds: in a pair standing side by side the two cards take one
+    /// height and their buttons one line (А2, А3) — or beside them, §3а step 3, in such a pair when
+    /// this makes the card lower.
+    #[allow(clippy::too_many_arguments)]
     fn action(
         &mut self,
         title: &str,
@@ -2172,31 +2288,50 @@ impl<I: Copy> Placer<'_, I> {
         x: f32,
         y: f32,
         w: f32,
+        slot: Option<f32>,
     ) -> f32 {
-        let gap = self.em(BLOCK_ROW_GAP);
-        let under = |this: &mut Self| {
-            let mut top = y + this.text(Role::Strong, title, x, y, w, Wrap::Words);
-            top += gap + this.text(Role::Body, text, x, top + gap, w, Wrap::Words);
-            if !buttons.is_empty() {
-                top += gap + this.buttons(buttons, x, top + gap, w);
-            }
-            top - y
-        };
+        let (v, h) = (self.em(BLOCK_PAD.v), self.em(BLOCK_PAD.h));
+        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (x, y, w) = (x + h, y + v, (w - h * 2.0).max(0.0));
         let beside_lowers = self.gives(Concession::Card)
             && self.in_pair
             && !buttons.is_empty()
             && self.trial(|this| this.action_beside(title, text, buttons, x, y, w))
-                < self.trial(under);
+                < self.trial(|this| this.action_under(title, text, buttons, x, y, w, None));
+        let inner = if beside_lowers {
+            self.action_beside(title, text, buttons, x, y, w)
+        } else {
+            let room = slot.map(|slot| slot - v * 2.0);
+            self.action_under(title, text, buttons, x, y, w, room)
+        };
+        let height = (inner + v * 2.0).max(slot.unwrap_or(0.0));
+        self.out[frame].rect.h = height;
+        height
+    }
 
-        if !beside_lowers {
-            let mut top = y + self.text(Role::Strong, title, x, y, w, Wrap::Words);
-            top += gap + self.text(Role::Body, text, x, top + gap, w, Wrap::Words);
-            if !buttons.is_empty() {
-                top += gap + self.buttons(buttons, x, top + gap, w);
-            }
+    /// The inside of a card with its buttons under the title and the text, at the foot of `room`
+    /// when there is more of it than the card needs.
+    #[allow(clippy::too_many_arguments)]
+    fn action_under(
+        &mut self,
+        title: &str,
+        text: &str,
+        buttons: &[Node<I>],
+        x: f32,
+        y: f32,
+        w: f32,
+        room: Option<f32>,
+    ) -> f32 {
+        let gap = self.em(BLOCK_ROW_GAP);
+        let mut top = y + self.text(Role::Strong, title, x, y, w, Wrap::Words);
+        top += gap + self.text(Role::Body, text, x, top + gap, w, Wrap::Words);
+        if buttons.is_empty() {
             return top - y;
         }
-        self.action_beside(title, text, buttons, x, y, w)
+        let row = self.trial(|this| this.buttons(buttons, x, 0.0, w, false));
+        let at = room.map_or(top + gap, |room| (y + room - row).max(top + gap));
+        self.buttons(buttons, x, at, w, false);
+        at + row - y
     }
 
     /// The card with its buttons beside the title and the text.
@@ -2326,34 +2461,11 @@ impl<I: Copy> Placer<'_, I> {
             .fold(0.0, f32::max)
             + h * 2.0;
         let (track_w, track_h) = (cell * count, style.line_height() + v * 2.0);
-        let gap = self.em(CONTROL_GAP);
-        let label_w = self.width_of(style, label);
 
-        if label_w + gap + track_w <= w {
-            let line = style.line_height().max(track_h);
-            self.text(
-                Role::Body,
-                label,
-                x,
-                y + (line - style.line_height()) / 2.0,
-                w - track_w - gap,
-                Wrap::Words,
-            );
-            self.track(
-                id,
-                options,
-                selected,
-                Rect::new(
-                    x + w - track_w,
-                    y + (line - track_h) / 2.0,
-                    track_w,
-                    track_h,
-                ),
-            );
-            return line;
-        }
+        // Always on a line of its own across the column, its label over it (208.209, AUDIT-180 О5);
+        // a choice field when its cells do not fit even there.
         if track_w <= w {
-            let above = self.text(Role::Body, label, x, y, w, Wrap::Words) + self.em(BLOCK_ROW_GAP);
+            let above = self.label_above(label, x, y, w);
             self.track(id, options, selected, Rect::new(x, y + above, w, track_h));
             return above + track_h;
         }
@@ -2361,32 +2473,79 @@ impl<I: Copy> Placer<'_, I> {
         self.choice(id, label, options, selected, x, y, w)
     }
 
-    /// A choice card: the card is pressed as a whole; the radio button before the title and its line.
+    /// The label over a field, a choice field or a segmented switch — in the role and at the gap of
+    /// the label of a text field (208.209, AUDIT-180 О4); nothing for an empty one.
+    fn label_above(&mut self, label: &str, x: f32, y: f32, w: f32) -> f32 {
+        if label.is_empty() {
+            return 0.0;
+        }
+        self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
+    }
+
+    /// A choice card: the card is pressed as a whole; the radio button before the title, its line
+    /// under it, where the choice leads under that (`next`), an icon on a plate at the end — and,
+    /// given a `slot` taller than all that, the card takes it and its content stands in its middle
+    /// (208.132, 208.133: the cards of a step share its height).
     #[allow(clippy::too_many_arguments)]
     fn choice_card(
         &mut self,
         id: I,
-        title: &str,
-        text: &str,
+        (title, text, next): (&str, Option<&str>, Option<&str>),
+        icon: Option<&str>,
         selected: bool,
         x: f32,
         y: f32,
         w: f32,
+        slot: Option<f32>,
     ) -> f32 {
-        let (v, h) = (self.em(CHOICE_PAD.v), self.em(CHOICE_PAD.h));
+        // A card with its icon is a card of a choice of the road (the first step of the wizard); one
+        // without is a card in a list of variants — the kinds of field of «Где» — with the paddings
+        // of the passport for those (§3 «Карточка выбора … в списке вариантов», 208.136 п. 3).
+        let pad = if icon.is_some() {
+            CHOICE_PAD
+        } else {
+            CHOICE_IN_LIST_PAD
+        };
+        let (v, h) = (self.em(pad.v), self.em(pad.h));
         let card = self.push(Part::Card { selected }, Rect::new(x, y, w, 0.0), Some(id));
         let side = CHECK.at(self.b);
         let gap = self.em(CONTROL_GAP);
         let first = self.style(Role::Strong).line_height();
-        let (tx, tw) = (x + h + side + gap, w - h * 2.0 - side - gap);
+        let plate = icon.map_or(0.0, |_| self.em(CHOICE_ICON_PLATE));
+        let beside = if icon.is_some() { plate + gap } else { 0.0 };
+        let (tx, tw) = (
+            x + h + side + gap,
+            (w - h * 2.0 - side - gap - beside).max(0.0),
+        );
+        let start = self.out.len();
         let mut inner = self.text(Role::Strong, title, tx, y + v, tw, Wrap::Words);
-        inner += self.text(Role::Small, text, tx, y + v + inner, tw, Wrap::Words);
+        if let Some(text) = text {
+            inner += self.text(Role::Small, text, tx, y + v + inner, tw, Wrap::Words);
+        }
+        if let Some(next) = next {
+            inner += self.em(CHOICE_NEXT_GAP);
+            inner += self.text(Role::Small, next, tx, y + v + inner, tw, Wrap::Words);
+        }
         self.push(
             Part::Radio { on: selected },
             Rect::new(x + h, y + v + (first - side) / 2.0, side, side),
             None,
         );
-        let height = inner + v * 2.0;
+        let height = (inner + v * 2.0).max(slot.unwrap_or(0.0));
+        // In a taller card the content stands in its middle.
+        let lift = (height - inner - v * 2.0) / 2.0;
+        for item in &mut self.out[start..] {
+            item.rect.y += lift;
+        }
+        if let Some(name) = icon {
+            self.push(
+                Part::CardIcon {
+                    name: name.to_owned(),
+                },
+                Rect::new(x + w - h - plate, y + (height - plate) / 2.0, plate, plate),
+                None,
+            );
+        }
         self.out[card].rect.h = height;
         height
     }
@@ -2432,8 +2591,8 @@ impl<I: Copy> Placer<'_, I> {
         }
     }
 
-    /// A label and a choice field as wide as its widest option and its corner mark: the field
-    /// does not change its width with the value (the live stand: «Eng…»).
+    /// A choice field under its label, across its column (208.209, AUDIT-180 О4): two of them stand
+    /// as a pair. The value is cut with an ellipsis short of the corner mark (Б6, `elements`).
     #[allow(clippy::too_many_arguments)]
     fn choice(
         &mut self,
@@ -2447,44 +2606,11 @@ impl<I: Copy> Placer<'_, I> {
     ) -> f32 {
         let style = self.style(Role::Body);
         let value = options.get(selected).map_or("", String::as_str);
-        let (v, h) = (self.em(FIELD_PAD.v), self.em(FIELD_PAD.h));
-        let widest = options
-            .iter()
-            .map(|option| self.width_of(style, option))
-            .fold(0.0, f32::max);
-        let (field_w, field_h) = (
-            (widest + h * 2.0 + CHEVRON.at(self.b)).min(w),
-            style.line_height() + v * 2.0,
-        );
-        let gap = self.em(CONTROL_GAP);
+        let field_h = style.line_height() + self.em(FIELD_PAD.v) * 2.0;
         let part = Part::Field {
             value: value.to_owned(),
         };
-
-        if self.width_of(style, label) + gap + field_w <= w {
-            let line = style.line_height().max(field_h);
-            self.text(
-                Role::Body,
-                label,
-                x,
-                y + (line - style.line_height()) / 2.0,
-                w - field_w - gap,
-                Wrap::Words,
-            );
-            self.push(
-                part,
-                Rect::new(
-                    x + w - field_w,
-                    y + (line - field_h) / 2.0,
-                    field_w,
-                    field_h,
-                ),
-                Some(id),
-            );
-            return line;
-        }
-
-        let above = self.text(Role::Body, label, x, y, w, Wrap::Words) + self.em(BLOCK_ROW_GAP);
+        let above = self.label_above(label, x, y, w);
         self.push(part, Rect::new(x, y + above, w, field_h), Some(id));
         above + field_h
     }
@@ -2505,11 +2631,7 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
         slot: Option<f32>,
     ) -> f32 {
-        let above = if label.is_empty() {
-            0.0
-        } else {
-            self.text(Role::FieldLabel, label, x, y, w, Wrap::Words) + self.em(FIELD_LABEL_GAP)
-        };
+        let above = self.label_above(label, x, y, w);
         let (pad, lines) = match kind {
             FieldKind::Line | FieldKind::Key { .. } => (FIELD_PAD, 1.0),
             FieldKind::Text | FieldKind::Code { .. } => (MULTILINE_PAD, FIELD_TEXT_LINES.0),
@@ -2658,6 +2780,10 @@ impl<I: Copy> Placer<'_, I> {
     #[allow(clippy::too_many_arguments)]
     fn sections(&mut self, id: I, items: &[String], current: usize, x: f32, y: f32, w: f32) -> f32 {
         let style = self.style(Role::Body);
+        // A tab is as wide as its label in the bold it is drawn in when chosen, every tab alike, so
+        // the chosen one shows all of it and the row stands still when the choice moves (Z16,
+        // 208.210: «Общ…» on a screen of 800 × 600).
+        let chosen = self.style(Role::Strong);
         let (v, h) = (self.em(SECTION_PAD.v), self.em(SECTION_PAD.h));
         let gap = self.em(SECTION_GAP);
         let item_h = style.line_height() + v * 2.0;
@@ -2666,7 +2792,7 @@ impl<I: Copy> Placer<'_, I> {
 
         for (index, label) in items.iter().enumerate() {
             let width = if narrow {
-                (self.width_of(style, label) + h * 2.0).min(w)
+                (self.width_of(chosen, label) + h * 2.0).min(w)
             } else {
                 w
             };

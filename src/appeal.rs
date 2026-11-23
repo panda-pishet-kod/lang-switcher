@@ -54,7 +54,7 @@ pub const TIMEOUTS: feed::Timeouts = feed::Timeouts {
 /// the two it is.
 pub fn kind_of(trouble: report::Trouble) -> &'static str {
     match trouble {
-        report::Trouble::WrongResult | report::Trouble::NothingHappened => "error",
+        report::Trouble::WrongResult => "error",
         report::Trouble::Idea => "wish",
     }
 }

@@ -14,7 +14,8 @@ use crate::settings::Language;
 use crate::theme::{KEY_PLACEHOLDER, ThemeSetting};
 use crate::ui::host::{Content, Reply};
 use crate::ui::scene::{
-    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind,
+    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind, linked,
+    strong,
 };
 use ::windows::Win32::Foundation::HWND;
 
@@ -87,6 +88,12 @@ impl LetterView {
         sentence.replace(KEY_PLACEHOLDER, &self.key)
     }
 
+    /// A step of the list with the name of the key in its place, in bold — so in the mock-up of
+    /// the letters (208.217), by the marks of «Как пользоваться» (П2, 208.209).
+    fn step(&self, sentence: &str) -> String {
+        sentence.replace(KEY_PLACEHOLDER, &strong(&self.key))
+    }
+
     /// What the demonstration of «Привет» shows at this frame — `letters::demo_frame`, the same
     /// table the old window animated; `None` for a letter without it. The picture of the letter
     /// takes the word and the key from here once it has its anchors (T-120-25).
@@ -157,8 +164,17 @@ impl LetterView {
                 Box::new(Node::Text(Role::Body, plan.note.clone())),
             ));
         }
-        if !plan.lead.is_empty() {
-            parts.push(Node::Text(Role::Lead, plan.lead.clone()));
+        // The link of «Спасибо» is the last sentence of its lead (208.217, Пс2): the words of the
+        // place underlined in the paragraph, a press on them the link's.
+        let in_lead = plan.link.as_ref().filter(|_| plan.link_in_lead);
+        match (plan.lead.is_empty(), in_lead) {
+            (false, Some(link)) => parts.push(Node::Linked {
+                role: Role::Lead,
+                words: format!("{} {}", plan.lead, linked(&link.label)),
+                id: Id::Do(link.action),
+            }),
+            (false, None) => parts.push(Node::Text(Role::Lead, plan.lead.clone())),
+            _ => {}
         }
         if plan.demo {
             let mut example = vec![self.live_example()];
@@ -194,12 +210,12 @@ impl LetterView {
             let (numbered, plain): (Vec<_>, Vec<_>) =
                 plan.rows.iter().partition(|row| !row.marker.is_empty());
             list.push(Node::Numbered(
-                numbered.iter().map(|row| self.keyed(row.words())).collect(),
+                numbered.iter().map(|row| self.step(row.words())).collect(),
             ));
             list.extend(
                 plain
                     .iter()
-                    .map(|row| Node::Text(Role::Body, self.keyed(row.words()))),
+                    .map(|row| Node::Text(Role::Body, self.step(row.words()))),
             );
             parts.push(Node::Rows(list));
         }
@@ -219,7 +235,7 @@ impl LetterView {
             _ => {}
         }
 
-        if let Some(link) = &plan.link {
+        if let (Some(link), false) = (&plan.link, plan.link_in_lead) {
             parts.push(Node::Link {
                 id: Id::Do(link.action),
                 words: link.label.clone(),

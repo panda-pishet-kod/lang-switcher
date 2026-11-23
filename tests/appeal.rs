@@ -114,11 +114,11 @@ fn every_character_json_needs_escaped_is_escaped() {
     assert_eq!(out, "\"a\\\"b\\\\c\\nd\\re\\tf\\u0001g\\u001fh — שלום 🖤\"");
 }
 
-/// **A trouble is `error` and an idea is `wish`** — the two kinds the site knows (199.7).
+/// **A trouble is `error` and an idea is `wish`** — the two kinds the site knows (199.7); one card of
+/// a trouble since AUDIT-180 Z8 (208.131).
 #[test]
-fn the_kind_is_error_for_both_troubles_and_wish_for_an_idea() {
+fn the_kind_is_error_for_a_trouble_and_wish_for_an_idea() {
     assert_eq!(appeal::kind_of(Trouble::WrongResult), "error");
-    assert_eq!(appeal::kind_of(Trouble::NothingHappened), "error");
     assert_eq!(appeal::kind_of(Trouble::Idea), "wish");
 }
 
