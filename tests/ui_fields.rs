@@ -15,7 +15,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateCompatibleDC, DeleteDC, GetBkColor, GetObjectW, GetTextColor, HGDIOBJ,
-    LOGFONTW,
+    LOGBRUSH, LOGFONTW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardState, SetKeyboardState, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_NEXT,
@@ -752,4 +752,126 @@ fn a_field_of_code_goes_by_the_direction_of_its_own_text() {
             "a line in a window in Hebrew"
         );
     }
+}
+
+/// A window with one field that, while the host handles an edit of the field, asks the window for
+/// the field's colours — as the field asks itself when Windows has it paint while the window is
+/// busy (a font set with a redraw, the keyboard moved to it).
+struct Busy {
+    /// The window and its field, told by the test once both exist.
+    pair: Rc<RefCell<Option<(HWND, HWND)>>>,
+    /// What the window answered from inside the edit: the text, the background, the brush.
+    answers: Rc<RefCell<Vec<(u32, u32, isize)>>>,
+}
+
+impl Content for Busy {
+    type Id = Id;
+
+    fn describe(&self) -> Window<Id> {
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Field {
+                id: Id::Name,
+                label: "Process".to_owned(),
+                value: String::new(),
+                hint: String::new(),
+                kind: FieldKind::Line,
+            },
+            buttons: Vec::new(),
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<Id>) -> Reply {
+        if let (Event::Edited(Id::Name, _), Some((window, field))) = (&event, *self.pair.borrow()) {
+            // SAFETY: a DC of the screen made and deleted here.
+            let dc = unsafe { CreateCompatibleDC(None) };
+            let brush = send(window, WM_CTLCOLOREDIT, dc.0 as usize, field.0 as isize);
+            // SAFETY: as above.
+            let (ink, fill) = unsafe { (GetTextColor(dc).0, GetBkColor(dc).0) };
+            // SAFETY: as above.
+            let _ = unsafe { DeleteDC(dc) };
+            self.answers.borrow_mut().push((ink, fill, brush));
+        }
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Busy".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        ("en-US".to_owned(), false)
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Dark
+    }
+}
+
+/// **AUDIT-180b п. 7 (решение 208.227)** — the field asks the window for its colours while the
+/// window is busy with something of its own, and gets the colours of the theme, not the white of
+/// Windows. Before, the answer came from the host, and a host already borrowed left the message to
+/// `DefWindowProcW`: the brush of the system window, white in the dark theme — the field «Ожидали»
+/// of the wizard white under its first line.
+#[test]
+fn a_field_gets_its_colours_while_the_window_is_busy() {
+    let turn = ONE_WINDOW.lock().unwrap_or_else(PoisonError::into_inner);
+    let pair = Rc::new(RefCell::new(None));
+    let answers = Rc::new(RefCell::new(Vec::new()));
+    let content = Busy {
+        pair: pair.clone(),
+        answers: answers.clone(),
+    };
+    let hwnd = host::create(content, None).expect("the window of the shell");
+    send(hwnd, WM_PAINT, 0, 0);
+    let field = host::probe(hwnd)
+        .expect("a live host")
+        .fields
+        .into_iter()
+        .find(|(name, _)| name == "Name")
+        .map(|(_, field)| field)
+        .expect("the field of Windows");
+    *pair.borrow_mut() = Some((hwnd, field));
+
+    // SAFETY: a field of this thread; the string lives across the call.
+    let _ = unsafe { SetWindowTextW(field, &HSTRING::from("x")) };
+
+    let colorref = |colour: Color| {
+        let rgb = colour.get(Theme::Dark);
+        u32::from(rgb.r) | (u32::from(rgb.g) << 8) | (u32::from(rgb.b) << 16)
+    };
+    let answered = answers.borrow().clone();
+    let mut logbrush = LOGBRUSH::default();
+    if let [(_, _, brush)] = answered[..] {
+        // SAFETY: the brush the window answered with, read into a local of its size while the
+        // window that owns it is still open.
+        let _ = unsafe {
+            GetObjectW(
+                HGDIOBJ(brush as *mut _),
+                std::mem::size_of::<LOGBRUSH>() as i32,
+                Some((&raw mut logbrush).cast()),
+            )
+        };
+    }
+    send(hwnd, WM_CLOSE, 0, 0);
+    drop(turn);
+
+    let [(ink, fill, brush)] = answered[..] else {
+        panic!("the edit was not delivered once: {answered:?}")
+    };
+    assert_eq!(
+        fill,
+        colorref(Color::Surface),
+        "the background of the field"
+    );
+    assert_eq!(ink, colorref(Color::Ink), "the text of the field");
+    assert_ne!(brush, 0, "the answer is not a brush");
+    assert_eq!(
+        logbrush.lbColor.0,
+        colorref(Color::Surface),
+        "the brush the field paints its background with"
+    );
 }
