@@ -14,6 +14,12 @@ page. Dates are the days the releases were published (UTC).
 - The settings window shows its sections in a column on the left — General, Hotkey, Layouts, Exclusions,
   Diagnostics — each with a line on what it holds. A change in it takes effect at once and is saved: «OK», «Cancel»
   and «Apply» gave way to one «Close».
+- One key or two: «Hotkey» has «One key | Two keys». «One key», the default, is what it was. With «Two keys»
+  «Fix typed text» only fixes — with nothing typed or selected it does nothing and knocks — and «Switch layout»
+  only switches the layout, leaving the text, the selection and the clipboard alone: after a word and a space it
+  switches for the next word. The second key can also be a single tap of the left or the right Ctrl, after a
+  warning of what that can break, with «Set it anyway» or «Choose another key». The settings file has the new
+  section `[switch_hotkey]`; an older version works with one key and forgets the second when it saves.
 - The menu of the icon starts with a line of the program's state; its items have icons, «Suspend» shows the hotkey
   and «Start when I sign in» is a switch that leaves the menu open. The items and their order are the same.
 - The windows open at two thirds of the work area of the screen, from 900 × 540 to 1280 × 720, and cannot be made

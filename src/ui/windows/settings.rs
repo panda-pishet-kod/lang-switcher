@@ -42,6 +42,9 @@ use ::windows::Win32::Foundation::HWND;
 use ::windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
 use std::time::{Duration, Instant};
 
+/// What stands between the two keys on the line of «Состояние» — « · » (решение 208.228).
+const STATUS_JOINER: &str = " · ";
+
 /// `VK_RCONTROL` — the side of a tap of `Ctrl` the warning names «Правый Ctrl» (решение 208.228).
 const RIGHT_CTRL: u16 = ::windows::Win32::UI::Input::KeyboardAndMouse::VK_RCONTROL.0;
 
@@ -520,10 +523,18 @@ impl Settings {
             },
             button(set_button, self.line(set)),
         ])];
-        nodes.push(match warning {
-            Some(_) => self.ctrl_warning_note(),
-            None => Node::Text(Role::Small, line),
-        });
+        // With two keys the line of the ways under the first field stands aside at rest — its notes,
+        // the line after a capture and the lines of a capture stay: the section of two keys does not
+        // fit bs and lb even at 12 points with it (ui_fit after Н1 of 1.8.0).
+        let quiet = two
+            && target == CaptureTarget::Fix
+            && capture.is_none()
+            && line == self.line(settings::IDS_HOTKEY_HINT);
+        match warning {
+            Some(_) => nodes.push(self.ctrl_warning_note()),
+            None if quiet => {}
+            None => nodes.push(Node::Text(Role::Small, line)),
+        }
         nodes
     }
 
@@ -717,28 +728,27 @@ impl Settings {
         } else {
             IDS_STATUS_AUTOSTART_OFF
         };
+        let mut keys = self
+            .line(IDS_STATUS_HOTKEY)
+            .replace("{0}", &settings::effective_hotkey_name(&self.config.hotkey));
+        // Решение 208.228: the second key on the line of the first, in the mode of two keys — a line
+        // of its own does not fit «Диагностика» of the shell in ta, kn, ml even at 12 points (ui_fit
+        // after Н1 of 1.8.0).
+        if self.config.two_keys() {
+            keys.push_str(STATUS_JOINER);
+            keys.push_str(&self.line(settings::IDS_STATUS_SWITCH_KEY).replace(
+                "{0}",
+                &settings::switch_hotkey_name_in(self.language, &self.config),
+            ));
+        }
         let mut lines = vec![
             Node::Status {
                 state,
                 words: self.line(words),
             },
             Node::Text(Role::Body, self.fixes()),
-            Node::Text(
-                Role::Body,
-                self.line(IDS_STATUS_HOTKEY)
-                    .replace("{0}", &settings::effective_hotkey_name(&self.config.hotkey)),
-            ),
+            Node::Text(Role::Body, keys),
         ];
-        // Решение 208.228: the second key, under the first, in the mode of two keys.
-        if self.config.two_keys() {
-            lines.push(Node::Text(
-                Role::Body,
-                self.line(settings::IDS_STATUS_SWITCH_KEY).replace(
-                    "{0}",
-                    &settings::switch_hotkey_name_in(self.language, &self.config),
-                ),
-            ));
-        }
         lines.extend([
             Node::Text(Role::Body, self.line(autostart)),
             Node::Buttons(vec![Node::Button {
