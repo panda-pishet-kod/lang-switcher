@@ -12,8 +12,14 @@
 //! constants: a test that imported `tray::LABEL_EXIT` and then asserted that the menu
 //! contains `tray::LABEL_EXIT` would pass whatever the label said.
 //!
-//! Two of the tests put a real icon in the notification area for a few milliseconds and
-//! take it away again — there is no way to check `Shell_NotifyIcon` without calling it.
+//! **No tray of this file goes to the shell but on purpose** (208.236 п. 6). [`TestWindow`]
+//! keeps the thread of its test out of it ([`tray::keep_this_thread_out_of_the_shell`]): every
+//! `Shell_NotifyIconW` of the tray answers success inside the process, so the counts and the
+//! flags of `Tray` read as with the shell up, and nothing is added to the notification area —
+//! where each folder of a target and each hash of a test image used to leave a row of its own
+//! (208.226). The three tests about the shell itself go to the real one and are `#[ignore]`d,
+//! for the step `--ignored`; [`the_trays_of_these_tests_never_reach_the_shell`] and
+//! [`the_build_that_ships_always_goes_to_the_shell`] guard the two sides of the arrangement.
 //! Nothing here writes into the real `%APPDATA%\Lang_Switcher`: every tray is installed
 //! with [`Tray::install_at`] pointing at a directory under `%TEMP%` that removes itself.
 
@@ -2659,10 +2665,31 @@ fn the_balloon_asks_for_the_large_icon_by_name() {
     );
 }
 
+/// The calls of this thread since `before` that went to the shell itself: some when the thread
+/// goes to it, none when it is kept out — so that a test of the real shell cannot pass without
+/// reaching it, and one kept out cannot reach it unseen (208.236 п. 6).
+fn assert_the_road_of_the_shell(before: u32) {
+    let calls = tray::shell_calls_on_this_thread() - before;
+    let out = tray::this_thread_is_out_of_the_shell();
+
+    println!("out of the shell: {out}; calls that reached it: {calls}");
+
+    if out {
+        assert_eq!(calls, 0, "a thread kept out of the shell must not reach it");
+    } else {
+        assert!(calls > 0, "a thread on the shell must really reach it");
+    }
+}
+
+/// **The icon reaches the notification area** — the real shell, and so `#[ignore]`d: it leaves a
+/// row under «Другие значки области уведомлений» for the path of this image (208.236 п. 6).
 #[test]
+#[ignore = "goes to the real shell and leaves a row of the notification area; run with --ignored"]
 fn the_icon_reaches_the_notification_area() {
     let window = TestWindow::new();
+    tray::keep_this_thread_out_of_the_shell(false);
     let home = TestDir::new("add");
+    let before = tray::shell_calls_on_this_thread();
     let tray = install(&window, &home);
 
     println!(
@@ -2677,15 +2704,36 @@ fn the_icon_reaches_the_notification_area() {
         "installation issues exactly one NIM_ADD"
     );
     assert!(
+        !tray::this_thread_is_out_of_the_shell(),
+        "this test is about the shell itself"
+    );
+    assert_the_road_of_the_shell(before);
+    assert!(
         tray.icon_present(),
         "Shell_NotifyIcon(NIM_ADD) must have succeeded with the shell running"
     );
 }
 
+/// FR-81: `TaskbarCreated` puts the icon back. Kept out of the shell in both batteries — the
+/// reaction and the counts are the tray's — and on the real one under `--ignored`, where the
+/// shell has to take the icon a second time (208.236 п. 6).
 #[test]
 fn taskbar_created_adds_the_icon_a_second_time() {
+    taskbar_created_adds_the_icon_a_second_time_on(false);
+}
+
+/// [`taskbar_created_adds_the_icon_a_second_time`] on the real shell.
+#[test]
+#[ignore = "goes to the real shell and leaves a row of the notification area; run with --ignored"]
+fn taskbar_created_adds_the_icon_a_second_time_on_the_real_shell() {
+    taskbar_created_adds_the_icon_a_second_time_on(true);
+}
+
+fn taskbar_created_adds_the_icon_a_second_time_on(real_shell: bool) {
     let window = TestWindow::new();
+    tray::keep_this_thread_out_of_the_shell(!real_shell);
     let home = TestDir::new("taskbar_created");
+    let before = tray::shell_calls_on_this_thread();
     let mut tray = install(&window, &home);
 
     let message = tray.taskbar_created_message();
@@ -2706,6 +2754,7 @@ fn taskbar_created_adds_the_icon_a_second_time() {
         tray.icon_present(),
         "and it is back in the notification area"
     );
+    assert_the_road_of_the_shell(before);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2728,10 +2777,27 @@ fn taskbar_created_adds_the_icon_a_second_time() {
 /// early return was put back into `remove_icon` for one run, which gave `delete_calls` 1 where
 /// 2 is asserted. Journal `scratchpad-E41\red-T-41-6-delete.log`; the mutation was removed
 /// again.
+///
+/// Kept out of the shell in both batteries, like every tray of this file; on the real one under
+/// `--ignored`, where the second delete is refused by the shell and must cost nothing
+/// (208.236 п. 6).
 #[test]
 fn the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove() {
+    the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove_on(false);
+}
+
+/// [`the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove`] on the real shell.
+#[test]
+#[ignore = "goes to the real shell and leaves a row of the notification area; run with --ignored"]
+fn the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove_on_the_real_shell() {
+    the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove_on(true);
+}
+
+fn the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove_on(real_shell: bool) {
     let window = TestWindow::new();
+    tray::keep_this_thread_out_of_the_shell(!real_shell);
     let home = TestDir::new("icon_delete_unconditional");
+    let before = tray::shell_calls_on_this_thread();
     let mut tray = install(&window, &home);
 
     assert!(
@@ -2773,6 +2839,100 @@ fn the_icon_is_removed_even_when_the_flag_says_there_is_nothing_to_remove() {
     assert!(
         tray.icon_present(),
         "and it is really back — the extra delete cost nothing"
+    );
+    assert_the_road_of_the_shell(before);
+}
+
+/// **208.236 п. 6 — no tray of these tests reaches the shell.** A tray installed the way this
+/// file installs one goes through every call of the notification area — `NIM_ADD` and
+/// `NIM_SETVERSION` at installation, `NIM_MODIFY` of a pause, the delete-and-add of FR-81 and the
+/// `NIM_DELETE` of FR-83 — and not one of them leaves the process. Before this, every run of the
+/// file added a row under «Другие значки области уведомлений» for the path of its image
+/// (208.226): 27 of them on the machine of the owner.
+///
+/// In the build that ships a request to stay out is not heard, and the trays of this file go to
+/// the shell as before: there the test has nothing to guard — its other side is
+/// [`the_build_that_ships_always_goes_to_the_shell`].
+#[test]
+#[cfg_attr(
+    not(any(debug_assertions, feature = "testing")),
+    ignore = "the build that ships goes to the shell: the_build_that_ships_always_goes_to_the_shell"
+)]
+fn the_trays_of_these_tests_never_reach_the_shell() {
+    let window = TestWindow::new();
+    let home = TestDir::new("out_of_the_shell");
+    let before = tray::shell_calls_on_this_thread();
+    let mut tray = install(&window, &home);
+
+    tray.toggle_state();
+    let message = tray.taskbar_created_message();
+    let _ = tray.handle_message(message, WPARAM(0), LPARAM(0));
+    tray.shut_down();
+
+    println!(
+        "NIM_ADD {}, NIM_MODIFY {}, NIM_DELETE {}; reached the shell {}",
+        tray.add_calls(),
+        tray.modify_calls(),
+        tray.delete_calls(),
+        tray::shell_calls_on_this_thread() - before
+    );
+
+    // The guard cannot pass on a tray that called nothing.
+    assert_eq!(tray.add_calls(), 2, "installation and FR-81 add the icon");
+    assert!(tray.modify_calls() >= 1, "the pause updates the icon");
+    assert_eq!(tray.delete_calls(), 2, "FR-81 and FR-83 remove it");
+
+    assert!(
+        tray::this_thread_is_out_of_the_shell(),
+        "the window of these tests keeps its thread out of the shell"
+    );
+    assert_eq!(
+        tray::shell_calls_on_this_thread() - before,
+        0,
+        "a tray of these tests reached the shell — a row of the notification area for this image"
+    );
+}
+
+/// **208.236 п. 6 — the build that ships always goes to the shell.** The rule of
+/// [`tray::shell_may_be_left_out`] in all four builds: only `--release` without `testing` says no
+/// — the one that reaches people, whose icon must be in the notification area whatever asked
+/// otherwise. Then this very build, on a thread of its own: one that never asked is never out —
+/// the threads of the program never ask — and one that asked is out exactly where the rule lets
+/// it be.
+#[test]
+fn the_build_that_ships_always_goes_to_the_shell() {
+    assert!(
+        !tray::shell_may_be_left_out(false, false),
+        "the build that ships (--release, no `testing`) must always go to the shell"
+    );
+    assert!(
+        tray::shell_may_be_left_out(true, false),
+        "the plain battery (debug) keeps its trays out"
+    );
+    assert!(
+        tray::shell_may_be_left_out(true, true),
+        "the battery of `testing` (debug) keeps its trays out"
+    );
+    assert!(
+        tray::shell_may_be_left_out(false, true),
+        "a build of `testing` with --release may keep them out"
+    );
+
+    let (fresh, asked) = std::thread::spawn(|| {
+        let fresh = tray::this_thread_is_out_of_the_shell();
+        tray::keep_this_thread_out_of_the_shell(true);
+        (fresh, tray::this_thread_is_out_of_the_shell())
+    })
+    .join()
+    .expect("the thread of the check");
+
+    println!("a fresh thread out of the shell: {fresh}; after asking: {asked}");
+
+    assert!(!fresh, "a thread that did not ask goes to the shell");
+    assert_eq!(
+        asked,
+        tray::shell_may_be_left_out(cfg!(debug_assertions), cfg!(feature = "testing")),
+        "a thread that asked is out exactly where the rule of this build lets it be"
     );
 }
 
@@ -6026,6 +6186,12 @@ struct TestWindow {
 
 impl TestWindow {
     fn new() -> Self {
+        // 208.236 п. 6: every tray of this file is installed on one of these windows, and so the
+        // window keeps its thread out of the shell — no row under «Другие значки области
+        // уведомлений» for a folder of a target and a hash of a test image (208.226). The few
+        // tests about the shell itself send the thread back to it after the window is made.
+        tray::keep_this_thread_out_of_the_shell(true);
+
         // SAFETY: `None` asks for the handle of the running executable, which cannot be
         // unloaded under us.
         let module = unsafe { GetModuleHandleW(PCWSTR::null()) }.expect("the module handle");
