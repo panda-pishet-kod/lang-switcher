@@ -383,6 +383,67 @@ fn an_empty_line_draws_nothing_in_either_look() {
     }
 }
 
+/// **The plain look puts the ellipsis only where DirectWrite cut the line** (208.217): GDI sets the
+/// same font a little wider, and in a box laid to the width of the line — the name of the author
+/// beside the panda, the address under it — it came out «Panda K…». A line DirectWrite did cut keeps
+/// its ellipsis and stays in its box.
+#[test]
+fn the_plain_look_cuts_a_line_only_where_directwrite_cut_it() {
+    use lang_switcher::ui::text::Laid;
+    use lang_switcher::ui::tokens::{BRAND_NAME_WEIGHT, Face};
+
+    let theme = Theme::Light;
+    let bg = Color::Bg.get(theme);
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let (left, top, w, h) = (10.0_f32, 10.0_f32, 400.0_f32, 40.0_f32);
+    let drawn = |laid: &Laid| {
+        let mut canvas = Canvas::in_memory(w, h, 1.0, Mode::Gdi).expect("a canvas");
+        canvas.frame(|painter| {
+            painter.clear(bg);
+            painter.text(laid, left, top, Color::Text.get(theme));
+        });
+        let image = canvas.image().expect("pixels");
+        let pixels: Vec<Rgb> = (0..image.height)
+            .flat_map(|y| (0..image.width).map(move |x| (x, y)))
+            .map(|(x, y)| image.at(x, y))
+            .collect();
+        (ink(&image, bg).expect("ink"), pixels)
+    };
+    let name = Style {
+        face: Face::Main,
+        weight: BRAND_NAME_WEIGHT,
+        ..Style::of(Role::Brand, 14.0, 512.0)
+    };
+    let address = Style::of(Role::Brand, 14.0, 512.0);
+
+    for (line, style) in [("Panda Koder", name), ("panda-pishet-kod.dev", address)] {
+        let lay = |width| {
+            text.lay(line, style, Wrap::OneLine, Align::Start, width)
+                .expect("a layout")
+        };
+        let free = lay(w);
+        let own = free.size().width;
+        let tight = lay(own);
+        assert!(!tight.is_cut(), "{line}: DirectWrite keeps it whole in its own width");
+        let (whole, cut) = (drawn(&free), drawn(&tight));
+        assert_eq!(
+            cut.0, whole.0,
+            "{line}: in a box of its own width the plain look draws the whole line, {own:.2} pt"
+        );
+        assert!(cut.1 == whole.1, "{line}: pixel for pixel");
+
+        let half = lay(own / 2.0);
+        assert!(half.is_cut(), "{line}: the control — DirectWrite cuts it in half the width");
+        let ((_, _, right, _), _) = drawn(&half);
+        assert!(
+            right as f32 <= left + own / 2.0 + 1.0,
+            "{line}: a line DirectWrite cut keeps its ellipsis in the plain look: ink to {right} px, \
+             the box to {:.1}",
+            left + own / 2.0
+        );
+    }
+}
+
 /// The ring around a picture of the panda is `bg` and 6 points wide: 6 pixels at 100 %, 12 at
 /// 200 % (passport §3).
 #[test]

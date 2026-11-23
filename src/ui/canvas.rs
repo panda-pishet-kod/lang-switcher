@@ -1552,7 +1552,11 @@ mod gdi {
         let mut flags = DT_NOPREFIX | DT_NOCLIP;
         flags |= match laid.wrap() {
             Wrap::Words => DT_WORDBREAK,
-            Wrap::OneLine | Wrap::Ellipsis => DT_SINGLELINE | DT_END_ELLIPSIS,
+            // The ellipsis only where DirectWrite cut the line itself: GDI sets the same font a
+            // little wider, and in a box laid to the width of the line it cut what fits —
+            // «Panda K…» and the address under the panda (208.217).
+            Wrap::OneLine | Wrap::Ellipsis if laid.is_cut() => DT_SINGLELINE | DT_END_ELLIPSIS,
+            Wrap::OneLine | Wrap::Ellipsis => DT_SINGLELINE,
         };
         flags |= match (laid.align(), rtl) {
             (Align::Centre, _) => DT_CENTER,
