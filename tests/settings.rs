@@ -15013,3 +15013,60 @@ fn every_locale_carries_the_strings_of_the_two_ways() {
 // (остается активной) даже если в настройках программы не было сделано никаких изменений».
 // Слово владельца 208.77: «А — серая без изменений».
 // =========================================================================================
+
+/// **П2 of AUDIT-180 (208.209): the name of the key in «Как пользоваться» is in bold** — every item
+/// that names the key carries it as a strong run, in every language, and nothing else of the item
+/// is marked.
+#[test]
+fn the_items_of_about_name_the_key_in_bold() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::Node;
+    use lang_switcher::ui::scene::strong;
+    use lang_switcher::ui::windows::about::About;
+
+    let _guard = with_product_strings();
+    for language in Language::ALL {
+        let about = About {
+            language,
+            key: "Pause".to_owned(),
+            theme: ThemeSetting::Light,
+        };
+        let window = about.describe();
+        let words = format!("{:?}", window.body);
+        let Node::Column(nodes) = &window.body else {
+            panic!("the body of «О программе» is a column");
+        };
+        let items: Vec<&String> = nodes
+            .iter()
+            .filter_map(|node| match node {
+                Node::Rows(rows) => Some(rows),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|node| match node {
+                Node::Numbered(items) => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(items.len(), 6, "{language:?}: six items: {words}");
+        let mut named = 0;
+        for (item, id) in items.iter().zip([
+            settings::IDS_ABOUT_HELP_1,
+            settings::IDS_ABOUT_HELP_2,
+            settings::IDS_ABOUT_HELP_3,
+            settings::IDS_ABOUT_HELP_4,
+            settings::IDS_ABOUT_HELP_5,
+            settings::IDS_ABOUT_HELP_6,
+        ]) {
+            let line = settings::text_in(language, id);
+            assert_eq!(
+                **item,
+                line.replace("{0}", &strong("Pause")),
+                "{language:?}: the key in bold, the rest as the string says"
+            );
+            named += usize::from(line.contains("{0}"));
+        }
+        assert!(named >= 3, "{language:?}: the items name the key ({named})");
+    }
+}

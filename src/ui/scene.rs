@@ -18,6 +18,18 @@
 /// values (a description does not reach `tokens`, `testsI_guard.rs` rule 2).
 pub use crate::ui::tokens::Role;
 
+/// The marks of a strong run inside a line of text (208.209, AUDIT-180 П2: the name of the key in
+/// bold inside «Как пользоваться»). Set by the program around words it puts into a string — never by
+/// a translation — and taken out when the line is laid (`text.rs`): the run between them is set in
+/// the weight of [`Role::Strong`]. The plain look draws the line without them, all in one weight.
+pub const STRONG_BEGIN: char = '\u{2}';
+pub const STRONG_END: char = '\u{3}';
+
+/// `words` as a strong run of a line: between [`STRONG_BEGIN`] and [`STRONG_END`].
+pub fn strong(words: &str) -> String {
+    format!("{STRONG_BEGIN}{words}{STRONG_END}")
+}
+
 /// The look of a button: one per kind (passport §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonKind {

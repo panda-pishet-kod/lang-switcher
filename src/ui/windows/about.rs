@@ -17,7 +17,7 @@ use crate::settings::{
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{self, Content, Reply};
-use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Window, WindowKind};
+use crate::ui::scene::{Art, Brand, ButtonKind, Event, Node, Role, Window, WindowKind, strong};
 use ::windows::Win32::Foundation::HWND;
 
 /// The elements of the window.
@@ -86,7 +86,7 @@ impl Content for About {
                     Node::Line(Role::Label, self.line(IDS_ABOUT_HELP)),
                     Node::Numbered(
                         help.iter()
-                            .map(|id| self.line(*id).replace("{0}", &self.key))
+                            .map(|id| self.line(*id).replace("{0}", &strong(&self.key)))
                             .collect(),
                     ),
                 ]),

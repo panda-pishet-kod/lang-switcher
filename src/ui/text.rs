@@ -22,6 +22,7 @@
 //!
 //! Knows nothing of windows.
 
+use crate::ui::scene::{STRONG_BEGIN, STRONG_END};
 use crate::ui::tokens::{self, Face, Role};
 use ::windows::Win32::Foundation::{HMODULE, LPARAM};
 use ::windows::Win32::Globalization::{LCMAP_LINGUISTIC_CASING, LCMAP_UPPERCASE, LCMapStringEx};
@@ -48,6 +49,39 @@ pub const MONO_FACES: [&str; 2] = ["Cascadia Mono", "Consolas"];
 
 /// A layout's height when nothing bounds it: far beyond any window.
 const UNBOUNDED: f32 = 1.0e6;
+
+/// `text` without the marks of strong runs, and the runs: their start and length in UTF-16 units of
+/// what is left. A mark without its pair runs to the end of the line.
+fn strong_runs(text: &str) -> (String, Vec<DWRITE_TEXT_RANGE>) {
+    let mut plain = String::with_capacity(text.len());
+    let mut runs = Vec::new();
+    let (mut at, mut open) = (0u32, None);
+    for ch in text.chars() {
+        match ch {
+            STRONG_BEGIN => open = open.or(Some(at)),
+            STRONG_END => {
+                if let Some(start) = open.take() {
+                    runs.push(DWRITE_TEXT_RANGE {
+                        startPosition: start,
+                        length: at - start,
+                    });
+                }
+            }
+            _ => {
+                plain.push(ch);
+                at += ch.len_utf16() as u32;
+            }
+        }
+    }
+    if let Some(start) = open {
+        runs.push(DWRITE_TEXT_RANGE {
+            startPosition: start,
+            length: at - start,
+        });
+    }
+    runs.retain(|run| run.length > 0);
+    (plain, runs)
+}
 
 /// The reading direction of the program's language.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +175,12 @@ pub struct FixedAdvance(pub f32);
 impl Measure for FixedAdvance {
     fn measure(&self, text: &str, style: Style, wrap: Wrap, width: f32) -> Size {
         let advance = self.0 * style.size;
-        let length = |word: &str| word.chars().count() as f32 * advance;
+        let length = |word: &str| {
+            word.chars()
+                .filter(|ch| *ch != STRONG_BEGIN && *ch != STRONG_END)
+                .count() as f32
+                * advance
+        };
 
         if wrap != Wrap::Words || text.is_empty() {
             return Size {
@@ -381,11 +420,12 @@ impl Text {
         align: Align,
         width: f32,
     ) -> WinResult<Laid> {
-        let shown = if style.caps {
+        let cased = if style.caps {
             upper(&self.locale, text)
         } else {
             text.to_owned()
         };
+        let (shown, strong) = strong_runs(&cased);
         let wide: Vec<u16> = shown.encode_utf16().collect();
         let family = self.family(style.face).to_owned();
 
@@ -451,6 +491,14 @@ impl Text {
                     range,
                 )
             }?;
+        }
+        if !strong.is_empty() {
+            let weight =
+                DWRITE_FONT_WEIGHT(i32::from(Role::Strong.style().weight.max(style.weight)));
+            for run in strong {
+                // SAFETY: a range of the layout's own text, counted over the same UTF-16 string.
+                unsafe { layout.SetFontWeight(weight, run) }?;
+            }
         }
 
         Ok(Laid {
