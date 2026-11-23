@@ -4801,6 +4801,61 @@ fn hello_shows_the_frame_of_its_tick() {
     }
 }
 
+/// **208.217: in the steps of «Привет» the name of the key is in bold** — so in the mock-up of the
+/// letters, by the marks of «Как пользоваться» (П2, 208.209): every step carries the key as a
+/// strong run, in every language, and nothing else of the step is marked.
+#[test]
+fn the_steps_of_hello_name_the_key_in_bold() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{Node, strong};
+    use lang_switcher::ui::windows::letter::LetterView;
+
+    fn steps<I>(node: &Node<I>, into: &mut Vec<String>) {
+        match node {
+            Node::Numbered(items) => into.extend(items.iter().cloned()),
+            Node::Column(nodes) | Node::Rows(nodes) | Node::Row(nodes) => {
+                nodes.iter().for_each(|node| steps(node, into))
+            }
+            _ => {}
+        }
+    }
+
+    let _guard = with_product_strings();
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    for language in Language::ALL {
+        let hello = LetterView {
+            letter: Letter::Welcome,
+            plan: letters::plan_in(language, Letter::Welcome, &context),
+            key: "Pause".to_owned(),
+            tick: 0,
+            language,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        };
+        let mut shown = Vec::new();
+        steps(&hello.describe().body, &mut shown);
+        let ids = [
+            settings::IDS_HELLO_ROW_1,
+            settings::IDS_HELLO_ROW_2,
+            settings::IDS_HELLO_ROW_3,
+        ];
+        assert_eq!(shown.len(), ids.len(), "{language:?}: three steps");
+        for (step, id) in shown.iter().zip(ids) {
+            let line = settings::text_in(language, id);
+            assert!(line.contains("{0}"), "{language:?}: each step names the key");
+            assert_eq!(
+                *step,
+                line.replace("{0}", &strong("Pause")),
+                "{language:?}: the key in bold, the rest as the string says"
+            );
+        }
+    }
+}
+
 /// **«Обновление» dates the release in the language of its window** — the same as «От автора»
 /// below (T-120-17): `plan_in` speaks `language`, and the day of the release came out in the
 /// program's («Version 1.7.1 came out on 16 ноября» in Tamil, the list of the wave of T-120-24).

@@ -14,7 +14,7 @@ use crate::settings::Language;
 use crate::theme::{KEY_PLACEHOLDER, ThemeSetting};
 use crate::ui::host::{Content, Reply};
 use crate::ui::scene::{
-    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind,
+    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind, strong,
 };
 use ::windows::Win32::Foundation::HWND;
 
@@ -85,6 +85,12 @@ impl LetterView {
     /// A sentence with the name of the key in its place.
     fn keyed(&self, sentence: &str) -> String {
         sentence.replace(KEY_PLACEHOLDER, &self.key)
+    }
+
+    /// A step of the list with the name of the key in its place, in bold — so in the mock-up of
+    /// the letters (208.217), by the marks of «Как пользоваться» (П2, 208.209).
+    fn step(&self, sentence: &str) -> String {
+        sentence.replace(KEY_PLACEHOLDER, &strong(&self.key))
     }
 
     /// What the demonstration of «Привет» shows at this frame — `letters::demo_frame`, the same
@@ -194,12 +200,12 @@ impl LetterView {
             let (numbered, plain): (Vec<_>, Vec<_>) =
                 plan.rows.iter().partition(|row| !row.marker.is_empty());
             list.push(Node::Numbered(
-                numbered.iter().map(|row| self.keyed(row.words())).collect(),
+                numbered.iter().map(|row| self.step(row.words())).collect(),
             ));
             list.extend(
                 plain
                     .iter()
-                    .map(|row| Node::Text(Role::Body, self.keyed(row.words()))),
+                    .map(|row| Node::Text(Role::Body, self.step(row.words()))),
             );
             parts.push(Node::Rows(list));
         }
