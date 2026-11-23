@@ -7313,6 +7313,21 @@ mod window_of_the_settings {
         assert!(two.contains(&ru(settings::IDS_SECTION_HOTKEY_SUB_TWO)));
         assert!(two.contains(&ru(settings::IDS_HOTKEY_FIX_LABEL)));
         assert!(two.contains(&ru(settings::IDS_HOTKEY_SWITCH_LABEL)));
+        // 208.234 (А): with two keys the line of the ways under the first field stands aside at
+        // rest; with one key it is there, and under the second field its own line stays.
+        let ways = ru(settings::IDS_HOTKEY_HINT);
+        assert!(one.contains(&ways), "one key: the line of the ways");
+        assert!(!two.contains(&ways), "two keys: no line of the ways at rest");
+        assert!(two.contains(&ru(settings::IDS_SWITCH_KEY_HINT)));
+        window.event(Event::Pressed(Id::HotkeySet));
+        assert!(
+            shown(&window).contains(&ru(settings::IDS_CAPTURE_HINT)),
+            "two keys: the capture of the first key keeps its line"
+        );
+        window.event(Event::KeyDown {
+            id: Id::Hotkey,
+            vk: ESCAPE,
+        });
 
         window.config.switch_hotkey.key = "ScrollLock".to_owned();
         window.event(Event::Selected(Id::HotkeyMode, 0));
@@ -7321,6 +7336,29 @@ mod window_of_the_settings {
         assert_eq!(
             back.switch_hotkey.key, "ScrollLock",
             "the second key is kept"
+        );
+    }
+
+    /// **«Состояние» names both keys on one line** — 208.234: «Клавиша: Pause · Переключение
+    /// раскладки: ScrollLock»; with one key the line is the first key's alone.
+    #[test]
+    fn the_state_names_both_keys_on_one_line() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Diagnostics;
+        window.showing_program(lang_switcher::ui::windows::settings::Program::default());
+        let first = ru(settings::IDS_STATUS_HOTKEY).replace("{0}", "Pause");
+        let second = ru(settings::IDS_STATUS_SWITCH_KEY).replace("{0}", "ScrollLock");
+
+        let one = shown(&window);
+        assert!(one.contains(&format!("{first:?}")), "one key: the line alone");
+
+        window.config.switch_hotkey.enabled = true;
+        window.config.switch_hotkey.key = "ScrollLock".to_owned();
+        let two = shown(&window);
+        assert!(
+            two.contains(&format!("{:?}", format!("{first} · {second}"))),
+            "two keys: one line, the second key after the first"
         );
     }
 
