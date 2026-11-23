@@ -537,19 +537,9 @@ impl Settings {
         if target == CaptureTarget::Switch {
             row.push(button(Id::SwitchKeyRemove, self.line(IDS_EXCLUSION_REMOVE)));
         }
-        // 208.235: the grey note of a tap of `Ctrl` in force stands half a block under its own field,
-        // a line of the field's block — a block under it, the section does not fit bs and lb in the
-        // ordinary window (ui_fit).
-        if target == CaptureTarget::Switch
-            && capture.is_none()
-            && warning.is_none()
-            && settings::switch_hotkey_note(&self.config) == Some(settings::IDS_CTRL_WARN_TEXT)
-        {
-            return vec![Node::Rows(vec![
-                Node::Row(row),
-                Node::Text(Role::Small, line),
-            ])];
-        }
+        // The grey note of a tap of `Ctrl` in force (208.235) is the line under the field, a block
+        // under it as every line under a field — решение 208.239: «прежний отступ, как у обычной
+        // подсказки». The half block of 208.235 answered a phantom of ui_fit, not the window.
         let mut nodes = vec![Node::Row(row)];
         // With two keys the line of the ways under the first field stands aside at rest — its notes,
         // the line after a capture and the lines of a capture stay: the section of two keys does not
