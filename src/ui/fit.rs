@@ -241,9 +241,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "mr",
         K {
-            narrow: 0.842,
-            ordinary: 0.842,
-            large: 0.979,
+            narrow: 0.856,
+            ordinary: 0.856,
+            large: 0.997,
         },
     ),
     (
@@ -259,7 +259,7 @@ pub const TABLE: &[(&str, K)] = &[
         K {
             narrow: 0.842,
             ordinary: 0.842,
-            large: 0.867,
+            large: 0.913,
         },
     ),
     (
@@ -305,8 +305,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "ml",
         K {
-            narrow: 0.841,
-            ordinary: 0.841,
+            narrow: 0.862,
+            ordinary: 0.862,
             large: 0.927,
         },
     ),
@@ -401,8 +401,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "hy",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
+            narrow: 0.877,
+            ordinary: 0.877,
             large: 0.899,
         },
     ),
@@ -521,9 +521,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "sk",
         K {
-            narrow: 0.842,
-            ordinary: 0.842,
-            large: 0.979,
+            narrow: 0.856,
+            ordinary: 0.856,
+            large: 0.997,
         },
     ),
     (
@@ -537,9 +537,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "lt",
         K {
-            narrow: 0.842,
-            ordinary: 0.842,
-            large: 0.979,
+            narrow: 0.856,
+            ordinary: 0.856,
+            large: 0.997,
         },
     ),
     (
@@ -553,9 +553,9 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "bs",
         K {
-            narrow: 0.842,
-            ordinary: 0.842,
-            large: 0.979,
+            narrow: 0.856,
+            ordinary: 0.856,
+            large: 0.997,
         },
     ),
     (

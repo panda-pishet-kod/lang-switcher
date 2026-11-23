@@ -1986,3 +1986,92 @@ fn a_choice_card_shows_its_icon_at_its_end_and_its_text_in_its_middle() {
         );
     }
 }
+
+/// **208.217, AUDIT-180 Пс2: the words of a link inside a paragraph answer the press where they
+/// stand.** The paragraph is one text part, its marks in it; over the words of the link, a line at a
+/// time, a part of the link with the paragraph's identifier. In a window that reads right to left
+/// the window is mirrored and the paragraph's own text is not: the part keeps the place the measure
+/// gave the words inside the box.
+#[test]
+fn the_words_of_a_link_in_a_paragraph_answer_the_press_where_they_stand() {
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END};
+
+    let words = format!("Say so {LINK_BEGIN}in the group{LINK_END} please.");
+    let window = bare(Node::Column(vec![Node::Linked {
+        role: Role::Body,
+        words: words.clone(),
+        id: Id::Site,
+    }]));
+    for rtl in [false, true] {
+        let layout = lay_out(&window, usual(), 1.0, rtl, &MEASURE);
+        let text = layout
+            .items
+            .iter()
+            .find(|item| matches!(item.part, Part::Text { .. }))
+            .expect("the paragraph");
+        let links: Vec<&Placed<Id>> = layout
+            .items
+            .iter()
+            .filter(|item| matches!(item.part, Part::InlineLink))
+            .collect();
+        let style = Style::of(Role::Body, layout.b, layout.size.h);
+        let areas = MEASURE.link_areas(&words, style, Wrap::Words, text.rect.w);
+        let advance = MEASURE.0 * style.size;
+
+        assert_eq!(areas.len(), 1, "rtl {rtl}: the link on one line");
+        assert!(
+            close(areas[0].x, 7.0 * advance),
+            "after «Say so »: {areas:?}"
+        );
+        assert!(
+            close(areas[0].w, 12.0 * advance),
+            "«in the group»: {areas:?}"
+        );
+        assert_eq!(links.len(), 1, "rtl {rtl}: one part per line of the link");
+        assert_eq!(
+            links[0].id,
+            Some(Id::Site),
+            "the press is the paragraph's element"
+        );
+        assert!(
+            close(links[0].rect.x - text.rect.x, areas[0].x)
+                && close(links[0].rect.y, text.rect.y + areas[0].y)
+                && close(links[0].rect.w, areas[0].w)
+                && close(links[0].rect.h, areas[0].h),
+            "rtl {rtl}: the part stands where the words stand in the box: {:?}, the box {:?}",
+            links[0].rect,
+            text.rect
+        );
+        assert_eq!(layout.focus_order(), vec![Id::Site], "one stop of Tab");
+    }
+}
+
+/// The stand-in measure finds the words of a link on the lines its own greedy wrap gives them: a
+/// link the line breaks takes a rectangle on each line, and the space at the break is in neither.
+#[test]
+fn the_stand_in_measure_finds_the_link_on_each_line_it_takes() {
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END};
+
+    let style = Style::of(Role::Body, 14.0, 512.0);
+    let (advance, line) = (MEASURE.0 * style.size, style.line_height());
+    let words = format!("aaaa {LINK_BEGIN}bb cc{LINK_END} dd");
+    let areas = MEASURE.link_areas(&words, style, Wrap::Words, 4.0 * advance);
+
+    assert_eq!(
+        areas.len(),
+        2,
+        "«bb» on the second line, «cc» on the third: {areas:?}"
+    );
+    for (area, row) in areas.iter().zip([1.0, 2.0]) {
+        assert!(
+            close(area.x, 0.0) && close(area.w, 2.0 * advance) && close(area.y, row * line),
+            "{area:?}"
+        );
+    }
+    assert!(
+        MEASURE
+            .link_areas("aaaa bb cc dd", style, Wrap::Words, 4.0 * advance)
+            .is_empty(),
+        "no link, no rectangle"
+    );
+}

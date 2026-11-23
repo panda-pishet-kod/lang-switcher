@@ -1152,6 +1152,9 @@ pub struct LetterPlan {
     pub cards: Vec<Card>,
     /// A link to the site under the body.
     pub link: Option<Button>,
+    /// The link is the last sentence of the lead, its words between `<a>` and `</a>` of its label
+    /// (AUDIT-180 Пс2, решение 208.217), and not a line of its own.
+    pub link_in_lead: bool,
     /// The line under the body — what the buttons do to the letter.
     pub foot: String,
     /// The first button of the row.
@@ -1206,12 +1209,12 @@ pub fn plan_for(letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
 pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) -> LetterPlan {
     use crate::settings::{
         IDS_CLOSE, IDS_FALLBACK_NOTICE, IDS_FALLBACK_REPEATS, IDS_FALLBACK_SUB, IDS_FALLBACK_TITLE,
-        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_OPEN, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT,
-        IDS_HELLO_DEMO_CAP, IDS_HELLO_FOOT, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL,
-        IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE,
-        IDS_LETTER_CAPTION, IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER,
-        IDS_NEWS_LETTER_TITLE, IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN,
-        IDS_SUPPORT_PANEL, IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SNOOZE,
+        IDS_FALLBACK_WHATS_NEW, IDS_FEEDBACK_PANEL, IDS_FEEDBACK_TEXT, IDS_HELLO_DEMO_CAP,
+        IDS_HELLO_FOOT, IDS_HELLO_LEAD, IDS_HELLO_OK, IDS_HELLO_PANEL, IDS_HELLO_ROW_1,
+        IDS_HELLO_ROW_2, IDS_HELLO_ROW_3, IDS_HELLO_SETTINGS, IDS_HELLO_TITLE, IDS_LETTER_CAPTION,
+        IDS_NEWS_DOWNLOAD, IDS_NEWS_FOOT, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
+        IDS_NEWS_OPEN_LINK, IDS_NEWS_READ_BUTTON, IDS_SUPPORT_OPEN, IDS_SUPPORT_PANEL,
+        IDS_SUPPORT_TEXT, IDS_THANKS_FOOT, IDS_THANKS_LEAD, IDS_THANKS_SAY, IDS_THANKS_SNOOZE,
         IDS_THANKS_TITLE, IDS_UPDATE_FOOT, IDS_UPDATE_HOW, IDS_UPDATE_STEP_1, IDS_UPDATE_STEP_2,
         IDS_UPDATE_STEP_3, IDS_WRITE_TO_AUTHOR,
     };
@@ -1285,12 +1288,14 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
                 },
             ],
             // Решение 181.1: «Если понравилось, расскажите об этом» — where a person can write,
-            // by language: the group, or GitHub Issues. A link, because it only goes to the site.
+            // by language: the group, or GitHub Issues. A link, because it only goes to the site;
+            // the last sentence of the lead, its words of the place the link (208.217, Пс2).
             link: Some(Button::link(
-                text(IDS_FEEDBACK_OPEN),
+                text(IDS_THANKS_SAY),
                 Action::OpenFeedback,
                 links::feedback_url(language),
             )),
+            link_in_lead: true,
             // FR-101: the snooze is offered once, and the second showing has no button where
             // it stood — not a disabled one. A disabled «Напомнить позже» would say the program
             // is refusing; an absent one says the letter is on its last showing, which is what

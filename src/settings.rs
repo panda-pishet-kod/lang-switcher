@@ -1714,6 +1714,11 @@ pub const IDS_MENU_RESTART: u16 = 3320;
 /// (AUDIT-180 А1, решение 208.211: «разбить без потерь»); the rest is [`IDS_AUTHOR_TEXT`], word for
 /// word.
 pub const IDS_AUTHOR_TITLE: u16 = 3321;
+/// The sentence at the end of the lead of «Спасибо» that carries its link (AUDIT-180 Пс2, решение
+/// 208.217): the first sentence of the old [`IDS_THANKS_PARA`]; the words of the link between
+/// `<a>` and `</a>` (`ui::scene::linked`) — the group or GitHub Issues,
+/// `letters::links::feedback_url` of the language.
+pub const IDS_THANKS_SAY: u16 = 3322;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2026,9 +2031,8 @@ pub const IDS_EXCLUSION_ALREADY: u16 = 3240;
 pub const IDS_EXCLUSION_NOT_PICKED: u16 = 3241;
 // Task T-103-2, решение 181.1: the button of «Спасибо» that sends a person where they can write —
 // the first free number when the task wrote it, in the block 3232…3247.
-/// «Открыть группу» / «Open GitHub Issues» — the panel of «Спасибо», `letters::links::feedback_url`
-/// of the language of the letter. `IDS_CHANNEL_OPEN` stays with «Что нового» and FR-103.
-pub const IDS_FEEDBACK_OPEN: u16 = 3242;
+// 3242 — «Открыть группу» / «Open GitHub Issues», the link under «Спасибо» until AUDIT-180 Пс2
+// (решение 208.217): the link went into the lead, [`IDS_THANKS_SAY`]. A hole, never to be taken.
 // Task T-103-7, решение 181.6: the last step of an appeal about a trouble — a letter to the author;
 // since task T-107-3 (решение 199.3) the letter of any appeal the site did not take. 3243…3247
 // close the block 3232…3247, 3248 opens the next. The address is `{0}` in every one of them: the
@@ -2295,8 +2299,8 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// brought eight, [`IDS_EXCLUSION_AUTO`] … [`IDS_EXCLUSION_NOT_PICKED`] (3234…3241).
 ///
 /// ⚠ **Two hundred and twenty-nine since task T-103-2** — вопрос 181, решение 181.1: «Спасибо» sends
-/// a person where they can write, and its button got a word of its own, [`IDS_FEEDBACK_OPEN`]
-/// (3242).
+/// a person where they can write, and its button got a word of its own, `IDS_FEEDBACK_OPEN`
+/// (3242; gone with AUDIT-180 Пс2).
 ///
 /// ⚠ **Two hundred and thirty-five since task T-103-7** — решение 181.6: an appeal about a trouble goes
 /// to the author by letter, and its last step got six words of its own, [`IDS_WIZARD_MAIL_NOTE`] …
@@ -2370,6 +2374,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and eighty-one since AUDIT-180 Z4 (А1)** — the title of «От автора»,
 /// [`IDS_AUTHOR_TITLE`] (3321), the first sentence of the owner's text (208.211). 280 + 1.
+///
+/// ⚠ **Two hundred and eighty-one again since AUDIT-180 Пс2** (решение 208.217) — the link of
+/// «Спасибо» went into its lead: `IDS_FEEDBACK_OPEN` (3242) left, [`IDS_THANKS_SAY`] (3322)
+/// came. 281 − 1 + 1.
 pub const INTERFACE_STRINGS: [u16; 281] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
@@ -2606,7 +2614,6 @@ pub const INTERFACE_STRINGS: [u16; 281] = [
     IDS_EXCLUSION_ADDED,
     IDS_EXCLUSION_ALREADY,
     IDS_EXCLUSION_NOT_PICKED,
-    IDS_FEEDBACK_OPEN,
     IDS_WIZARD_MAIL_ADDRESS,
     IDS_WIZARD_COPY_TEXT,
     IDS_WIZARD_COPY_ADDRESS,
@@ -2640,6 +2647,7 @@ pub const INTERFACE_STRINGS: [u16; 281] = [
     IDS_MENU_SUSPENDED,
     IDS_MENU_RESTART,
     IDS_AUTHOR_TITLE,
+    IDS_THANKS_SAY,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

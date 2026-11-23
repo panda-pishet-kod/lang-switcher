@@ -63,7 +63,9 @@ pub const EXCUSED: &[Excuse] = &[
         why: "шапка мастера по самой высокой — IDS_WIZARD_DID_NOTE длинна в ta и ml (Z8)",
     },
     // AUDIT-180 Z3: «Поддержать автора ↗» of the card of «Спасибо» is wider than the card in its
-    // frame in ta and uz-Cyrl, in both classes — the translator shortens it.
+    // frame in ta and uz-Cyrl, in both classes — the translator shortens it. Since the link went
+    // into the lead (208.217, Пс2) uz-Cyrl of the ordinary window fits at the factor of the table,
+    // but not with the margin of the pass of the table even at 12 points: the excuse stays.
     Excuse {
         window: "letter thanks",
         class: Class::Ordinary,

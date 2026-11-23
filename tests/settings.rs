@@ -6528,7 +6528,7 @@ impl Drop for ProductImage {
 /// `Shift` and the line after the double press — 218 + 2, row for row.
 ///
 /// ⚠ **229 since task T-103-2** — вопрос 181: the button of «Спасибо» that sends a person where they
-/// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row.
+/// can write, `IDS_FEEDBACK_OPEN` — 228 + 1, row for row (gone with AUDIT-180 Пс2, 208.217).
 ///
 /// ⚠ **235 since task T-103-7** — решение 181.6: the six words of the last step of a trouble, which
 /// goes to the author by letter — 229 + 6, row for row.
@@ -6570,6 +6570,9 @@ impl Drop for ProductImage {
 ///
 /// ⚠ **281 since AUDIT-180 Z4 (А1)** — the title of «От автора», the first sentence of the owner's
 /// text (3321, 208.211).
+///
+/// ⚠ **281 again since AUDIT-180 Пс2** — the link of «Спасибо» went into its lead: 3242 left, the
+/// sentence that carries it came (3322, 208.217).
 const FR_94_STRINGS: [(u16, &str, &str); 281] = [
     (
         settings::IDS_DIALOG_CAPTION,
@@ -7574,13 +7577,6 @@ const FR_94_STRINGS: [(u16, &str, &str); 281] = [
         "Окно не выбрано",
         "No window picked",
     ),
-    // Task T-103-2, решение 181.1: where «Спасибо» sends a person to write — the group, GitHub
-    // Issues. `IDS_CHANNEL_OPEN` above stays with «Что нового» and FR-103.
-    (
-        settings::IDS_FEEDBACK_OPEN,
-        "Открыть группу",
-        "Open GitHub Issues",
-    ),
     // Task T-103-7, решение 181.6: an appeal about a trouble goes to the author by letter — the
     // table of the addendum to TZ-E103, word for word; the address is `{0}`. Since stage E107
     // (решение 199.3) the letter of any appeal the site did not take; IDS_WIZARD_MAIL_NOTE left.
@@ -7700,6 +7696,13 @@ const FR_94_STRINGS: [(u16, &str, &str); 281] = [
         settings::IDS_AUTHOR_TITLE,
         "Программу делает один человек в свободное время",
         "The program is made by one person in their spare time",
+    ),
+    // AUDIT-180 Пс2 (208.217): the link of «Спасибо» in its lead — where it sends a person to write
+    // (решение 181.1), the first sentence of the old IDS_THANKS_PARA.
+    (
+        settings::IDS_THANKS_SAY,
+        "Если понравилось, расскажите об этом <a>в группе</a>.",
+        "If you liked it, say so <a>in GitHub Issues</a>.",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -8106,7 +8109,7 @@ fn the_words_of_the_letter_are_in_every_language_with_the_address_as_a_slot() {
 /// issues out of the wizard — the two of «Спасибо» stay.
 const STRINGS_OF_THE_PLACE: [(u16, &str); 2] = [
     (settings::IDS_THANKS_PARA, "IDS_THANKS_PARA"),
-    (settings::IDS_FEEDBACK_OPEN, "IDS_FEEDBACK_OPEN"),
+    (settings::IDS_THANKS_SAY, "IDS_THANKS_SAY"),
 ];
 
 /// The words of the last step of the wizard and of its thanks — stage E107, решение 199.3: not one
@@ -8238,7 +8241,7 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
             control_caught += 1;
         }
 
-        if names_the_group_or_the_issues(&settings::text(settings::IDS_FEEDBACK_OPEN)) {
+        if names_the_group_or_the_issues(&settings::text(settings::IDS_THANKS_SAY)) {
             place_caught += 1;
         }
     }
@@ -8253,7 +8256,7 @@ fn each_string_of_the_place_names_the_place_of_its_own_language() {
     assert_eq!(
         place_caught,
         THE_CHANNEL.len(),
-        "the control: «Открыть группу» / «Open GitHub Issues» must be caught in every language of \
+        "the control: the link of «Спасибо» (IDS_THANKS_SAY) must be caught in every language of \
          1.0.0"
     );
     assert!(
@@ -12193,9 +12196,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     // 3143).
     // AUDIT-180 Z8 (решение 208.131): the card «Ничего не произошло» of the wizard and its line
     // (3163, 3164) went into the first card — two more holes, held by the same checks.
-    const RETIRED_E119: [u16; 19] = [
+    const RETIRED_E119: [u16; 20] = [
         3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3212, 3249, 3250, 3123, 3124, 3137, 3138,
-        3140, 3143, 3163, 3164,
+        3140, 3143, 3163, 3164, 3242,
     ];
 
     assert!(
@@ -12237,13 +12240,13 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     for hole in RETIRED_E119 {
         assert!(
             !settings::INTERFACE_STRINGS.contains(&hole),
-            "{hole} left the vocabulary with task T-119-8, T-119-9, T-119-10 or AUDIT-180 Z8 and must not come back into it"
+            "{hole} left the vocabulary with task T-119-8, T-119-9, T-119-10, AUDIT-180 Z8 or Пс2 and must not come back into it"
         );
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
         281,
-        "two hundred and EIGHTY-ONE identifiers in use since AUDIT-180 Z4 (А1): the title of «От \
+        "two hundred and EIGHTY-ONE identifiers in use since AUDIT-180 Z4 (А1) and again since Пс2 (3242 left, 3322 came): the title of «От \
          автора» (3321). Two hundred and eighty since AUDIT-180 Z14: the state in the head of the \
          menu in small letters (3318…3320). Two hundred and seventy-seven again since AUDIT-180 Z8: \
          the card «Ничего \

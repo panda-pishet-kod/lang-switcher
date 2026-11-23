@@ -1022,6 +1022,26 @@ impl Painter<'_, '_> {
         }
     }
 
+    /// The words of the links of `laid` in `value` when it is drawn next (208.217, Пс2): a brush of
+    /// their own as the drawing effect of their runs. The plain look draws them as the rest.
+    pub fn tint_links(&mut self, laid: &Laid, value: Rgb) {
+        let Kind::Direct2D { target, .. } = self.kind else {
+            return;
+        };
+        if laid.links().is_empty() {
+            return;
+        }
+        // SAFETY: inside a frame; the colour outlives the call. The layout keeps the brush for as
+        // long as it lives.
+        let Ok(brush) = (unsafe { target.CreateSolidColorBrush(&colour(value), None) }) else {
+            return;
+        };
+        for run in laid.links() {
+            // SAFETY: a range of the layout's own text.
+            let _ = unsafe { laid.layout().SetDrawingEffect(&brush, *run) };
+        }
+    }
+
     /// The picture `name` in the circle of `radius` centred on `x`, `y`. Without pictures (before
     /// `art.rs` is in, a picture it does not have, the plain look) — the ground of the pictures
     /// alone: a work stand-in, not the look.

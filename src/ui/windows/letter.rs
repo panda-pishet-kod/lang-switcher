@@ -14,7 +14,8 @@ use crate::settings::Language;
 use crate::theme::{KEY_PLACEHOLDER, ThemeSetting};
 use crate::ui::host::{Content, Reply};
 use crate::ui::scene::{
-    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind, strong,
+    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind, linked,
+    strong,
 };
 use ::windows::Win32::Foundation::HWND;
 
@@ -163,8 +164,17 @@ impl LetterView {
                 Box::new(Node::Text(Role::Body, plan.note.clone())),
             ));
         }
-        if !plan.lead.is_empty() {
-            parts.push(Node::Text(Role::Lead, plan.lead.clone()));
+        // The link of «Спасибо» is the last sentence of its lead (208.217, Пс2): the words of the
+        // place underlined in the paragraph, a press on them the link's.
+        let in_lead = plan.link.as_ref().filter(|_| plan.link_in_lead);
+        match (plan.lead.is_empty(), in_lead) {
+            (false, Some(link)) => parts.push(Node::Linked {
+                role: Role::Lead,
+                words: format!("{} {}", plan.lead, linked(&link.label)),
+                id: Id::Do(link.action),
+            }),
+            (false, None) => parts.push(Node::Text(Role::Lead, plan.lead.clone())),
+            _ => {}
         }
         if plan.demo {
             let mut example = vec![self.live_example()];
@@ -225,7 +235,7 @@ impl LetterView {
             _ => {}
         }
 
-        if let Some(link) = &plan.link {
+        if let (Some(link), false) = (&plan.link, plan.link_in_lead) {
             parts.push(Node::Link {
                 id: Id::Do(link.action),
                 words: link.label.clone(),

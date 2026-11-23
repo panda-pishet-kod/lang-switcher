@@ -30,6 +30,36 @@ pub fn strong(words: &str) -> String {
     format!("{STRONG_BEGIN}{words}{STRONG_END}")
 }
 
+/// The marks of the link inside a paragraph (208.217, AUDIT-180 Пс2: «в группе» in the paragraph of
+/// «Спасибо»): the run between them is underlined and in the colour of a link, and a press on it is
+/// the press of the paragraph's element ([`Node::Linked`]). The plain look draws it as the rest.
+pub const LINK_BEGIN: char = '\u{4}';
+pub const LINK_END: char = '\u{5}';
+
+/// How a translation marks the words of its link: `<a>` before them, `</a>` after.
+pub const LINK_OPEN_TAG: &str = "<a>";
+pub const LINK_CLOSE_TAG: &str = "</a>";
+
+/// A sentence of a translation with its link marked for the layout: `<a>`…`</a>` become
+/// [`LINK_BEGIN`]…[`LINK_END`]. A sentence without the tags is a link from end to end — a press
+/// still goes where it should.
+pub fn linked(sentence: &str) -> String {
+    match (sentence.find(LINK_OPEN_TAG), sentence.find(LINK_CLOSE_TAG)) {
+        (Some(open), Some(close)) if open < close => format!(
+            "{}{LINK_BEGIN}{}{LINK_END}{}",
+            &sentence[..open],
+            &sentence[open + LINK_OPEN_TAG.len()..close],
+            &sentence[close + LINK_CLOSE_TAG.len()..]
+        ),
+        _ => format!(
+            "{LINK_BEGIN}{}{LINK_END}",
+            sentence
+                .replace(LINK_OPEN_TAG, "")
+                .replace(LINK_CLOSE_TAG, "")
+        ),
+    }
+}
+
 /// The look of a button: one per kind (passport §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonKind {
@@ -155,6 +185,9 @@ pub enum Node<I> {
     },
     /// A paragraph in a role, wrapped by words.
     Text(Role, String),
+    /// A paragraph with a link inside, between [`LINK_BEGIN`] and [`LINK_END`] (see [`linked`]): a
+    /// press on the words of the link is `id`'s.
+    Linked { role: Role, words: String, id: I },
     /// One line in a role, cut with an ellipsis.
     Line(Role, String),
     /// A button; `browser` — it opens the browser and carries the sign ↗.
@@ -365,6 +398,11 @@ impl<I> Node<I> {
                 subtitle,
             },
             Node::Text(role, text) => Node::Text(role, text),
+            Node::Linked { role, words, id } => Node::Linked {
+                role,
+                words,
+                id: f(id),
+            },
             Node::Line(role, text) => Node::Line(role, text),
             Node::Button {
                 id,
@@ -567,6 +605,7 @@ impl<I> Node<I> {
                 }
             }
             Node::Text(role, text) | Node::Line(role, text) => f(*role, text),
+            Node::Linked { role, words, .. } => f(*role, words),
             Node::Button { label, .. } => f(Role::Button, label),
             Node::Action {
                 title,

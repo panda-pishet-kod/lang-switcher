@@ -366,6 +366,8 @@ END
 #define IDS_MENU_RESTART        3320
 // AUDIT-180, Z4 (decision 208.211): the title of «От автора», the first sentence of the owner's text.
 #define IDS_AUTHOR_TITLE        3321
+// AUDIT-180, Пс2 (decision 208.217): the sentence that carries the link of «Спасибо» in its lead.
+#define IDS_THANKS_SAY          3322
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291
@@ -574,10 +576,7 @@ END
 #define IDS_EXCLUSION_ADDED     3239
 #define IDS_EXCLUSION_ALREADY   3240
 #define IDS_EXCLUSION_NOT_PICKED 3241
-// Task T-103-2, decision 181.1: the button of the letter of thanks that sends a person where they
-// can write -- the group for ru and uk, GitHub Issues for the other twelve. 3242 continues the
-// block 3232...3247; IDS_CHANNEL_OPEN stays with the news and the author window.
-#define IDS_FEEDBACK_OPEN       3242
+// 3242 -- the link under the letter of thanks until AUDIT-180 Пс2 (decision 208.217): a hole.
 // Task T-103-7, decision 181.6: the last step of an appeal about a trouble goes to the author by
 // letter. 3243...3247 close the block 3232...3247, 3248 opens the next. The address is {0}.
 // Since stage E107 (decision 199.3) the letter of any appeal the site did not take; 3243 (the note

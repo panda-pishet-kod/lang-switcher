@@ -595,3 +595,79 @@ fn the_picture_is_drawn_again_for_a_new_size_or_scale_and_not_for_a_repeated_fra
     // SAFETY: the window made above.
     let _ = unsafe { DestroyWindow(hwnd) };
 }
+
+/// **208.217, AUDIT-180 Пс2: the words of a link in a paragraph are in the colour of a link and
+/// underlined; the rest of the paragraph is not.** Drawn in memory by the painter of the shell: the
+/// green of the accent only over the words of the link, and under them a line of it across their
+/// width.
+#[test]
+fn the_words_of_a_link_in_a_paragraph_are_green_and_underlined() {
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END};
+
+    let theme = Theme::Light;
+    let (bg, ink, accent) = (
+        Color::Bg.get(theme),
+        Color::Text.get(theme),
+        Color::Accent.get(theme),
+    );
+    let text = Text::new("en-US", Direction::LeftToRight).expect("DirectWrite");
+    let laid = text
+        .lay(
+            &format!("Say so {LINK_BEGIN}in the group{LINK_END}, please."),
+            Style::of(Role::Body, 14.0, 512.0),
+            Wrap::Words,
+            Align::Start,
+            380.0,
+        )
+        .expect("a layout");
+    let (left, top) = (10.0_f32, 10.0_f32);
+    let mut canvas = Canvas::in_memory(400.0, 40.0, 1.0, Mode::Direct2D).expect("a canvas");
+    canvas.frame(|painter| {
+        painter.clear(bg);
+        painter.tint_links(&laid, accent);
+        painter.text(&laid, left, top, ink);
+    });
+    let image = canvas.image().expect("pixels");
+    // Green: the green of the pixel well above its red — the accent and its blends with the ground,
+    // never the ink of the text or the ground.
+    let green = |x: u32, y: u32| {
+        let p = image.at(x, y);
+        i32::from(p.g) - i32::from(p.r) > 40
+    };
+    let areas = laid.link_areas();
+    assert_eq!(areas.len(), 1, "one line: {areas:?}");
+    let a = areas[0];
+    let (x0, x1) = ((left + a.x) as u32, (left + a.x + a.w).ceil() as u32);
+    let (y0, y1) = ((top + a.y) as u32, (top + a.y + a.h).ceil() as u32);
+    let inside = |x: u32, y: u32| (x0..x1).contains(&x) && (y0..y1).contains(&y);
+
+    let mut over = 0;
+    let mut outside = 0;
+    for y in 0..image.height {
+        for x in 0..image.width {
+            if green(x, y) {
+                if inside(x, y) {
+                    over += 1
+                } else {
+                    outside += 1
+                }
+            }
+        }
+    }
+    let widest_row = (y0..y1)
+        .map(|y| (x0..x1).filter(|x| green(*x, y)).count())
+        .max()
+        .unwrap_or(0);
+    println!(
+        "green over the link {over}, elsewhere {outside}; the widest green row {widest_row} of {}",
+        x1 - x0
+    );
+
+    assert!(over > 50, "the words of the link are green: {over} pixels");
+    assert_eq!(outside, 0, "nothing else is green");
+    assert!(
+        widest_row as f32 >= 0.8 * a.w,
+        "a line under the words across their width: {widest_row} of {:.1}",
+        a.w
+    );
+}

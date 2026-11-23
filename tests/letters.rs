@@ -2035,7 +2035,7 @@ fn plan_arm<'a>(source: &'a str, head: &str, next: &str) -> &'a str {
 fn the_thanks_sends_a_person_to_write(arm: &str) -> bool {
     let code = squeezed_code(arm);
 
-    code.contains("text(IDS_FEEDBACK_OPEN), Action::OpenFeedback,")
+    code.contains("text(IDS_THANKS_SAY), Action::OpenFeedback,")
         && code.contains("Action::OpenFeedback, links::feedback_url(language),")
         && !code.contains("CHANNEL_URL")
         && !code.contains("Action::OpenChannel")
@@ -2099,7 +2099,7 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
 
     // The control.
     let channel_again = thanks
-        .replace("IDS_FEEDBACK_OPEN", "IDS_CHANNEL_OPEN")
+        .replace("IDS_THANKS_SAY", "IDS_CHANNEL_OPEN")
         .replace("Action::OpenFeedback", "Action::OpenChannel");
     assert_ne!(channel_again, thanks, "the control must change the arm");
     assert!(
@@ -4856,6 +4856,74 @@ fn the_steps_of_hello_name_the_key_in_bold() {
                 "{language:?}: the key in bold, the rest as the string says"
             );
         }
+    }
+}
+
+/// **208.217, AUDIT-180 Пс2: the link of «Спасибо» is in its lead.** The lead ends with the first
+/// sentence of the old paragraph, its words of the place a link pressing which is «Открыть группу»
+/// of before; the line of its own under the cards is gone. Every language marks exactly one run.
+#[test]
+fn the_link_of_thanks_is_the_last_sentence_of_its_lead() {
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::scene::{LINK_BEGIN, LINK_END, Node, linked};
+    use lang_switcher::ui::windows::letter::{Id, LetterView};
+
+    fn nodes<I: Clone>(node: &Node<I>, into: &mut Vec<Node<I>>) {
+        into.push(node.clone());
+        if let Node::Column(children) | Node::Rows(children) | Node::Row(children) = node {
+            children.iter().for_each(|child| nodes(child, into));
+        }
+    }
+
+    let _guard = with_product_strings();
+    let context = letters::PlanContext {
+        version: "1.8.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: None,
+    };
+    for language in Language::ALL {
+        let say = settings::text_in(language, settings::IDS_THANKS_SAY);
+        assert!(
+            say.matches("<a>").count() == 1
+                && say.matches("</a>").count() == 1
+                && say.find("<a>") < say.find("</a>"),
+            "{language:?}: one link marked: «{say}»"
+        );
+        let thanks = LetterView {
+            letter: Letter::Thanks,
+            plan: letters::plan_in(language, Letter::Thanks, &context),
+            key: "Pause".to_owned(),
+            tick: 0,
+            language,
+            theme: lang_switcher::theme::ThemeSetting::Light,
+        };
+        let mut all = Vec::new();
+        nodes(&thanks.describe().body, &mut all);
+        let lead = settings::text_in(language, settings::IDS_THANKS_LEAD);
+        let paragraphs: Vec<_> = all
+            .iter()
+            .filter_map(|node| match node {
+                Node::Linked { role, words, id } => Some((*role, words.clone(), *id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            paragraphs,
+            vec![(
+                lang_switcher::ui::tokens::Role::Lead,
+                format!("{lead} {}", linked(&say)),
+                Id::Do(letters::Action::OpenFeedback)
+            )],
+            "{language:?}: the lead, then the sentence with its link"
+        );
+        let words = &paragraphs[0].1;
+        let run = &words[words.find(LINK_BEGIN).unwrap()..words.find(LINK_END).unwrap()];
+        assert!(run.chars().count() > 1, "{language:?}: the link has words");
+        assert!(
+            !all.iter().any(|node| matches!(node, Node::Link { .. })),
+            "{language:?}: no line of its own for the link"
+        );
     }
 }
 

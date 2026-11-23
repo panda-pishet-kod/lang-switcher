@@ -1102,3 +1102,147 @@ fn a_new_description_marks_only_what_the_mouse_is_over() {
     // SAFETY: a window of this thread.
     unsafe { SendMessageW(hwnd, WM_CLOSE, None, None) };
 }
+
+/// A paragraph with a link inside (208.217, Пс2), in a language read right to left when `rtl`.
+struct Paragraph {
+    events: Rc<RefCell<Vec<Event<Id>>>>,
+    rtl: bool,
+}
+
+impl Content for Paragraph {
+    type Id = Id;
+
+    fn describe(&self) -> Window<Id> {
+        use lang_switcher::ui::scene::linked;
+
+        let words = if self.rtl {
+            format!("أخبرنا {}", linked("<a>في المجموعة</a>."))
+        } else {
+            format!(
+                "If you liked it, {}",
+                linked("say so <a>in GitHub Issues</a>.")
+            )
+        };
+        Window {
+            kind: WindowKind::Ordinary,
+            art: None,
+            brand: None,
+            body: Node::Column(vec![Node::Linked {
+                role: Role::Lead,
+                words,
+                id: Id::Site,
+            }]),
+            buttons: vec![Node::Button {
+                id: Id::Close,
+                label: "Close".to_owned(),
+                kind: ButtonKind::Primary,
+                browser: false,
+            }],
+            disabled: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, event: Event<Id>) -> Reply {
+        self.events.borrow_mut().push(event);
+        Reply::Stay
+    }
+
+    fn title(&self) -> String {
+        "Paragraph".to_owned()
+    }
+
+    fn language(&self) -> (String, bool) {
+        if self.rtl {
+            ("ar-SA".to_owned(), true)
+        } else {
+            ("en-US".to_owned(), false)
+        }
+    }
+
+    fn theme(&self) -> ThemeSetting {
+        ThemeSetting::Light
+    }
+
+    fn least(&self) -> bool {
+        true
+    }
+}
+
+/// **208.217, AUDIT-180 Пс2: the words of the link in a paragraph are pressed like a link** — a click
+/// on them presses the paragraph's element, the cursor over them is the hand's part, Tab stops on
+/// them once; in a window read right to left too. A click on the paragraph beside them presses
+/// nothing (the control).
+#[test]
+fn a_click_on_the_words_of_a_link_in_a_paragraph_presses_it() {
+    for rtl in [false, true] {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let hwnd = host::create(
+            Paragraph {
+                events: events.clone(),
+                rtl,
+            },
+            None,
+        )
+        .expect("the window of the shell");
+        let link = rect_of(hwnd, "Site");
+        let parts = host::probe(hwnd).expect("a live host").items;
+        let (text, _, paragraph) = parts
+            .iter()
+            .find(|(part, _, _)| part.starts_with("Text"))
+            .cloned()
+            .expect("the paragraph");
+        let named: Vec<&String> = parts
+            .iter()
+            .filter(|(_, id, _)| id.as_deref() == Some("Site"))
+            .map(|(part, _, _)| part)
+            .collect();
+
+        // Beside the words: the first or the last tenth of the paragraph, away from the link.
+        let beside = lang_switcher::ui::canvas::Rect::new(
+            if link.x > paragraph.x + paragraph.w / 2.0 {
+                paragraph.x
+            } else {
+                paragraph.right() - paragraph.w / 10.0
+            },
+            link.y,
+            paragraph.w / 10.0,
+            link.h,
+        );
+        // Tab goes round the two: the link once, then the button.
+        let stops: Vec<Option<String>> = (0..3)
+            .map(|_| {
+                // SAFETY: a key to a window of this thread.
+                unsafe {
+                    SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(usize::from(VK_TAB.0))), None)
+                };
+                host::probe(hwnd).expect("a live host").focus
+            })
+            .collect();
+        click_at(hwnd, beside);
+        let pressed_beside = events.borrow().contains(&Event::Pressed(Id::Site));
+        click_at(hwnd, link);
+        let pressed = events.borrow().contains(&Event::Pressed(Id::Site));
+        println!(
+            "rtl {rtl}: {} {paragraph:?}, the link {link:?}, beside {beside:?}",
+            &text[..text.len().min(40)]
+        );
+        // SAFETY: a window of this thread.
+        let _ = unsafe { DestroyWindow(hwnd) };
+
+        assert!(
+            !named.is_empty() && named.iter().all(|part| part.as_str() == "InlineLink"),
+            "rtl {rtl}: the parts of the link: {named:?}"
+        );
+        assert!(
+            !pressed_beside,
+            "rtl {rtl}: the control — beside the words nothing is pressed"
+        );
+        assert!(pressed, "rtl {rtl}: a click on the words presses the link");
+        assert!(
+            stops.contains(&Some("Site".to_owned()))
+                && stops[0] != stops[1]
+                && stops[2] == stops[0],
+            "rtl {rtl}: Tab stops on the link once in its round: {stops:?}"
+        );
+    }
+}

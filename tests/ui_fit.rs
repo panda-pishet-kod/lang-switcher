@@ -382,6 +382,10 @@ struct Pass {
     wave: Vec<String>,
     /// The failures excused, each with its reason.
     excused: Vec<String>,
+    /// The excuses this pass leaned on: window, class, language — not stale while it does (Пс2,
+    /// 23.11: at the factor of the table a window fits, with the margin of 3 % it does not even at
+    /// 12 points; the excuse is needed by this pass and excused nothing at the table).
+    leaned_on: Vec<(String, Class, String)>,
     stand_ins: usize,
 }
 
@@ -391,7 +395,7 @@ fn pass() -> &'static Pass {
         with_product_strings();
         let names = string_names();
         let faces = faces();
-        let mut pass = Pass { table: Vec::new(), failures: Vec::new(), borders: Vec::new(), tightest: Vec::new(), steps: Vec::new(), wave: Vec::new(), excused: Vec::new(), stand_ins: 0 };
+        let mut pass = Pass { table: Vec::new(), failures: Vec::new(), borders: Vec::new(), tightest: Vec::new(), steps: Vec::new(), wave: Vec::new(), excused: Vec::new(), leaned_on: Vec::new(), stand_ins: 0 };
 
         for language in Language::ALL {
             let (windows, stand_ins) = windows_of(language);
@@ -431,7 +435,10 @@ fn pass() -> &'static Pass {
                                 );
                                 beyond.push(name);
                                 match excused(name, *class, language.tag()) {
-                                    Some(excuse) => pass.excused.push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse))),
+                                    Some(excuse) => {
+                                        pass.excused.push(format!("{line} — ИСКЛЮЧЕНИЕ: {}", excuse_line(excuse)));
+                                        pass.leaned_on.push((name.to_string(), *class, language.tag().to_owned()));
+                                    }
                                     None => pass.failures.push(line),
                                 }
                             }
@@ -580,6 +587,8 @@ fn every_window_fits_every_language_at_the_factor_of_the_table() {
     }
 
     // An excuse that excused nothing is taken away (208.175): it would hide a fault to come.
+    // An excuse the pass of the table leans on (C6, with its margin of 3 %) is not stale either.
+    matched.extend(pass().leaned_on.iter().cloned());
     let stale = excused::stale(&matched);
     for line in &stale {
         found.push(format!("an excuse no longer needed — take it away: {line}"));
@@ -929,13 +938,16 @@ fn a_button_too_wide_for_its_room_is_named_with_its_key() {
 /// ⚠ Built anew on 22.11 (208.209): the action card took the frame of a block, and in the narrow
 /// window the label of that day ran over the card with the lead or without it (60.7 points across).
 /// The same label, lead and factor reproduce the case in the large window, whose column is wider.
+/// The factor moved again on 23.11 (Пс2), see `K`.
 #[test]
 fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     const LABEL: &str = "നിർമ്മാതാവിനെ പിന്തുണയ്ക്കുക";
     // The lead and the factor of ml Narrow of that day: the translator shortened the lead and the
     // table moved since, and the case lives on these (the wave of translations, 20.11).
     const LEAD: &str = "നമസ്കാരം, ഇത് വീണ്ടും പാണ്ട. ഒരു മാസം മുമ്പ് നിങ്ങൾ Lang Switcher ഇൻസ്റ്റാൾ ചെയ്തു, ഇത് ഉപകാരപ്പെടും എന്ന് കരുതുന്നു: പ്രോഗ്രാമിന്റെ ഭാരം കുറയ്ക്കാനും നന്നായി ഓടാനും ഞാൻ ഏറെ ശ്രമിച്ചു.";
-    const K: f32 = 0.914;
+    // ⚠ 0.914 until 23.11: the link of «Спасибо» went into its lead (208.217, Пс2), the letter
+    // lost a line, and the case lives at 0.936…1.000 of the large window — the middle of it.
+    const K: f32 = 0.95;
     with_product_strings();
     let names = string_names();
     let support = settings::text_in(Language::Ml, settings::IDS_SUPPORT_OPEN);
@@ -949,7 +961,9 @@ fn a_button_is_named_even_when_taking_a_paragraph_away_also_fits() {
     window.texts_mut(&mut |role, s| {
         if matches!(role, Role::Button) && *s == support {
             *s = LABEL.to_owned();
-        } else if *s == lead {
+        // The lead and the sentence with the link after it (208.217, Пс2) — the lead of that day
+        // alone, as the case was.
+        } else if *s == lead || s.starts_with(&format!("{lead} ")) {
             *s = LEAD.to_owned();
         }
     });

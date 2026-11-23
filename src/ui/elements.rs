@@ -23,7 +23,7 @@
 
 use crate::ui::canvas::{Painter, Rect};
 use crate::ui::layout::{Part, Status};
-use crate::ui::scene::{ButtonKind, Surface};
+use crate::ui::scene::{ButtonKind, LINK_BEGIN, Surface};
 use crate::ui::text::{Align, Direction, Measure, Style, Text, Wrap};
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
 use crate::ui::tokens::{
@@ -138,6 +138,7 @@ pub fn hit_area(part: &Part, rect: Rect, state: State) -> Option<Rect> {
         | Part::Card { .. }
         | Part::Button { .. }
         | Part::Link { .. }
+        | Part::InlineLink
         | Part::Segment { .. }
         | Part::Field { .. }
         | Part::Input { .. }
@@ -157,6 +158,7 @@ fn takes_ring(part: &Part) -> bool {
             | Part::Card { .. }
             | Part::Button { .. }
             | Part::Link { .. }
+            | Part::InlineLink
             | Part::Track
             | Part::Field { .. }
             | Part::Section { .. }
@@ -207,19 +209,36 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             } else {
                 role.style().color.unwrap_or(Color::Text)
             };
-            write(
-                painter,
-                look,
-                *role,
-                None,
-                text,
-                rect,
-                *wrap,
-                *align,
-                false,
-                c(colour),
-            );
+            // A paragraph with a link (208.217): the words of the link in the colour of a link,
+            // underlined by the layout of the text; the press is the parts' over them.
+            if text.contains(LINK_BEGIN) {
+                if let Ok(laid) = look.text.lay(
+                    text,
+                    Style::of(*role, look.b, look.h),
+                    *wrap,
+                    *align,
+                    rect.w,
+                ) {
+                    painter.tint_links(&laid, c(Color::Accent));
+                    painter.text(&laid, rect.x, rect.y, c(colour));
+                }
+            } else {
+                write(
+                    painter,
+                    look,
+                    *role,
+                    None,
+                    text,
+                    rect,
+                    *wrap,
+                    *align,
+                    false,
+                    c(colour),
+                );
+            }
         }
+        // The paragraph draws the words; the part answers the press and takes the ring.
+        Part::InlineLink => {}
         Part::Button { kind, label } => button(painter, look, *kind, label, rect, state),
         Part::ButtonRule | Part::Divider => painter.fill_rect(rect, 0.0, c(Color::Line)),
         Part::Toggle { on } => {

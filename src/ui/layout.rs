@@ -203,6 +203,9 @@ pub enum Part {
         text: String,
         role: Role,
     },
+    /// Where a press counts for the link inside a paragraph (208.217, Пс2): the words of the link
+    /// on one line, over the paragraph's text, which draws them — this part draws only the ring.
+    InlineLink,
     Divider,
     /// Where a press counts for the element: the whole line of a switch or a check box.
     Hit,
@@ -353,6 +356,7 @@ impl Part {
             Part::Field { .. } => "choice field",
             Part::Section { .. } => "section",
             Part::Link { .. } => "link",
+            Part::InlineLink => "link in a paragraph",
             Part::Divider => "divider",
             Part::Hit => "hit area",
             Part::Radio { .. } => "radio button",
@@ -489,9 +493,23 @@ impl<I: Copy + PartialEq> Layout<I> {
 
     /// Where `straight`'s element `item` stands in this layout when it is mirrored (passport §7):
     /// reflected in the vertical axis of the window — or, for what lies over the picture of the
-    /// panel (T-120-25), moved with the picture and not reflected in it.
+    /// panel (T-120-25), moved with the picture and not reflected in it; for the words of a link
+    /// inside a paragraph (208.217), moved with the paragraph, whose own text is not reflected.
     pub fn reflection_of(&self, straight: &Layout<I>, item: &Placed<I>) -> Rect {
         let r = item.rect;
+        if matches!(item.part, Part::InlineLink)
+            && let Some(paragraph) = straight.items.iter().find(|placed| {
+                let p = placed.rect;
+                matches!(placed.part, Part::Text { .. })
+                    && r.x >= p.x - 0.01
+                    && r.right() <= p.right() + 0.01
+                    && r.y >= p.y - 0.01
+                    && r.bottom() <= p.bottom() + 0.01
+            })
+        {
+            let p = paragraph.rect;
+            return Rect::new(self.size.w - p.right() + (r.x - p.x), r.y, r.w, r.h);
+        }
         let picture = |layout: &Layout<I>| {
             layout
                 .items
@@ -1005,6 +1023,26 @@ impl<I: Copy> Placer<'_, I> {
                 subtitle,
             } => self.header(eyebrow.as_deref(), title, subtitle.as_deref(), x, y, w),
             Node::Text(role, text) => self.text(*role, text, x, y, w, Wrap::Words),
+            Node::Linked { role, words, id } => {
+                let h = self.text(*role, words, x, y, w, Wrap::Words);
+                let style = self.style(*role);
+                for area in self.measure.link_areas(words, style, Wrap::Words, w) {
+                    // The window is laid out straight and mirrored at the end, and the paragraph's
+                    // own text is not: a line that reads right to left stands where DirectWrite
+                    // set it once the mirror has moved the box (passport §7).
+                    let left = if self.rtl {
+                        x + w - area.x - area.w
+                    } else {
+                        x + area.x
+                    };
+                    self.push(
+                        Part::InlineLink,
+                        Rect::new(left, y + area.y, area.w, area.h),
+                        Some(*id),
+                    );
+                }
+                h
+            }
             Node::Line(role, text) => self.text(*role, text, x, y, w, Wrap::OneLine),
             Node::Button { .. } => {
                 let (bw, bh) = self.fitted_button(node, w);
@@ -1898,6 +1936,7 @@ impl<I: Copy> Placer<'_, I> {
             Node::Line(role, text) | Node::Text(role, text) => {
                 self.width_of(self.style(*role), text)
             }
+            Node::Linked { role, words, .. } => self.width_of(self.style(*role), words),
             _ => f32::MAX,
         }
     }

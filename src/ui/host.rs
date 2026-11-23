@@ -2833,7 +2833,7 @@ impl<C: Content> Handler for Host<C> {
                 let over_link = self
                     .hover
                     .and_then(|index| self.layout.as_ref()?.items.get(index))
-                    .is_some_and(|item| matches!(item.part, Part::Link { .. }));
+                    .is_some_and(|item| matches!(item.part, Part::Link { .. } | Part::InlineLink));
                 if !over_link {
                     return None;
                 }
