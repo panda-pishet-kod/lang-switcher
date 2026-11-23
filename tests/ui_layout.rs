@@ -1057,6 +1057,7 @@ fn the_mirror_reflects_the_window_descriptions_of_the_shell() {
         let window = About {
             language,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::System,
         }
         .describe();

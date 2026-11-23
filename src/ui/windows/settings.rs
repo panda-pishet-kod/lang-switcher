@@ -9,19 +9,20 @@
 
 use crate::layouts::LayoutId;
 use crate::settings::{
-    self, CaptureEvent, CaptureSession, CaptureStep, Config, ExclusionPick, ExclusionVerdict,
-    Hotkey, IDS_AUTOSTART, IDS_CAPTURE_HINT, IDS_CAPTURE_PROMPT, IDS_CAPTURE_SHIFT_AGAIN,
-    IDS_CLOSE, IDS_CYCLE_DOWN, IDS_CYCLE_HINT, IDS_CYCLE_UP, IDS_DIALOG_CAPTION, IDS_EXCLUSION_ADD,
-    IDS_EXCLUSION_ADDED, IDS_EXCLUSION_ALREADY, IDS_EXCLUSION_AUTO, IDS_EXCLUSION_HINT,
-    IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_NOT_PICKED, IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_COUNT,
-    IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE, IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS,
-    IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY, IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET,
-    IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL, IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_HINT,
-    IDS_LOG_OPEN, IDS_LOG_SAVE, IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR,
-    IDS_NEW_BADGE, IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED,
-    IDS_SOUND, IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM,
-    IDS_TRANSLATION_REPORT, IDS_TRAY_FLAG, IDS_TRAY_FLAG_HINT, IDS_UPDATES_SWITCH,
-    IDS_WRITE_TO_AUTHOR, Language, LanguageOrder, LayoutMode, LayoutRow, Modifiers, Refusal,
+    self, CaptureEvent, CaptureSession, CaptureStep, CaptureTarget, Config, ExclusionPick,
+    ExclusionVerdict, Hotkey, IDS_AUTOSTART, IDS_CAPTURE_HINT, IDS_CAPTURE_PROMPT,
+    IDS_CAPTURE_SHIFT_AGAIN, IDS_CLOSE, IDS_CYCLE_DOWN, IDS_CYCLE_HINT, IDS_CYCLE_UP,
+    IDS_DIALOG_CAPTION, IDS_EXCLUSION_ADD, IDS_EXCLUSION_ADDED, IDS_EXCLUSION_ALREADY,
+    IDS_EXCLUSION_AUTO, IDS_EXCLUSION_HINT, IDS_EXCLUSION_MANUAL, IDS_EXCLUSION_NOT_PICKED,
+    IDS_EXCLUSION_PICK, IDS_EXCLUSION_PICK_COUNT, IDS_EXCLUSION_PICK_NOTE, IDS_EXCLUSION_REMOVE,
+    IDS_GROUP_DIAGNOSTICS, IDS_GROUP_EXCLUSIONS, IDS_GROUP_GENERAL, IDS_GROUP_HOTKEY,
+    IDS_GROUP_LAYOUTS, IDS_HOTKEY_LABEL, IDS_HOTKEY_SET, IDS_HOTKEY_STOP, IDS_LANGUAGE_LABEL,
+    IDS_LOG_DIR_LABEL, IDS_LOG_ENABLED, IDS_LOG_HINT, IDS_LOG_OPEN, IDS_LOG_SAVE,
+    IDS_LOG_SAVE_FAILED, IDS_LOG_SAVED, IDS_MODE_CYCLE, IDS_MODE_PAIR, IDS_NEW_BADGE,
+    IDS_PAIR_SOURCE, IDS_PAIR_TARGET, IDS_SELECTION_ENABLED, IDS_SETTINGS_NOT_SAVED, IDS_SOUND,
+    IDS_THEME_DARK, IDS_THEME_LABEL, IDS_THEME_LIGHT, IDS_THEME_SYSTEM, IDS_TRANSLATION_REPORT,
+    IDS_TRAY_FLAG, IDS_TRAY_FLAG_HINT, IDS_UPDATES_SWITCH, IDS_WRITE_TO_AUTHOR, Language,
+    LanguageOrder, LayoutMode, LayoutRow, Modifiers, Refusal,
 };
 use crate::settings::{
     IDS_AUTOSTART_PRESENT, IDS_CYCLE_ARROW, IDS_SECTION_DIAGNOSTICS_SUB,
@@ -40,6 +41,9 @@ use crate::ui::windows::tray_menu;
 use ::windows::Win32::Foundation::HWND;
 use ::windows::Win32::UI::WindowsAndMessaging::GetMessageTime;
 use std::time::{Duration, Instant};
+
+/// `VK_RCONTROL` — the side of a tap of `Ctrl` the warning names «Правый Ctrl» (решение 208.228).
+const RIGHT_CTRL: u16 = ::windows::Win32::UI::Input::KeyboardAndMouse::VK_RCONTROL.0;
 
 /// The elements of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +78,16 @@ pub enum Id {
     Close,
     /// The address under the sections, in the panel (AUDIT-180 Н2).
     Site,
+    /// «Одна клавиша | Две клавиши» — the mode of the section «Горячая клавиша» (решение 208.228).
+    HotkeyMode,
+    /// The field of the second key, «Переключить раскладку».
+    SwitchKey,
+    /// «Задать» beside it.
+    SwitchKeySet,
+    /// «Всё равно установить» of the warning about a single `Ctrl` (В-4).
+    CtrlWarnSet,
+    /// «Выбрать другую клавишу» of the warning.
+    CtrlWarnOther,
 }
 
 /// The name of the author's site under the sections, as in «О программе» and «От автора»: the host
@@ -154,6 +168,10 @@ pub struct Settings {
     journal_until: Option<Instant>,
     /// The capture of the hotkey, while the field takes every key.
     capture: Option<Capture>,
+    /// ⭐ **A lone `Ctrl` tapped in a capture of the second key, waiting for the person's choice** —
+    /// решение 208.228, В-4: its side; the warning stands under the second field till «Всё равно
+    /// установить» or «Выбрать другую клавишу».
+    ctrl_warning: Option<u16>,
     /// The last capture took a combination or the double press: the line under the field says
     /// once which half stays with the programs (task T-93-2), till the next capture.
     combination_taken: bool,
@@ -237,6 +255,7 @@ impl Settings {
             journal: None,
             journal_until: None,
             capture: None,
+            ctrl_warning: None,
             combination_taken: false,
             pick_at: None,
             pick_note: None,
@@ -375,14 +394,63 @@ impl Settings {
     /// The field of the hotkey and «Задать» beside it; under them, one line: at rest the ways a
     /// hotkey may be, once after a capture what stays with the programs, in a capture the way out
     /// or why the press was refused (решение 82.6, task T-95-2).
+    ///
+    /// ⭐ **Решение 208.228 — one key or two.** Above the field, the segment «Одна клавиша | Две
+    /// клавиши» (the element of «Пара | Несколько раскладок», no label, as in «Раскладки»). With two
+    /// keys, two groups: «Исправить набранное:» over the first field with its line, and «Переключить
+    /// раскладку:» over the second with «Только переключает раскладку, набранное не трогает.» under
+    /// it (the mock-up, В-5). The mode set does not assign the second key and arms no capture: the
+    /// field says «Не задана» in the colour of a hint till «Задать».
     fn hotkey(&self) -> Vec<Node<Id>> {
-        let (value, set, line) = match &self.capture {
+        let two = self.config.switch_hotkey.enabled;
+        // While the warning about a single `Ctrl` waits for the choice it is the question of the
+        // section: the segment and the first group step aside, so that the warning fits the window
+        // in every language (FIT-E120).
+        let warning = two && self.ctrl_warning.is_some();
+        let mut nodes = Vec::new();
+        if !warning {
+            nodes.push(Node::Segments {
+                id: Id::HotkeyMode,
+                label: String::new(),
+                options: vec![
+                    self.line(settings::IDS_HOTKEY_MODE_ONE),
+                    self.line(settings::IDS_HOTKEY_MODE_TWO),
+                ],
+                selected: usize::from(two),
+            });
+            nodes.extend(self.key_group(CaptureTarget::Fix, two));
+        }
+        if two {
+            nodes.extend(self.key_group(CaptureTarget::Switch, two));
+        }
+        nodes
+    }
+
+    /// One field of a hotkey, «Задать» beside it and the line under them — the first key's or the
+    /// second's (решение 208.228). The capture of the one shows in its own group; the other stands
+    /// at rest.
+    fn key_group(&self, target: CaptureTarget, two: bool) -> Vec<Node<Id>> {
+        let (field, set_button) = match target {
+            CaptureTarget::Fix => (Id::Hotkey, Id::HotkeySet),
+            CaptureTarget::Switch => (Id::SwitchKey, Id::SwitchKeySet),
+        };
+        let label = match (target, two) {
+            (CaptureTarget::Fix, false) => IDS_HOTKEY_LABEL,
+            (CaptureTarget::Fix, true) => settings::IDS_HOTKEY_FIX_LABEL,
+            (CaptureTarget::Switch, _) => settings::IDS_HOTKEY_SWITCH_LABEL,
+        };
+        let capture = self
+            .capture
+            .as_ref()
+            .filter(|capture| capture.session.target() == target);
+        let (value, hint, set, line) = match capture {
             Some(capture) => (
                 if capture.pair_until.is_some() {
                     settings::pending_shift_name()
                 } else {
                     self.line(IDS_CAPTURE_PROMPT)
                 },
+                String::new(),
                 IDS_HOTKEY_STOP,
                 match capture.line {
                     CaptureLine::Hint => self.line(IDS_CAPTURE_HINT),
@@ -390,8 +458,9 @@ impl Settings {
                     CaptureLine::ShiftAgain => self.line(IDS_CAPTURE_SHIFT_AGAIN),
                 },
             ),
-            None => (
+            None if target == CaptureTarget::Fix => (
                 settings::effective_hotkey_name(&self.config.hotkey),
+                String::new(),
                 IDS_HOTKEY_SET,
                 settings::hotkey_line_in(
                     self.language,
@@ -399,22 +468,101 @@ impl Settings {
                     self.combination_taken,
                 ),
             ),
+            None => {
+                let line = settings::switch_hotkey_note(&self.config)
+                    .unwrap_or(settings::IDS_SWITCH_KEY_HINT);
+                match self.config.switch_binding() {
+                    // «Не задана» in the colour of a hint — the field is empty (the mock-up).
+                    None => (
+                        String::new(),
+                        self.line(settings::IDS_SWITCH_KEY_NONE),
+                        IDS_HOTKEY_SET,
+                        self.line(line),
+                    ),
+                    Some(_) => (
+                        settings::switch_hotkey_name_in(self.language, &self.config),
+                        String::new(),
+                        IDS_HOTKEY_SET,
+                        self.line(line),
+                    ),
+                }
+            }
         };
-        vec![
-            Node::Row(vec![
-                Node::Field {
-                    id: Id::Hotkey,
-                    label: self.line(IDS_HOTKEY_LABEL),
-                    value,
-                    hint: String::new(),
-                    kind: FieldKind::Key {
-                        capturing: self.capture.is_some(),
-                    },
+        // The warning: the `Ctrl` tapped is the candidate, shown in the colour of a hint — it is not
+        // set yet — and the warning stands in the place of the line under the field.
+        let warning = self
+            .ctrl_warning
+            .filter(|_| target == CaptureTarget::Switch && capture.is_none());
+        let (value, hint) = match warning {
+            Some(side) => (
+                String::new(),
+                self.line(if side == RIGHT_CTRL {
+                    settings::IDS_KEY_RIGHT_CTRL
+                } else {
+                    settings::IDS_KEY_LEFT_CTRL
+                }),
+            ),
+            None => (value, hint),
+        };
+        let mut nodes = vec![Node::Row(vec![
+            Node::Field {
+                id: field,
+                label: self.line(label),
+                value,
+                hint,
+                kind: FieldKind::Key {
+                    capturing: capture.is_some(),
                 },
-                button(Id::HotkeySet, self.line(set)),
-            ]),
-            Node::Text(Role::Small, line),
-        ]
+            },
+            button(set_button, self.line(set)),
+        ])];
+        nodes.push(match warning {
+            Some(_) => self.ctrl_warning_note(),
+            None => Node::Text(Role::Small, line),
+        });
+        nodes
+    }
+
+    /// ⭐ **The warning about a single `Ctrl`** — решение 208.228, В-4: what may break and what it
+    /// touches, then the person's choice — «Выбрать другую клавишу» (the capture again) or «Всё равно
+    /// установить». A note of the section, as the note of a refused write is (the shell of 1.8.0).
+    fn ctrl_warning_note(&self) -> Node<Id> {
+        Node::Surface(
+            Surface::Note,
+            Box::new(Node::Rows(vec![
+                Node::Text(Role::Strong, self.line(settings::IDS_CTRL_WARN_TITLE)),
+                Node::Text(Role::Body, self.line(settings::IDS_CTRL_WARN_TEXT)),
+                Node::Buttons(vec![
+                    button(Id::CtrlWarnOther, self.line(settings::IDS_CTRL_WARN_OTHER)),
+                    button(Id::CtrlWarnSet, self.line(settings::IDS_CTRL_WARN_SET)),
+                ]),
+            ])),
+        )
+    }
+
+    /// Arms a capture of `target` (FR-94; решение 208.228): the other hotkey in force is what the
+    /// press may not share its main key with — the second key in force for a capture of the first,
+    /// the first as it is published (its binding, or `Pause`) for a capture of the second.
+    fn arm_capture(&mut self, target: CaptureTarget) {
+        let (previous, other) = match target {
+            CaptureTarget::Fix => (self.config.hotkey.clone(), self.config.switch_binding()),
+            CaptureTarget::Switch => (
+                self.config.switch_hotkey.as_hotkey(),
+                Some(
+                    self.config
+                        .hotkey
+                        .binding()
+                        .unwrap_or((crate::hook::DEFAULT_HOTKEY_VK, 0)),
+                ),
+            ),
+        };
+        self.capture = Some(Capture {
+            session: CaptureSession::arm_for(target, previous, other),
+            line: CaptureLine::Hint,
+            pair_until: None,
+        });
+        self.combination_taken = false;
+        self.ctrl_warning = None;
     }
 
     fn layouts(&self) -> Vec<Node<Id>> {
@@ -565,7 +713,7 @@ impl Settings {
         } else {
             IDS_STATUS_AUTOSTART_OFF
         };
-        vec![
+        let mut lines = vec![
             Node::Status {
                 state,
                 words: self.line(words),
@@ -576,6 +724,18 @@ impl Settings {
                 self.line(IDS_STATUS_HOTKEY)
                     .replace("{0}", &settings::effective_hotkey_name(&self.config.hotkey)),
             ),
+        ];
+        // Решение 208.228: the second key, under the first, in the mode of two keys.
+        if self.config.two_keys() {
+            lines.push(Node::Text(
+                Role::Body,
+                self.line(settings::IDS_STATUS_SWITCH_KEY).replace(
+                    "{0}",
+                    &settings::switch_hotkey_name_in(self.language, &self.config),
+                ),
+            ));
+        }
+        lines.extend([
             Node::Text(Role::Body, self.line(autostart)),
             Node::Buttons(vec![Node::Button {
                 id: Id::Details,
@@ -583,7 +743,8 @@ impl Settings {
                 kind: ButtonKind::Quiet,
                 browser: false,
             }]),
-        ]
+        ]);
+        lines
     }
 
     /// «Исправляет: English → Русский»: the pair source → target, or the layouts of the cycle in
@@ -634,6 +795,11 @@ impl Settings {
             CaptureStep::Ignore => {}
             CaptureStep::Cancel => self.capture = None,
             CaptureStep::Take(hotkey) => self.take_hotkey(hotkey),
+            // Решение 208.228, В-4: the capture ends — the hotkeys come back — and the warning asks.
+            CaptureStep::CtrlTapped(side) => {
+                self.capture = None;
+                self.ctrl_warning = Some(side);
+            }
             step => {
                 let Some(capture) = self.capture.as_mut() else {
                     return;
@@ -663,8 +829,17 @@ impl Settings {
 
     /// A press taken (FR-94): the capture ends — its session gives the callback the hotkey it had —
     /// and only then is the new one put in force, like any other change.
+    ///
+    /// Решение 208.228: into the field it was captured for — the second key keeps the mode it has.
     fn take_hotkey(&mut self, hotkey: Hotkey) {
-        self.capture = None;
+        let target = self
+            .capture
+            .take()
+            .map_or(CaptureTarget::Fix, |capture| capture.session.target());
+        if target == CaptureTarget::Switch {
+            self.change(|config| config.switch_hotkey = config.switch_hotkey.with_key(hotkey));
+            return;
+        }
         let combination = !hotkey.modifiers.is_empty() || hotkey.is_double_tap();
         self.change(|config| config.hotkey = hotkey);
         self.combination_taken = combination && !self.refused;
@@ -861,7 +1036,14 @@ impl Content for Settings {
             Node::Header {
                 eyebrow: Some(self.line(IDS_SETTINGS_EYEBROW)),
                 title: self.line(self.section.title()),
-                subtitle: Some(self.line(self.section.subtitle())),
+                // Решение 208.228: with two keys, «Горячая клавиша» says what each one does.
+                subtitle: Some(
+                    if self.section == Section::Hotkey && self.config.switch_hotkey.enabled {
+                        self.line(settings::IDS_SECTION_HOTKEY_SUB_TWO)
+                    } else {
+                        self.line(self.section.subtitle())
+                    },
+                ),
             },
             Node::Sections {
                 id: Id::Sections,
@@ -903,18 +1085,35 @@ impl Content for Settings {
     fn event(&mut self, event: Event<Id>) -> Reply {
         // The keys of the capture, its end and the timer; anything else ends a capture first —
         // the hotkey is suspended only while the field takes the keys.
+        //
+        // Решение 208.228: either field takes the keys of its own capture; «Задать» of either arms
+        // its capture, and stops it while it is armed.
         let event = match event {
-            Event::KeyDown { id: Id::Hotkey, vk } => {
+            Event::KeyDown {
+                id: Id::Hotkey | Id::SwitchKey,
+                vk,
+            } => {
                 self.capture_step(CaptureEvent::KeyDown(vk, Modifiers::held_now()));
                 return Reply::Stay;
             }
-            Event::KeyUp { id: Id::Hotkey, vk } => {
+            Event::KeyUp {
+                id: Id::Hotkey | Id::SwitchKey,
+                vk,
+            } => {
                 self.capture_step(CaptureEvent::KeyUp(vk));
                 return Reply::Stay;
             }
-            Event::FocusLost { id: Id::Hotkey, to } => {
+            Event::FocusLost {
+                id: id @ (Id::Hotkey | Id::SwitchKey),
+                to,
+            } => {
+                let own = if id == Id::Hotkey {
+                    Id::HotkeySet
+                } else {
+                    Id::SwitchKeySet
+                };
                 self.capture_step(CaptureEvent::FocusLost {
-                    to_capture_button: to == Some(Id::HotkeySet),
+                    to_capture_button: to == Some(own),
                 });
                 return Reply::Stay;
             }
@@ -922,14 +1121,24 @@ impl Content for Settings {
                 self.timer_came();
                 return Reply::Stay;
             }
-            Event::Pressed(Id::HotkeySet) => {
-                if self.capture.take().is_none() {
-                    self.capture = Some(Capture {
-                        session: CaptureSession::arm(self.config.hotkey.clone()),
-                        line: CaptureLine::Hint,
-                        pair_until: None,
-                    });
-                    self.combination_taken = false;
+            Event::Pressed(id @ (Id::HotkeySet | Id::SwitchKeySet | Id::CtrlWarnOther)) => {
+                let target = if id == Id::HotkeySet {
+                    CaptureTarget::Fix
+                } else {
+                    CaptureTarget::Switch
+                };
+                let armed = self.capture.take().map(|capture| capture.session.target());
+                if armed != Some(target) || id == Id::CtrlWarnOther {
+                    self.arm_capture(target);
+                }
+                return Reply::Stay;
+            }
+            Event::Pressed(Id::CtrlWarnSet) => {
+                self.capture = None;
+                if let Some(side) = self.ctrl_warning.take()
+                    && let Some(tap) = self.config.switch_hotkey.ctrl_tap(side)
+                {
+                    self.change(|config| config.switch_hotkey = tap);
                 }
                 return Reply::Stay;
             }
@@ -944,6 +1153,12 @@ impl Content for Settings {
                 if let Some(section) = Section::ALL.get(index) {
                     self.section = *section;
                 }
+                self.ctrl_warning = None;
+            }
+            // Решение 208.228: the mode; the second key is kept in the file either way.
+            Event::Selected(Id::HotkeyMode, index) => {
+                self.ctrl_warning = None;
+                self.change(|config| config.switch_hotkey.enabled = index == 1);
             }
             Event::Toggled(id, on) => self.change(|config| match id {
                 Id::Autostart => config.general.autostart = on,
@@ -1301,6 +1516,22 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
         window.showing_program(sample_program(language, enabled, fail_safe));
         all.push((format!("settings Diagnostics {name}"), window.describe()));
     }
+    // Решение 208.228: «Две клавиши» — the second key not set, set (and the line of «Состояние» it
+    // adds), and the warning about a single `Ctrl`, the tallest of the section.
+    window.config.switch_hotkey.enabled = true;
+    window.section = Section::Hotkey;
+    all.push(("settings Hotkey two empty".to_owned(), window.describe()));
+    window.config.switch_hotkey.key = "ScrollLock".to_owned();
+    all.push(("settings Hotkey two".to_owned(), window.describe()));
+    window.section = Section::Diagnostics;
+    window.showing_program(sample_program(language, true, false));
+    all.push((
+        "settings Diagnostics two keys".to_owned(),
+        window.describe(),
+    ));
+    window.section = Section::Hotkey;
+    window.ctrl_warning = Some(RIGHT_CTRL);
+    all.push(("settings Hotkey ctrl warning".to_owned(), window.describe()));
     all
 }
 

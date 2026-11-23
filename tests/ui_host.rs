@@ -455,6 +455,7 @@ fn the_host_holds_the_pictures_while_the_frame_is_dragged() {
         About {
             language: Language::Ru,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::Light,
         },
         None,

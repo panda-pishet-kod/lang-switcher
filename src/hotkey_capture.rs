@@ -142,6 +142,13 @@ pub enum Refusal {
     Text,
     /// A key section 7 has no name for, so it could not be written to the file and read back.
     Nameless,
+    /// ⭐ **The key already fixes the typed text** — a capture of the second key, решение 208.228
+    /// (the moment «Конфликт» of the mock-up): the main key of the first hotkey, with any set (§5 of
+    /// the design — `Shift+Pause` beside `Pause` too), or a second double press of `Shift`.
+    TakenByFix,
+    /// **The key already switches the layout** — a capture of the first key while a second is in
+    /// force.
+    TakenBySwitch,
 }
 
 impl Refusal {
@@ -158,8 +165,22 @@ impl Refusal {
             // press instead of after it.
             Self::Text => IDS_NOTE_TEXT_KEY,
             Self::Nameless => IDS_CAPTURE_NAMELESS,
+            // Решение 208.228: what the key already does, said by the key that does it.
+            Self::TakenByFix => IDS_CAPTURE_TAKEN_FIX,
+            Self::TakenBySwitch => IDS_CAPTURE_TAKEN_SWITCH,
         }
     }
+}
+
+/// **Which hotkey a capture assigns** — решение 208.228: the first, «Исправить набранное», or the
+/// second, «Переключить раскладку». A lone `Ctrl` is the second's alone (В-4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CaptureTarget {
+    /// The first hotkey — `[hotkey]`.
+    #[default]
+    Fix,
+    /// The second hotkey — `[switch_hotkey]`.
+    Switch,
 }
 
 /// What one press during a capture amounts to.
@@ -228,6 +249,11 @@ pub enum CaptureStep {
     /// field says the invitation again, the line under it stays until the next press, and the timer
     /// is dead. The capture stays armed.
     ShiftLapsed,
+    /// ⭐ **A lone `Ctrl` was tapped in a capture of the second key** — решение 208.228, В-4: the
+    /// value is the side, `VK_LCONTROL` or `VK_RCONTROL`. Not taken: the window ends the capture and
+    /// shows the warning — «Всё равно установить» takes it, «Выбрать другую клавишу» arms the
+    /// capture again.
+    CtrlTapped(u16),
 }
 
 /// **The double press of `Shift` as a capture waits for it** — task T-95-2, вопрос 159, the moments
@@ -330,6 +356,12 @@ impl CapturePair {
     /// and the timer of the pair runs.
     pub fn open(&self) -> bool {
         self.taps.pressing() || self.taps.waiting()
+    }
+
+    /// Something else was pressed — the `Ctrl` of a capture of the second key (решение 208.228):
+    /// the pair is broken, as by any key.
+    pub fn interrupt(&mut self) {
+        self.taps.interrupt();
     }
 }
 
@@ -601,15 +633,35 @@ pub struct CaptureSession {
     /// message of being taken, and putting it back at the end of a capture wrote a value older
     /// than the one the program already had. What the flag must equal after a capture is
     /// `tray.enabled()`, and that is published by the procedure itself.
-    published: (u16, u16),
+    ///
+    /// ⭐ Решение 208.228: **both hotkeys** — the one word holds both, and a capture of either
+    /// suspends both (§3 of the design: «пока взведён любой захват, сняты обе»).
+    published: ((u16, u16), (u16, u16)),
+    /// Which hotkey this capture assigns (решение 208.228).
+    target: CaptureTarget,
+    /// The other hotkey in force — its code and set — which the press must not share its main key
+    /// with ([`crate::settings::same_main_key`]); `None` — there is no other.
+    other: Option<(u16, u16)>,
+    /// The `Ctrl` down in a capture of the second key — its side, zero for none (В-4).
+    ctrl_side: u16,
+    /// The tap of that `Ctrl`, by the hook's own rule of times ([`crate::hook::Taps::single`]).
+    ctrl_taps: crate::hook::Taps,
 }
 
 impl CaptureSession {
-    /// Arms a capture and suspends the hotkey for its duration.
+    /// Arms a capture **of the first hotkey** with no second beside it, and suspends the hotkey for
+    /// its duration — [`Self::arm_for`] with [`CaptureTarget::Fix`].
     pub fn arm(previous: Hotkey) -> Self {
-        let published = crate::hook::hotkey();
+        Self::arm_for(CaptureTarget::Fix, previous, None)
+    }
 
-        crate::hook::set_hotkey(NO_HOTKEY_VK, 0);
+    /// Arms a capture of `target` — решение 208.228 — and suspends **both** hotkeys for its
+    /// duration. `previous` is what stood in its field; `other` is the other hotkey in force, whose
+    /// main key a press may not take ([`Refusal::TakenByFix`], [`Refusal::TakenBySwitch`]).
+    pub fn arm_for(target: CaptureTarget, previous: Hotkey, other: Option<(u16, u16)>) -> Self {
+        let published = crate::hook::hotkeys();
+
+        crate::hook::set_hotkeys((NO_HOTKEY_VK, 0), (NO_HOTKEY_VK, 0));
 
         // ⚠ Task T-36-6 left this call exactly where it was and took away only the belief about
         // it: the flag is cleared, and `app::window_proc` publishes `tray.enabled()` back over it
@@ -621,6 +673,10 @@ impl CaptureSession {
             previous,
             pair: CapturePair::default(),
             published,
+            target,
+            other,
+            ctrl_side: 0,
+            ctrl_taps: crate::hook::Taps::NONE,
         }
     }
 
@@ -629,10 +685,100 @@ impl CaptureSession {
         &self.previous
     }
 
+    /// Which hotkey this capture assigns.
+    pub fn target(&self) -> CaptureTarget {
+        self.target
+    }
+
     /// One event of this capture, decided with the memory of its pair — [`CapturePair::step`],
     /// task T-95-2.
+    ///
+    /// ⭐ Решение 208.228: a capture of the second key takes a tap of a lone `Ctrl` first
+    /// ([`Self::ctrl_step`]), and a press taken by either capture whose main key the other hotkey
+    /// holds is refused, the capture staying armed.
     pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
-        self.pair.step(event, time)
+        if self.target == CaptureTarget::Switch
+            && let Some(step) = self.ctrl_step(event, time)
+        {
+            return step;
+        }
+
+        match self.pair.step(event, time) {
+            CaptureStep::Take(hotkey) => match (hotkey.binding(), self.other) {
+                (Some(taken), Some(other)) if crate::settings::same_main_key(taken, other) => {
+                    CaptureStep::Refuse(match self.target {
+                        CaptureTarget::Fix => Refusal::TakenBySwitch,
+                        CaptureTarget::Switch => Refusal::TakenByFix,
+                    })
+                }
+                _ => CaptureStep::Take(hotkey),
+            },
+            step => step,
+        }
+    }
+
+    /// **A lone `Ctrl` in a capture of the second key** — решение 208.228, В-4. `None` — the event is
+    /// not this rule's, and the pair decides it.
+    ///
+    /// * a `Ctrl` goes down with no `Alt`, `Shift` or `Win` held — a tap may begin, the line under
+    ///   the field does not change; with any of them — the refusal of a modifier on its own, as in a
+    ///   capture of the first key;
+    /// * the `Ctrl` comes up within `hook::DOUBLE_TAP_MS`, no key down in between —
+    ///   [`CaptureStep::CtrlTapped`] with its side; held longer — nothing, the capture waits on;
+    /// * a key pressed while it is down ends the tap, and the key is decided as ever — `Ctrl + F12`
+    ///   is a combination.
+    ///
+    /// The side is the one the queue holds down: the window messages carry the neutral `VK_CONTROL`
+    /// ([`sided_ctrl`]).
+    fn ctrl_step(&mut self, event: CaptureEvent, time: u32) -> Option<CaptureStep> {
+        match event {
+            CaptureEvent::KeyDown(vk, modifiers) if CTRL_KEYS.contains(&vk) => {
+                let side = sided_ctrl(vk);
+
+                if self.ctrl_side == side {
+                    // The auto-repeat of the `Ctrl` already down.
+                    return Some(CaptureStep::Ignore);
+                }
+
+                let clean =
+                    self.ctrl_side == 0 && !modifiers.alt && !modifiers.shift && !modifiers.win;
+
+                self.ctrl_side = side;
+                self.pair.interrupt();
+                self.ctrl_taps.press(time, clean);
+
+                Some(if clean {
+                    CaptureStep::Ignore
+                } else {
+                    CaptureStep::Refuse(Refusal::Modifier)
+                })
+            }
+
+            CaptureEvent::KeyUp(vk) if CTRL_KEYS.contains(&vk) => {
+                let side = std::mem::take(&mut self.ctrl_side);
+
+                if side == 0 {
+                    // The release of a `Ctrl` this capture never saw go down.
+                    return Some(CaptureStep::Ignore);
+                }
+
+                // A `Ctrl` held too long is no tap and no key either: the capture waits on, its
+                // line unchanged — the refusal of a modifier says «Ctrl — только вместе с
+                // клавишей», which a capture of the second key does not mean.
+                Some(if self.ctrl_taps.single(time, true) {
+                    CaptureStep::CtrlTapped(side)
+                } else {
+                    CaptureStep::Ignore
+                })
+            }
+
+            CaptureEvent::KeyDown(..) => {
+                self.ctrl_taps.interrupt();
+                None
+            }
+
+            _ => None,
+        }
     }
 
     /// Whether this capture has a pair open — the field says «Shift…» and the timer of the pair
@@ -642,9 +788,32 @@ impl CaptureSession {
     }
 
     /// The hotkey the callback will be given back when this capture ends — the code and its
-    /// modifier set.
+    /// modifier set of the first key.
     pub fn published(&self) -> (u16, u16) {
+        self.published.0
+    }
+
+    /// Both hotkeys the callback will be given back when this capture ends (решение 208.228).
+    pub fn published_both(&self) -> ((u16, u16), (u16, u16)) {
         self.published
+    }
+}
+
+/// The three codes of `Ctrl` — the neutral one the queue reports and the two sides.
+const CTRL_KEYS: [u16; 3] = [VK_CONTROL.0, VK_LCONTROL.0, VK_RCONTROL.0];
+
+/// **The side of a `Ctrl` that went down** — решение 208.228, В-4: the window messages carry the
+/// neutral `VK_CONTROL`, and the queue holds the sides — the right one when it alone is down, the
+/// left otherwise. A sided code is its own side.
+pub fn sided_ctrl(vk: u16) -> u16 {
+    if vk != VK_CONTROL.0 {
+        return vk;
+    }
+
+    if key_is_down(VK_RCONTROL) && !key_is_down(VK_LCONTROL) {
+        VK_RCONTROL.0
+    } else {
+        VK_LCONTROL.0
     }
 }
 
@@ -657,8 +826,9 @@ impl Drop for CaptureSession {
     /// sees, and writing back a copy taken at arming would put a staler value than the one the
     /// program already has.
     fn drop(&mut self) {
-        let (vk, modifiers) = self.published;
+        // Решение 208.228: both keys, in the one store.
+        let (fix, switch) = self.published;
 
-        crate::hook::set_hotkey(vk, modifiers);
+        crate::hook::set_hotkeys(fix, switch);
     }
 }
