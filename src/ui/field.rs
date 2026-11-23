@@ -5,7 +5,8 @@
 //!
 //! * **No frame of its own,** placed inside the wrapper at the paddings of the table: a line field
 //!   centred on the wrapper's height, a text field filling it, its scroll bar the system's (in the
-//!   dark theme it stays light — the accepted price, T-120-18 п. 6).
+//!   dark theme it stays light — the accepted price, T-120-18 п. 6) and shown only while the text
+//!   does not fit (AUDIT-180b Н2, решение 208.227).
 //! * **Colours from the table** through `WM_CTLCOLOREDIT` (the window answers it with
 //!   [`colours_of`], before its host is borrowed: AUDIT-180b п. 7); the font is the role `body`'s face and size, made for the scale now; a field of code is set in the
 //!   monospace face of the role `code` (T-120-19) — or wholly in the font of `body`, while its text
@@ -29,7 +30,10 @@ use ::windows::Win32::Graphics::Gdi::{
     GetTextMetricsW, HBRUSH, HDC, HFONT, HGDIOBJ, InvalidateRect, OUT_DEFAULT_PRECIS, ReleaseDC,
     SelectObject, SetBkColor, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
 };
-use ::windows::Win32::UI::Controls::EM_SETMARGINS;
+use ::windows::Win32::UI::Controls::{
+    EM_GETFIRSTVISIBLELINE, EM_GETLINECOUNT, EM_GETRECT, EM_REPLACESEL, EM_SETMARGINS,
+    ShowScrollBar,
+};
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetFocus, SetFocus, VK_ESCAPE, VK_RETURN, VK_TAB,
 };
@@ -46,6 +50,9 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     ES_READONLY, PostMessageW, WM_APP, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS,
     WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    GWL_STYLE, SB_VERT, WM_IME_ENDCOMPOSITION, WM_SIZE,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     GetPropW, IsWindowVisible, RemovePropW, SW_HIDE, SW_SHOWNOACTIVATE, SetPropW, ShowWindow,
@@ -120,6 +127,8 @@ struct Data {
     rtl: bool,
     /// A field of a key: whether it captures now.
     capture: Cell<Option<bool>>,
+    /// A text field is asking whether its text fits — the bar it shows or hides sizes it again.
+    fitting: Cell<bool>,
 }
 
 struct Item<I> {
@@ -622,6 +631,7 @@ fn make<I: Copy>(parent: HWND, spec: &Spec<'_, I>, look: &Look, brush: HBRUSH) -
         multiline: spec.multiline,
         rtl: spec.rtl,
         capture: Cell::new(spec.capture),
+        fitting: Cell::new(false),
     });
     // SAFETY: the procedure below and the box kept in the item until `destroy` removes the
     // procedure first.
@@ -734,8 +744,44 @@ fn paint_hint(hwnd: HWND, data: &Data) {
     }
 }
 
+/// Whether the text of the text field `hwnd` goes beyond its height — then, and only then, it shows
+/// its scroll bar (AUDIT-180b Н2, решение 208.227: the bar of Windows was always there, light in the
+/// dark theme, in an empty field too). Shown, the bar narrows the field and the text can only take
+/// more lines, so the answer does not swing.
+fn fit_scroll_bar(hwnd: HWND, data: &Data) {
+    if !data.multiline || data.fitting.replace(true) {
+        return;
+    }
+    let lines = i32::try_from(tell(hwnd, EM_GETLINECOUNT, 0, 0)).unwrap_or(i32::MAX);
+    let first = tell(hwnd, EM_GETFIRSTVISIBLELINE, 0, 0);
+    let mut rect = RECT::default();
+    // SAFETY: a field of this thread fills the local rectangle (FR-72: the timeout form); the call
+    // returns before the local goes.
+    let _ = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            EM_GETRECT,
+            WPARAM(0),
+            LPARAM((&raw mut rect) as isize),
+            SMTO_ABORTIFHUNG,
+            FIELD_TIMEOUT_MS,
+            None,
+        )
+    };
+    let font = HFONT(tell(hwnd, WM_GETFONT, 0, 0) as *mut _);
+    let needs = first > 0 || lines.saturating_mul(line_of(font)) > rect.bottom - rect.top;
+    // SAFETY: a window of this thread.
+    let shown = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } & WS_VSCROLL.0 as isize != 0;
+    if needs != shown {
+        // SAFETY: as above.
+        let _ = unsafe { ShowScrollBar(hwnd, SB_VERT, needs) };
+    }
+    data.fitting.set(false);
+}
+
 /// The shell's procedure in every field: the keys of the window go to the window, the hint is
-/// drawn, an emptied or filled field is drawn again.
+/// drawn, an emptied or filled field is drawn again, a text field shows its scroll bar only while
+/// its text does not fit.
 unsafe extern "system" fn procedure(
     hwnd: HWND,
     message: u32,
@@ -806,6 +852,14 @@ unsafe extern "system" fn procedure(
     if watched && before != is_empty(hwnd) {
         // SAFETY: a window of this thread; drawn again with or without the hint.
         let _ = unsafe { InvalidateRect(Some(hwnd), None, true) };
+    }
+    if watched
+        || matches!(
+            message,
+            WM_SIZE | WM_SETFONT | EM_REPLACESEL | WM_IME_ENDCOMPOSITION
+        )
+    {
+        fit_scroll_bar(hwnd, data);
     }
     answer
 }

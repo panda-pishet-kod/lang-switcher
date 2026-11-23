@@ -875,3 +875,58 @@ fn a_field_gets_its_colours_while_the_window_is_busy() {
         "the brush the field paints its background with"
     );
 }
+
+/// Whether `field` has its vertical scroll bar now, and the range and page Windows keeps for it.
+fn scroll_bar_of(field: HWND) -> (bool, i32, u32) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetScrollInfo, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_RANGE, WS_VSCROLL,
+    };
+    // SAFETY: a window of this thread; the out parameter is a local of its declared size.
+    unsafe {
+        let shown = GetWindowLongPtrW(field, GWL_STYLE) & WS_VSCROLL.0 as isize != 0;
+        let mut info = SCROLLINFO {
+            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+            fMask: SIF_RANGE | SIF_PAGE,
+            ..Default::default()
+        };
+        let _ = GetScrollInfo(field, SB_VERT, &mut info);
+        (shown, info.nMax, info.nPage)
+    }
+}
+
+/// **AUDIT-180b Н2 (решение 208.227)** — a text field shows the scroll bar of Windows only while its
+/// text does not fit: none in an empty field or with a line typed, there with more lines than its
+/// height holds — and working, its range beyond the page —, gone again when the text is cleared.
+/// Red before: the bar of every text field was always there, light in the dark theme.
+#[test]
+fn a_text_field_shows_its_scroll_bar_only_while_its_text_does_not_fit() {
+    use windows::Win32::UI::WindowsAndMessaging::WM_CHAR;
+
+    let open = Open::with(3, false, ("ru-RU", false), ThemeSetting::Dark);
+    let note = open.field(Id::Note);
+    assert!(!scroll_bar_of(note).0, "an empty field has a scroll bar");
+
+    send(note, WM_CHAR, usize::from(b'a'), 0);
+    assert!(
+        !scroll_bar_of(note).0,
+        "a field with one letter has a scroll bar"
+    );
+
+    let long: String = (1..=60).map(|line| format!("line {line}\r\n")).collect();
+    // SAFETY: a field of this thread; the string lives across the call.
+    let _ = unsafe { SetWindowTextW(note, &HSTRING::from(long.as_str())) };
+    let (shown, range, page) = scroll_bar_of(note);
+    assert!(shown, "sixty lines and no scroll bar");
+    assert!(
+        range >= page as i32,
+        "the bar does not scroll: range {range}, page {page}"
+    );
+
+    // SAFETY: as above.
+    let _ = unsafe { SetWindowTextW(note, &HSTRING::from("")) };
+    assert!(
+        !scroll_bar_of(note).0,
+        "the bar stays after the text is cleared"
+    );
+    send(open.hwnd, WM_CLOSE, 0, 0);
+}
