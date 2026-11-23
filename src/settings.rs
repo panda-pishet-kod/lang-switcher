@@ -1719,6 +1719,11 @@ pub const IDS_AUTHOR_TITLE: u16 = 3321;
 /// `<a>` and `</a>` (`ui::scene::linked`) — the group or GitHub Issues,
 /// `letters::links::feedback_url` of the language.
 pub const IDS_THANKS_SAY: u16 = 3322;
+/// «Письма от автора» — the title of «Последние письма» under its eyebrow, which is the caption
+/// [`IDS_LETTERS_CAPTION`] (AUDIT-180b Н4, решение 208.227: the head of the mock-up).
+pub const IDS_LETTERS_TITLE: u16 = 3323;
+/// The subtitle of «Последние письма»: what the list holds (AUDIT-180b Н4, решение 208.227).
+pub const IDS_LETTERS_SUB: u16 = 3324;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2390,7 +2395,11 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// ⚠ The knock of «Спасибо» names its second button with the letter's own [`IDS_THANKS_SNOOZE`]
 /// (решение 208.112 п. 1: the knock and the letter name their buttons alike) — the 3341 of Z13
 /// left before any release, a hole.
-pub const INTERFACE_STRINGS: [u16; 282] = [
+///
+/// ⚠ **Two hundred and eighty-four since AUDIT-180b Н4** (решение 208.227) — the head of «Последние
+/// письма» as the mock-up has it: [`IDS_LETTERS_TITLE`] (3323) and [`IDS_LETTERS_SUB`] (3324).
+/// 282 + 2.
+pub const INTERFACE_STRINGS: [u16; 284] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2534,6 +2543,8 @@ pub const INTERFACE_STRINGS: [u16; 282] = [
     IDS_FEEDBACK_TEXT,
     IDS_WRITE_TO_AUTHOR,
     IDS_LETTERS_CAPTION,
+    IDS_LETTERS_TITLE,
+    IDS_LETTERS_SUB,
     IDS_LETTERS_FOOT,
     IDS_LETTERS_OPEN,
     IDS_NEWS_READ_BUTTON,

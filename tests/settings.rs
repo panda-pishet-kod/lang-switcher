@@ -6576,7 +6576,10 @@ impl Drop for ProductImage {
 ///
 /// ⚠ **282 since the merge of the fixes of AUDIT-180** — Z11, made beside them: the text of the
 /// hint of the flag on Windows 10 (3340).
-const FR_94_STRINGS: [(u16, &str, &str); 282] = [
+///
+/// ⚠ **284 since AUDIT-180b Н4** — the title and the subtitle of «Последние письма» (3323, 3324,
+/// 208.227).
+const FR_94_STRINGS: [(u16, &str, &str); 284] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7169,6 +7172,17 @@ const FR_94_STRINGS: [(u16, &str, &str); 282] = [
         settings::IDS_LETTERS_CAPTION,
         "Последние письма",
         "Recent letters",
+    ),
+    // AUDIT-180b Н4 (решение 208.227): the head of «Последние письма» as the mock-up has it.
+    (
+        settings::IDS_LETTERS_TITLE,
+        "Письма от автора",
+        "Letters from the author",
+    ),
+    (
+        settings::IDS_LETTERS_SUB,
+        "Три последние новости и письмо об обновлении, если оно есть",
+        "The three latest news items and the update letter, if there is one",
     ),
     (
         settings::IDS_LETTERS_FOOT,
@@ -12254,8 +12268,10 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        282,
-        "two hundred and EIGHTY-TWO identifiers in use since the merge of the fixes of AUDIT-180: Z11, \
+        284,
+        "two hundred and EIGHTY-FOUR identifiers in use since AUDIT-180b Н4: the title and the \
+         subtitle of «Последние письма» (3323, 3324). Two hundred and eighty-two since the merge \
+         of the fixes of AUDIT-180: Z11, \
          made beside them, the text of the hint of the flag on Windows 10 (3340); the knock of \
          «Спасибо» names its second button with the letter's own string (решение 208.112). Two \
          hundred and eighty-one since AUDIT-180 Z4 (А1) and again since Пс2 (3242 left, 3322 came): the title of «От \

@@ -169,6 +169,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "พบข้อผิดพลาดหรือมีไอเดียหรือไม่ ตัวช่วยจะเรียบเรียงเรื่องที่จะส่งให้ และส่งถึงผู้พัฒนาก็ต่อเมื่อคุณกด “ส่ง”"
     IDS_WRITE_TO_AUTHOR     "เขียนถึงผู้พัฒนา…"
     IDS_LETTERS_CAPTION     "จดหมายล่าสุด"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "เก็บข่าวล่าสุดสามรายการ เมื่อมีรายการที่สี่เข้ามา รายการเก่าสุดจะถูกลบ แม้ยังไม่ได้อ่าน"
     IDS_LETTERS_OPEN        "เปิดจดหมาย"
     IDS_NEWS_READ_BUTTON    "อ่านแล้ว"

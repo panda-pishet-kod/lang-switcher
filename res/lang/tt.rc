@@ -169,6 +169,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Хата таптыгызмы яки идеягез бармы? Мастер мөрәҗәгатьне туплап, «Җибәрү» төймәсенә баскач кына авторга җибәрә."
     IDS_WRITE_TO_AUTHOR     "Авторга язу…"
     IDS_LETTERS_CAPTION     "Соңгы хатлар"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Соңгы өч яңалык саклана. Дүртенчесе килгәч, иң искесе, укылган яки укылмаганына карамастан, китә."
     IDS_LETTERS_OPEN        "Хатны ачу"
     IDS_NEWS_READ_BUTTON    "Укылды"

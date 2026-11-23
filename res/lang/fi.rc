@@ -174,6 +174,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Löysitkö virheen tai onko sinulla idea? Ohjattu toiminto kokoaa yhteydenoton ja lähettää sen tekijälle vasta, kun painat painiketta ”Lähetä”."
     IDS_WRITE_TO_AUTHOR     "Kirjoita tekijälle…"
     IDS_LETTERS_CAPTION     "Uusimmat kirjeet"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Kolme uusinta uutista säilytetään. Kun neljäs saapuu, vanhin poistuu, luettu tai ei."
     IDS_LETTERS_OPEN        "Avaa kirje"
     IDS_NEWS_READ_BUTTON    "Luettu"

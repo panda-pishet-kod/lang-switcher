@@ -170,6 +170,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "ਕੋਈ ਗਲਤੀ ਮਿਲੀ ਜਾਂ ਕੋਈ ਵਿਚਾਰ ਹੈ? ਵਿਜ਼ਰਡ ਸੁਨੇਹਾ ਤਿਆਰ ਕਰ ਦਿੰਦਾ ਹੈ ਅਤੇ “ਭੇਜੋ” ਦਬਾਉਣ ਤੇ ਹੀ ਇਸਨੂੰ ਲੇਖਕ ਨੂੰ ਭੇਜਦਾ ਹੈ।"
     IDS_WRITE_TO_AUTHOR     "ਲੇਖਕ ਨੂੰ ਲਿਖੋ…"
     IDS_LETTERS_CAPTION     "ਹਾਲੀਆ ਚਿੱਠੀਆਂ"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "ਤਿੰਨ ਤਾਜ਼ਾ ਖ਼ਬਰਾਂ ਸੰਭਾਲੀਆਂ ਜਾਂਦੀਆਂ ਹਨ। ਚੌਥੀ ਆਉਣ ਤੇ ਸਭ ਤੋਂ ਪੁਰਾਣੀ ਹਟ ਜਾਂਦੀ ਹੈ, ਭਾਵੇਂ ਪੜ੍ਹੀ ਹੋਵੇ ਜਾਂ ਨਾ।"
     IDS_LETTERS_OPEN        "ਚਿੱਠੀ ਖੋਲ੍ਹੋ"
     IDS_NEWS_READ_BUTTON    "ਪੜ੍ਹੀ ਗਈ"

@@ -168,6 +168,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Našli ste chybu alebo máte nápad? Sprievodca zostaví správu a odošle ju autorovi, až keď stlačíte „Odoslať“."
     IDS_WRITE_TO_AUTHOR     "Napísať autorovi…"
     IDS_LETTERS_CAPTION     "Posledné listy"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Uchovávajú sa tri posledné novinky. Keď príde štvrtá, najstaršia zmizne, prečítaná či nie."
     IDS_LETTERS_OPEN        "Otvoriť list"
     IDS_NEWS_READ_BUTTON    "Prečítané"

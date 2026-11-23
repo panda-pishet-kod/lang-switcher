@@ -371,6 +371,9 @@ END
 #define IDS_AUTHOR_TITLE        3321
 // AUDIT-180, Пс2 (decision 208.217): the sentence that carries the link of «Спасибо» in its lead.
 #define IDS_THANKS_SAY          3322
+// AUDIT-180b, Н4 (decision 208.227): the title and the subtitle of «Последние письма», as the mock-up.
+#define IDS_LETTERS_TITLE       3323
+#define IDS_LETTERS_SUB         3324
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291

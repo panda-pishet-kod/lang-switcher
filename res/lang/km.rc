@@ -170,6 +170,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "រកឃើញកំហុស ឬមានគំនិត? អ្នកជំនួយប្រមូលសារ ហើយផ្ញើទៅអ្នកបង្កើតតែនៅពេលអ្នកចុច «ផ្ញើ»។"
     IDS_WRITE_TO_AUTHOR     "សរសេរទៅអ្នកបង្កើត…"
     IDS_LETTERS_CAPTION     "សំបុត្រថ្មីៗ"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "ព័ត៌មានថ្មីបីចុងក្រោយត្រូវបានរក្សាទុក។ នៅពេលមានទីបួនមកដល់ ចាស់បំផុតនឹងចេញ ទោះបីបានអានឬមិនទាន់អាន។"
     IDS_LETTERS_OPEN        "បើកសំបុត្រ"
     IDS_NEWS_READ_BUTTON    "បានអាន"

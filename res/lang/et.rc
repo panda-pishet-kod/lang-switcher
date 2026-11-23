@@ -175,6 +175,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Leidsite vea või on teil idee? Viisard koostab pöördumise ja saadab selle autorile alles siis, kui vajutate nuppu „Saada“."
     IDS_WRITE_TO_AUTHOR     "Kirjuta autorile…"
     IDS_LETTERS_CAPTION     "Viimased kirjad"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Säilitatakse kolm viimast uudist. Kui saabub neljas, kaob vanim, loetud või mitte."
     IDS_LETTERS_OPEN        "Ava kiri"
     IDS_NEWS_READ_BUTTON    "Loetud"

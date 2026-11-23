@@ -168,6 +168,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Phát hiện lỗi hoặc có ý tưởng? Trình hướng dẫn sẽ soạn tin nhắn và chỉ gửi cho tác giả khi bạn nhấn “Gửi”."
     IDS_WRITE_TO_AUTHOR     "Viết cho tác giả…"
     IDS_LETTERS_CAPTION     "Thư gần đây"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Ba tin mới nhất được giữ lại. Khi có tin thứ tư, tin cũ nhất sẽ bị xóa, dù đã đọc hay chưa."
     IDS_LETTERS_OPEN        "Mở thư"
     IDS_NEWS_READ_BUTTON    "Đã đọc"

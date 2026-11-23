@@ -168,6 +168,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Atradāt kļūdu vai jums ir ideja? Vednis sagatavos ziņojumu un nosūtīs to autoram tikai tad, kad nospiedīsiet «Sūtīt»."
     IDS_WRITE_TO_AUTHOR     "Rakstīt autoram…"
     IDS_LETTERS_CAPTION     "Pēdējās vēstules"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Tiek glabātas trīs pēdējās ziņas. Kad pienāk ceturtā, vecākā tiek dzēsta, pat ja nav izlasīta."
     IDS_LETTERS_OPEN        "Atvērt vēstuli"
     IDS_NEWS_READ_BUTTON    "Izlasīts"

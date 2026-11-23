@@ -169,6 +169,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "ພົບຂໍ້ຜິດພາດ ຫຼືມີໄອເດຍບໍ? ຕົວຊ່ວຍຈະຮຽບຮຽງເລື່ອງທີ່ຈະສົ່ງໃຫ້ ແລະສົ່ງຫາຜູ້ພັດທະນາກໍຕໍ່ເມື່ອທ່ານກົດ “ສົ່ງ”"
     IDS_WRITE_TO_AUTHOR     "ຂຽນຫາຜູ້ພັດທະນາ…"
     IDS_LETTERS_CAPTION     "ຈົດໝາຍຫຼ້າສຸດ"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "ເກັບຂ່າວຫຼ້າສຸດສາມລາຍການ ເມື່ອມີລາຍການທີສີ່ເຂົ້າມາ ລາຍການເກົ່າສຸດຈະຖືກລຶບ ເຖິງແມ່ນຍັງບໍ່ໄດ້ອ່ານ"
     IDS_LETTERS_OPEN        "ເປີດຈົດໝາຍ"
     IDS_NEWS_READ_BUTTON    "ອ່ານແລ້ວ"

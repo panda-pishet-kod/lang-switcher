@@ -170,6 +170,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Een fout gevonden of een idee? De wizard stelt een bericht samen en stuurt het pas naar de auteur als je op “Verzenden” drukt."
     IDS_WRITE_TO_AUTHOR     "Bericht aan de auteur…"
     IDS_LETTERS_CAPTION     "Recente brieven"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "De drie laatste nieuwsberichten worden bewaard. Komt er een vierde, dan verdwijnt het oudste, gelezen of niet."
     IDS_LETTERS_OPEN        "Brief openen"
     IDS_NEWS_READ_BUTTON    "Gelezen"

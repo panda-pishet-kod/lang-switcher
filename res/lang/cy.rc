@@ -170,6 +170,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "Wedi dod o hyd i wall, neu oes gennych syniad?Mae'r dewin yn llunio neges ac yn ei hanfon at yr awdur dim ond pan wasgwch “Anfon”."
     IDS_WRITE_TO_AUTHOR     "Ysgrifennu at yr awdur…"
     IDS_LETTERS_CAPTION     "Llythyrau diweddar"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "Cedwir y tri darn diweddaraf o newyddion. Pan ddaw pedwerydd, mae'r hynaf yn mynd, wedi'i ddarllen neu beidio."
     IDS_LETTERS_OPEN        "Agor y llythyr"
     IDS_NEWS_READ_BUTTON    "Darllenwyd"

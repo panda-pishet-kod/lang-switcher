@@ -28,10 +28,10 @@ use crate::ui::tokens::{
     BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
     CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
     FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
-    LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
-    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, ROW_GROUP_PAD,
-    ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
-    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
+    LETTER_CARD_PAD, LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD,
+    NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE,
+    ROW_GROUP_PAD, ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART,
+    TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WINDOW_SHARE,
     WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{
@@ -1820,7 +1820,9 @@ impl<I: Copy> Placer<'_, I> {
         y: f32,
         w: f32,
     ) -> f32 {
-        let (pad_v, pad_h) = (self.em(NESTED_PAD.v), self.em(NESTED_PAD.h));
+        // Tighter than a nested card (208.136 п. 2): the list must hold the letter of the update and
+        // three news items under its head at the least window.
+        let (pad_v, pad_h) = (self.em(LETTER_CARD_PAD.v), self.em(LETTER_CARD_PAD.h));
         let card = self.push(
             Part::Surface(Surface::Nested),
             Rect::new(x, y, w, 0.0),

@@ -5,8 +5,8 @@
 
 use crate::letters::{self, Entry, Letter};
 use crate::settings::{
-    self, IDS_CLOSE, IDS_LETTERS_CAPTION, IDS_LETTERS_FOOT, IDS_LETTERS_OPEN, IDS_NEWS_READ_BUTTON,
-    Language,
+    self, IDS_CLOSE, IDS_LETTERS_CAPTION, IDS_LETTERS_FOOT, IDS_LETTERS_OPEN, IDS_LETTERS_SUB,
+    IDS_LETTERS_TITLE, IDS_NEWS_READ_BUTTON, Language,
 };
 use crate::theme::ThemeSetting;
 use crate::ui::host::{Content, Reply};
@@ -86,17 +86,23 @@ impl Content for LettersList {
     type Id = Id;
 
     fn describe(&self) -> Window<Id> {
+        // The head of the mock-up (AUDIT-180b Н4, решение 208.227): the caption of the window as its
+        // eyebrow, as «От автора» has it, then whose letters they are and what the list holds.
         let mut body = vec![Node::Header {
-            eyebrow: None,
-            title: self.line(IDS_LETTERS_CAPTION),
-            subtitle: None,
+            eyebrow: Some(self.line(IDS_LETTERS_CAPTION)),
+            title: self.line(IDS_LETTERS_TITLE),
+            subtitle: Some(self.line(IDS_LETTERS_SUB)),
         }];
-        body.extend(
-            self.entries
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| self.card(index, entry)),
-        );
+        // The cards half a block apart, as the mock-up of 208.136 п. 2 has them (`.lcards`: `.5em`).
+        if !self.entries.is_empty() {
+            body.push(Node::Rows(
+                self.entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| self.card(index, entry))
+                    .collect(),
+            ));
+        }
         body.push(Node::Text(Role::Small, self.line(IDS_LETTERS_FOOT)));
         Window {
             kind: WindowKind::Ordinary,

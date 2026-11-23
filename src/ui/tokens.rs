@@ -686,6 +686,9 @@ pub const BLOCK_PAD: Pad = Pad::em(0.8, 1.0);
 pub const BLOCK_ROW_GAP: Em = Em(0.5);
 /// Вложенная карточка — поля.
 pub const NESTED_PAD: Pad = Pad::em(0.8, 0.95);
+/// ◆ Карточка письма в «Последних письмах» — поля (208.136 п. 2 «карточки плотнее», макет
+/// `.win.rec .lcard`: `.5em .9em`); между карточками — `BLOCK_ROW_GAP` (`.win.rec .lcards`: `.5em`).
+pub const LETTER_CARD_PAD: Pad = Pad::em(0.5, 0.9);
 /// Замечание — поля.
 pub const NOTE_PAD: Pad = Pad::em(0.65, 0.85);
 /// Ряд кнопок окна — отступ над ним, под линией.

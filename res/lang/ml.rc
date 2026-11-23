@@ -173,6 +173,8 @@ BEGIN
     IDS_FEEDBACK_TEXT       "പിശകോ ആശയമോ? “അയയ്ക്കുക” അമർത്തിയാലേ നിർമ്മാതാവിന് അയയ്ക്കൂ."
     IDS_WRITE_TO_AUTHOR     "ഫീഡ്ബാക്ക്…"
     IDS_LETTERS_CAPTION     "അടുത്തിടെയുള്ള കത്തുകൾ"
+    IDS_LETTERS_TITLE       "Letters from the author"
+    IDS_LETTERS_SUB         "The three latest news items and the update letter, if there is one"
     IDS_LETTERS_FOOT        "അവസാനത്തെ മൂന്ന് വാർത്തകൾ സൂക്ഷിക്കും. നാലാമത്തേത് വരുമ്പോൾ, വായിച്ചതായാലും ഇല്ലെങ്കിലും, ഏറ്റവും പഴയത് പോകും."
     IDS_LETTERS_OPEN        "കത്ത് തുറക്കുക"
     IDS_NEWS_READ_BUTTON    "വായിച്ചു"

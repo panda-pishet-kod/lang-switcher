@@ -685,8 +685,8 @@ fn every_language_file_holds_the_strings_of_english_and_nothing_else() {
     );
     assert_eq!(
         english.strings.len(),
-        282,
-        "AUDIT-180 Пс2: the link of «Спасибо» into its lead (3242 left, 3322 came); AUDIT-180 Z4 (А1): the title of «От автора» (3321); AUDIT-180 Z14: the state in the head of the menu in small letters (3318…3320); AUDIT-180 Z8: the card «Ничего не произошло» and its line left (3163, 3164), the lines of \
+        284,
+        "AUDIT-180b Н4: the title and the subtitle of «Последние письма» (3323, 3324); AUDIT-180 Пс2: the link of «Спасибо» into its lead (3242 left, 3322 came); AUDIT-180 Z4 (А1): the title of «От автора» (3321); AUDIT-180 Z14: the state in the head of the menu in small letters (3318…3320); AUDIT-180 Z8: the card «Ничего не произошло» and its line left (3163, 3164), the lines of \
          where the two cards lead came (3316, 3317); AUDIT-180 Z6: the hints of the flag and of \
          the journal (3314, 3315); before them, \
          the strings of 1.0.0 (premise П1), the three of T-L10N-10, stage E107 (T-107-3): \
