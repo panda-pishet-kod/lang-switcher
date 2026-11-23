@@ -110,8 +110,40 @@ fn faces() -> Vec<&'static str> {
 /// The windows of `language`, missing strings stood in for; answers them and how many stand-ins.
 fn windows_of(language: Language) -> (Vec<(String, Window<u16>)>, usize) {
     let mut windows = catalogue(language);
+    let stand_ins = stand_in(&mut windows);
+    (windows, stand_ins)
+}
+
+/// ⭐ **The places of the texts empty in English too** — empty on purpose, no string missing
+/// there (окно правок 208.235): the label of a segment that has none («Одна клавиша | Две
+/// клавиши», «Пара | Несколько раскладок»), the hint of a field that shows a value. By the name of
+/// the window, whether each of its texts, in the order [`Window::texts_mut`] walks them, is empty in
+/// English.
+fn empty_in_english() -> &'static BTreeMap<String, Vec<bool>> {
+    static EMPTY: OnceLock<BTreeMap<String, Vec<bool>>> = OnceLock::new();
+    EMPTY.get_or_init(|| {
+        with_product_strings();
+        catalogue(Language::En)
+            .into_iter()
+            .map(|(name, mut window)| {
+                let mut empty = Vec::new();
+                window.texts_mut(&mut |_, text| empty.push(text.is_empty()));
+                (name, empty)
+            })
+            .collect()
+    })
+}
+
+/// Stands in for the missing strings of `windows`: a text empty here and not in English is a string
+/// the language lacks, and takes the longest of its role, [`STAND_IN`] times longer. A text empty
+/// in English too is empty on purpose and stays so — ⛔ standing in for it put a paragraph of ≈ 990
+/// characters (the warning about a single `Ctrl`, the longest `Body` of ta) over the segment of
+/// «Горячая клавиша», and the instrument said 14.9 points short where 114.7 were free (окно правок
+/// 208.235). A window whose texts are not as many as in English is stood in for everywhere, as
+/// before. Answers how many stand-ins.
+fn stand_in(windows: &mut [(String, Window<u16>)]) -> usize {
     let mut longest: BTreeMap<String, String> = BTreeMap::new();
-    for (_, window) in &mut windows {
+    for (_, window) in windows.iter_mut() {
         window.texts_mut(&mut |role, text| {
             let entry = longest.entry(format!("{role:?}")).or_default();
             if text.chars().count() > entry.chars().count() {
@@ -120,9 +152,17 @@ fn windows_of(language: Language) -> (Vec<(String, Window<u16>)>, usize) {
         });
     }
     let mut stand_ins = 0;
-    for (_, window) in &mut windows {
+    for (name, window) in windows.iter_mut() {
+        let mut count = 0;
+        window.texts_mut(&mut |_, _| count += 1);
+        let english = empty_in_english()
+            .get(name.as_str())
+            .filter(|empty| empty.len() == count);
+        let mut at = 0;
         window.texts_mut(&mut |role, text| {
-            if text.is_empty() {
+            let on_purpose = english.is_some_and(|empty| empty[at]);
+            at += 1;
+            if text.is_empty() && !on_purpose {
                 let model = longest
                     .get(&format!("{role:?}"))
                     .cloned()
@@ -133,7 +173,7 @@ fn windows_of(language: Language) -> (Vec<(String, Window<u16>)>, usize) {
             }
         });
     }
-    (windows, stand_ins)
+    stand_ins
 }
 
 /// What fails in `window` at `size`, `k` and direction, every step of giving way (§3а) allowed: a
@@ -685,6 +725,56 @@ fn the_narrow_factor_is_not_above_the_ordinary_one() {
         found.is_empty(),
         "208.200, k Narrow ≤ k Ordinary:\n{}",
         found.join("\n")
+    );
+}
+
+/// ⭐ **A missing string is stood in for, a text empty on purpose is not** (окно правок 208.235).
+/// In «settings Hotkey ctrl set» of ta the texts empty in English too — the label of the segment
+/// of the mode, the hints of the fields that show their keys — stay empty; the note under the
+/// second field, emptied as a language that lacks the string would have it, takes a stand-in.
+#[test]
+fn a_missing_string_is_stood_in_for_and_a_text_empty_on_purpose_is_not() {
+    with_product_strings();
+    let mut windows = catalogue(Language::Ta);
+    let at = windows
+        .iter()
+        .position(|(name, _)| name == "settings Hotkey ctrl set")
+        .expect("the state of the tap set");
+    let count_empty = |window: &mut Window<u16>| {
+        let mut empty = 0;
+        window.texts_mut(&mut |_, text| empty += usize::from(text.is_empty()));
+        empty
+    };
+    let on_purpose = count_empty(&mut windows[at].1);
+    assert!(on_purpose > 0, "the state has texts empty on purpose");
+
+    let note = settings::text_in(Language::Ta, settings::IDS_CTRL_WARN_TEXT);
+    let (mut index, mut emptied) = (0, None);
+    windows[at].1.texts_mut(&mut |_, text| {
+        if *text == note {
+            text.clear();
+            emptied = Some(index);
+        }
+        index += 1;
+    });
+    let emptied = emptied.expect("the note of the tap is in the state");
+
+    let stand_ins = stand_in(&mut windows);
+    let (mut index, mut stood_in) = (0, String::new());
+    windows[at].1.texts_mut(&mut |_, text| {
+        if index == emptied {
+            stood_in = text.clone();
+        }
+        index += 1;
+    });
+    assert!(
+        stand_ins >= 1 && !stood_in.is_empty(),
+        "the missing note took no stand-in"
+    );
+    assert_eq!(
+        count_empty(&mut windows[at].1),
+        on_purpose,
+        "a text empty on purpose took a stand-in"
     );
 }
 
