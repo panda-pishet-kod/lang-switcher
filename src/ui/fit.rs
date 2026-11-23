@@ -321,8 +321,8 @@ pub const TABLE: &[(&str, K)] = &[
     (
         "uz-Cyrl",
         K {
-            narrow: 0.875,
-            ordinary: 0.875,
+            narrow: 0.873,
+            ordinary: 0.873,
             large: 0.995,
         },
     ),
