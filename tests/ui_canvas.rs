@@ -424,7 +424,10 @@ fn the_plain_look_cuts_a_line_only_where_directwrite_cut_it() {
         let free = lay(w);
         let own = free.size().width;
         let tight = lay(own);
-        assert!(!tight.is_cut(), "{line}: DirectWrite keeps it whole in its own width");
+        assert!(
+            !tight.is_cut(),
+            "{line}: DirectWrite keeps it whole in its own width"
+        );
         let (whole, cut) = (drawn(&free), drawn(&tight));
         assert_eq!(
             cut.0, whole.0,
@@ -433,7 +436,10 @@ fn the_plain_look_cuts_a_line_only_where_directwrite_cut_it() {
         assert!(cut.1 == whole.1, "{line}: pixel for pixel");
 
         let half = lay(own / 2.0);
-        assert!(half.is_cut(), "{line}: the control — DirectWrite cuts it in half the width");
+        assert!(
+            half.is_cut(),
+            "{line}: the control — DirectWrite cuts it in half the width"
+        );
         let ((_, _, right, _), _) = drawn(&half);
         assert!(
             right as f32 <= left + own / 2.0 + 1.0,

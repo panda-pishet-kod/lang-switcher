@@ -4846,7 +4846,10 @@ fn the_steps_of_hello_name_the_key_in_bold() {
         assert_eq!(shown.len(), ids.len(), "{language:?}: three steps");
         for (step, id) in shown.iter().zip(ids) {
             let line = settings::text_in(language, id);
-            assert!(line.contains("{0}"), "{language:?}: each step names the key");
+            assert!(
+                line.contains("{0}"),
+                "{language:?}: each step names the key"
+            );
             assert_eq!(
                 *step,
                 line.replace("{0}", &strong("Pause")),
