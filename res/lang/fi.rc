@@ -160,6 +160,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Tekijältä"
     IDS_AUTHOR_PANEL        "Tekijä"
     IDS_AUTHOR_TEXT         "Ohjelman tekee yksi ihminen vapaa-ajallaan. Se on ilmainen ja pysyy sellaisena. Jos haluat kiittää teoin, tukisivulla on muutama tapa. On hienoa, että arvostat toisen työtä ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Uutiset ja päivitykset"
     IDS_NEWS_ABOUT_FEED     "Kerran päivässä ohjelma lukee uutistiedoston tekijän sivustolta eikä lähetä sinusta mitään. Uudet versiot se lataa samasta paikasta ja asentaa itse tarkistettuaan digitaalisen allekirjoituksen."
     IDS_NEWS_NEVER_READ     "Uutissyötettä ei ole vielä luettu."

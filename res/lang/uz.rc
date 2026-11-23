@@ -157,6 +157,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Muallifdan"
     IDS_AUTHOR_PANEL        "Muallif"
     IDS_AUTHOR_TEXT         "Dasturni bir kishi boʻsh vaqtida yaratadi. U bepul va shunday qoladi. Amalda rahmat aytmoqchi boʻlsangiz, qoʻllab-quvvatlash sahifasida bir necha usul bor. Birovning mehnatini qadrlashingiz yaxshi ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Yangiliklar va yangilanishlar"
     IDS_NEWS_ABOUT_FEED     "Dastur kuniga bir marta muallif saytidan yangiliklar faylini oʻqiydi va siz haqingizda hech narsa yubormaydi. Yangi versiyalarni ham oʻsha yerdan yuklab oladi va raqamli imzoni tekshirib, oʻzi oʻrnatadi."
     IDS_NEWS_NEVER_READ     "Lenta hali oʻqilmagan."

@@ -2811,7 +2811,8 @@ thread_local! {
 /// yet, and a feed that has never said anything is not something to turn off.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorView {
-    /// The title of the head — `IDS_ABOUT_LINE_1`, задача T-81-3. The second line of the head
+    /// The title of the head — `IDS_AUTHOR_TITLE` since AUDIT-180 А1 (решение 208.211: the first
+    /// sentence of the owner's text; till then `IDS_ABOUT_LINE_1` of «О программе», T-81-3). The second line of the head
     /// of «О программе», `IDS_ABOUT_LINE_2`, is not in «От автора» since C6 of T-120-17
     /// (решение контролёра по слову 208.178: in the mock-up of the window there is none).
     pub line_1: String,
@@ -2875,7 +2876,7 @@ pub fn author_view_in(
     feed: FeedView<'_>,
 ) -> AuthorView {
     use crate::settings::{
-        IDS_ABOUT_LINE_1, IDS_AUTHOR_TEXT, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
+        IDS_AUTHOR_TEXT, IDS_AUTHOR_TITLE, IDS_FEEDBACK_TEXT, IDS_NEWS_ABOUT_FEED,
         IDS_NEWS_AVAILABLE, IDS_NEWS_FILE_ONLY, IDS_NEWS_LATEST, IDS_NEWS_NEVER_READ,
         IDS_NEWS_OFF_IN_FILE, IDS_NEWS_READ_ON,
     };
@@ -2902,9 +2903,9 @@ pub fn author_view_in(
     // `IDS_ABOUT_VERSION`; у окна оболочки нет имени, под которым ей стоять, и номер версии
     // стоит в строке состояния (`IDS_NEWS_LATEST`, `IDS_NEWS_AVAILABLE`).
     AuthorView {
-        // Заголовок общей шапки — те же слова, что в «О программе», из той же строки; подписи
-        // под ним у «От автора» нет (C6 T-120-17).
-        line_1: text(IDS_ABOUT_LINE_1),
+        // Заголовок — первая фраза текста владельца, остаток — текст карточки «Поддержать автора»
+        // (А1, решение 208.211: «разбить без потерь»); подписи под ним у «От автора» нет (C6 T-120-17).
+        line_1: text(IDS_AUTHOR_TITLE),
         author_text: text(IDS_AUTHOR_TEXT),
         // The sentence about the feed moves under the switch once there is one — it is the
         // same sentence, and two copies of it on one panel would be a stutter.

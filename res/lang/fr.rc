@@ -162,6 +162,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "De l'auteur"
     IDS_AUTHOR_PANEL        "L'auteur"
     IDS_AUTHOR_TEXT         "Le programme est fait par une seule personne sur son temps libre. Il est gratuit et le restera. Si vous voulez dire merci par un geste, la page de soutien propose plusieurs moyens. C'est bien de savoir apprécier le travail d'autrui ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Nouvelles et mises à jour"
     IDS_NEWS_ABOUT_FEED     "Une fois par jour, le programme lit un fichier de nouvelles sur le site de l'auteur et n'envoie rien sur vous. Il en télécharge les nouvelles versions et les installe lui-même après avoir vérifié la signature."
     IDS_NEWS_NEVER_READ     "Le flux n'a pas encore été lu."

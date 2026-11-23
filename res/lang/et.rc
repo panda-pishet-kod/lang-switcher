@@ -161,6 +161,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Autorilt"
     IDS_AUTHOR_PANEL        "Autor"
     IDS_AUTHOR_TEXT         "Programmi teeb üks inimene vabal ajal. See on tasuta ja jääbki selliseks. Kui soovite tänada teoga, on tugilehel mitu võimalust. Tore, et väärtustate teise tööd ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Uudised ja värskendused"
     IDS_NEWS_ABOUT_FEED     "Kord päevas loeb programm autori saidilt uudistefaili ega saada teie kohta midagi. Uued versioonid laadib see sealt alla ja paigaldab ise pärast digiallkirja kontrollimist."
     IDS_NEWS_NEVER_READ     "Uudisvoogu pole veel loetud."

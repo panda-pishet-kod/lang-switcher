@@ -158,6 +158,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_PANEL        "Autor"
     IDS_AUTHOR_TEXT         "Program dělá jeden člověk ve volném čase. Je zdarma a zůstane takový. Jestli chcete poděkovat skutkem, na stránce podpory je několik možností. Je hezké, že si vážíte cizí práce ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Novinky a aktualizace"
     IDS_NEWS_ABOUT_FEED     "Jednou denně program přečte soubor s novinkami ze stránek autora a nic o vás neodesílá. Nové verze odtud stahuje a sám je instaluje po ověření podpisu."
     IDS_NEWS_NEVER_READ     "Kanál zatím nebyl čten."

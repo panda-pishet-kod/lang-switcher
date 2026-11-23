@@ -159,6 +159,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Del autor"
     IDS_AUTHOR_PANEL        "El autor"
     IDS_AUTHOR_TEXT         "El programa lo hace una sola persona en su tiempo libre. Es gratuito y seguirá siéndolo. Si quiere dar las gracias con un gesto, la página de apoyo ofrece varias formas. Está bien saber valorar el trabajo ajeno ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Noticias y actualizaciones"
     IDS_NEWS_ABOUT_FEED     "Una vez al día el programa lee un archivo de noticias del sitio del autor y no envía nada sobre usted. Descarga de allí las versiones nuevas y las instala solo, tras comprobar la firma."
     IDS_NEWS_NEVER_READ     "El canal aún no se ha leído."

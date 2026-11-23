@@ -5037,3 +5037,37 @@ fn the_author_window_fits_the_narrowest_window() {
     }
     assert!(faults.is_empty(), "«От автора»:\n{}", faults.join("\n"));
 }
+
+/// **AUDIT-180 А1, решение 208.211 — the owner's text split without a loss.** The title of «От
+/// автора» is the first sentence of the owner's text, without its full stop; the card «Поддержать
+/// автора» says the rest word for word; together they are the text the owner wrote.
+#[test]
+fn the_title_and_the_card_of_the_author_window_are_the_owners_text_split() {
+    use lang_switcher::letters::author_view_sample;
+    use lang_switcher::theme::ThemeSetting;
+    use lang_switcher::ui::host::Content;
+    use lang_switcher::ui::windows::author::Author;
+
+    let _guard = with_product_strings();
+    let title = settings::text_in(Language::Ru, settings::IDS_AUTHOR_TITLE);
+    let card = settings::text_in(Language::Ru, settings::IDS_AUTHOR_TEXT);
+    assert_eq!(
+        format!("{title}. {card}"),
+        "Программу делает один человек в свободное время. Программа бесплатная и останется \
+         такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько \
+         способов. Классно, что вы цените чужой труд ♥",
+        "the title and the card are the owner's text, no word lost (208.180 п. 1, 208.211)"
+    );
+    let window = Author {
+        view: author_view_sample(Language::Ru),
+        language: Language::Ru,
+        theme: ThemeSetting::Light,
+    }
+    .describe();
+    let body = format!("{:?}", window.body);
+    assert!(
+        body.contains(&format!("title: {title:?}")) && body.contains(&format!("words: {card:?}")),
+        "the head says the first sentence and the card the rest: {}",
+        &body[..body.len().min(300)]
+    );
+}

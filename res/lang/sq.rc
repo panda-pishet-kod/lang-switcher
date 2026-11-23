@@ -155,6 +155,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Nga autori"
     IDS_AUTHOR_PANEL        "Autori"
     IDS_AUTHOR_TEXT         "Programin e bën një person në kohën e lirë. Është falas dhe do të mbetet i tillë. Nëse dëshironi ta falënderoni me vepra, faqja e mbështetjes ka disa mënyra. Është mirë që e çmoni punën e dikujt tjetër ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Lajme dhe përditësime"
     IDS_NEWS_ABOUT_FEED     "Një herë në ditë programi lexon një skedar lajmesh nga faqja e autorit dhe nuk dërgon asgjë për ju. Prej andej shkarkon versionet e reja dhe i instalon vetë, pasi të kontrollojë nënshkrimin."
     IDS_NEWS_NEVER_READ     "Burimi i lajmeve nuk është lexuar ende."

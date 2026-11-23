@@ -157,6 +157,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Od autora"
     IDS_AUTHOR_PANEL        "Autor"
     IDS_AUTHOR_TEXT         "Program u slobodno vreme pravi jedna osoba. Besplatan je i takav će i ostati. Ako želite da se zahvalite delom, na stranici podrške ima nekoliko načina. Lepo je što cenite tuđ trud ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Vesti i ažuriranja"
     IDS_NEWS_ABOUT_FEED     "Jednom dnevno program čita datoteku sa vestima sa sajta autora i ništa o vama ne šalje. Nove verzije preuzima odatle i sam ih instalira, pošto proveri potpis."
     IDS_NEWS_NEVER_READ     "Fid vesti još nije pročitan."

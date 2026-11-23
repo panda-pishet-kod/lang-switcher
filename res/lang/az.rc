@@ -158,6 +158,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Müəllifdən"
     IDS_AUTHOR_PANEL        "Müəllif"
     IDS_AUTHOR_TEXT         "Proqramı boş vaxtında bir nəfər hazırlayır. Proqram pulsuzdur və belə də qalacaq. Təşəkkürünüzü əməllə bildirmək istəsəniz, dəstək səhifəsində bir neçə üsul göstərilib. Başqasının zəhmətinə dəyər verməyiniz yaxşıdır ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Xəbərlər və yeniləmələr"
     IDS_NEWS_ABOUT_FEED     "Proqram gündə bir dəfə müəllifin saytından xəbər faylını oxuyur və sizin haqqınızda heç nə göndərmir. Yeni versiyaları da oradan yükləyir və imzanı yoxladıqdan sonra özü quraşdırır."
     IDS_NEWS_NEVER_READ     "Xəbər lenti hələ oxunmayıb."

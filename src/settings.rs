@@ -1710,6 +1710,10 @@ pub const IDS_WIZARD_CARD_IDEA_NEXT: u16 = 3317;
 pub const IDS_MENU_WORKING: u16 = 3318;
 pub const IDS_MENU_SUSPENDED: u16 = 3319;
 pub const IDS_MENU_RESTART: u16 = 3320;
+/// The title of «От автора» — the first sentence of the owner's text, without its full stop
+/// (AUDIT-180 А1, решение 208.211: «разбить без потерь»); the rest is [`IDS_AUTHOR_TEXT`], word for
+/// word.
+pub const IDS_AUTHOR_TITLE: u16 = 3321;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2363,7 +2367,10 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 ///
 /// ⚠ **Two hundred and eighty since AUDIT-180 Z14** — the state in the head of the menu in small
 /// letters, [`IDS_MENU_WORKING`] and its two (3318…3320). 277 + 3.
-pub const INTERFACE_STRINGS: [u16; 280] = [
+///
+/// ⚠ **Two hundred and eighty-one since AUDIT-180 Z4 (А1)** — the title of «От автора»,
+/// [`IDS_AUTHOR_TITLE`] (3321), the first sentence of the owner's text (208.211). 280 + 1.
+pub const INTERFACE_STRINGS: [u16; 281] = [
     IDS_DIALOG_CAPTION,
     IDS_GROUP_GENERAL,
     IDS_AUTOSTART,
@@ -2632,6 +2639,7 @@ pub const INTERFACE_STRINGS: [u16; 280] = [
     IDS_MENU_WORKING,
     IDS_MENU_SUSPENDED,
     IDS_MENU_RESTART,
+    IDS_AUTHOR_TITLE,
     IDS_OWN_LIST_TITLE,
     IDS_OWN_LIST_MORE,
     IDS_CORNER_UPDATE,

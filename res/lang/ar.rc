@@ -157,6 +157,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "من المؤلف"
     IDS_AUTHOR_PANEL        "المؤلف"
     IDS_AUTHOR_TEXT         "يصنع البرنامج شخص واحد في وقت فراغه. وهو مجاني وسيبقى كذلك. إن أردت أن تشكر بفعل، ففي صفحة الدعم عدة طرق. جميل أنك تقدّر عمل الآخرين ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "الأخبار والتحديثات"
     IDS_NEWS_ABOUT_FEED     "مرة كل يوم يقرأ البرنامج ملف أخبار من موقع المؤلف ولا يرسل شيئًا عنك. وينزّل الإصدارات الجديدة من هناك ويثبّتها بنفسه بعد التحقق من التوقيع."
     IDS_NEWS_NEVER_READ     "لم تُقرأ التغذية بعد."

@@ -154,6 +154,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Từ tác giả"
     IDS_AUTHOR_PANEL        "Tác giả"
     IDS_AUTHOR_TEXT         "Chương trình do một người làm trong thời gian rảnh. Nó miễn phí và sẽ luôn như vậy. Nếu bạn muốn cảm ơn bằng hành động, trang ủng hộ có vài cách. Thật tuyệt khi bạn trân trọng công sức của người khác ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Tin tức và cập nhật"
     IDS_NEWS_ABOUT_FEED     "Mỗi ngày một lần, chương trình đọc tệp tin tức từ trang web của tác giả và không gửi gì về bạn. Chương trình cũng tải các phiên bản mới từ đó và tự cài đặt sau khi kiểm tra chữ ký."
     IDS_NEWS_NEVER_READ     "Nguồn tin chưa được đọc."

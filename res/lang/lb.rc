@@ -156,6 +156,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Vum Auteur"
     IDS_AUTHOR_PANEL        "Den Auteur"
     IDS_AUTHOR_TEXT         "Eng eenzeg Persoun mécht de Programm an hirer Fräizäit. Hien ass gratis a bleift et. Wann Dir mat enger Daat Merci soe wëllt: Op der Ënnerstëtzungssäit stinn e puer Méiglechkeeten. Flott, datt Dir anerer hir Aarbecht schätzt ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Neiegkeeten an Updates"
     IDS_NEWS_ABOUT_FEED     "Eemol am Dag liest de Programm eng Datei mat Neiegkeete vum Site vum Auteur a schéckt näischt iwwer Iech. Nei Versioune luet hien och vun do erof an installéiert se selwer, nodeems d'Ënnerschrëft kontrolléiert ass."
     IDS_NEWS_NEVER_READ     "Den Newsfeed ass nach net gelies ginn."

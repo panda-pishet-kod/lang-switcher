@@ -154,6 +154,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Från utvecklaren"
     IDS_AUTHOR_PANEL        "Utvecklaren"
     IDS_AUTHOR_TEXT         "Programmet görs av en enda person på fritiden. Det är gratis och kommer att förbli det. Vill du tacka i handling finns det några sätt på stödsidan. Det är fint att du värdesätter någon annans arbete ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Nyheter och uppdateringar"
     IDS_NEWS_ABOUT_FEED     "En gång om dagen läser programmet nyhetsflödet, en fil på utvecklarens webbplats, och skickar ingenting om dig. Därifrån hämtar det nya versioner och installerar dem själv efter att ha kontrollerat signaturen."
     IDS_NEWS_NEVER_READ     "Nyhetsflödet har inte lästs ännu."

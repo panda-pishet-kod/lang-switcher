@@ -6567,7 +6567,10 @@ impl Drop for ProductImage {
 /// left, the lines of where the two cards lead (3316, 3317) came (208.131, 208.132).
 ///
 /// ⚠ **280 since AUDIT-180 Z14** — the state in the head of the menu in small letters (3318…3320).
-const FR_94_STRINGS: [(u16, &str, &str); 280] = [
+///
+/// ⚠ **281 since AUDIT-180 Z4 (А1)** — the title of «От автора», the first sentence of the owner's
+/// text (3321, 208.211).
+const FR_94_STRINGS: [(u16, &str, &str); 281] = [
     (
         settings::IDS_DIALOG_CAPTION,
         "Lang Switcher — настройки",
@@ -7082,12 +7085,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 280] = [
     (settings::IDS_AUTHOR_PANEL, "Автор", "The author"),
     (
         settings::IDS_AUTHOR_TEXT,
-        "Программу делает один человек в свободное время. Программа бесплатная и останется \
-         такой. Если хотите сказать спасибо делом, на странице поддержки есть несколько \
-         способов. Классно, что вы цените чужой труд ♥",
-        "The program is made by one person in their spare time. It is free and will stay that \
-         way. If you would like to say thank you in deed, the support page lists a few ways. It \
-         is good that you value somebody else's work ♥",
+        // А1, решение 208.211: the first sentence went into the title (IDS_AUTHOR_TITLE), the rest
+        // stays word for word.
+        "Программа бесплатная и останется такой. Если хотите сказать спасибо делом, на странице \
+         поддержки есть несколько способов. Классно, что вы цените чужой труд ♥",
+        "It is free and will stay that way. If you would like to say thank you in deed, the support \
+         page lists a few ways. It is good that you value somebody else's work ♥",
     ),
     (
         settings::IDS_NEWS_PANEL,
@@ -7691,6 +7694,12 @@ const FR_94_STRINGS: [(u16, &str, &str); 280] = [
         settings::IDS_MENU_RESTART,
         "нужен перезапуск",
         "restart needed",
+    ),
+    // AUDIT-180 Z4 (А1, 208.211): the title of «От автора» — the first sentence of the owner's text.
+    (
+        settings::IDS_AUTHOR_TITLE,
+        "Программу делает один человек в свободное время",
+        "The program is made by one person in their spare time",
     ),
     // Task T-119-3, part Б: the title and the link of the list of the program's own.
     (settings::IDS_OWN_LIST_TITLE, "Раскладка", "Keyboard layout"),
@@ -12233,8 +12242,9 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
     }
     assert_eq!(
         settings::INTERFACE_STRINGS.len(),
-        280,
-        "two hundred and EIGHTY identifiers in use since AUDIT-180 Z14: the state in the head of the \
+        281,
+        "two hundred and EIGHTY-ONE identifiers in use since AUDIT-180 Z4 (А1): the title of «От \
+         автора» (3321). Two hundred and eighty since AUDIT-180 Z14: the state in the head of the \
          menu in small letters (3318…3320). Two hundred and seventy-seven again since AUDIT-180 Z8: \
          the card «Ничего \
          не произошло» and its line left (3163, 3164), the lines of where the two cards lead came \

@@ -156,6 +156,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Van de auteur"
     IDS_AUTHOR_PANEL        "De auteur"
     IDS_AUTHOR_TEXT         "Het programma wordt door één persoon gemaakt, in zijn vrije tijd. Het is gratis en blijft dat ook. Wil je je dank met een daad tonen, dan staan er op de steunpagina een paar manieren. Fijn dat je het werk van een ander waardeert ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Nieuws en updates"
     IDS_NEWS_ABOUT_FEED     "Eén keer per dag leest het programma een nieuwsbestand van de site van de auteur en verstuurt het niets over jou. Nieuwe versies downloadt het daar ook en installeert het zelf, na controle van de handtekening."
     IDS_NEWS_NEVER_READ     "De nieuwsfeed is nog niet gelezen."

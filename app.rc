@@ -364,6 +364,8 @@ END
 #define IDS_MENU_WORKING        3318
 #define IDS_MENU_SUSPENDED      3319
 #define IDS_MENU_RESTART        3320
+// AUDIT-180, Z4 (decision 208.211): the title of «От автора», the first sentence of the owner's text.
+#define IDS_AUTHOR_TITLE        3321
 #define IDS_TRANSLATION_REPORT  3289
 #define IDS_WIZARD_TRANSLATION_NOW 3290
 #define IDS_WIZARD_TRANSLATION_RIGHT 3291

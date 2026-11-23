@@ -158,6 +158,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "מהמפתח"
     IDS_AUTHOR_PANEL        "המפתח"
     IDS_AUTHOR_TEXT         "את התוכנה עושה אדם אחד בזמנו הפנוי. היא חינמית ותישאר כזאת. אם בא לכם להגיד תודה במעשה, בעמוד התמיכה יש כמה דרכים. נחמד שאתם מעריכים עבודה של אחרים ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "חדשות ועדכונים"
     IDS_NEWS_ABOUT_FEED     "פעם ביום התוכנה קוראת קובץ חדשות מאתר המפתח ואינה שולחת דבר עליכם. גרסאות חדשות היא מורידה משם ומתקינה בעצמה, לאחר בדיקת החתימה."
     IDS_NEWS_NEVER_READ     "ההזנה עדיין לא נקראה."

@@ -34,20 +34,21 @@ pub struct Excuse {
 
 /// **The windows excused from fitting** (208.175), each with its category and its term.
 pub const EXCUSED: &[Excuse] = &[
-    // AUDIT-180 Z3 (208.209): the cards of «От автора» took the frames of blocks, and with the
-    // whole text of `IDS_AUTHOR_TEXT` (the owner's text, 208.180 п. 1) the window of 900 × 540 does
-    // not fit even at 12 points. The short text of the mock-up (А1) is the question of Z4.
+    // AUDIT-180 А1 (208.211): the title of «От автора» is the first sentence of the owner's text and
+    // the card says the rest. In ru and en it is split; in these languages, till the wave splits
+    // their old translation the same way, the title is the English stand-in and the card still says
+    // the whole text — the window of 900 × 540 does not fit at 12 points.
     Excuse {
         window: "author",
         class: Class::Ordinary,
         languages: &[
-            "be", "cy", "de", "el", "hi", "hr", "hu", "hy", "ka", "kk", "km", "lb", "mi", "ml",
-            "nl", "pa", "ru", "ta", "te", "uz", "uz-Cyrl",
+            "be", "cy", "de", "el", "hy", "ka", "km", "lb", "mi", "ml", "nl", "ta", "te", "uz",
+            "uz-Cyrl",
         ],
-        category: Some(Category::Owner),
-        until: "Z4 — ответ на вопрос А1 (текст «От автора»)",
-        decision: Some("208.209, А1 — ждёт ответа"),
-        why: "карточки в рамках (Z3) с полным текстом владельца не помещаются при 12 т.",
+        category: Some(Category::Wave),
+        until: "волна переводов 1.8.0: разбить прежний перевод IDS_AUTHOR_TEXT (208.211)",
+        decision: None,
+        why: "до волны заголовок «От автора» — английская заглушка, а карточка — весь прежний текст",
     },
     // AUDIT-180 Z8 (208.133): the head of a step of the wizard is as tall as the tallest head of
     // both roads — the one of «Что делали», whose note is long in ta and ml — and «Что приложить»

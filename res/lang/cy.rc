@@ -156,6 +156,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Gan yr awdur"
     IDS_AUTHOR_PANEL        "Yr awdur"
     IDS_AUTHOR_TEXT         "Un person sy'n gwneud y rhaglen yn ei amser sbâr. Mae'n rhad ac am ddim a bydd yn aros felly. Os hoffech ddweud diolch drwy weithred, mae ychydig o ffyrdd ar y dudalen gefnogi. Braf eich bod yn gwerthfawrogi gwaith rhywun arall ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Newyddion a diweddariadau"
     IDS_NEWS_ABOUT_FEED     "Unwaith y dydd, mae'r rhaglen yn darllen y ffrwd newyddion o wefan yr awdur heb anfon dim amdanoch. Mae'n lawrlwytho fersiynau newydd oddi yno ac yn eu gosod ei hun ar ôl gwirio'r llofnod."
     IDS_NEWS_NEVER_READ     "Nid yw'r ffrwd wedi'i darllen eto."

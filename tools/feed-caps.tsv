@@ -4,7 +4,7 @@
 # instrument of fitting (tests/ui_fit.rs, print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE);
 # read by tools/sign-news.ps1, which refuses a longer text of that kind. 0 -- the letter does not
 # fit even without a text in that language yet.
-ru	198	798
+ru	270	880
 en	202	900
 uk	249	837
 de	324	965
@@ -12,16 +12,16 @@ fr	272	903
 es	266	958
 pt	262	935
 it	265	982
-pl	249	887
-cs	261	911
+pl	249	957
+cs	261	975
 tr	238	869
 el	169	800
-he	223	763
+he	223	810
 ar	314	867
-hi	244	846
+hi	244	922
 bn	242	905
 ur	244	936
-pa	235	822
+pa	235	899
 mr	302	796
 te	181	778
 ta	177	660
@@ -33,17 +33,17 @@ or	237	843
 ml	239	665
 uz	183	812
 uz-Cyrl	170	754
-ne	160	768
+ne	160	794
 as	230	800
 az	240	762
 km	235	774
-kk	226	738
+kk	226	754
 sr	246	881
-sr-Latn	250	822
+sr-Latn	250	893
 ug	249	883
 bg	234	800
 hy	163	665
-lo	271	743
+lo	271	800
 be	237	768
 tt	231	762
 ka	161	578
@@ -51,19 +51,19 @@ mk	239	818
 vi	220	789
 nl	155	790
 ro	237	836
-hu	179	816
+hu	179	880
 sv	238	850
 sq	237	861
 da	227	799
 fi	216	837
-hr	235	834
+hr	235	907
 sk	295	852
 nb	220	816
 lt	299	840
-sl	230	814
+sl	230	884
 bs	303	884
-lv	244	806
-et	223	780
+lv	244	845
+et	223	812
 cy	156	754
 mt	260	972
 is	236	926

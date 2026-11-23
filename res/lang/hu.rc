@@ -160,6 +160,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "A szerzőtől"
     IDS_AUTHOR_PANEL        "A szerző"
     IDS_AUTHOR_TEXT         "A programot egyetlen ember készíti a szabadidejében. Ingyenes, és az is marad. Ha tettekkel is megköszönné, a támogatási oldalon néhány lehetőséget talál. Jó, hogy értékeli mások munkáját ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Hírek és frissítések"
     IDS_NEWS_ABOUT_FEED     "A program naponta egyszer beolvas egy hírfájlt a szerző webhelyéről, és semmit nem küld el Önről. Az új verziókat is onnan tölti le, és az aláírás ellenőrzése után maga telepíti őket."
     IDS_NEWS_NEVER_READ     "A hírcsatornát még nem olvasta be a program."

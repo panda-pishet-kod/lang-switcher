@@ -158,6 +158,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "உருவாக்குநரிடமிருந்து"
     IDS_AUTHOR_PANEL        "உருவாக்குநர்"
     IDS_AUTHOR_TEXT         "ஒருவர் ஓய்வு நேரத்தில் உருவாக்கும் நிரல் இது. இலவசம், இனியும் இலவசமே. செயலால் நன்றி சொல்ல — ஆதரவுப் பக்கம்."
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "செய்திகளும் புதுப்பிப்புகளும்"
     IDS_NEWS_ABOUT_FEED     "நாளுக்கு ஒருமுறை உருவாக்குநரின் தளத்திலிருந்து செய்திகளைப் படிக்கிறது; உங்களைப் பற்றி எதையும் அனுப்பாது."
     IDS_NEWS_NEVER_READ     "செய்தி ஊட்டம் இன்னும் படிக்கப்படவில்லை."

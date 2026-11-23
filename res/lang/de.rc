@@ -160,6 +160,7 @@ BEGIN
     IDS_AUTHOR_CAPTION      "Vom Autor"
     IDS_AUTHOR_PANEL        "Der Autor"
     IDS_AUTHOR_TEXT         "Das Programm macht ein einzelner Mensch in seiner Freizeit. Es ist kostenlos und bleibt es. Wenn Sie sich mit einer Tat bedanken möchten, nennt die Unterstützungsseite einige Wege. Schön, dass Sie fremde Arbeit zu schätzen wissen ♥"
+    IDS_AUTHOR_TITLE        "The program is made by one person in their spare time"
     IDS_NEWS_PANEL          "Nachrichten und Updates"
     IDS_NEWS_ABOUT_FEED     "Einmal am Tag liest das Programm eine Nachrichtendatei von der Seite des Autors und sendet nichts über Sie. Neue Versionen lädt es von dort und installiert sie nach Prüfung der Signatur selbst."
     IDS_NEWS_NEVER_READ     "Der Feed wurde noch nicht gelesen."
