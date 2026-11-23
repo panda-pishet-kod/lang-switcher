@@ -181,6 +181,13 @@ pub struct Settings {
     /// решение 208.228, В-4: its side; the warning stands under the second field till «Всё равно
     /// установить» or «Выбрать другую клавишу».
     ctrl_warning: Option<u16>,
+    /// ⭐ **The tap of `Ctrl+Alt` made in a capture, waiting for the person's choice** — решение 208.237
+    /// п. 2: the key it was captured for; its warning stands under that field as the one of a `Ctrl`.
+    ctrl_alt_warning: Option<CaptureTarget>,
+    /// ⭐ **The combinations Windows gives the input languages** — решение 208.237 п. 1
+    /// (`settings::windows_language_hotkeys`, read when the window opens; none for the instrument of
+    /// fitting): a key in force among them has the grey note [`settings::IDS_NOTE_WINDOWS_KEY`].
+    pub windows_keys: Vec<(u16, u16)>,
     /// The last capture took a combination or the double press: the line under the field says
     /// once which half stays with the programs (task T-93-2), till the next capture.
     combination_taken: bool,
@@ -204,6 +211,15 @@ struct Capture {
     /// A `Shift` went down on its own: the field says «Shift…» till then (`hook::DOUBLE_TAP_MS`
     /// after the last tap, the timer of the pair of task T-95-2).
     pair_until: Option<Instant>,
+}
+
+/// Which warning stands under a field, waiting for the person's choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Warning {
+    /// A lone `Ctrl` of this side (решение 208.228, В-4).
+    Ctrl(u16),
+    /// The tap of `Ctrl+Alt` (решение 208.237 п. 2).
+    CtrlAlt,
 }
 
 /// What the line under the field says in a capture.
@@ -236,7 +252,9 @@ impl Settings {
     /// The window over `config`, in `language`, putting changes in force by `apply`.
     pub fn new(config: Config, language: Language, apply: Apply) -> Self {
         let session = crate::layouts::enumerate().unwrap_or_default();
-        Self::with_session(config, language, session, apply)
+        let mut window = Self::with_session(config, language, session, apply);
+        window.windows_keys = settings::windows_language_hotkeys();
+        window
     }
 
     /// The same over a given list of layouts — the instrument of fitting and the tests name it.
@@ -267,6 +285,8 @@ impl Settings {
             journal_until: None,
             capture: None,
             ctrl_warning: None,
+            ctrl_alt_warning: None,
+            windows_keys: Vec::new(),
             combination_taken: false,
             pick_at: None,
             pick_note: None,
@@ -421,7 +441,15 @@ impl Settings {
         // While the warning about a single `Ctrl` waits for the choice it is the question of the
         // section: the segment and the first group step aside, so that the warning fits the window
         // in every language (FIT-E120).
-        let warning = two && self.ctrl_warning.is_some();
+        //
+        // ⭐ Решение 208.237 п. 2: the warning about the tap of `Ctrl+Alt` the same way, for either key —
+        // the segment and the other group step aside, its own group stays.
+        let warning = (two && self.ctrl_warning.is_some()) || self.ctrl_alt_warning.is_some();
+        let shown = |target| match (self.ctrl_alt_warning, self.ctrl_warning) {
+            (Some(waiting), _) => waiting == target,
+            (None, Some(_)) if two => target == CaptureTarget::Switch,
+            _ => target == CaptureTarget::Fix || two,
+        };
         let mut nodes = Vec::new();
         if !warning {
             nodes.push(Node::Segments {
@@ -433,12 +461,40 @@ impl Settings {
                 ],
                 selected: usize::from(two),
             });
+        }
+        if shown(CaptureTarget::Fix) {
             nodes.extend(self.key_group(CaptureTarget::Fix, two));
         }
-        if two {
+        if two && shown(CaptureTarget::Switch) {
             nodes.extend(self.key_group(CaptureTarget::Switch, two));
         }
         nodes
+    }
+
+    /// The line under a field at rest — решение 208.237 п. 1 puts the grey note of a key Windows gives
+    /// a language under it, unless a warning of FR-92 or the note of a tap says more.
+    fn rest_line(&self, target: CaptureTarget) -> String {
+        let (binding, note) = match target {
+            CaptureTarget::Fix => (
+                self.config.hotkey.binding(),
+                settings::hotkey_note(&self.config.hotkey),
+            ),
+            CaptureTarget::Switch => (
+                self.config.switch_binding(),
+                settings::switch_hotkey_note(&self.config),
+            ),
+        };
+        if note.is_none()
+            && let Some(windows) = settings::windows_key_note(binding, &self.windows_keys)
+        {
+            return self.line(windows);
+        }
+        match target {
+            CaptureTarget::Fix => {
+                settings::hotkey_line_in(self.language, &self.config.hotkey, self.combination_taken)
+            }
+            CaptureTarget::Switch => self.line(note.unwrap_or(settings::IDS_SWITCH_KEY_HINT)),
+        }
     }
 
     /// One field of a hotkey, «Задать» beside it and the line under them — the first key's or the
@@ -477,45 +533,45 @@ impl Settings {
                 settings::effective_hotkey_name(&self.config.hotkey),
                 String::new(),
                 IDS_HOTKEY_SET,
-                settings::hotkey_line_in(
-                    self.language,
-                    &self.config.hotkey,
-                    self.combination_taken,
-                ),
+                self.rest_line(target),
             ),
-            None => {
-                let line = settings::switch_hotkey_note(&self.config)
-                    .unwrap_or(settings::IDS_SWITCH_KEY_HINT);
-                match self.config.switch_binding() {
-                    // «Не задана» in the colour of a hint — the field is empty (the mock-up).
-                    None => (
-                        String::new(),
-                        self.line(settings::IDS_SWITCH_KEY_NONE),
-                        IDS_HOTKEY_SET,
-                        self.line(line),
-                    ),
-                    Some(_) => (
-                        settings::switch_hotkey_name_in(self.language, &self.config),
-                        String::new(),
-                        IDS_HOTKEY_SET,
-                        self.line(line),
-                    ),
-                }
-            }
+            None => match self.config.switch_binding() {
+                // «Не задана» in the colour of a hint — the field is empty (the mock-up).
+                None => (
+                    String::new(),
+                    self.line(settings::IDS_SWITCH_KEY_NONE),
+                    IDS_HOTKEY_SET,
+                    self.rest_line(target),
+                ),
+                Some(_) => (
+                    settings::switch_hotkey_name_in(self.language, &self.config),
+                    String::new(),
+                    IDS_HOTKEY_SET,
+                    self.rest_line(target),
+                ),
+            },
         };
         // The warning: the `Ctrl` tapped is the candidate, shown in the colour of a hint — it is not
-        // set yet — and the warning stands in the place of the line under the field.
-        let warning = self
-            .ctrl_warning
-            .filter(|_| target == CaptureTarget::Switch && capture.is_none());
+        // set yet — and the warning stands in the place of the line under the field. Решение 208.237
+        // п. 2: the tap of `Ctrl+Alt` the same way, under the field of the key it was captured for.
+        let warning = match (self.ctrl_alt_warning, self.ctrl_warning) {
+            _ if capture.is_some() => None,
+            (Some(waiting), _) if waiting == target => Some(Warning::CtrlAlt),
+            (None, Some(side)) if target == CaptureTarget::Switch => Some(Warning::Ctrl(side)),
+            _ => None,
+        };
         let (value, hint) = match warning {
-            Some(side) => (
+            Some(Warning::Ctrl(side)) => (
                 String::new(),
                 self.line(if side == RIGHT_CTRL {
                     settings::IDS_KEY_RIGHT_CTRL
                 } else {
                     settings::IDS_KEY_LEFT_CTRL
                 }),
+            ),
+            Some(Warning::CtrlAlt) => (
+                String::new(),
+                settings::effective_hotkey_name(&Hotkey::ctrl_alt_tap()),
             ),
             None => (value, hint),
         };
@@ -544,14 +600,26 @@ impl Settings {
         // With two keys the line of the ways under the first field stands aside at rest — its notes,
         // the line after a capture and the lines of a capture stay: the section of two keys does not
         // fit bs and lb even at 12 points with it (ui_fit after Н1 of 1.8.0).
-        let quiet = two
-            && target == CaptureTarget::Fix
+        let at_rest = target == CaptureTarget::Fix
             && capture.is_none()
             && line == self.line(settings::IDS_HOTKEY_HINT);
+        let quiet = two && at_rest;
         match warning {
-            Some(_) => nodes.push(self.ctrl_warning_note()),
+            Some(warning) => nodes.push(self.ctrl_warning_note(warning)),
             None if quiet => {}
             None => nodes.push(Node::Text(Role::Small, line)),
+        }
+        // ⭐ Решение 208.237 п. 4: «Pause + подсказка» — with one key, while it is `Pause` and the line of
+        // the ways stands at rest, the way out for a keyboard with no `Pause` stands under it.
+        if !two
+            && at_rest
+            && warning.is_none()
+            && self.config.hotkey.binding() == Some((crate::hook::DEFAULT_HOTKEY_VK, 0))
+        {
+            nodes.push(Node::Text(
+                Role::Small,
+                self.line(settings::IDS_HOTKEY_NO_PAUSE),
+            ));
         }
         nodes
     }
@@ -559,12 +627,22 @@ impl Settings {
     /// ⭐ **The warning about a single `Ctrl`** — решение 208.228, В-4: what may break and what it
     /// touches, then the person's choice — «Выбрать другую клавишу» (the capture again) or «Всё равно
     /// установить». A note of the section, as the note of a refused write is (the shell of 1.8.0).
-    fn ctrl_warning_note(&self) -> Node<Id> {
+    ///
+    /// Решение 208.237 п. 2: **the warning about the tap of `Ctrl+Alt`** is the same note with its own
+    /// title and text, and the same two buttons.
+    fn ctrl_warning_note(&self, warning: Warning) -> Node<Id> {
+        let (title, words) = match warning {
+            Warning::Ctrl(_) => (settings::IDS_CTRL_WARN_TITLE, settings::IDS_CTRL_WARN_TEXT),
+            Warning::CtrlAlt => (
+                settings::IDS_CTRLALT_WARN_TITLE,
+                settings::IDS_CTRLALT_WARN_TEXT,
+            ),
+        };
         Node::Surface(
             Surface::Note,
             Box::new(Node::Rows(vec![
-                Node::Text(Role::Strong, self.line(settings::IDS_CTRL_WARN_TITLE)),
-                Node::Text(Role::Body, self.line(settings::IDS_CTRL_WARN_TEXT)),
+                Node::Text(Role::Strong, self.line(title)),
+                Node::Text(Role::Body, self.line(words)),
                 Node::Buttons(vec![
                     button(Id::CtrlWarnOther, self.line(settings::IDS_CTRL_WARN_OTHER)),
                     button(Id::CtrlWarnSet, self.line(settings::IDS_CTRL_WARN_SET)),
@@ -596,6 +674,7 @@ impl Settings {
         });
         self.combination_taken = false;
         self.ctrl_warning = None;
+        self.ctrl_alt_warning = None;
     }
 
     fn layouts(&self) -> Vec<Node<Id>> {
@@ -832,6 +911,10 @@ impl Settings {
                 self.capture = None;
                 self.ctrl_warning = Some(side);
             }
+            // Решение 208.237 п. 2: the tap of `Ctrl+Alt` — the same, for the key being captured.
+            CaptureStep::CtrlAltTapped => {
+                self.ctrl_alt_warning = self.capture.take().map(|capture| capture.session.target());
+            }
             step => {
                 let Some(capture) = self.capture.as_mut() else {
                     return;
@@ -997,7 +1080,8 @@ impl Settings {
         if self.config.switch_hotkey.enabled
             && (!self.config.switch_hotkey.is_set()
                 || self.capture.is_some()
-                || self.ctrl_warning.is_some())
+                || self.ctrl_warning.is_some()
+                || self.ctrl_alt_warning.is_some())
         {
             off.push(Id::SwitchKeyRemove);
         }
@@ -1176,15 +1260,18 @@ impl Content for Settings {
                 return Reply::Stay;
             }
             Event::Pressed(id @ (Id::HotkeySet | Id::SwitchKeySet | Id::CtrlWarnOther)) => {
-                let target = if id == Id::HotkeySet {
-                    CaptureTarget::Fix
-                } else {
-                    CaptureTarget::Switch
+                // Решение 208.237 п. 2: «Выбрать другую клавишу» of the tap of `Ctrl+Alt` arms the
+                // capture of the key it was made for.
+                let target = match id {
+                    Id::HotkeySet => CaptureTarget::Fix,
+                    Id::CtrlWarnOther => self.ctrl_alt_warning.unwrap_or(CaptureTarget::Switch),
+                    _ => CaptureTarget::Switch,
                 };
                 // ⭐ 208.231: the second key — and the single `Ctrl` with it — exists only in the
                 // mode of two keys; with one key nothing arms its capture.
                 if target == CaptureTarget::Switch && !self.config.switch_hotkey.enabled {
                     self.ctrl_warning = None;
+                    self.ctrl_alt_warning = None;
                     return Reply::Stay;
                 }
                 let armed = self.capture.take().map(|capture| capture.session.target());
@@ -1202,6 +1289,20 @@ impl Content for Settings {
                 {
                     self.change(|config| config.switch_hotkey = tap);
                 }
+                // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` — the key it was captured for; the
+                // second only in the mode of two keys.
+                match self.ctrl_alt_warning.take() {
+                    Some(CaptureTarget::Fix) => {
+                        self.change(|config| config.hotkey = Hotkey::ctrl_alt_tap());
+                    }
+                    Some(CaptureTarget::Switch) if self.config.switch_hotkey.enabled => {
+                        self.change(|config| {
+                            config.switch_hotkey =
+                                config.switch_hotkey.with_key(Hotkey::ctrl_alt_tap());
+                        });
+                    }
+                    _ => {}
+                }
                 return Reply::Stay;
             }
             event => {
@@ -1216,16 +1317,19 @@ impl Content for Settings {
                     self.section = *section;
                 }
                 self.ctrl_warning = None;
+                self.ctrl_alt_warning = None;
             }
             // ⭐ Решение 208.235: the second key back to «Не задана», the mode as it is. With no second
             // key the program works as with one (§2 п. 3 of the design: `Config::two_keys`).
             Event::Pressed(Id::SwitchKeyRemove) => {
                 self.ctrl_warning = None;
+                self.ctrl_alt_warning = None;
                 self.change(|config| config.switch_hotkey = config.switch_hotkey.cleared());
             }
             // Решение 208.228: the mode; the second key is kept in the file either way.
             Event::Selected(Id::HotkeyMode, index) => {
                 self.ctrl_warning = None;
+                self.ctrl_alt_warning = None;
                 self.change(|config| config.switch_hotkey.enabled = index == 1);
             }
             Event::Toggled(id, on) => self.change(|config| match id {
@@ -1609,6 +1713,50 @@ pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
         window.config.switch_hotkey = tap;
     }
     all.push(("settings Hotkey ctrl set".to_owned(), window.describe()));
+    // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` — the first key with it beside the tap of `Ctrl`
+    // (two grey notes, the tallest section of two keys at rest), its warning under the second field,
+    // then with one key: set, and its warning under the first.
+    window.config.hotkey = Hotkey::ctrl_alt_tap();
+    all.push((
+        "settings Hotkey two ctrlalt set".to_owned(),
+        window.describe(),
+    ));
+    window.ctrl_alt_warning = Some(CaptureTarget::Switch);
+    all.push((
+        "settings Hotkey two ctrlalt warning".to_owned(),
+        window.describe(),
+    ));
+    window.ctrl_alt_warning = None;
+    window.config.switch_hotkey.enabled = false;
+    all.push(("settings Hotkey ctrlalt set".to_owned(), window.describe()));
+    window.ctrl_alt_warning = Some(CaptureTarget::Fix);
+    all.push((
+        "settings Hotkey ctrlalt warning".to_owned(),
+        window.describe(),
+    ));
+    window.ctrl_alt_warning = None;
+    // ⭐ Решение 208.237 п. 1: a key «Сочетания клавиш для языков ввода» gives a language — the grey
+    // note under the field; and the refusal of `Alt+Shift` in a capture.
+    let ctrl_shift_1 = Hotkey {
+        key: "1".to_owned(),
+        modifiers: vec!["Ctrl".to_owned(), "Shift".to_owned()],
+        ..Hotkey::default()
+    };
+    window.windows_keys = ctrl_shift_1.binding().into_iter().collect();
+    window.config.hotkey = ctrl_shift_1;
+    all.push(("settings Hotkey windows note".to_owned(), window.describe()));
+    window.windows_keys.clear();
+    window.config.hotkey = Hotkey::default();
+    window.capture = Some(Capture {
+        session: CaptureSession::still(CaptureTarget::Fix, Hotkey::default(), None),
+        line: CaptureLine::Refused(Refusal::WindowsSwitch),
+        pair_until: None,
+    });
+    all.push((
+        "settings Hotkey windows refusal".to_owned(),
+        window.describe(),
+    ));
+    window.capture = None;
     all
 }
 

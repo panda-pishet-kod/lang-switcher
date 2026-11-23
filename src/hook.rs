@@ -170,9 +170,43 @@ pub const DOUBLE_TAP: u16 = 0x8000;
 /// With the flag up the key of the word is `VK_LCONTROL` or `VK_RCONTROL` — the side the capture saw
 /// tapped — and it is never compared as a key: the hotkey is a `Ctrl` that goes down and comes up
 /// within [`DOUBLE_TAP_MS`] with nothing else pressed in between (the rule of a tap of [`Taps`]).
-/// The fixing hotkey never carries it: the capture refuses a lone `Ctrl` there (примечание к FR-94,
+/// The fixing hotkey never carries a lone `Ctrl`: the capture refuses it there (примечание к FR-94,
 /// 208.4), and `settings::Hotkey::binding` has no name for it.
+///
+/// ⭐ **And the tap of `Ctrl+Alt` — решение 208.237 п. 2**, either hotkey: [`CTRL_ALT_TAP`], the left
+/// `Alt` with [`MOD_CTRL`] beside the flag.
 pub const SINGLE_TAP: u16 = 0x4000;
+
+/// ⭐ **The tap of `Ctrl+Alt` — решение 208.237 п. 2** («Обеим»): the word either hotkey carries for
+/// it — the left `Alt` as the key, `Ctrl` as its set, and the flag [`SINGLE_TAP`].
+///
+/// Both keys go down together and come up within [`DOUBLE_TAP_MS`] of the first press, in any order,
+/// with no key and no mouse button in between (the rule of [`Taps`], see [`tap_stroke`]). **Only the
+/// left `Alt` counts** and either real `Ctrl`: the right `Alt` is `AltGr` on ru, pl, de…, which the
+/// keyboard sends as a false left `Ctrl` (scan code [`ALTGR_CTRL_SCAN`]) and the right `Alt` — so
+/// `AltGr` never makes the tap, on every layout alike. The strokes are never suppressed: the programs
+/// see `Ctrl` and `Alt` as ever, and the moment both are down the input thread sends the menu mask
+/// ([`Outcome::mask_menu`]), so that the release of `Alt` takes no window into its menu.
+pub const CTRL_ALT_TAP: (u16, u16) = (VK_LMENU.0, MOD_CTRL | SINGLE_TAP);
+
+/// The scan code `KBDLLHOOKSTRUCT` reports for **the false left `Ctrl` of `AltGr`** — the keyboard
+/// driver of a layout with `AltGr` sends it before the right `Alt` (О-2, `reports\O2-STAND.md`). Not a
+/// real `Ctrl`: it never begins the tap of [`CTRL_ALT_TAP`].
+pub const ALTGR_CTRL_SCAN: u16 = 0x21D;
+
+/// Whether a key and its set are the tap of `Ctrl+Alt` — [`CTRL_ALT_TAP`].
+pub const fn is_ctrl_alt_tap(vk: u16, set: u16) -> bool {
+    vk == CTRL_ALT_TAP.0 && set == CTRL_ALT_TAP.1
+}
+
+/// Message the callback posts to the input thread's window **when the two keys of the tap of
+/// `Ctrl+Alt` are down together** (решение 208.237 п. 2): send the menu mask now, while `Alt` is
+/// still held — the release would otherwise reach the window as a lone `Alt` and open its menu
+/// (T-93-3). `WM_APP + 35`, the next free number of the program-wide row.
+///
+/// SEC-05: any process at the same integrity level can post this too, and what it buys is a press
+/// and a release of `0x07`, a key no layout and no application gives a meaning. It carries nothing.
+pub const WM_APP_MENU_MASK: u32 = WM_APP + 35;
 
 /// **The window of the double press of `Shift`, in milliseconds** — task T-95-1, вопрос 159.
 ///
@@ -372,6 +406,10 @@ pub struct Mode {
     /// The flag [`DOUBLE_TAP`] of the same word as the key and its modifiers, so the three are
     /// never read from two different publications either.
     pub hotkey_double_tap: bool,
+    /// ⭐ **The hotkey is the tap of `Ctrl+Alt` — решение 208.237 п. 2** ([`CTRL_ALT_TAP`]): the flag
+    /// [`SINGLE_TAP`] of the same word, and like the double press no key is compared with
+    /// [`Self::hotkey_vk`] — `Alt` and `Ctrl` stay the programs'.
+    pub hotkey_tap: bool,
     /// **The foreground process is one the user excluded — FR-84**, task T-52-3.
     ///
     /// `true` means the hotkey is not ours here: it is passed to the application untouched and
@@ -501,6 +539,17 @@ pub struct HotkeyState {
     /// The count of mouse buttons pressed when the tap of `Ctrl` began — as [`Self::taps_mouse`]:
     /// `Ctrl` and a click is no tap.
     pub ctrl_mouse: u32,
+    /// ⭐ **The tap of `Ctrl+Alt` under way** (решение 208.237 п. 2, [`CTRL_ALT_TAP`]): the code of the
+    /// real `Ctrl` of it that is down, zero when none is.
+    pub chord_ctrl: u16,
+    /// The left `Alt` of the tap of `Ctrl+Alt` is down.
+    pub chord_alt: bool,
+    /// Both keys of the tap have been down together — a `Ctrl` alone or an `Alt` alone is no tap.
+    pub chord_both: bool,
+    /// The tap of `Ctrl+Alt` under way — [`Taps`], timed from its first press.
+    pub chord_taps: Taps,
+    /// The count of mouse buttons pressed when the tap of `Ctrl+Alt` began — as [`Self::taps_mouse`].
+    pub chord_mouse: u32,
 }
 
 /// **The double press of `Shift`, as a rule of times — task T-95-1, вопрос 159.**
@@ -638,6 +687,10 @@ pub struct Outcome {
     /// (решение 208.228): the layout is switched, nothing is converted. Never together with
     /// [`Self::fire_hotkey`]: one stroke is one key's.
     pub fire_switch: bool,
+    /// ⭐ **The two keys of the tap of `Ctrl+Alt` are down together** — the `PostMessageW` of
+    /// [`WM_APP_MENU_MASK`] (решение 208.237 п. 2): the menu mask goes out while `Alt` is held, and its
+    /// release is no lone `Alt` to the window in front.
+    pub mask_menu: bool,
 }
 
 impl Outcome {
@@ -647,6 +700,7 @@ impl Outcome {
         fire_hotkey: false,
         probe_layout: false,
         fire_switch: false,
+        mask_menu: false,
     };
 }
 
@@ -829,9 +883,13 @@ pub fn classify(
     // and the capture refuse it, §5 of the design), so a stroke is one key's at most.
     //
     // NFR-01: an ordinary letter pays two comparisons of its code and three flags — no call.
-    let fix_pressed = !mode.hotkey_double_tap && key.vk == mode.hotkey_vk;
+    //
+    // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` ([`CTRL_ALT_TAP`]) is a way of either key and no
+    // key that is pressed — its word carries the left `Alt`, which is never swallowed.
+    let fix_pressed = !mode.hotkey_double_tap && !mode.hotkey_tap && key.vk == mode.hotkey_vk;
     let switch_pressed = mode.switch.is_pressed() && key.vk == mode.switch.vk;
-    let counting = mode.hotkey_double_tap || mode.switch.double_tap || mode.switch.tap;
+    let counting =
+        mode.hotkey_double_tap || mode.hotkey_tap || mode.switch.double_tap || mode.switch.tap;
 
     if !fix_pressed && !switch_pressed {
         return if counting {
@@ -846,6 +904,7 @@ pub fn classify(
     if counting && key.edge == Edge::Down {
         state.taps.interrupt();
         state.ctrl_taps.interrupt();
+        state.chord_taps.interrupt();
     }
 
     // Each key holds its own FR-08: the press, its fate, and whether it was the key's set.
@@ -939,6 +998,7 @@ pub fn classify(
                 // key's switch is its own message, not this probe (решение 208.228).
                 probe_layout: false,
                 fire_switch: first_press && !fix_pressed,
+                mask_menu: false,
             }
         }
 
@@ -1065,22 +1125,33 @@ fn tap_stroke(
     mouse: impl FnOnce() -> u32,
 ) -> Outcome {
     let pair = mode.hotkey_double_tap || mode.switch.double_tap;
-    let ctrl_tap = mode.switch.tap;
+    // Решение 208.237 п. 2: a tap of the second key is a lone `Ctrl` or `Ctrl+Alt` — the word says
+    // which ([`CTRL_ALT_TAP`] carries the left `Alt`).
+    let switch_chord = mode.switch.tap && mode.switch.vk == CTRL_ALT_TAP.0;
+    let ctrl_tap = mode.switch.tap && !switch_chord;
     let tapped_ctrl = ctrl_tap && key.vk == mode.switch.vk;
+    let chord = mode.hotkey_tap || switch_chord;
+
+    // One stroke may be asked about by two rules — the press of a `Ctrl` that may begin both its own
+    // tap and the tap of `Ctrl+Alt` — so each question is asked at most once and the answer kept.
+    let (mut held_source, mut held_memo) = (Some(held), None);
+    let mut held = || *held_memo.get_or_insert_with(|| held_source.take().map_or(0, |f| f()));
+    let (mut mouse_source, mut mouse_memo) = (Some(mouse), None);
+    let mut mouse = || *mouse_memo.get_or_insert_with(|| mouse_source.take().map_or(0, |f| f()));
 
     let fire = match (is_shift(key.vk), key.edge) {
         (true, Edge::Down) => {
             state.ctrl_taps.interrupt();
 
             if pair {
-                shift_pressed(state, key, held, mouse);
+                shift_pressed(state, key, &mut held, &mut mouse);
             } else if state.shift_held != key.vk {
                 state.shift_held = key.vk;
             }
 
             false
         }
-        (true, Edge::Up) if pair => shift_released(state, key, mouse),
+        (true, Edge::Up) if pair => shift_released(state, key, &mut mouse),
         (true, Edge::Up) => {
             if state.shift_held == key.vk {
                 state.shift_held = 0;
@@ -1090,10 +1161,10 @@ fn tap_stroke(
         }
         (false, Edge::Down) if tapped_ctrl => {
             state.taps.interrupt();
-            ctrl_pressed(state, key, held, mouse);
+            ctrl_pressed(state, key, &mut held, &mut mouse);
             false
         }
-        (false, Edge::Up) if tapped_ctrl => ctrl_released(state, key, mouse),
+        (false, Edge::Up) if tapped_ctrl => ctrl_released(state, key, &mut mouse),
         (false, Edge::Down) => {
             state.taps.interrupt();
             state.ctrl_taps.interrupt();
@@ -1102,17 +1173,121 @@ fn tap_stroke(
         (false, Edge::Up) => false,
     };
 
-    // The pair of `Shift` is the key that has it; a tap of `Ctrl` is the second key's alone.
+    // The tap of `Ctrl+Alt` beside the rules above — its `Ctrl` may be the `Ctrl` of a lone tap too.
+    let (chord_fire, mask) = if chord {
+        chord_stroke(state, key, &mut held, &mut mouse)
+    } else {
+        (false, false)
+    };
+
+    // The pair of `Shift` is the key that has it; a tap of `Ctrl` is the second key's alone; the tap
+    // of `Ctrl+Alt` is the key whose word carries it.
     let (fix, switch) = match fire {
         false => (false, false),
         true if tapped_ctrl => (false, true),
         true => (mode.hotkey_double_tap, mode.switch.double_tap),
     };
+    let (fix, switch) = (
+        fix || (chord_fire && mode.hotkey_tap),
+        switch || (chord_fire && switch_chord),
+    );
 
     Outcome {
         fire_hotkey: fix && !mode.hotkey_yields,
         fire_switch: switch && !mode.hotkey_yields,
+        mask_menu: mask && !mode.hotkey_yields,
         ..ordinary_stroke(key)
+    }
+}
+
+/// Whether a stroke is a **real** `Ctrl` — either side, and not the false left `Ctrl` `AltGr` sends
+/// ([`ALTGR_CTRL_SCAN`]): what the tap of `Ctrl+Alt` counts (решение 208.237 п. 2).
+fn is_real_ctrl(key: KeyEvent) -> bool {
+    (key.vk == VK_LCONTROL.0 || key.vk == VK_RCONTROL.0) && key.scan != ALTGR_CTRL_SCAN
+}
+
+/// ⭐ **One stroke for the tap of `Ctrl+Alt`** — решение 208.237 п. 2, [`CTRL_ALT_TAP`]. `(fire, mask)`:
+/// the release that ends the tap, and the press that puts the second key down beside the first.
+///
+/// * the **first press** — a real `Ctrl` ([`is_real_ctrl`]) or the left `Alt` — begins the tap when
+///   nothing is held: no `Shift` (from the strokes, [`HotkeyState::shift_held`]), no `Ctrl`, `Alt` or
+///   `Win` (asked once); the count of mouse buttons is taken;
+/// * the **second press** — the other of the two — makes the tap whole, and asks for the menu mask:
+///   the user still holds `Alt`;
+/// * **any other key** going down breaks it: the right `Alt`, the false `Ctrl` of `AltGr`, a second
+///   `Ctrl`, a `Shift`, a `Win`, a letter. So `AltGr` never makes the tap, on any layout;
+/// * the **release of the last** of the two ends it: whole, within [`DOUBLE_TAP_MS`] of the first press
+///   ([`Taps::single`]), and no mouse button pressed since — `fire`.
+///
+/// The auto-repeat of a key already down is no new press. The strokes are passed on and recorded by
+/// [`tap_stroke`] as ever — nothing is suppressed.
+fn chord_stroke(
+    state: &mut HotkeyState,
+    key: KeyEvent,
+    held: impl FnOnce() -> u16,
+    mut mouse: impl FnMut() -> u32,
+) -> (bool, bool) {
+    let ctrl = is_real_ctrl(key);
+    let alt = key.vk == VK_LMENU.0;
+
+    match key.edge {
+        Edge::Down if (ctrl && state.chord_ctrl == key.vk) || (alt && state.chord_alt) => {
+            // The auto-repeat of a key of the tap already down.
+            (false, false)
+        }
+        Edge::Down if (ctrl && state.chord_ctrl == 0) || alt => {
+            let first = state.chord_ctrl == 0 && !state.chord_alt;
+
+            if ctrl {
+                state.chord_ctrl = key.vk;
+            } else {
+                state.chord_alt = true;
+            }
+
+            if first {
+                let clean = state.shift_held == 0
+                    && held() & (MOD_CTRL | MOD_ALT | MOD_SHIFT | MOD_WIN) == 0;
+
+                state.chord_both = false;
+                state.chord_taps.press(key.time, clean);
+
+                if state.chord_taps.pressing() {
+                    state.chord_mouse = mouse();
+                }
+
+                return (false, false);
+            }
+
+            // The other key of the two, beside the first.
+            let whole = state.chord_taps.pressing() && state.chord_ctrl != 0 && state.chord_alt;
+
+            state.chord_both |= whole;
+            (false, whole)
+        }
+        Edge::Down => {
+            // Anything else — the second `Ctrl` among them.
+            state.chord_taps.interrupt();
+            (false, false)
+        }
+        Edge::Up if (ctrl && state.chord_ctrl == key.vk) || (alt && state.chord_alt) => {
+            if ctrl {
+                state.chord_ctrl = 0;
+            } else {
+                state.chord_alt = false;
+            }
+
+            if state.chord_ctrl != 0 || state.chord_alt {
+                // One of the two is still down.
+                return (false, false);
+            }
+
+            let both = std::mem::take(&mut state.chord_both);
+            // The mouse is read only for a release that can end a tap.
+            let clean = both && state.chord_taps.pressing() && mouse() == state.chord_mouse;
+
+            (state.chord_taps.single(key.time, clean), false)
+        }
+        Edge::Up => (false, false),
     }
 }
 
@@ -1512,6 +1687,11 @@ thread_local! {
             ctrl_held: 0,
             ctrl_taps: Taps::NONE,
             ctrl_mouse: 0,
+            chord_ctrl: 0,
+            chord_alt: false,
+            chord_both: false,
+            chord_taps: Taps::NONE,
+            chord_mouse: 0,
         })
     };
 }
@@ -2019,8 +2199,10 @@ pub fn current_mode() -> Mode {
         active: is_active(),
         fail_safe: fail_safe(),
         hotkey_vk,
-        hotkey_modifiers: set & !DOUBLE_TAP,
+        // Решение 208.237 п. 2: and the flag of the tap of `Ctrl+Alt`, out of the same half.
+        hotkey_modifiers: set & !(DOUBLE_TAP | SINGLE_TAP),
         hotkey_double_tap: set & DOUBLE_TAP != 0,
+        hotkey_tap: set & SINGLE_TAP != 0,
         // ⚠ **A fourth relaxed load on the path of every keystroke — task T-52-3, and it is
         // paid here on purpose.** It could be read inside the hotkey branch alone, which would
         // cost an ordinary letter nothing at all; what that would cost instead is the property
@@ -3122,6 +3304,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         post_hotkey(WM_APP_SWITCH_KEY);
     }
 
+    // Решение 208.237 п. 2: both keys of the tap of `Ctrl+Alt` are down — the menu mask, now.
+    if outcome.mask_menu {
+        post_quiet(WM_APP_MENU_MASK);
+    }
+
     // FR-21, task T-03-3c. One `PostMessageW` and nothing else, on the same terms as the one
     // above: `classify` decided, this posts. The two are mutually exclusive for a hotkey that is
     // pressed — its key is not a modifier — and since task T-95-1 one stroke costs both: the
@@ -3164,8 +3351,13 @@ fn decide_here(key: KeyEvent) -> Outcome {
     // Решение 208.228: with two keys the whole set is asked whenever either key is a combination
     // — the combination compares `Shift` too; otherwise a double press or a tap of `Ctrl` asks the
     // four (a tap of `Ctrl` reads its `Shift` from the strokes, see [`tap_stroke`]).
-    let combination = mode.hotkey_modifiers != 0 || mode.switch.modifiers != 0;
-    let taps = mode.hotkey_double_tap || mode.switch.double_tap || mode.switch.tap;
+    //
+    // Решение 208.237 п. 2: the `Ctrl` in the word of the tap of `Ctrl+Alt` is no combination — the
+    // tap asks the four, as a tap of `Ctrl` does.
+    let combination = (mode.hotkey_modifiers != 0 && !mode.hotkey_tap)
+        || (mode.switch.modifiers != 0 && !mode.switch.tap);
+    let taps =
+        mode.hotkey_double_tap || mode.hotkey_tap || mode.switch.double_tap || mode.switch.tap;
     let held: fn() -> u16 = if taps && !combination {
         held_command_modifiers
     } else {
@@ -3299,6 +3491,13 @@ fn answer_lost_hotkey() {
 /// it. SEC-05: any process at the same integrity level can post it, and all that buys the
 /// sender is a re-read of the system's own layout list into memory of ours.
 fn post_layout_probe() {
+    post_quiet(crate::watchdog::WM_APP_LAYOUT);
+}
+
+/// One `PostMessageW` of `message` to the input thread's window from the callback, a failure counted
+/// and nothing else — the body of [`post_layout_probe`], and of the menu mask of the tap of `Ctrl+Alt`
+/// ([`WM_APP_MENU_MASK`], решение 208.237 п. 2): neither answers a lost post with a tone.
+fn post_quiet(message: u32) {
     let raw = HOTKEY_TARGET.load(Ordering::Relaxed);
 
     if raw == NO_HANDLE {
@@ -3316,7 +3515,7 @@ fn post_layout_probe() {
     let posted = unsafe {
         PostMessageW(
             Some(HWND(raw as *mut c_void)),
-            crate::watchdog::WM_APP_LAYOUT,
+            message,
             WPARAM(0),
             LPARAM(0),
         )

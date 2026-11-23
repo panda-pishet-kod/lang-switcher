@@ -2200,6 +2200,7 @@ fn armed() -> Mode {
         hotkey_vk: VK_PAUSE,
         hotkey_modifiers: 0,
         hotkey_double_tap: false,
+        hotkey_tap: false,
         hotkey_yields: false,
         switch: hook::SwitchKey::NONE,
     }

@@ -1256,7 +1256,15 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
             demo_pair: demo_pair(language),
             demo_caption: text(IDS_HELLO_DEMO_CAP),
             panel: text(IDS_HELLO_PANEL),
-            rows: numbered([IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3]),
+            // ⭐ Решение 208.237 п. 4, «Pause + подсказка»: under the three things, a plain row — the
+            // way out for a keyboard with no `Pause` (a laptop's). `Pause` stays the default.
+            rows: numbered([IDS_HELLO_ROW_1, IDS_HELLO_ROW_2, IDS_HELLO_ROW_3])
+                .into_iter()
+                .chain([Row {
+                    marker: String::new(),
+                    text: text(crate::settings::IDS_NO_PAUSE_HINT),
+                }])
+                .collect(),
             left: Some(Button::live(text(IDS_HELLO_SETTINGS), Action::OpenSettings)),
             accent: Some(Button::live(text(IDS_HELLO_OK), Action::Close)),
             // 208.106 п. 3: pause and settings by a right-click on the icon, the flag in the settings —

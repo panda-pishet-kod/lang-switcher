@@ -2804,7 +2804,26 @@ fn each_letter_fills_the_slots_of_its_own_shape() {
         hello.demo,
         "«Привет» is the one letter with a demonstration"
     );
-    assert_eq!(hello.rows.len(), 3, "and three things for the first day");
+    assert_eq!(
+        hello
+            .rows
+            .iter()
+            .filter(|row| !row.marker.is_empty())
+            .count(),
+        3,
+        "and three things for the first day"
+    );
+    // ⭐ Решение 208.237 п. 4, «Pause + подсказка»: under them a plain row — no number — for a
+    // keyboard with no `Pause`.
+    assert_eq!(hello.rows.len(), 4);
+    assert_eq!(hello.rows[3].marker, "");
+    assert_eq!(
+        hello.rows[3].text,
+        lang_switcher::settings::text_in(
+            lang_switcher::settings::ui_language(),
+            lang_switcher::settings::IDS_NO_PAUSE_HINT
+        )
+    );
     assert!(hello.left.is_some(), "«Открыть настройки»");
     assert!(hello.accent.is_some(), "«Понятно»");
     assert!(hello.cards.is_empty(), "and no cards");
