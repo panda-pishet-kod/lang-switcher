@@ -701,3 +701,61 @@ fn a_tab_of_a_section_holds_its_label_in_the_weight_it_is_drawn_in() {
         cut.join("\n")
     );
 }
+
+/// **AUDIT-180b Н1 (решения 208.227, 208.230)** — the groups of every section stand a block apart,
+/// as the passport (§3 «между блоками 1 B») and the mock-up have them: the content under the tabs is
+/// a column, whose gap is `BLOCK_GAP` (`ui_layout`,
+/// `a_column_stands_its_blocks_a_block_gap_apart_and_rows_a_line_gap_apart`), not rows. «Общие»
+/// (208.230): a block only between the switches and «Язык интерфейса»; the language, its button and
+/// the theme — rows, half a block; while the note of a refused write stands, all of «Общие». Red
+/// before: rows everywhere, half a block — the label «Язык интерфейса» nearer the group above it
+/// than its own field.
+#[test]
+fn the_groups_of_every_section_stand_a_block_apart() {
+    use lang_switcher::ui::scene::Node;
+
+    with_product_strings();
+    for language in [Language::Ru, Language::De] {
+        let states = window_of_settings::states(language);
+        assert!(states.len() >= 5, "the five sections at the least");
+        for (name, window) in states {
+            let Node::Column(body) = &window.body else {
+                panic!("{name}: the body is a column")
+            };
+            let Some(Node::Fill(content)) = body.last() else {
+                panic!("{name}: the section takes the rest of the column")
+            };
+            let Node::Column(groups) = &**content else {
+                panic!("{language:?} {name}: the groups of the section are not a block apart")
+            };
+            if !name.starts_with("settings General") {
+                continue;
+            }
+            if name == "settings General refused" {
+                // While the note of a refused write stands over «Общие», the groups close up to half
+                // a block (208.230: else de and ta go out of the least window by half a point).
+                assert!(
+                    matches!(&groups[..], [Node::Rows(_)]),
+                    "{language:?} {name}: the note and the groups half a block apart"
+                );
+                continue;
+            }
+            let [switches, rows] = &groups[..] else {
+                panic!(
+                    "{language:?} {name}: «Общие» is the switches and the rows under them, a block apart"
+                )
+            };
+            let (switches, rows) = (format!("{switches:?}"), format!("{rows:?}"));
+            assert!(
+                switches.contains("id: Autostart") && !switches.contains("id: Language"),
+                "{language:?} {name}: the switches first: {switches}"
+            );
+            assert!(
+                rows.starts_with("Rows(")
+                    && rows.contains("id: Language")
+                    && rows.contains("id: Theme"),
+                "{language:?} {name}: the language and the theme half a block apart: {rows}"
+            );
+        }
+    }
+}

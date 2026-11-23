@@ -360,8 +360,11 @@ impl Settings {
         // over them (208.209, AUDIT-180 Н5, О5). Not a pair: three segments are wider than half the
         // column at the type of the window, and in a half they turned into a choice field (the
         // frame of the stand, 23.11) — the rule of the segments comes first.
-        nodes.extend(language_column);
-        nodes.push(Node::Segments {
+        // A block under the switches, half a block between the language, its button and the theme
+        // (решение 208.230, AUDIT-180b Н1 «слипание убрать»): a block everywhere would push «Общие»
+        // out of the least window in forty-one languages, and the table of the type size stays.
+        let mut rows = language_column;
+        rows.push(Node::Segments {
             id: Id::Theme,
             label: self.line(IDS_THEME_LABEL),
             options: [IDS_THEME_SYSTEM, IDS_THEME_LIGHT, IDS_THEME_DARK]
@@ -369,6 +372,7 @@ impl Settings {
                 .to_vec(),
             selected: settings::theme_combo_index(self.config.general.theme),
         });
+        nodes.push(Node::Rows(rows));
         nodes
     }
 
@@ -855,7 +859,18 @@ impl Content for Settings {
             Section::Diagnostics => self.diagnostics(),
         };
         if self.refused {
-            content.insert(0, note(self.refused_sentence()));
+            let note = note(self.refused_sentence());
+            if self.section == Section::General {
+                // While the note stands over «Общие», its groups close up to half a block — as the
+                // button «Нашли ошибку в переводе?» gives the note its place (C6, (г)): with the block
+                // under the switches the note pushed «Общие» out of the least window in de and ta by
+                // half a point (решение 208.230). The note goes with the next change.
+                let mut rows = vec![note];
+                rows.append(&mut content);
+                content = vec![Node::Rows(rows)];
+            } else {
+                content.insert(0, note);
+            }
         }
         let mut body = vec![
             Node::Header {
@@ -876,8 +891,10 @@ impl Content for Settings {
             },
         ];
         // The section takes the rest of the column, so that a list in it can take the rest of the
-        // section.
-        body.push(Node::Fill(Box::new(Node::Rows(content))));
+        // section. Its groups a block apart, as the passport (§3 «между блоками 1 B») and the mock-up
+        // have them (AUDIT-180b Н1, решения 208.227, 208.230): half a block made a label nearer the
+        // group above it than its own field. «Общие» keeps half a block inside its rows.
+        body.push(Node::Fill(Box::new(Node::Column(content))));
 
         Window {
             kind: WindowKind::Settings,
