@@ -540,8 +540,8 @@ fn a_choice_field_and_a_segmented_switch_stand_under_their_labels_across_the_col
     );
 }
 
-/// **208.209, AUDIT-180 О3, А2, А3 — the cards of a pair.** An action card stands in the frame of a
-/// block; in a pair standing side by side the two take one height — the taller card's — however
+/// **208.209, AUDIT-180 О3, А2, А3, AUDIT-180b Н3 — the cards of a pair.** An action card stands
+/// in the frame of a nested card (`surface2`, the mock-up's `.card`, решение 208.227); in a pair standing side by side the two take one height — the taller card's — however
 /// long the text of either, and their buttons stand on one line at the foot, at the start edge.
 #[test]
 fn the_cards_of_a_pair_stand_in_frames_of_one_height_with_their_buttons_on_one_line() {
@@ -560,7 +560,7 @@ fn the_cards_of_a_pair_stand_in_frames_of_one_height_with_their_buttons_on_one_l
     ));
     let layout = lay(&window, usual());
     let frames = rects_of(&layout, |part| {
-        matches!(part, Part::Surface(Surface::Block))
+        matches!(part, Part::Surface(Surface::Nested))
     });
     let buttons = rects_of(&layout, |part| matches!(part, Part::Button { .. }));
 

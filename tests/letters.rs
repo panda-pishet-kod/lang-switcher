@@ -5107,7 +5107,7 @@ fn the_switch_of_the_author_window_stands_under_the_block_of_the_news() {
     let block = children
         .iter()
         .position(|node| {
-            matches!(node, Node::Surface(Surface::Block, _)) && format!("{node:?}").contains(&news)
+            matches!(node, Node::Surface(Surface::Nested, _)) && format!("{node:?}").contains(&news)
         })
         .expect("the block of the news");
     let switch = children

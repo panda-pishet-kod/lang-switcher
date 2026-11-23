@@ -2335,7 +2335,8 @@ impl<I: Copy> Placer<'_, I> {
         top - y
     }
 
-    /// An action card (passport §6, 208.209): in the frame of a block (AUDIT-180 О3), the title and
+    /// An action card (passport §6, 208.209): a nested card — `surface2` in a frame of `line`, as the
+    /// mock-up's `.card` (AUDIT-180b Н3, решение 208.227; the frame AUDIT-180 О3) —, the title and
     /// the text, the buttons under them at the start edge (О2) — at the foot of the card when its
     /// `slot` is taller than what it holds: in a pair standing side by side the two cards take one
     /// height and their buttons one line (А2, А3) — or beside them, §3а step 3, in such a pair when
@@ -2351,8 +2352,12 @@ impl<I: Copy> Placer<'_, I> {
         w: f32,
         slot: Option<f32>,
     ) -> f32 {
-        let (v, h) = (self.em(BLOCK_PAD.v), self.em(BLOCK_PAD.h));
-        let frame = self.push(Part::Surface(Surface::Block), Rect::new(x, y, w, 0.0), None);
+        let (v, h) = (self.em(NESTED_PAD.v), self.em(NESTED_PAD.h));
+        let frame = self.push(
+            Part::Surface(Surface::Nested),
+            Rect::new(x, y, w, 0.0),
+            None,
+        );
         let (x, y, w) = (x + h, y + v, (w - h * 2.0).max(0.0));
         let beside_lowers = self.gives(Concession::Card)
             && self.in_pair
