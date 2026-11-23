@@ -6,8 +6,8 @@ page. Dates are the days the releases were published (UTC).
 
 ## 1.8.0 — не выпущено
 
-- 1.7.0 was not released on its own: what it was to bring — the flag of the layout on the tray icon and the window
-  «Updated» — comes in 1.8.0 together with the new look of every window of the program.
+- 1.7.0 was not released on its own: what it was to bring — the flag of the layout on the tray icon and a small
+  update window — comes in 1.8.0 together with the new look of every window of the program.
 - Every window of the program has a new look, one for all of them: the settings, the menu of the icon, «About», the
   letters and «Recent letters», «From the author», the wizard «Write to the author» and the small window by the
   notification area. Light, dark or as in Windows — the choice in «General», as before.
@@ -28,7 +28,7 @@ page. Dates are the days the releases were published (UTC).
   opens the wizard at the page of an idea, with the language already named in the message.
 - In the wizard the text of the message is shown in a monospace font; when it has letters that font lacks — Hebrew
   and Arabic on Windows 10 — the whole field is in the main font of the window, at the same size.
-- After an update the balloon «Lang Switcher has been updated to X» no longer appears; the window «Updated» takes its place
+- After an update the balloon «Lang Switcher has been updated to X» no longer appears; a small update window takes its place
   after an important release.
 - The tray icon can be the flag of the current keyboard layout: the tick «Layout flag in the tray» in «General» of the
   settings window, off by default. The flag is the country Windows names for the layout's language; a country without a flag
@@ -44,7 +44,7 @@ page. Dates are the days the releases were published (UTC).
 - When the flag is turned on but stands under the arrow ^ of the taskbar, a hint tells where to pin it.
 - For a week after an update the menu of the icon has «What's new in X…».
 - In «From the author» the switch «Tell me about the author’s updates and news» gave way to «Tell me about program
-  updates»: it turns the window «Updated» on and off, the same setting as its tick and as the switch of the
+  updates»: it turns the small update window on and off, the same setting as its tick and as the switch of the
   same name in «General» of the settings — turned in one window, it shows so in the other. Letters and news are turned
   off in the settings file (`[letters] feed = false`); whoever has done that keeps it, and the window says so in a line.
 - When the program could not install a new version by itself, it no longer says so on its own: no notification and no

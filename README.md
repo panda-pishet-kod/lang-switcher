@@ -197,8 +197,9 @@ without a UAC prompt. The source of every release is in this repository under it
 
 Once a day Lang Switcher reads a short news file from the author's site; it sends nothing about your
 computer. When a new version comes out, the program downloads it from the same site by itself,
-checks the author's signature and installs it while the computer is idle. A short notice by the tray
-icon tells you when it has been updated.
+checks the author's signature and installs it while the computer is idle. After an important update
+a small window by the tray icon tells you once what is new; it is turned off in the settings («Tell
+me about program updates»).
 
 A message to the author from the wizard goes to the site only when you press **Send** yourself —
 exactly the text you saw before sending; a way to contact you is optional.
