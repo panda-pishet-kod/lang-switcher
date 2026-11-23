@@ -107,7 +107,7 @@ BEGIN
     IDS_SECTION_HOTKEY_SUB  "ஒரு விசை தட்டச்சு செய்த உரையைச் சரிசெய்து தளவமைப்பை மாற்றும்"
     IDS_HOTKEY_MODE_ONE     "ஒரு விசை"
     IDS_HOTKEY_MODE_TWO     "இரண்டு விசைகள்"
-    IDS_SECTION_HOTKEY_SUB_TWO "ஒரு விசை தட்டச்சு செய்த உரையைச் சரிசெய்யும், மற்றொன்று தளவமைப்பை மாற்றும்"
+    IDS_SECTION_HOTKEY_SUB_TWO "ஒரு விசை உரையைச் சரிசெய்யும், மற்றது தளவமைப்பை மாற்றும்"
     IDS_HOTKEY_FIX_LABEL    "தட்டச்சு செய்ததைச் சரிசெய்:"
     IDS_HOTKEY_SWITCH_LABEL "தளவமைப்பை மாற்று:"
     IDS_SWITCH_KEY_NONE     "அமைக்கப்படவில்லை"
