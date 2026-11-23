@@ -1721,9 +1721,9 @@ pub const IDS_AUTHOR_TITLE: u16 = 3321;
 pub const IDS_THANKS_SAY: u16 = 3322;
 /// «Письма от автора» — the title of «Последние письма» under its eyebrow, which is the caption
 /// [`IDS_LETTERS_CAPTION`] (AUDIT-180b Н4, решение 208.227: the head of the mock-up).
-pub const IDS_LETTERS_TITLE: u16 = 3323;
+pub const IDS_LETTERS_TITLE: u16 = 3342;
 /// The subtitle of «Последние письма»: what the list holds (AUDIT-180b Н4, решение 208.227).
-pub const IDS_LETTERS_SUB: u16 = 3324;
+pub const IDS_LETTERS_SUB: u16 = 3343;
 /// «Раскладка» — the title of the list of the program's own a click on the flag shows when РУС/ENG
 /// is hidden at the clock, task T-119-3, part Б (решение 208.88).
 pub const IDS_OWN_LIST_TITLE: u16 = 3265;
@@ -2397,7 +2397,7 @@ pub const IDS_WIZARD_FAILED: u16 = 3207;
 /// left before any release, a hole.
 ///
 /// ⚠ **Two hundred and eighty-four since AUDIT-180b Н4** (решение 208.227) — the head of «Последние
-/// письма» as the mock-up has it: [`IDS_LETTERS_TITLE`] (3323) and [`IDS_LETTERS_SUB`] (3324).
+/// письма» as the mock-up has it: [`IDS_LETTERS_TITLE`] (3342) and [`IDS_LETTERS_SUB`] (3343).
 /// 282 + 2.
 pub const INTERFACE_STRINGS: [u16; 284] = [
     IDS_DIALOG_CAPTION,

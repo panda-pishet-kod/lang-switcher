@@ -6577,7 +6577,7 @@ impl Drop for ProductImage {
 /// ⚠ **282 since the merge of the fixes of AUDIT-180** — Z11, made beside them: the text of the
 /// hint of the flag on Windows 10 (3340).
 ///
-/// ⚠ **284 since AUDIT-180b Н4** — the title and the subtitle of «Последние письма» (3323, 3324,
+/// ⚠ **284 since AUDIT-180b Н4** — the title and the subtitle of «Последние письма» (3342, 3343,
 /// 208.227).
 const FR_94_STRINGS: [(u16, &str, &str); 284] = [
     (
@@ -12270,7 +12270,7 @@ fn the_retired_restart_string_is_a_hole_and_the_block_reads_across_it() {
         settings::INTERFACE_STRINGS.len(),
         284,
         "two hundred and EIGHTY-FOUR identifiers in use since AUDIT-180b Н4: the title and the \
-         subtitle of «Последние письма» (3323, 3324). Two hundred and eighty-two since the merge \
+         subtitle of «Последние письма» (3342, 3343). Two hundred and eighty-two since the merge \
          of the fixes of AUDIT-180: Z11, \
          made beside them, the text of the hint of the flag on Windows 10 (3340); the knock of \
          «Спасибо» names its second button with the letter's own string (решение 208.112). Two \
