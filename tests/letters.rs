@@ -2347,7 +2347,18 @@ fn the_page_of_a_report_about_the_translation_is_headed_with_the_words_of_its_bu
             .describe()
             .body
         );
-        let at = body.find("Header {").expect("the page has its header");
+        // The head shown: since AUDIT-180 Z8 the heads of every step stand in `Steps(shown, …)`
+        // (the head as tall as the tallest), and the shown one is the `shown`-th of them.
+        let shown: usize = body
+            .find("Steps(")
+            .and_then(|at| body[at + "Steps(".len()..].split(',').next())
+            .and_then(|number| number.trim().parse().ok())
+            .unwrap_or(0);
+        let at = body
+            .match_indices("Header {")
+            .nth(shown)
+            .map(|(at, _)| at)
+            .expect("the page has its header");
         let end = body[at..].find("}").map_or(body.len(), |end| at + end);
         body[at..end].to_owned()
     };

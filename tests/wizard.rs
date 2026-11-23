@@ -16,8 +16,11 @@ use lang_switcher::ui::windows::wizard;
 ///
 /// The same helper the letters tests use: without it `settings::text` answers with the strings
 /// of whatever module ran first, and an appeal would be checked against blanks.
+/// The strings of the product, opened as data, and Russian as the language of the program: every
+/// test of this file reads the same words (one of them opening the strings while another builds an
+/// appeal without them raced, AUDIT-180 Z8).
 fn with_product_strings() {
-    settings::set_ui_language(settings::Language::Ru);
+    with_product_texts();
 }
 
 /// A draft with something in every field — the one an appeal is fullest from.
@@ -852,5 +855,5 @@ fn with_product_texts() {
         module.0 as usize
     });
     settings::set_resource_module(HMODULE(std::ptr::without_provenance_mut(raw)));
-    with_product_strings();
+    settings::set_ui_language(settings::Language::Ru);
 }

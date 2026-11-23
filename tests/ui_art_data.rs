@@ -15,12 +15,15 @@ mod built {
     include!(concat!(env!("OUT_DIR"), "/art.rs"));
 }
 
-/// The eight pictures of 1.8.0 and the ten menu icons of part C, in the order of their names.
-const NAMES: [&str; 18] = [
+/// The eight pictures of 1.8.0, the ten menu icons of part C and the two icons of the cards of the
+/// wizard (AUDIT-180 Z8, 208.132), in the order of their names.
+const NAMES: [&str; 20] = [
     "about",
     "avatar",
     "hello",
+    "icons/alert",
     "icons/boot",
+    "icons/bulb",
     "icons/down",
     "icons/exit",
     "icons/gear",

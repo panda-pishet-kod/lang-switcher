@@ -399,7 +399,7 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
             let mark = CHEVRON.at(look.b);
             // The value ends a padding short of the corner mark, cut with an ellipsis: a long
             // name ran into the mark (Б6 of AUDIT-180, «English (United States)» of «Источник»).
-            let room = (rect.w - pad * 3.0 - mark).max(0.0);
+            let room = (rect.w - pad * 2.0 - pad - mark).max(0.0);
             let text = Rect::new(rect.x + pad, rect.y, room, rect.h);
             let text = if look.rtl {
                 Rect::new(rect.x + pad * 2.0 + mark, rect.y, room, rect.h)

@@ -30,7 +30,7 @@ use crate::ui::scene::{
 use ::windows::Win32::Foundation::HWND;
 
 /// Every step of both roads, whose heads the head of a step is as tall as (AUDIT-180 М3).
-const HEADS: [Step; 6] = [
+const HEADS: &[Step] = &[
     Step::What,
     Step::Where,
     Step::Did,

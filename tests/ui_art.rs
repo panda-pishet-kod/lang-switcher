@@ -488,7 +488,8 @@ fn an_unknown_name_is_an_error() {
         assert!(art.draw(target, "nobody", (5.0, 5.0), 5.0).is_err());
     });
     assert_eq!(art::names().count(), 8);
-    assert_eq!(art::icon_names().count(), 10);
+    // Twelve since AUDIT-180 Z8: «!» in a circle and the lamp of the cards of the wizard (208.132).
+    assert_eq!(art::icon_names().count(), 12);
     assert!(art::names().all(|name| !name.contains('/')));
     canvas.frame(|target| {
         assert!(art::draw_icon(target, "nobody", Rgb::from_hex(0), (0.0, 0.0), 10.0).is_err());
