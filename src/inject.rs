@@ -1749,7 +1749,13 @@ pub fn send_switch_menu_mask() {
     send_menu_mask_of(crate::hook::switch_hotkey().1);
 }
 
-/// The mask for a hotkey of `modifiers` — one body for both keys.
+/// The menu mask of **the tap of `Ctrl+Alt`** (решение 208.237 п. 2) — on `hook::WM_APP_MENU_MASK`,
+/// the moment both keys of the tap are down: `Alt` is held, whatever the tap then becomes.
+pub fn send_alt_menu_mask() {
+    send_menu_mask_of(crate::hook::MOD_ALT);
+}
+
+/// The mask for a hotkey of `modifiers` — one body for all three.
 fn send_menu_mask_of(modifiers: u16) {
     let Some(events) = menu_mask(modifiers) else {
         return;

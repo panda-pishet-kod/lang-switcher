@@ -9141,13 +9141,14 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         (
             0x10,
             ctrl,
-            settings::Refusal::Modifier,
+            // Решение 208.237 п. 1: the switch of Windows names its reason.
+            settings::Refusal::WindowsSwitch,
             "Shift при зажатом Ctrl",
         ),
         (
             0x10,
             settings::Modifiers { alt: true, ..shift },
-            settings::Refusal::Modifier,
+            settings::Refusal::WindowsSwitch,
             "Shift при зажатом Alt",
         ),
         // The `Windows` key: the shell acts on it whatever anybody else does — and since task
@@ -9232,6 +9233,8 @@ fn the_capture_refuses_every_press_that_cannot_be_a_hotkey() {
         settings::Refusal::Editing,
         settings::Refusal::Text,
         settings::Refusal::Nameless,
+        // Решение 208.237 п. 1.
+        settings::Refusal::WindowsSwitch,
     ] {
         for language in [settings::Language::Ru, settings::Language::En] {
             let sentence = product.string(language, refusal.string_id());
@@ -9855,7 +9858,12 @@ fn ctrl_or_alt_on_its_own_is_refused_and_a_pair_under_them_is_none() {
     ] {
         assert_eq!(
             capture_steps(&[(KeyDown(vk, held), 1_000)]),
-            [Refuse(settings::Refusal::Modifier)],
+            [Refuse(if vk == VK_SHIFT_KEY {
+                // Решение 208.237 п. 1: `Ctrl+Shift` and `Alt+Shift` are the switches of Windows.
+                settings::Refusal::WindowsSwitch
+            } else {
+                settings::Refusal::Modifier
+            })],
             "{what}"
         );
     }
@@ -15511,7 +15519,8 @@ mod second_hotkey {
                 },
                 1_000
             ),
-            CaptureStep::Refuse(Refusal::Modifier)
+            // Решение 208.237 п. 1: `Ctrl+Shift` names its reason — Windows switches with it.
+            CaptureStep::Refuse(Refusal::WindowsSwitch)
         );
         assert_ne!(
             up(&mut under_shift, LCONTROL, 1_050),
@@ -15529,12 +15538,14 @@ mod second_hotkey {
         drop(combination);
 
         let mut first = CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), None);
+        // Решение 208.237 п. 2: the press may still be the tap of `Ctrl+Alt` — the refusal of 208.4
+        // stands, said on the release.
+        assert_eq!(down(&mut first, CONTROL, CTRL, 1_000), CaptureStep::Ignore);
         assert_eq!(
-            down(&mut first, CONTROL, CTRL, 1_000),
+            up(&mut first, CONTROL, 1_050),
             CaptureStep::Refuse(Refusal::Modifier),
             "the first key: the refusal of 208.4 stands"
         );
-        assert_eq!(up(&mut first, CONTROL, 1_050), CaptureStep::Ignore);
         drop(first);
 
         hook::set_hotkeys(before.0, before.1);
@@ -15557,16 +15568,18 @@ mod second_hotkey {
                     CaptureSession::arm_for(CaptureTarget::Fix, bare("Pause"), other)
                 };
                 assert_eq!(first.target(), CaptureTarget::Fix);
+                // Решение 208.237 п. 2: the press may begin the tap of `Ctrl+Alt` — the refusal of a
+                // modifier on its own is said on the release, and no warning is begun.
                 assert_eq!(
                     down(&mut first, side, CTRL, 1_000),
-                    CaptureStep::Refuse(Refusal::Modifier),
-                    "{mode}, {side:#04x}: the refusal of a modifier on its own"
+                    CaptureStep::Ignore,
+                    "{mode}, {side:#04x}: nothing while it may be a tap of Ctrl+Alt"
                 );
                 let released = up(&mut first, side, 1_060);
                 assert_eq!(
                     released,
-                    CaptureStep::Ignore,
-                    "{mode}, {side:#04x}: the tap is no hotkey and asks no warning"
+                    CaptureStep::Refuse(Refusal::Modifier),
+                    "{mode}, {side:#04x}: the tap is no hotkey — the refusal, no warning"
                 );
                 drop(first);
             }
@@ -15729,6 +15742,579 @@ mod second_hotkey {
         assert!(
             packed.contains("lettwo_keys=crate::hook::switch_hotkey().0!=0;"),
             "and the mode of two keys is the second key in the word of the hook"
+        );
+    }
+}
+
+/// ⭐ **Решение 208.237 пп. 1, 2, 4** — the keys Windows switches the language with, the tap of
+/// `Ctrl+Alt` for either hotkey, and the line for a keyboard with no `Pause`.
+mod windows_keys_and_ctrl_alt {
+    use super::*;
+    use lang_switcher::hook;
+    use lang_switcher::settings::{
+        Capture, CaptureEvent, CaptureSession, CaptureStep, CaptureTarget, Hotkey, Modifiers,
+        Refusal, SwitchHotkey,
+    };
+
+    const SHIFT_KEY: u16 = 0x10;
+    const CONTROL: u16 = 0x11;
+    const MENU: u16 = 0x12;
+    const PAUSE: u16 = 0x13;
+    const SPACE: u16 = 0x20;
+    const DIGIT_1: u16 = 0x31;
+    const T: u16 = 0x54;
+    const LWIN: u16 = 0x5B;
+    const LCONTROL: u16 = 0xA2;
+    const RCONTROL: u16 = 0xA3;
+    const LMENU: u16 = 0xA4;
+    const RMENU: u16 = 0xA5;
+
+    fn held(ctrl: bool, alt: bool, shift: bool, win: bool) -> Modifiers {
+        Modifiers {
+            ctrl,
+            alt,
+            shift,
+            win,
+        }
+    }
+
+    /// What the queue holds when `vk` goes down beside `with`: its own modifier too.
+    fn with_own(vk: u16, with: Modifiers) -> Modifiers {
+        Modifiers {
+            ctrl: with.ctrl || [CONTROL, LCONTROL, RCONTROL].contains(&vk),
+            alt: with.alt || [MENU, LMENU, RMENU].contains(&vk),
+            ..with
+        }
+    }
+
+    /// The four events of a tap in a capture — `first` down, `second` beside it, `second` up, `first`
+    /// up — and the step of each.
+    fn tap(
+        session: &mut CaptureSession,
+        first: u16,
+        second: u16,
+        down: u32,
+        up: u32,
+    ) -> Vec<CaptureStep> {
+        let nothing = Modifiers::default();
+        let first_held = with_own(first, nothing);
+        vec![
+            session.step(CaptureEvent::KeyDown(first, first_held), down),
+            session.step(
+                CaptureEvent::KeyDown(second, with_own(second, first_held)),
+                down + 20,
+            ),
+            session.step(CaptureEvent::KeyUp(second), up - 10),
+            session.step(CaptureEvent::KeyUp(first), up),
+        ]
+    }
+
+    fn still(target: CaptureTarget, other: Option<(u16, u16)>) -> CaptureSession {
+        CaptureSession::still(target, Hotkey::default(), other)
+    }
+
+    /// ⭐ **`Alt+Shift`, `Ctrl+Shift` and `Win+Space` are refused with the reason** (208.237 п. 1): «Этим
+    /// сочетанием Windows переключает язык». A modifier on its own otherwise, and a `Win` with any other
+    /// key, keep the refusals they had.
+    #[test]
+    fn the_switches_of_windows_are_refused_with_their_reason() {
+        let windows = Capture::Refused(Refusal::WindowsSwitch);
+
+        for (vk, with, why) in [
+            (SHIFT_KEY, held(false, true, true, false), "Shift under Alt"),
+            (MENU, held(false, true, true, false), "Alt under Shift"),
+            (
+                LMENU,
+                held(false, true, true, false),
+                "the left Alt under Shift",
+            ),
+            (
+                SHIFT_KEY,
+                held(true, false, true, false),
+                "Shift under Ctrl",
+            ),
+            (CONTROL, held(true, false, true, false), "Ctrl under Shift"),
+            (
+                RCONTROL,
+                held(true, false, true, false),
+                "the right Ctrl under Shift",
+            ),
+            (SPACE, held(false, false, false, true), "Win+Space"),
+            (SPACE, held(false, false, true, true), "Win+Shift+Space"),
+        ] {
+            assert_eq!(settings::capture(vk, with), windows, "{why}");
+        }
+
+        for (vk, with, refusal, why) in [
+            (
+                SHIFT_KEY,
+                held(true, true, true, false),
+                Refusal::Modifier,
+                "Ctrl+Alt+Shift",
+            ),
+            (
+                CONTROL,
+                held(true, false, false, false),
+                Refusal::Modifier,
+                "a lone Ctrl",
+            ),
+            (
+                MENU,
+                held(false, true, false, false),
+                Refusal::Modifier,
+                "a lone Alt",
+            ),
+            (
+                CONTROL,
+                held(true, true, false, false),
+                Refusal::Modifier,
+                "Ctrl+Alt",
+            ),
+            (
+                T,
+                held(false, false, false, true),
+                Refusal::Reserved,
+                "Win+T",
+            ),
+            (
+                LWIN,
+                held(false, false, false, true),
+                Refusal::Reserved,
+                "Win",
+            ),
+        ] {
+            assert_eq!(
+                settings::capture(vk, with),
+                Capture::Refused(refusal),
+                "{why}"
+            );
+        }
+
+        assert_eq!(
+            settings::capture(SHIFT_KEY, held(false, false, true, false)),
+            Capture::Shift,
+            "a lone Shift still begins the double press"
+        );
+        assert_eq!(
+            Refusal::WindowsSwitch.string_id(),
+            settings::IDS_CAPTURE_WINDOWS_SWITCH
+        );
+
+        // The capture of the second key, which reads its `Ctrl` itself.
+        let mut second = still(CaptureTarget::Switch, Some((PAUSE, 0)));
+        assert_eq!(
+            second.step(
+                CaptureEvent::KeyDown(LCONTROL, held(true, false, true, false)),
+                1_000
+            ),
+            CaptureStep::Refuse(Refusal::WindowsSwitch),
+            "Ctrl under Shift in a capture of the second key"
+        );
+    }
+
+    /// ⭐ **The tap of `Ctrl+Alt` is captured for either key** (208.237 п. 2): either real `Ctrl` and the
+    /// left `Alt`, in any order, up within the window — the release of the last asks the warning.
+    #[test]
+    fn a_tap_of_ctrl_and_the_left_alt_is_captured_for_either_key() {
+        for target in [CaptureTarget::Fix, CaptureTarget::Switch] {
+            for (first, second) in [
+                (LCONTROL, LMENU),
+                (LMENU, LCONTROL),
+                (RCONTROL, LMENU),
+                (LMENU, RCONTROL),
+                (CONTROL, MENU),
+            ] {
+                let steps = tap(&mut still(target, None), first, second, 1_000, 1_100);
+                assert_eq!(
+                    steps[3],
+                    CaptureStep::CtrlAltTapped,
+                    "{target:?}: {first:#04x} then {second:#04x}"
+                );
+                assert_eq!(
+                    steps[..3],
+                    [
+                        CaptureStep::Ignore,
+                        CaptureStep::Ignore,
+                        CaptureStep::Ignore
+                    ],
+                    "{target:?}: only the last release — and no refusal of a modifier meanwhile"
+                );
+            }
+
+            let exactly = tap(
+                &mut still(target, None),
+                LCONTROL,
+                LMENU,
+                1_000,
+                1_000 + hook::DOUBLE_TAP_MS,
+            );
+            assert_eq!(
+                exactly[3],
+                CaptureStep::CtrlAltTapped,
+                "{target:?}: the window"
+            );
+        }
+    }
+
+    /// **What a capture never takes for the tap of `Ctrl+Alt`**: the right `Alt` (`AltGr`), a hold, a key
+    /// between, `Shift` held, the two one after the other, a lone `Ctrl` of the first key.
+    #[test]
+    fn a_capture_takes_no_other_press_for_the_tap_of_ctrl_and_alt() {
+        let never = |steps: &[CaptureStep], why: &str| {
+            assert!(!steps.contains(&CaptureStep::CtrlAltTapped), "{why}");
+        };
+
+        for target in [CaptureTarget::Fix, CaptureTarget::Switch] {
+            never(
+                &tap(&mut still(target, None), LCONTROL, RMENU, 1_000, 1_100),
+                "the right Alt",
+            );
+            never(
+                &tap(&mut still(target, None), RMENU, LCONTROL, 1_000, 1_100),
+                "the right Alt first",
+            );
+            never(
+                &tap(
+                    &mut still(target, None),
+                    LCONTROL,
+                    LMENU,
+                    1_000,
+                    1_000 + hook::DOUBLE_TAP_MS + 1,
+                ),
+                "401 ms",
+            );
+
+            let mut between = still(target, None);
+            let ctrl_alt = held(true, true, false, false);
+            let steps = [
+                between.step(
+                    CaptureEvent::KeyDown(LCONTROL, held(true, false, false, false)),
+                    1_000,
+                ),
+                between.step(CaptureEvent::KeyDown(LMENU, ctrl_alt), 1_020),
+                between.step(CaptureEvent::KeyDown(T, ctrl_alt), 1_040),
+                between.step(CaptureEvent::KeyUp(T), 1_060),
+                between.step(CaptureEvent::KeyUp(LMENU), 1_080),
+                between.step(CaptureEvent::KeyUp(LCONTROL), 1_100),
+            ];
+            never(&steps, "a key between");
+
+            let mut shifted = still(target, None);
+            let steps = [
+                shifted.step(
+                    CaptureEvent::KeyDown(LCONTROL, held(true, false, true, false)),
+                    1_000,
+                ),
+                shifted.step(
+                    CaptureEvent::KeyDown(LMENU, held(true, true, true, false)),
+                    1_020,
+                ),
+                shifted.step(CaptureEvent::KeyUp(LMENU), 1_080),
+                shifted.step(CaptureEvent::KeyUp(LCONTROL), 1_100),
+            ];
+            never(&steps, "Shift held");
+
+            let mut apart = still(target, None);
+            let steps = [
+                apart.step(
+                    CaptureEvent::KeyDown(LCONTROL, held(true, false, false, false)),
+                    1_000,
+                ),
+                apart.step(CaptureEvent::KeyUp(LCONTROL), 1_050),
+                apart.step(
+                    CaptureEvent::KeyDown(LMENU, held(false, true, false, false)),
+                    1_100,
+                ),
+                apart.step(CaptureEvent::KeyUp(LMENU), 1_150),
+            ];
+            never(&steps, "one after the other");
+        }
+    }
+
+    /// ⭐ **The refusal of a modifier on its own is said on the release** (208.237 п. 2, word of the
+    /// controller): a `Ctrl` or the left `Alt` may begin the tap of `Ctrl+Alt`, so nothing is refused
+    /// while it is down; released with no tap — the refusal it always was. A refusal said meanwhile
+    /// (`Ctrl+Shift`) is not followed by another; the right `Alt` is refused at once — it is no key of
+    /// the tap.
+    #[test]
+    fn a_lone_ctrl_or_alt_is_refused_on_its_release() {
+        let modifier = CaptureStep::Refuse(Refusal::Modifier);
+        let ignore = CaptureStep::Ignore;
+        let alone = |target, vk: u16, with: Modifiers| {
+            let mut session = still(target, None);
+            [
+                session.step(CaptureEvent::KeyDown(vk, with), 1_000),
+                session.step(CaptureEvent::KeyUp(vk), 1_080),
+            ]
+        };
+
+        let ctrl = held(true, false, false, false);
+        let alt = held(false, true, false, false);
+        assert_eq!(
+            alone(CaptureTarget::Fix, LCONTROL, ctrl),
+            [ignore.clone(), modifier.clone()]
+        );
+        assert_eq!(
+            alone(CaptureTarget::Fix, LMENU, alt),
+            [ignore.clone(), modifier.clone()]
+        );
+        assert_eq!(
+            alone(CaptureTarget::Switch, LMENU, alt),
+            [ignore.clone(), modifier.clone()]
+        );
+        assert_eq!(
+            alone(CaptureTarget::Fix, RMENU, alt)[0],
+            modifier,
+            "the right Alt at once"
+        );
+
+        let held_long = tap(
+            &mut still(CaptureTarget::Fix, None),
+            LCONTROL,
+            LMENU,
+            1_000,
+            1_000 + hook::DOUBLE_TAP_MS + 100,
+        );
+        assert_eq!(
+            held_long,
+            [
+                ignore.clone(),
+                ignore.clone(),
+                ignore.clone(),
+                modifier.clone()
+            ],
+            "Ctrl+Alt held: the refusal on the last release"
+        );
+
+        let mut shifted = still(CaptureTarget::Fix, None);
+        let steps = [
+            shifted.step(CaptureEvent::KeyDown(LCONTROL, ctrl), 1_000),
+            shifted.step(
+                CaptureEvent::KeyDown(SHIFT_KEY, held(true, false, true, false)),
+                1_020,
+            ),
+            shifted.step(CaptureEvent::KeyUp(SHIFT_KEY), 1_060),
+            shifted.step(CaptureEvent::KeyUp(LCONTROL), 1_080),
+        ];
+        assert_eq!(
+            steps,
+            [
+                ignore.clone(),
+                CaptureStep::Refuse(Refusal::WindowsSwitch),
+                ignore.clone(),
+                ignore
+            ],
+            "Ctrl+Shift: its own refusal, and none after it"
+        );
+    }
+
+    /// **One main key, one purpose** (§5 of the design of the second key): the tap of `Ctrl+Alt` already
+    /// in force for the other key is refused with «уже …»; beside the tap of a lone `Ctrl` it is taken.
+    #[test]
+    fn the_tap_of_ctrl_and_alt_is_one_main_key() {
+        let other = Some(hook::CTRL_ALT_TAP);
+
+        let fix = tap(
+            &mut still(CaptureTarget::Fix, other),
+            LCONTROL,
+            LMENU,
+            1_000,
+            1_100,
+        );
+        assert_eq!(fix[3], CaptureStep::Refuse(Refusal::TakenBySwitch));
+
+        let switch = tap(
+            &mut still(CaptureTarget::Switch, other),
+            LCONTROL,
+            LMENU,
+            1_000,
+            1_100,
+        );
+        assert_eq!(switch[3], CaptureStep::Refuse(Refusal::TakenByFix));
+
+        let beside = tap(
+            &mut still(CaptureTarget::Fix, Some((LCONTROL, hook::SINGLE_TAP))),
+            LCONTROL,
+            LMENU,
+            1_000,
+            1_100,
+        );
+        assert_eq!(beside[3], CaptureStep::CtrlAltTapped);
+    }
+
+    /// **The tap in section 7** (208.237 п. 2): `key = "LeftAlt"`, `modifiers = ["Ctrl"]`,
+    /// `trigger = "tap"` in either section, read back to the word of the hook, written and read again
+    /// whole; any other key or set with `tap` is no hotkey — the whole first key stays `Pause`; and the
+    /// schema stays 10.
+    #[test]
+    fn the_tap_of_ctrl_and_alt_is_written_and_read_in_either_section() {
+        let tap = Hotkey::ctrl_alt_tap();
+        assert_eq!(
+            (
+                tap.key.as_str(),
+                tap.modifiers.as_slice(),
+                tap.trigger.as_str()
+            ),
+            ("LeftAlt", ["Ctrl".to_owned()].as_slice(), "tap")
+        );
+        assert_eq!(tap.binding(), Some(hook::CTRL_ALT_TAP));
+        assert!(tap.is_ctrl_alt_tap());
+        assert_eq!(
+            Hotkey::from_binding(hook::CTRL_ALT_TAP.0, hook::CTRL_ALT_TAP.1),
+            Some(tap.clone())
+        );
+
+        for (key, modifiers, why) in [
+            ("LeftAlt", vec![], "no Ctrl"),
+            ("Alt", vec!["Ctrl".to_owned()], "no side"),
+            ("RightAlt", vec!["Ctrl".to_owned()], "the right Alt"),
+            ("LeftCtrl", vec![], "a lone Ctrl is the second key's"),
+            (
+                "LeftAlt",
+                vec!["Ctrl".to_owned(), "Shift".to_owned()],
+                "and Shift",
+            ),
+        ] {
+            let unlawful = Hotkey {
+                key: key.to_owned(),
+                modifiers,
+                trigger: "tap".to_owned(),
+            };
+            assert_eq!(unlawful.binding(), None, "{why}");
+        }
+
+        let second = SwitchHotkey {
+            enabled: true,
+            ..SwitchHotkey::default()
+        }
+        .with_key(tap.clone());
+        assert_eq!(second.binding(), Some(hook::CTRL_ALT_TAP));
+        assert!(!second.is_ctrl_tap(), "the tap of Ctrl+Alt is no lone Ctrl");
+
+        let config = Config {
+            hotkey: tap.clone(),
+            switch_hotkey: SwitchHotkey {
+                enabled: true,
+                ..SwitchHotkey::default()
+            }
+            .ctrl_tap(RCONTROL)
+            .expect("the right Ctrl"),
+            ..Config::default()
+        };
+        let text = config.to_toml_string().expect("written");
+        let (read, _) = Config::from_toml_str(&text).expect("read back");
+        assert_eq!(read.hotkey, tap);
+        assert_eq!(read.switch_binding(), Some((RCONTROL, hook::SINGLE_TAP)));
+        assert_eq!(read.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            CURRENT_SCHEMA_VERSION, 10,
+            "208.237: no new schema for the tap"
+        );
+    }
+
+    /// **How the tap is named and what stays under its field** (208.237 п. 2): «Ctrl + Alt» in either
+    /// field, and the text of its warning, greyed, for as long as it is the key.
+    #[test]
+    fn the_tap_of_ctrl_and_alt_is_named_and_warned_of_under_its_field() {
+        let _guard = with_product_strings();
+        let tap = Hotkey::ctrl_alt_tap();
+
+        assert_eq!(settings::effective_hotkey_name(&tap), "Ctrl + Alt");
+        assert_eq!(settings::hotkey_note(&tap), None);
+
+        for (language, text) in [
+            (
+                Language::Ru,
+                "Каждое короткое нажатие Ctrl+Alt без других клавиш будет срабатывать как эта \
+                 горячая клавиша.",
+            ),
+            (
+                Language::En,
+                "Every short press of Ctrl+Alt with no other key will act as this hotkey.",
+            ),
+        ] {
+            let line = settings::hotkey_line_in(language, &tap, false);
+            assert!(line.starts_with(text), "{language:?}: {line}");
+            assert_eq!(
+                line,
+                settings::text_in(language, settings::IDS_CTRLALT_WARN_TEXT)
+            );
+        }
+
+        let config = Config {
+            switch_hotkey: SwitchHotkey {
+                enabled: true,
+                ..SwitchHotkey::default()
+            }
+            .with_key(tap),
+            ..Config::default()
+        };
+        assert_eq!(
+            settings::switch_hotkey_note(&config),
+            Some(settings::IDS_CTRLALT_WARN_TEXT)
+        );
+        assert_eq!(
+            settings::switch_hotkey_name_in(Language::Ru, &config),
+            "Ctrl + Alt"
+        );
+    }
+
+    /// ⭐ **A key Windows gives a language has its grey note** (208.237 п. 1): the combinations of
+    /// `ImmGetHotKey` become the words of the hook — sides and flags of the IME dropped — and a hotkey in
+    /// force among them is noted; a tap or a double press never is.
+    #[test]
+    fn a_key_windows_gives_a_language_is_noted() {
+        let ctrl_shift = hook::MOD_CTRL | hook::MOD_SHIFT;
+        let alt_shift = hook::MOD_ALT | hook::MOD_SHIFT;
+
+        assert_eq!(
+            settings::ime_hotkey_word(0xC006, 0x31),
+            Some((DIGIT_1, ctrl_shift))
+        );
+        assert_eq!(
+            settings::ime_hotkey_word(0x8005, 0x32),
+            Some((0x32, alt_shift))
+        );
+        assert_eq!(
+            settings::ime_hotkey_word(0x0806, 0x30),
+            Some((0x30, ctrl_shift))
+        );
+        assert_eq!(
+            settings::ime_hotkey_word(0x0008, 0x20),
+            Some((SPACE, hook::MOD_WIN))
+        );
+        assert_eq!(settings::ime_hotkey_word(0xC006, 0), None, "no key");
+        assert_eq!(
+            settings::ime_hotkey_word(0xC006, 0x1_0031),
+            None,
+            "no virtual key"
+        );
+
+        let keys = [(DIGIT_1, ctrl_shift), (0x32, alt_shift)];
+        assert_eq!(
+            settings::windows_key_note(Some((DIGIT_1, ctrl_shift)), &keys),
+            Some(settings::IDS_NOTE_WINDOWS_KEY)
+        );
+        assert_eq!(
+            settings::windows_key_note(Some((DIGIT_1, hook::MOD_CTRL)), &keys),
+            None
+        );
+        assert_eq!(settings::windows_key_note(None, &keys), None);
+        assert_eq!(
+            settings::windows_key_note(
+                Some(hook::CTRL_ALT_TAP),
+                &[(hook::CTRL_ALT_TAP.0, hook::MOD_CTRL)]
+            ),
+            None,
+            "a tap is no combination"
+        );
+
+        // The live reading answers words of keys, whatever this machine has set.
+        assert!(
+            settings::windows_language_hotkeys()
+                .iter()
+                .all(|(vk, set)| *vk != 0
+                    && set & !(ctrl_shift | hook::MOD_ALT | hook::MOD_WIN) == 0)
         );
     }
 }

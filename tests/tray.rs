@@ -7176,6 +7176,16 @@ mod window_of_the_settings {
             id: Id::Hotkey,
             vk: CONTROL,
         });
+        // Решение 208.237 п. 2: while the `Ctrl` is down it may begin the tap of `Ctrl+Alt` — the
+        // refusal is said on its release.
+        assert!(
+            !shown(&window).contains(&ru(settings::IDS_CAPTURE_MODIFIER)),
+            "nothing is refused while it may be a tap"
+        );
+        window.event(Event::KeyUp {
+            id: Id::Hotkey,
+            vk: CONTROL,
+        });
 
         assert!(
             window.capturing(),
@@ -7691,6 +7701,160 @@ mod window_of_the_settings {
             after.contains(&ru(settings::IDS_KEY_RIGHT_CTRL)),
             "«Правый Ctrl»"
         );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Решение 208.237 — Windows, the tap of `Ctrl+Alt`, `Pause`
+    // ---------------------------------------------------------------------------------------
+
+    /// `VK_LCONTROL`, `VK_LMENU`.
+    const LCONTROL: u16 = 0xA2;
+    const LMENU: u16 = 0xA4;
+
+    /// ⭐ **The tap of `Ctrl+Alt` asks first, for either key** (208.237 п. 2, В-3 «как у одиночного
+    /// Ctrl»): the capture ends, the warning with its title, its text and the two buttons stands under
+    /// the field of the key captured — the segment and the other group step aside; «Выбрать другую
+    /// клавишу» arms the same capture again, «Всё равно установить» sets the tap, and its text stays
+    /// under the field as the grey note. The first key with one key, the second with two.
+    #[test]
+    fn a_tap_of_ctrl_and_alt_asks_first_for_either_key() {
+        let _strings = product_strings(Language::Ru);
+        let _toggle = toggle_turn();
+
+        for (two, set_button, field) in [
+            (false, Id::HotkeySet, Id::Hotkey),
+            (true, Id::HotkeySet, Id::Hotkey),
+            (true, Id::SwitchKeySet, Id::SwitchKey),
+        ] {
+            let (mut window, applied) = recorded(&[]);
+            window.section = Section::Hotkey;
+            window.config.switch_hotkey.enabled = two;
+            let tap = |window: &mut Settings| {
+                window.event(Event::Pressed(set_button));
+                for (down, vk) in [
+                    (true, LCONTROL),
+                    (true, LMENU),
+                    (false, LMENU),
+                    (false, LCONTROL),
+                ] {
+                    window.event(if down {
+                        Event::KeyDown { id: field, vk }
+                    } else {
+                        Event::KeyUp { id: field, vk }
+                    });
+                }
+            };
+
+            tap(&mut window);
+            let warned = shown(&window);
+            assert!(!window.capturing(), "{field:?}: the capture ends");
+            assert!(
+                warned.contains(&ru(settings::IDS_CTRLALT_WARN_TITLE)),
+                "{field:?}"
+            );
+            assert!(
+                warned.contains(&ru(settings::IDS_CTRLALT_WARN_TEXT)),
+                "{field:?}"
+            );
+            assert!(warned.contains("CtrlWarnSet") && warned.contains("CtrlWarnOther"));
+            assert!(
+                warned.contains("Ctrl + Alt"),
+                "{field:?}: the candidate in the field"
+            );
+            assert!(
+                !warned.contains("HotkeyMode"),
+                "{field:?}: the segment steps aside"
+            );
+            let other = if field == Id::Hotkey {
+                "SwitchKeySet"
+            } else {
+                "HotkeySet"
+            };
+            assert!(
+                !warned.contains(other),
+                "{field:?}: the other group steps aside"
+            );
+            assert!(
+                applied.borrow().is_empty(),
+                "{field:?}: nothing before the choice"
+            );
+
+            window.event(Event::Pressed(Id::CtrlWarnOther));
+            assert!(window.capturing(), "{field:?}: «Выбрать другую клавишу»");
+            assert!(
+                !shown(&window).contains("CtrlWarnSet"),
+                "{field:?}: the warning went"
+            );
+            assert!(applied.borrow().is_empty());
+            window.event(Event::Pressed(set_button));
+            assert!(!window.capturing(), "{field:?}: the same capture was armed");
+
+            tap(&mut window);
+            window.event(Event::Pressed(Id::CtrlWarnSet));
+            let set = applied
+                .borrow()
+                .last()
+                .cloned()
+                .expect("«Всё равно установить»");
+            let after = shown(&window);
+            assert!(
+                !after.contains("CtrlWarnSet"),
+                "{field:?}: the warning went"
+            );
+            assert!(after.contains("Ctrl + Alt"), "{field:?}: the key in force");
+            assert!(
+                after.contains(&ru(settings::IDS_CTRLALT_WARN_TEXT)),
+                "{field:?}: the grey note of 208.235"
+            );
+            if field == Id::Hotkey {
+                assert_eq!(set.hotkey, settings::Hotkey::ctrl_alt_tap());
+                assert_eq!(set.switch_binding(), None);
+            } else {
+                assert_eq!(set.switch_binding(), Some(hook::CTRL_ALT_TAP));
+                assert_eq!(set.hotkey, settings::Hotkey::default());
+            }
+        }
+    }
+
+    /// ⭐ **The grey note of a key Windows gives a language, and the line for a keyboard with no
+    /// `Pause`** (208.237 пп. 1, 4): `Ctrl+Shift+1` set while Windows switches to a language with it —
+    /// the note under the field; `Pause` with one key — the line under the line of the ways, which
+    /// with two keys stands aside with it, and goes with another key.
+    #[test]
+    fn the_note_of_windows_and_the_line_for_no_pause() {
+        let _strings = product_strings(Language::Ru);
+        let (mut window, _) = recorded(&[]);
+        window.section = Section::Hotkey;
+
+        let no_pause = ru(settings::IDS_HOTKEY_NO_PAUSE);
+        assert!(shown(&window).contains(&no_pause), "Pause with one key");
+        window.config.switch_hotkey.enabled = true;
+        assert!(
+            !shown(&window).contains(&no_pause),
+            "two keys: it stands aside"
+        );
+        window.config.switch_hotkey.enabled = false;
+        window.config.hotkey = settings::Hotkey::from_binding(0x7B, 0).expect("F12");
+        assert!(!shown(&window).contains(&no_pause), "another key");
+
+        let ctrl_shift_1 = (0x31, hook::MOD_CTRL | hook::MOD_SHIFT);
+        window.config.hotkey =
+            settings::Hotkey::from_binding(ctrl_shift_1.0, ctrl_shift_1.1).expect("Ctrl+Shift+1");
+        let windows = ru(settings::IDS_NOTE_WINDOWS_KEY);
+        assert!(
+            !shown(&window).contains(&windows),
+            "Windows does not use it"
+        );
+        window.windows_keys = vec![ctrl_shift_1];
+        assert!(shown(&window).contains(&windows), "the first key");
+
+        window.config.hotkey = settings::Hotkey::default();
+        window.config.switch_hotkey = settings::SwitchHotkey {
+            enabled: true,
+            ..settings::SwitchHotkey::default()
+        }
+        .with_key(settings::Hotkey::from_binding(ctrl_shift_1.0, ctrl_shift_1.1).expect("again"));
+        assert!(shown(&window).contains(&windows), "the second key");
     }
 
     /// ⭐ **Решение 208.235** — the lists of the settings scroll: the list of the cycle and the list

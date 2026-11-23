@@ -4045,6 +4045,14 @@ unsafe extern "system" fn window_proc(
                 }
             }
 
+            // ⭐ **Решение 208.237 п. 2 — the tap of `Ctrl+Alt`.** The callback saw both keys of it go
+            // down and posted `hook::WM_APP_MENU_MASK`: the menu mask goes out now, while the user still
+            // holds `Alt`, so that its release is no lone `Alt` to the window in front (T-93-3). The
+            // input window only (SEC-05); the message buys a press of `0x07` and nothing else.
+            if message == crate::hook::WM_APP_MENU_MASK && is_input_window(hwnd) {
+                crate::inject::send_alt_menu_mask();
+            }
+
             // ⛔ **There was an arm for `switch::WM_APP_SWITCH` here until task Т-14-4**, and
             // there is deliberately none now. It was the far end of the handoff of decision R-31:
             // method 3 of the old FR-50 was `ITfInputProcessorProfileMgr::ActivateProfile`, which

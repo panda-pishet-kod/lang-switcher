@@ -149,6 +149,10 @@ pub enum Refusal {
     /// **The key already switches the layout** — a capture of the first key while a second is in
     /// force.
     TakenBySwitch,
+    /// ⭐ **Windows switches the input language with it** — решение 208.237 п. 1: `Alt+Shift` and
+    /// `Ctrl+Shift` (a modifier on its own, as [`Self::Modifier`], with nothing else held) and
+    /// `Win+Space` (a press under `Win`, as [`Self::Reserved`]). Refused as before; the line says why.
+    WindowsSwitch,
 }
 
 impl Refusal {
@@ -168,7 +172,25 @@ impl Refusal {
             // Решение 208.228: what the key already does, said by the key that does it.
             Self::TakenByFix => IDS_CAPTURE_TAKEN_FIX,
             Self::TakenBySwitch => IDS_CAPTURE_TAKEN_SWITCH,
+            // Решение 208.237 п. 1.
+            Self::WindowsSwitch => IDS_CAPTURE_WINDOWS_SWITCH,
         }
+    }
+}
+
+/// **The refusal of a modifier on its own** — [`Refusal::Modifier`], or, решение 208.237 п. 1,
+/// [`Refusal::WindowsSwitch`] when what is down with the press is exactly `Alt+Shift` or `Ctrl+Shift`:
+/// the switches of the input language in Windows. `vk` is the modifier pressed, `modifiers` what the
+/// queue holds with it.
+pub fn modifier_refusal(vk: u16, modifiers: Modifiers) -> Refusal {
+    let shift = modifiers.shift || SHIFT_KEYS.contains(&vk);
+    let ctrl = modifiers.ctrl || CTRL_KEYS.contains(&vk);
+    let alt = modifiers.alt || ALT_KEYS.contains(&vk);
+
+    if shift && ctrl != alt && !modifiers.win {
+        Refusal::WindowsSwitch
+    } else {
+        Refusal::Modifier
     }
 }
 
@@ -254,6 +276,10 @@ pub enum CaptureStep {
     /// shows the warning — «Всё равно установить» takes it, «Выбрать другую клавишу» arms the
     /// capture again.
     CtrlTapped(u16),
+    /// ⭐ **The tap of `Ctrl+Alt`** — решение 208.237 п. 2, a capture of either key: the left `Alt` and a
+    /// `Ctrl` down together and up within `hook::DOUBLE_TAP_MS`, nothing between. Not taken: the
+    /// window ends the capture and shows its warning, as for [`Self::CtrlTapped`].
+    CtrlAltTapped,
 }
 
 /// **The double press of `Shift` as a capture waits for it** — task T-95-2, вопрос 159, the moments
@@ -463,6 +489,11 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
     }
 
     if SYSTEM_RESERVED.contains(&vk) || modifiers.win {
+        // ⭐ Решение 208.237 п. 1: `Win+Space` is the switch of the input language — the line says so.
+        if vk == VK_SPACE.0 && modifiers.win {
+            return Capture::Refused(Refusal::WindowsSwitch);
+        }
+
         return Capture::Refused(Refusal::Reserved);
     }
 
@@ -471,12 +502,13 @@ pub fn capture(vk: u16, modifiers: Modifiers) -> Capture {
         // a double press — 157.17 gives the double press to `Shift` alone. `Ctrl` and `Alt` on
         // their own, and a `Shift` pressed under either (`Ctrl+Shift`, `Alt+Shift` — the switches
         // of the layout), stay the refusal they were; its line names the way that is left
-        // («дважды — только Shift»).
+        // («дважды — только Shift») — and since решение 208.237 п. 1 `Ctrl+Shift` and `Alt+Shift`
+        // name the reason instead ([`modifier_refusal`]).
         if SHIFT_KEYS.contains(&vk) && !modifiers.ctrl && !modifiers.alt {
             return Capture::Shift;
         }
 
-        return Capture::Refused(Refusal::Modifier);
+        return Capture::Refused(modifier_refusal(vk, modifiers));
     }
 
     let set = modifiers.set();
@@ -646,6 +678,120 @@ pub struct CaptureSession {
     ctrl_side: u16,
     /// The tap of that `Ctrl`, by the hook's own rule of times ([`crate::hook::Taps::single`]).
     ctrl_taps: crate::hook::Taps,
+    /// The tap of `Ctrl+Alt` this capture may be seeing (решение 208.237 п. 2) — either key's.
+    chord: ChordCapture,
+    /// The hotkeys were suspended by this capture and come back when it ends; `false` only for a
+    /// capture drawn and fitted ([`Self::still`]), which never touched them.
+    suspended: bool,
+    /// The refusal of a modifier on its own held back while the press may still be the tap of
+    /// `Ctrl+Alt` — said on the release ([`Self::step`]).
+    held_refusal: Option<Refusal>,
+}
+
+/// ⭐ **The tap of `Ctrl+Alt` as a capture waits for it** — решение 208.237 п. 2: the rule of the hook
+/// (`hook::chord_stroke`) on the window messages, timed by the hook's own [`crate::hook::Taps`].
+///
+/// The left `Alt` and a `Ctrl` go down together — in any order, the first with nothing else held, the
+/// second with no `Shift` or `Win` — and the last of them comes up within `hook::DOUBLE_TAP_MS` of the
+/// first press, no other key down in between. The right `Alt` (`AltGr`) is never a key of the tap
+/// ([`sided_alt`]); its false `Ctrl` may begin one, and the right `Alt` that follows ends it.
+///
+/// It only watches: what each press shows meanwhile is decided as ever (the refusal of a modifier on
+/// its own); the release that ends the tap is answered by [`CaptureStep::CtrlAltTapped`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ChordCapture {
+    /// A `Ctrl` of the tap is down.
+    ctrl: bool,
+    /// The left `Alt` of the tap is down.
+    alt: bool,
+    /// Both have been down together.
+    both: bool,
+    /// The tap, timed from its first press.
+    taps: crate::hook::Taps,
+}
+
+impl ChordCapture {
+    /// Whether a key of the tap is down and the tap may still be made.
+    fn may_tap(&self) -> bool {
+        (self.ctrl || self.alt) && self.taps.pressing()
+    }
+
+    /// Whether no key of the tap is down.
+    fn idle(&self) -> bool {
+        !self.ctrl && !self.alt
+    }
+
+    /// One event — `true` when it ends the tap.
+    fn step(&mut self, event: CaptureEvent, time: u32) -> bool {
+        match event {
+            CaptureEvent::KeyDown(vk, modifiers) => {
+                let ctrl = CTRL_KEYS.contains(&vk);
+                let alt = ALT_KEYS.contains(&vk) && sided_alt(vk) == VK_LMENU.0;
+
+                if (ctrl && self.ctrl) || (alt && self.alt) {
+                    // The auto-repeat of a key of the tap already down.
+                    return false;
+                }
+
+                if !ctrl && !alt {
+                    // Any other key — the right `Alt` among them.
+                    self.taps.interrupt();
+                    return false;
+                }
+
+                let first = !self.ctrl && !self.alt;
+                let other = if ctrl { modifiers.alt } else { modifiers.ctrl };
+                let clean = !modifiers.shift && !modifiers.win && (!first || !other);
+
+                if ctrl {
+                    self.ctrl = true;
+                } else {
+                    self.alt = true;
+                }
+
+                if first {
+                    self.both = false;
+                    self.taps.press(time, clean);
+                } else if clean {
+                    self.both = self.taps.pressing();
+                } else {
+                    self.taps.interrupt();
+                }
+
+                false
+            }
+
+            CaptureEvent::KeyUp(vk) => {
+                let ctrl = CTRL_KEYS.contains(&vk) && self.ctrl;
+                let alt = ALT_KEYS.contains(&vk) && self.alt;
+
+                if !ctrl && !alt {
+                    return false;
+                }
+
+                if ctrl {
+                    self.ctrl = false;
+                } else {
+                    self.alt = false;
+                }
+
+                if self.ctrl || self.alt {
+                    return false;
+                }
+
+                let both = std::mem::take(&mut self.both);
+
+                self.taps.single(time, both)
+            }
+
+            CaptureEvent::FocusLost { .. } | CaptureEvent::ClickBeside => {
+                *self = Self::default();
+                false
+            }
+
+            CaptureEvent::PairTimeout => false,
+        }
+    }
 }
 
 impl CaptureSession {
@@ -677,6 +823,27 @@ impl CaptureSession {
             other,
             ctrl_side: 0,
             ctrl_taps: crate::hook::Taps::NONE,
+            chord: ChordCapture::default(),
+            suspended: true,
+            held_refusal: None,
+        }
+    }
+
+    /// **A capture for the pictures and the fitting** (the catalogue of states of the window of the
+    /// settings, решение 208.237): it decides as [`Self::arm_for`]'s does and **suspends nothing** —
+    /// the published hotkeys and the flag of the hook are not touched, and nothing is given back.
+    pub fn still(target: CaptureTarget, previous: Hotkey, other: Option<(u16, u16)>) -> Self {
+        Self {
+            previous,
+            pair: CapturePair::default(),
+            published: ((NO_HOTKEY_VK, 0), (NO_HOTKEY_VK, 0)),
+            target,
+            other,
+            ctrl_side: 0,
+            ctrl_taps: crate::hook::Taps::NONE,
+            chord: ChordCapture::default(),
+            suspended: false,
+            held_refusal: None,
         }
     }
 
@@ -696,7 +863,61 @@ impl CaptureSession {
     /// ⭐ Решение 208.228: a capture of the second key takes a tap of a lone `Ctrl` first
     /// ([`Self::ctrl_step`]), and a press taken by either capture whose main key the other hotkey
     /// holds is refused, the capture staying armed.
+    ///
+    /// ⭐ Решение 208.237 п. 2: either capture watches for the tap of `Ctrl+Alt` ([`ChordCapture`]); the
+    /// release that ends it is [`CaptureStep::CtrlAltTapped`] — or the refusal of a key the other
+    /// hotkey holds, when the other is the same tap.
+    ///
+    /// ⭐ **The refusal of a modifier on its own waits for the release** (решение 208.237 п. 2, word of
+    /// the controller after the pictures): while the press of a `Ctrl` or of the left `Alt` may still
+    /// become the tap of `Ctrl+Alt`, «Ctrl и Alt — только вместе с клавишей» is not said — the tap is
+    /// lawful now; it is said on the release of the last of them when no tap was made, as the refusal
+    /// it always was. A refusal or a key said meanwhile (`Ctrl+Shift`, `AltGr`, `Ctrl+F12`) drops it.
     pub fn step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
+        let tapped = self.chord.step(event, time);
+        let step = self.key_step(event, time);
+
+        if tapped {
+            self.held_refusal = None;
+
+            return match self.other {
+                Some(other) if crate::settings::same_main_key(crate::hook::CTRL_ALT_TAP, other) => {
+                    CaptureStep::Refuse(self.taken_by_other())
+                }
+                _ => CaptureStep::CtrlAltTapped,
+            };
+        }
+
+        match (event, step) {
+            (CaptureEvent::KeyDown(..), CaptureStep::Refuse(Refusal::Modifier))
+                if self.chord.may_tap() =>
+            {
+                self.held_refusal = Some(Refusal::Modifier);
+                CaptureStep::Ignore
+            }
+            (CaptureEvent::KeyUp(_), CaptureStep::Ignore) if self.chord.idle() => self
+                .held_refusal
+                .take()
+                .map_or(CaptureStep::Ignore, CaptureStep::Refuse),
+            (_, CaptureStep::Ignore) => CaptureStep::Ignore,
+            (_, step) => {
+                self.held_refusal = None;
+                step
+            }
+        }
+    }
+
+    /// The refusal of a press whose main key the other hotkey holds.
+    fn taken_by_other(&self) -> Refusal {
+        match self.target {
+            CaptureTarget::Fix => Refusal::TakenBySwitch,
+            CaptureTarget::Switch => Refusal::TakenByFix,
+        }
+    }
+
+    /// One event of this capture without the tap of `Ctrl+Alt` — the lone `Ctrl` of the second key,
+    /// the pair of `Shift`, the press.
+    fn key_step(&mut self, event: CaptureEvent, time: u32) -> CaptureStep {
         if self.target == CaptureTarget::Switch
             && let Some(step) = self.ctrl_step(event, time)
         {
@@ -706,10 +927,7 @@ impl CaptureSession {
         match self.pair.step(event, time) {
             CaptureStep::Take(hotkey) => match (hotkey.binding(), self.other) {
                 (Some(taken), Some(other)) if crate::settings::same_main_key(taken, other) => {
-                    CaptureStep::Refuse(match self.target {
-                        CaptureTarget::Fix => Refusal::TakenBySwitch,
-                        CaptureTarget::Switch => Refusal::TakenByFix,
-                    })
+                    CaptureStep::Refuse(self.taken_by_other())
                 }
                 _ => CaptureStep::Take(hotkey),
             },
@@ -750,7 +968,8 @@ impl CaptureSession {
                 Some(if clean {
                     CaptureStep::Ignore
                 } else {
-                    CaptureStep::Refuse(Refusal::Modifier)
+                    // Решение 208.237 п. 1: `Ctrl+Shift` names its reason.
+                    CaptureStep::Refuse(modifier_refusal(vk, modifiers))
                 })
             }
 
@@ -802,6 +1021,24 @@ impl CaptureSession {
 /// The three codes of `Ctrl` — the neutral one the queue reports and the two sides.
 const CTRL_KEYS: [u16; 3] = [VK_CONTROL.0, VK_LCONTROL.0, VK_RCONTROL.0];
 
+/// The three codes of `Alt` — the neutral one and the two sides (решение 208.237).
+const ALT_KEYS: [u16; 3] = [VK_MENU.0, VK_LMENU.0, VK_RMENU.0];
+
+/// **The side of an `Alt` that went down** — решение 208.237 п. 2, as [`sided_ctrl`] for `Ctrl`: the
+/// window messages carry the neutral `VK_MENU`, and the queue holds the sides — the right one
+/// (`AltGr`) when it is down, the left otherwise. A sided code is its own side.
+pub fn sided_alt(vk: u16) -> u16 {
+    if vk != VK_MENU.0 {
+        return vk;
+    }
+
+    if key_is_down(VK_RMENU) {
+        VK_RMENU.0
+    } else {
+        VK_LMENU.0
+    }
+}
+
 /// **The side of a `Ctrl` that went down** — решение 208.228, В-4: the window messages carry the
 /// neutral `VK_CONTROL`, and the queue holds the sides — the right one when it alone is down, the
 /// left otherwise. A sided code is its own side.
@@ -826,6 +1063,11 @@ impl Drop for CaptureSession {
     /// sees, and writing back a copy taken at arming would put a staler value than the one the
     /// program already has.
     fn drop(&mut self) {
+        // A capture of the pictures suspended nothing, and gives nothing back (208.237).
+        if !self.suspended {
+            return;
+        }
+
         // Решение 208.228: both keys, in the one store.
         let (fix, switch) = self.published;
 

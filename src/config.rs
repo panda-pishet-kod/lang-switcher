@@ -245,6 +245,15 @@ impl Hotkey {
             return lawful.then_some((VK_SHIFT.0, crate::hook::DOUBLE_TAP));
         }
 
+        // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` — `key = "LeftAlt"`, `modifiers = ["Ctrl"]`
+        // and nothing else; any other key or set with `tap` is `None`, the whole hotkey `Pause`.
+        if trigger.eq_ignore_ascii_case(TRIGGER_TAP) {
+            let lawful = modifiers == crate::hook::MOD_CTRL
+                && self.key.trim().eq_ignore_ascii_case(LEFT_ALT_KEY);
+
+            return lawful.then_some(crate::hook::CTRL_ALT_TAP);
+        }
+
         if !trigger.eq_ignore_ascii_case(TRIGGER_PRESS) {
             return None;
         }
@@ -264,6 +273,12 @@ impl Hotkey {
     /// The flag `hook::DOUBLE_TAP` reads back to [`Self::double_shift`] — with a `Shift` and
     /// nothing else beside it (task T-95-1); with anything else it is `None`.
     pub fn from_binding(vk: u16, modifiers: u16) -> Option<Self> {
+        // Решение 208.237 п. 2: the tap of `Ctrl+Alt` reads back to [`Self::ctrl_alt_tap`]; no other
+        // tap is a `[hotkey]` (a lone `Ctrl` is the second key's, [`SwitchHotkey::ctrl_tap`]).
+        if modifiers & crate::hook::SINGLE_TAP != 0 {
+            return crate::hook::is_ctrl_alt_tap(vk, modifiers).then(Self::ctrl_alt_tap);
+        }
+
         if modifiers & crate::hook::DOUBLE_TAP != 0 {
             let shift = SHIFT_KEYS.contains(&vk);
 
@@ -305,6 +320,26 @@ impl Hotkey {
             trigger: TRIGGER_DOUBLE_TAP.to_owned(),
         }
     }
+
+    /// ⭐ **The tap of `Ctrl+Alt` as section 7 stores it** — решение 208.237 п. 2: `key = "LeftAlt"`,
+    /// `modifiers = ["Ctrl"]`, `trigger = "tap"`, in `[hotkey]` or `[switch_hotkey]` alike.
+    ///
+    /// ⚠ **`schema_version` stays 10** (208.237, сверено на 1.6.1): a build before 1.8.0 keeps
+    /// `trigger` a string, reads a word it does not know as `binding() == None` — `Pause` with the note
+    /// of an unknown key — and quarantines nothing.
+    pub fn ctrl_alt_tap() -> Self {
+        Self {
+            key: LEFT_ALT_KEY.to_owned(),
+            modifiers: vec![crate::hook::HOTKEY_MODIFIERS[0].0.to_owned()],
+            trigger: TRIGGER_TAP.to_owned(),
+        }
+    }
+
+    /// Whether this hotkey is the tap of `Ctrl+Alt` — what [`Self::binding`] reads.
+    pub fn is_ctrl_alt_tap(&self) -> bool {
+        self.binding()
+            .is_some_and(|(vk, set)| crate::hook::is_ctrl_alt_tap(vk, set))
+    }
 }
 
 /// `[hotkey] trigger` of a hotkey that is pressed — the default of section 7 (task T-95-1).
@@ -319,9 +354,16 @@ pub const DOUBLE_TAP_KEY: &str = "Shift";
 
 /// `[switch_hotkey] trigger` of **one tap of a `Ctrl`** — решение 208.228, В-4: «только второй
 /// клавишей, только через предупреждение». Lawful with `key` [`LEFT_CTRL_KEY`] or
-/// [`RIGHT_CTRL_KEY`] and no modifiers, in `[switch_hotkey]` alone: `[hotkey]` has no such word, and
+/// [`RIGHT_CTRL_KEY`] and no modifiers, in `[switch_hotkey]` alone: for `[hotkey]`
 /// [`Hotkey::binding`] answers `None` for it.
+///
+/// ⭐ **And of the tap of `Ctrl+Alt`** — решение 208.237 п. 2, in either section: `key` [`LEFT_ALT_KEY`]
+/// with `modifiers = ["Ctrl"]` ([`Hotkey::ctrl_alt_tap`]).
 pub const TRIGGER_TAP: &str = "tap";
+
+/// The name of the left `Alt` of **the tap of `Ctrl+Alt`** (решение 208.237 п. 2) — only the left one
+/// counts: the right `Alt` is `AltGr` on ru, pl, de…
+pub const LEFT_ALT_KEY: &str = "LeftAlt";
 
 /// The name of the left `Ctrl` of a tap — the side the capture saw tapped (решение 208.228).
 pub const LEFT_CTRL_KEY: &str = "LeftCtrl";
@@ -395,7 +437,8 @@ impl SwitchHotkey {
             } else if key.eq_ignore_ascii_case(RIGHT_CTRL_KEY) {
                 VK_RCONTROL.0
             } else {
-                return None;
+                // Решение 208.237 п. 2: the tap of `Ctrl+Alt` is the first key's reading.
+                return self.as_hotkey().binding();
             };
 
             return self
@@ -456,8 +499,9 @@ impl SwitchHotkey {
     /// Whether the key is a tap of a `Ctrl` — what [`Self::binding`] reads, so a tap that is no
     /// good is not one.
     pub fn is_ctrl_tap(&self) -> bool {
-        self.binding()
-            .is_some_and(|(_, set)| set & crate::hook::SINGLE_TAP != 0)
+        self.binding().is_some_and(|(vk, set)| {
+            set & crate::hook::SINGLE_TAP != 0 && !crate::hook::is_ctrl_alt_tap(vk, set)
+        })
     }
 }
 

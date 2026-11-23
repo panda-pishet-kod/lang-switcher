@@ -81,8 +81,8 @@ use windows::Win32::UI::Controls::LVIS_STATEIMAGEMASK;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, VIRTUAL_KEY, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_END, VK_ESCAPE, VK_F1,
     VK_HOME, VK_INSERT, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK,
-    VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
-    VK_SNAPSHOT,
+    VK_OEM_3, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    VK_SNAPSHOT, VK_SPACE,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -1800,6 +1800,23 @@ pub const IDS_CTRL_WARN_OTHER: u16 = 3375;
 pub const IDS_KEY_LEFT_CTRL: u16 = 3376;
 /// «Правый Ctrl» — the name of the tap of the right `Ctrl`.
 pub const IDS_KEY_RIGHT_CTRL: u16 = 3377;
+/// «Этим сочетанием Windows переключает язык — выберите другое.» — the refusal of `Alt+Shift`,
+/// `Ctrl+Shift` and `Win+Space` (решение 208.237 п. 1, [`Refusal::WindowsSwitch`]).
+pub const IDS_CAPTURE_WINDOWS_SWITCH: u16 = 3380;
+/// «Windows этим сочетанием переключает язык ввода; пока работает Lang Switcher, оно достаётся ему.» —
+/// the grey note under a field whose key is one of «Сочетания клавиш для языков ввода» (208.237 п. 1).
+pub const IDS_NOTE_WINDOWS_KEY: u16 = 3381;
+/// «Касание Ctrl+Alt может мешать работе» — the title of the warning about the tap (208.237 п. 2).
+pub const IDS_CTRLALT_WARN_TITLE: u16 = 3382;
+/// What the tap of `Ctrl+Alt` may get in the way of — the text of its warning, and the grey note
+/// under the field once it is set (208.237 п. 2).
+pub const IDS_CTRLALT_WARN_TEXT: u16 = 3383;
+/// «Нет клавиши Pause? Подойдёт двойной Shift — Настройки → Горячая клавиша.» — the line of the
+/// letter «Привет» (208.237 п. 4).
+pub const IDS_NO_PAUSE_HINT: u16 = 3384;
+/// «Нет клавиши Pause? Подойдёт двойной Shift.» — the same line in the section «Горячая клавиша»
+/// while the key is `Pause`, without the way to the section it stands in (решение 208.240).
+pub const IDS_HOTKEY_NO_PAUSE: u16 = 3385;
 /// «Что нового в {0}…» — the entry of the menu a week after an update, T-119-7.
 pub const IDS_MENU_WHATSNEW: u16 = 3278;
 /// «Сообщать об обновлениях программы» — the switch of «От автора», T-119-10. The last of the block
@@ -3633,6 +3650,82 @@ pub fn hotkey_note(hotkey: &Hotkey) -> Option<u16> {
     }
 }
 
+/// The first of the ids `ImmGetHotKey` answers for **the direct switches of the input language** —
+/// `IME_HOTKEY_DSWITCH_FIRST`: «Сочетания клавиш для языков ввода» gives each language its own.
+const IME_DIRECT_SWITCH_FIRST: u32 = 0x100;
+
+/// The last of them — `IME_HOTKEY_DSWITCH_LAST`.
+const IME_DIRECT_SWITCH_LAST: u32 = 0x11F;
+
+/// ⭐ **The combinations Windows gives the input languages** — решение 208.237 п. 1, each as the word of
+/// a hotkey: the key and the set of `hook::MOD_*`.
+///
+/// Two sources, both documented and both read only: `ImmGetHotKey` over the ids of the direct switches
+/// (0x100…0x11F) — `Ctrl+Shift` or the left `Alt+Shift` with a digit, as the dialog «Сочетания клавиш
+/// для языков ввода» sets them — and the grave key when `HKCU\Keyboard Layout\Toggle` names it (stage
+/// Э113, [`crate::layouts::read_grave_is_bound`]). Read when the settings open: the dialog of Windows
+/// is not a thing a person changes while ours is open, and a stale answer costs a grey line.
+///
+/// A key found here and taken by a hotkey of ours is the program's while it works: the hook swallows
+/// it (FR-95), and Windows never sees it — the note [`IDS_NOTE_WINDOWS_KEY`] says so.
+pub fn windows_language_hotkeys() -> Vec<(u16, u16)> {
+    let mut keys: Vec<(u16, u16)> = (IME_DIRECT_SWITCH_FIRST..=IME_DIRECT_SWITCH_LAST)
+        .filter_map(|id| {
+            let (mut modifiers, mut vk) = (0u32, 0u32);
+            let mut layout = windows::Win32::UI::Input::KeyboardAndMouse::HKL::default();
+            // SAFETY: the three out-parameters are locals of this frame, written by the call and read
+            // after it; the call keeps none of them. An id with no combination answers `FALSE`.
+            let found = unsafe {
+                windows::Win32::UI::Input::Ime::ImmGetHotKey(
+                    id,
+                    &mut modifiers,
+                    &mut vk,
+                    &mut layout,
+                )
+            };
+
+            found
+                .as_bool()
+                .then(|| ime_hotkey_word(modifiers, vk))
+                .flatten()
+        })
+        .collect();
+
+    if crate::layouts::read_grave_is_bound() {
+        keys.push((VK_OEM_3.0, 0));
+    }
+
+    keys
+}
+
+/// One combination of `ImmGetHotKey` as the word of a hotkey — решение 208.237 п. 1. The modifiers of
+/// `RegisterHotKey` (`MOD_ALT` 1, `MOD_CONTROL` 2, `MOD_SHIFT` 4, `MOD_WIN` 8) become the program's own;
+/// the sides and the flags of the IME (`MOD_LEFT`, `MOD_RIGHT`, `MOD_ON_KEYUP`) are dropped — a
+/// combination of ours does not tell the sides apart either. `None` for no key.
+pub fn ime_hotkey_word(modifiers: u32, vk: u32) -> Option<(u16, u16)> {
+    let vk = u16::try_from(vk).ok().filter(|vk| *vk != 0)?;
+    let set = [
+        (0x1, crate::hook::MOD_ALT),
+        (0x2, crate::hook::MOD_CTRL),
+        (0x4, crate::hook::MOD_SHIFT),
+        (0x8, crate::hook::MOD_WIN),
+    ]
+    .iter()
+    .filter(|(bit, _)| modifiers & bit != 0)
+    .fold(0, |set, (_, ours)| set | ours);
+
+    Some((vk, set))
+}
+
+/// ⭐ **The grey note of a key Windows gives a language** — решение 208.237 п. 1: [`IDS_NOTE_WINDOWS_KEY`]
+/// when `binding`, the word of a hotkey in force, is one of `keys` ([`windows_language_hotkeys`]); a tap
+/// or a double press never is.
+pub fn windows_key_note(binding: Option<(u16, u16)>, keys: &[(u16, u16)]) -> Option<u16> {
+    binding
+        .filter(|binding| keys.contains(binding))
+        .map(|_| IDS_NOTE_WINDOWS_KEY)
+}
+
 /// **The note of the second hotkey** — решение 208.228, §4 of the design. In the mode of two keys,
 /// a key written in `[switch_hotkey]` that is not in force — an unknown name, a lawless trigger, the
 /// main key of `[hotkey]` — is [`IDS_NOTE_SWITCH_INVALID`]; a text key is the warning of FR-95 the
@@ -3652,6 +3745,10 @@ pub fn switch_hotkey_note(config: &Config) -> Option<u16> {
 
     match config.switch_binding() {
         None => Some(IDS_NOTE_SWITCH_INVALID),
+        // Решение 208.237 п. 2: the tap of `Ctrl+Alt` keeps its own warning under the field.
+        Some((vk, modifiers)) if crate::hook::is_ctrl_alt_tap(vk, modifiers) => {
+            Some(IDS_CTRLALT_WARN_TEXT)
+        }
         Some((_, modifiers)) if modifiers & crate::hook::SINGLE_TAP != 0 => {
             Some(IDS_CTRL_WARN_TEXT)
         }
@@ -3670,6 +3767,10 @@ pub fn switch_hotkey_note(config: &Config) -> Option<u16> {
 pub fn switch_hotkey_name_in(language: Language, config: &Config) -> String {
     match config.switch_binding() {
         None => text_in(language, IDS_SWITCH_KEY_NONE),
+        // Решение 208.237 п. 2: «Ctrl + Alt», as the first key names it.
+        Some((vk, set)) if crate::hook::is_ctrl_alt_tap(vk, set) => {
+            effective_hotkey_name(&Hotkey::ctrl_alt_tap())
+        }
         Some((vk, set)) if set & crate::hook::SINGLE_TAP != 0 => text_in(
             language,
             if vk == VK_RCONTROL.0 {
@@ -3743,6 +3844,12 @@ pub fn effective_hotkey_name(hotkey: &Hotkey) -> String {
 
     if modifiers & crate::hook::DOUBLE_TAP != 0 {
         return [DOUBLE_TAP_KEY, DOUBLE_TAP_KEY].join(DOUBLE_TAP_JOINER);
+    }
+
+    // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` is named by its two modifiers — «Ctrl + Alt», the
+    // head of every combination's name; no word in it is translated.
+    if crate::hook::is_ctrl_alt_tap(vk, modifiers) {
+        return modifier_label(crate::hook::MOD_CTRL | crate::hook::MOD_ALT);
     }
 
     let key = key_name(vk).unwrap_or_else(|| hotkey.key.trim().to_owned());
@@ -5362,6 +5469,11 @@ pub fn hotkey_line_in(language: Language, hotkey: &Hotkey, combination_taken: bo
     }
 
     match hotkey.binding() {
+        // ⭐ Решение 208.237 п. 2: the tap of `Ctrl+Alt` in force — the text of its warning stays under
+        // the field, greyed, as the note of a tap of `Ctrl` does under the second (208.235).
+        Some((vk, set)) if crate::hook::is_ctrl_alt_tap(vk, set) => {
+            text_in(language, IDS_CTRLALT_WARN_TEXT)
+        }
         // Task T-95-2 — once after the double press is captured (the moment 5 of 157.18).
         Some((_, set)) if combination_taken && set & crate::hook::DOUBLE_TAP != 0 => {
             text_in(language, IDS_CAPTURE_DOUBLE_NOTE)

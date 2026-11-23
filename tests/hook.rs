@@ -49,6 +49,7 @@ fn armed() -> Mode {
         hotkey_vk: VK_PAUSE,
         hotkey_modifiers: 0,
         hotkey_double_tap: false,
+        hotkey_tap: false,
         hotkey_yields: false,
         switch: hook::SwitchKey::NONE,
     }
@@ -72,6 +73,7 @@ fn passed_on() -> Outcome {
         fire_hotkey: false,
         probe_layout: false,
         fire_switch: false,
+        mask_menu: false,
     }
 }
 
@@ -137,6 +139,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         hotkey_vk: hook::DEFAULT_HOTKEY_VK,
         hotkey_modifiers: 0,
         hotkey_double_tap: false,
+        hotkey_tap: false,
         hotkey_yields: false,
         switch: hook::SwitchKey::NONE,
     };
@@ -3917,6 +3920,7 @@ fn armed_on_two(first: (u16, u16), second: (u16, u16)) -> Mode {
         hotkey_vk: first.0,
         hotkey_modifiers: fix.modifiers,
         hotkey_double_tap: fix.double_tap,
+        hotkey_tap: fix.tap,
         switch: hook::SwitchKey::from_word(second.0, second.1),
         ..armed()
     }
@@ -4259,6 +4263,317 @@ fn both_keys_are_published_as_one_word() {
         hook::hotkeys(),
         ((VK_F12, hook::MOD_CTRL), (VK_RCONTROL, hook::SINGLE_TAP))
     );
+
+    hook::set_hotkeys(restore.0, restore.1);
+    assert_eq!(hook::hotkeys(), restore);
+}
+
+// -------------------------------------------------------------------------------------
+// Решение 208.237 п. 2 — the tap of `Ctrl+Alt`, either key
+// -------------------------------------------------------------------------------------
+
+/// The scan code of a real left `Ctrl` (`KBDLLHOOKSTRUCT.scanCode`).
+const SC_CTRL: u16 = 0x1D;
+
+/// The scan code of the left and of the right `Alt` (the right one is told by `LLKHF_EXTENDED`).
+const SC_ALT: u16 = 0x38;
+
+/// A stroke of the tap of `Ctrl+Alt`: the key, its scan code (the false `Ctrl` of `AltGr` is told by
+/// it), the edge, the time, the set held, the count of mouse buttons.
+type Chord = (u16, u16, Edge, u32, u16, u32);
+
+/// The four strokes of a tap: `first` down at `down`, `second` beside it, both up — the second first.
+fn chord(first: (u16, u16), second: (u16, u16), down: u32, up: u32) -> Vec<Chord> {
+    vec![
+        (first.0, first.1, Edge::Down, down, 0, 0),
+        (second.0, second.1, Edge::Down, down + 20, 0, 0),
+        (second.0, second.1, Edge::Up, up - 10, 0, 0),
+        (first.0, first.1, Edge::Up, up, 0, 0),
+    ]
+}
+
+/// Drives `events` through `classify` and answers each fire — its index and its key — and the
+/// index of every stroke that asked for the menu mask; every stroke is checked to be passed on.
+fn chord_in(mode: Mode, events: &[Chord]) -> (Vec<(usize, &'static str)>, Vec<usize>) {
+    let mut state = HotkeyState::default();
+    let mut fires = Vec::new();
+    let mut masks = Vec::new();
+
+    for (index, &(vk, scan, edge, time, held, mouse)) in events.iter().enumerate() {
+        let outcome = hook::classify(
+            mode,
+            &mut state,
+            KeyEvent {
+                time,
+                scan,
+                ..user_key(vk, edge)
+            },
+            || held,
+            || mouse,
+        );
+
+        assert_eq!(
+            outcome.decision,
+            Decision::Pass,
+            "event {index}: the tap of `Ctrl+Alt` suppresses nothing"
+        );
+        assert!(!(outcome.fire_hotkey && outcome.fire_switch));
+
+        if outcome.fire_hotkey {
+            fires.push((index, "fix"));
+        }
+        if outcome.fire_switch {
+            fires.push((index, "switch"));
+        }
+        if outcome.mask_menu {
+            masks.push(index);
+        }
+    }
+
+    (fires, masks)
+}
+
+/// The first key is the tap of `Ctrl+Alt`, no second.
+fn armed_on_ctrl_alt() -> Mode {
+    armed_on_two(hook::CTRL_ALT_TAP, (0, 0))
+}
+
+/// `Pause` fixes, the tap of `Ctrl+Alt` switches.
+fn armed_on_pause_and_ctrl_alt() -> Mode {
+    armed_on_two((VK_PAUSE, 0), hook::CTRL_ALT_TAP)
+}
+
+/// ⭐ **The tap of `Ctrl+Alt` fires its key on the release of the last of the two, in any order, with
+/// either real `Ctrl`, and asks for the menu mask the moment both are down** (решение 208.237 п. 2).
+/// The red «before»: on the base the word of the tap is no hotkey at all and nothing fires.
+#[test]
+fn a_tap_of_ctrl_and_the_left_alt_fires_its_key_on_the_last_release() {
+    let left_ctrl = (VK_LCONTROL, SC_CTRL);
+    let right_ctrl = (VK_RCONTROL, SC_CTRL);
+    let left_alt = (VK_LMENU, SC_ALT);
+
+    for (mode, key) in [
+        (armed_on_ctrl_alt(), "fix"),
+        (armed_on_pause_and_ctrl_alt(), "switch"),
+    ] {
+        for (first, second) in [
+            (left_ctrl, left_alt),
+            (left_alt, left_ctrl),
+            (right_ctrl, left_alt),
+            (left_alt, right_ctrl),
+        ] {
+            let (fires, masks) = chord_in(mode, &chord(first, second, 1_000, 1_100));
+            assert_eq!(fires, [(3, key)], "{key}: {first:?} then {second:?}");
+            assert_eq!(masks, [1], "{key}: the mask while both are down");
+        }
+
+        let exactly = chord(left_ctrl, left_alt, 1_000, 1_000 + hook::DOUBLE_TAP_MS);
+        assert_eq!(
+            chord_in(mode, &exactly).0,
+            [(3, key)],
+            "{key}: exactly the window"
+        );
+
+        // Released in the order they went down — the last release still ends it.
+        let in_order = vec![
+            (VK_LCONTROL, SC_CTRL, Edge::Down, 1_000, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Down, 1_030, 0, 0),
+            (VK_LCONTROL, SC_CTRL, Edge::Up, 1_060, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Up, 1_090, 0, 0),
+        ];
+        assert_eq!(chord_in(mode, &in_order).0, [(3, key)], "{key}: any order");
+    }
+
+    // The first key of `Pause` stays a key that is pressed beside the tap of the second.
+    let (fires, decisions) = fires_in(armed_on_pause_and_ctrl_alt(), &press(VK_PAUSE, 0, 50, 0));
+    assert_eq!(fires, [(0, "fix")]);
+    assert_eq!(decisions, [Decision::Suppress; 2]);
+}
+
+/// ⭐ **`AltGr` never makes the tap — on any layout** (решение 208.237 п. 2): the right `Alt` is no key
+/// of it, and the false left `Ctrl` the keyboard sends with it (scan code `0x21D`) is no `Ctrl`.
+#[test]
+fn alt_gr_and_the_right_alt_never_make_the_tap() {
+    let false_ctrl = (VK_LCONTROL, hook::ALTGR_CTRL_SCAN);
+    let right_alt = (VK_RMENU, SC_ALT);
+
+    for mode in [armed_on_ctrl_alt(), armed_on_pause_and_ctrl_alt()] {
+        // `AltGr` on ru, pl, de…: the false `Ctrl`, then the right `Alt`.
+        let alt_gr = chord(false_ctrl, right_alt, 1_000, 1_100);
+        assert_eq!(chord_in(mode, &alt_gr).0, NONE, "`AltGr`");
+
+        let real_ctrl_and_right_alt = chord((VK_LCONTROL, SC_CTRL), right_alt, 1_000, 1_100);
+        assert_eq!(
+            chord_in(mode, &real_ctrl_and_right_alt),
+            (vec![], vec![]),
+            "the right `Alt`"
+        );
+
+        // The false `Ctrl` beside the left `Alt` — no real `Ctrl` was ever pressed.
+        let false_and_left = chord(false_ctrl, (VK_LMENU, SC_ALT), 1_000, 1_100);
+        assert_eq!(chord_in(mode, &false_and_left).0, NONE, "the false `Ctrl`");
+
+        // The left `Alt` held, then `AltGr`: the right `Alt` breaks the tap.
+        let alt = hook::MOD_ALT;
+        let left_then_alt_gr = vec![
+            (VK_LMENU, SC_ALT, Edge::Down, 1_000, 0, 0),
+            (
+                VK_LCONTROL,
+                hook::ALTGR_CTRL_SCAN,
+                Edge::Down,
+                1_020,
+                alt,
+                0,
+            ),
+            (VK_RMENU, SC_ALT, Edge::Down, 1_020, alt, 0),
+            (VK_LCONTROL, hook::ALTGR_CTRL_SCAN, Edge::Up, 1_060, 0, 0),
+            (VK_RMENU, SC_ALT, Edge::Up, 1_060, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Up, 1_090, 0, 0),
+        ];
+        assert_eq!(
+            chord_in(mode, &left_then_alt_gr).0,
+            NONE,
+            "the left `Alt` and `AltGr`"
+        );
+    }
+}
+
+/// **What is no tap of `Ctrl+Alt`**: held too long, a key between (`Ctrl+Alt+T`), a lone `Ctrl` or
+/// `Alt`, the two one after the other, `Shift`, `Win` or `Alt` held, a mouse button, both `Ctrl`.
+#[test]
+fn what_is_no_tap_of_ctrl_and_alt() {
+    let ctrl = (VK_LCONTROL, SC_CTRL);
+    let alt = (VK_LMENU, SC_ALT);
+    let both = hook::MOD_CTRL | hook::MOD_ALT;
+
+    for mode in [armed_on_ctrl_alt(), armed_on_pause_and_ctrl_alt()] {
+        let held_long = chord(ctrl, alt, 1_000, 1_000 + hook::DOUBLE_TAP_MS + 1);
+        assert_eq!(chord_in(mode, &held_long).0, NONE, "401 ms is a hold");
+
+        let mut with_t = chord(ctrl, alt, 1_000, 1_200);
+        with_t.insert(2, (0x54, 0x14, Edge::Down, 1_050, both, 0));
+        with_t.insert(3, (0x54, 0x14, Edge::Up, 1_070, both, 0));
+        assert_eq!(chord_in(mode, &with_t).0, NONE, "`Ctrl+Alt+T`");
+
+        let lone_ctrl = vec![
+            (VK_LCONTROL, SC_CTRL, Edge::Down, 1_000, 0, 0),
+            (VK_LCONTROL, SC_CTRL, Edge::Up, 1_080, 0, 0),
+        ];
+        assert_eq!(chord_in(mode, &lone_ctrl).0, NONE, "a lone `Ctrl`");
+
+        let lone_alt = vec![
+            (VK_LMENU, SC_ALT, Edge::Down, 1_100, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Up, 1_180, 0, 0),
+        ];
+        assert_eq!(chord_in(mode, &lone_alt).0, NONE, "a lone `Alt`");
+
+        let one_after_the_other = [lone_ctrl, lone_alt].concat();
+        assert_eq!(
+            chord_in(mode, &one_after_the_other),
+            (vec![], vec![]),
+            "never down together"
+        );
+
+        for held in [hook::MOD_SHIFT, hook::MOD_WIN, hook::MOD_ALT] {
+            let mut events = chord(ctrl, alt, 1_000, 1_100);
+            events[0].4 = held;
+            assert_eq!(
+                chord_in(mode, &events).0,
+                NONE,
+                "held {held:#06x} at the first press"
+            );
+        }
+
+        let under_shift = [
+            vec![(VK_LSHIFT, 0x2A, Edge::Down, 900, 0, 0)],
+            chord(ctrl, alt, 1_000, 1_100),
+            vec![(VK_LSHIFT, 0x2A, Edge::Up, 1_200, 0, 0)],
+        ]
+        .concat();
+        assert_eq!(
+            chord_in(mode, &under_shift).0,
+            NONE,
+            "`Ctrl+Alt` under a held `Shift`"
+        );
+
+        let mut click = chord(ctrl, alt, 1_000, 1_100);
+        click[3].5 = 1;
+        assert_eq!(chord_in(mode, &click).0, NONE, "a mouse button between");
+
+        let both_ctrl = vec![
+            (VK_LCONTROL, SC_CTRL, Edge::Down, 1_000, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Down, 1_010, 0, 0),
+            (VK_RCONTROL, SC_CTRL, Edge::Down, 1_020, 0, 0),
+            (VK_RCONTROL, SC_CTRL, Edge::Up, 1_040, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Up, 1_060, 0, 0),
+            (VK_LCONTROL, SC_CTRL, Edge::Up, 1_080, 0, 0),
+        ];
+        assert_eq!(chord_in(mode, &both_ctrl).0, NONE, "both `Ctrl`");
+
+        // The auto-repeat of a held `Ctrl` is no new press: held 600 ms, it is a hold.
+        let repeated = vec![
+            (VK_LCONTROL, SC_CTRL, Edge::Down, 1_000, 0, 0),
+            (VK_LCONTROL, SC_CTRL, Edge::Down, 1_300, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Down, 1_500, 0, 0),
+            (VK_LMENU, SC_ALT, Edge::Up, 1_550, 0, 0),
+            (VK_LCONTROL, SC_CTRL, Edge::Up, 1_600, 0, 0),
+        ];
+        assert_eq!(chord_in(mode, &repeated).0, NONE, "a held `Ctrl` repeats");
+    }
+}
+
+/// **FR-84 for the tap of `Ctrl+Alt`**: in an excluded process the tap is the application's — it
+/// fires nothing and asks for no mask.
+#[test]
+fn the_tap_of_ctrl_and_alt_in_an_excluded_process_is_the_applications() {
+    for mode in [armed_on_ctrl_alt(), armed_on_pause_and_ctrl_alt()] {
+        let excluded = Mode {
+            hotkey_yields: true,
+            ..mode
+        };
+        let events = chord((VK_LCONTROL, SC_CTRL), (VK_LMENU, SC_ALT), 1_000, 1_100);
+        assert_eq!(chord_in(excluded, &events), (vec![], vec![]));
+    }
+}
+
+/// **The tap of `Ctrl+Alt` beside the tap of a lone `Ctrl`** (208.237 п. 2 and В-4): the first key on
+/// `Ctrl+Alt`, the second on the left `Ctrl` — the lone tap switches, the tap of both fixes, and one
+/// stroke never fires both.
+#[test]
+fn the_tap_of_ctrl_and_alt_and_the_tap_of_a_lone_ctrl_are_two_keys() {
+    let mode = armed_on_two(hook::CTRL_ALT_TAP, (VK_LCONTROL, hook::SINGLE_TAP));
+
+    let lone = [
+        (VK_LCONTROL, SC_CTRL, Edge::Down, 1_000, 0, 0),
+        (VK_LCONTROL, SC_CTRL, Edge::Up, 1_080, 0, 0),
+    ];
+    assert_eq!(chord_in(mode, &lone).0, [(1, "switch")], "the lone `Ctrl`");
+
+    let both = chord((VK_LCONTROL, SC_CTRL), (VK_LMENU, SC_ALT), 1_000, 1_100);
+    assert_eq!(chord_in(mode, &both).0, [(3, "fix")], "`Ctrl+Alt`");
+}
+
+/// **The word of the tap goes out and comes back whole** (решение 208.237 п. 2): `current_mode` reads
+/// the flag of the first key out of the same half as its key — `Alt` and `Ctrl` are no key compared.
+#[test]
+fn the_tap_of_ctrl_and_alt_is_published_in_the_word_of_either_key() {
+    let _mode = PUBLISHED_MODE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let restore = hook::hotkeys();
+
+    hook::set_hotkeys(hook::CTRL_ALT_TAP, (0, 0));
+    let mode = hook::current_mode();
+    assert!(mode.hotkey_tap && !mode.hotkey_double_tap);
+    assert_eq!(
+        (mode.hotkey_vk, mode.hotkey_modifiers),
+        (hook::CTRL_ALT_TAP.0, hook::MOD_CTRL)
+    );
+
+    hook::set_hotkeys((VK_PAUSE, 0), hook::CTRL_ALT_TAP);
+    let mode = hook::current_mode();
+    assert!(!mode.hotkey_tap && mode.switch.tap);
+    assert_eq!(mode.switch.vk, hook::CTRL_ALT_TAP.0);
 
     hook::set_hotkeys(restore.0, restore.1);
     assert_eq!(hook::hotkeys(), restore);
