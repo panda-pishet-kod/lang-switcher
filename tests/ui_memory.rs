@@ -99,6 +99,7 @@ fn the_memory_after_thirty_openings_of_the_about_window() {
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             None,
@@ -258,6 +259,7 @@ fn the_memory_after_openings_of_the_about_window_with_parts_taken_away() {
         let about = About {
             language: Language::Ru,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::Light,
         };
         let hwnd = host::create(Stripped(about, "art,brand,body,buttons".to_owned()), None)
@@ -272,6 +274,7 @@ fn the_memory_after_openings_of_the_about_window_with_parts_taken_away() {
         let about = About {
             language: Language::Ru,
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::Light,
         };
         let hwnd = host::create(Stripped(about, strip.clone()), None).expect("the window");
@@ -413,6 +416,7 @@ fn the_debug_layer_names_what_the_picture_leaves() {
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             None,
@@ -477,6 +481,7 @@ fn the_memory_while_the_about_window_is_resized() {
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             strip,
@@ -651,6 +656,7 @@ fn the_heaps_while_the_about_window_is_resized() {
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             strip,
@@ -835,6 +841,7 @@ fn the_series_of_the_gate(
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             None,
@@ -1095,6 +1102,7 @@ fn the_memory_with_the_menu_of_the_icon() {
             About {
                 language: Language::Ru,
                 key: "Pause".to_owned(),
+                switch_key: None,
                 theme: ThemeSetting::Light,
             },
             None,

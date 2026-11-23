@@ -59,6 +59,7 @@ fn about(language: Language, theme: Theme) -> About {
     About {
         language,
         key: "Pause".to_owned(),
+        switch_key: None,
         theme,
     }
 }

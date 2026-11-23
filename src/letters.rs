@@ -5545,7 +5545,13 @@ pub mod report {
 
     /// The settings, as **values without paths** — §7 and nothing about this disk.
     fn settings_now(config: &settings::Config) -> String {
-        let hotkey = settings::effective_hotkey_name(&config.hotkey);
+        let mut hotkey = settings::effective_hotkey_name(&config.hotkey);
+        // Решение 208.228 (§7 of the design): the second key, technical and untranslated —
+        // `Pause · switch ScrollLock · …`.
+        if let Some(switch) = settings::switch_hotkey_technical_name(config) {
+            hotkey.push_str(" · switch ");
+            hotkey.push_str(&switch);
+        }
         let layouts = match config.layouts.mode {
             settings::LayoutMode::Pair => format!(
                 "{} → {}",

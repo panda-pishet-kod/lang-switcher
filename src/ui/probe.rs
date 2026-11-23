@@ -56,6 +56,7 @@ pub fn run_about() -> std::process::ExitCode {
         let about = About {
             language: settings::ui_language(),
             key: "Pause".to_owned(),
+            switch_key: None,
             theme: ThemeSetting::System,
         };
         let Ok(window) = crate::ui::host::open(about, None) else {

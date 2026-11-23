@@ -915,6 +915,40 @@ pub enum PressAct {
     /// forward did, and heard the knock until 1.6.0 (209.20). Kept apart from
     /// [`PressAct::Nothing`] so the rule stays a row of the table a test walks.
     Refuse,
+    /// **«Исправить набранное» with nothing to fix, in the mode of two keys** — решение 208.228,
+    /// В-2: «ничего, глухой звук». No switch — the layout is the second key's — and the knock of a
+    /// refusal ([`Press::Refused`], the third tone of FR-100). See [`fixing_act`].
+    Knock,
+}
+
+/// **The fork of a press of the first key in the mode of two keys** — решение 208.228, В-2. Every
+/// press [`press_act`] answers with [`PressAct::Switch`] — nothing typed and nothing selected, a
+/// password field, a field whose verdict is on its way — becomes [`PressAct::Knock`] while a second
+/// key is in force (`two_keys`); everything else, and everything in the mode of one key (208.5),
+/// stays as [`press_act`] put it.
+pub const fn fixing_act(act: PressAct, two_keys: bool) -> PressAct {
+    match act {
+        PressAct::Switch if two_keys => PressAct::Knock,
+        other => other,
+    }
+}
+
+/// **What the second hotkey answers** — «Переключить раскладку», решение 208.228. `excluded` is
+/// FR-84 as the input window reads it, `switch` the switch itself — `inject::switch_on_empty_press`
+/// in the product. The tones are the ones a switch on a press over nothing has (208.5, Q-208-20):
+/// «чк-чк» when the window took the layout, the knock when it did not, none while the late verdict
+/// is out, the idle click when there was nothing to switch to; an excluded process is silent and
+/// the switch is not asked (208.17). The typing buffer, the selection and the clipboard are not
+/// part of the question at all (§2 of the design).
+pub fn switch_key_outcome(
+    excluded: bool,
+    switch: impl FnOnce() -> Option<crate::inject::EmptySwitch>,
+) -> Option<Press> {
+    if excluded {
+        return None;
+    }
+
+    buffer_path_outcome(PressAct::Switch, || false, switch)
 }
 
 /// **The fork of a press on the typing-buffer path** — stage E114, task T-114-1, решения 208.5 и
@@ -1035,6 +1069,8 @@ fn buffer_path_outcome(
         // ⭐ Stage E116, task T-116-2 (решение 208.17): an excluded process is silent. See
         // `PressAct::Refuse` for how such a press still reaches this thread.
         PressAct::Refuse => None,
+        // ⭐ Решение 208.228, В-2: the first key with nothing to fix knocks, and switches nothing.
+        PressAct::Knock => Some(Press::Refused),
     }
 }
 
@@ -3133,19 +3169,27 @@ pub fn publish_configuration(config: &settings::Config) {
     // Task T-93-1, вопрос 157: the key and its modifiers go out **together, in one store** — a
     // modifier name nobody knows leaves the whole default in place, exactly as an unknown key
     // does (`Hotkey::binding`).
+    //
+    // ⭐ **Решение 208.228 — and the second key with it, in the same store**: «Переключить
+    // раскладку» of `[switch_hotkey]` in the mode of two keys, `(0, 0)` in the mode of one, for no
+    // key, for a key that is no good and for one that collides with the first
+    // (`Config::switch_binding`). The first key keeps its rule: an unknown name leaves the default
+    // that stands in the word.
     let binding = config.hotkey.binding();
+    let switch = config.switch_binding().unwrap_or((0, 0));
+    let fix = binding.unwrap_or_else(crate::hook::hotkey);
 
-    if let Some((vk, modifiers)) = binding {
-        crate::hook::set_hotkey(vk, modifiers);
-    }
+    crate::hook::set_hotkeys(fix, switch);
 
     // ⭐ **Task T-95-6, решение 159.25.** The shortcut of the sticky keys of Windows — five presses
     // of `Shift` — follows the hotkey just published: off while it is the double press of `Shift`
     // (two pairs, forth and back, and the capital after them make five), given back for any other.
     // Module `sticky` keeps the debt and writes the session's memory and never the profile. Here,
     // on the UI thread, like everything this function publishes — never in the callback (NFR-01).
+    // Решение 208.228: the double press of either key (§2 п. 5 of the design).
+    let double_tap = |set: u16| set & crate::hook::DOUBLE_TAP != 0;
     crate::sticky::follow_hotkey(
-        binding.is_some_and(|(_, modifiers)| modifiers & crate::hook::DOUBLE_TAP != 0),
+        binding.is_some_and(|(_, modifiers)| double_tap(modifiers)) || double_tap(switch.1),
     );
 
     // Section `[replacement]` of section 7 — FR-42 and FR-44, task T-04-2. This is the only
@@ -3938,14 +3982,22 @@ unsafe extern "system" fn window_proc(
                 // and FR-84 is read in one word.
                 let (field, excluded) = crate::guard::state_now();
 
+                //
+                // ⭐ **Решение 208.228, В-2 — in the mode of two keys** (a second key in the word of
+                // the hook) a press over nothing knocks instead of switching: `fixing_act`.
+                let two_keys = crate::hook::switch_hotkey().0 != 0;
+
                 if is_input_window(hwnd)
                     && let Some(press) = buffer_path_outcome(
-                        press_act(
-                            handed_back,
-                            crate::buffer::is_installed(),
-                            crate::buffer::is_empty(),
-                            field,
-                            excluded,
+                        fixing_act(
+                            press_act(
+                                handed_back,
+                                crate::buffer::is_installed(),
+                                crate::buffer::is_empty(),
+                                field,
+                                excluded,
+                            ),
+                            two_keys,
                         ),
                         || crate::inject::on_hotkey().is_some(),
                         crate::inject::switch_on_empty_press,
@@ -3963,6 +4015,32 @@ unsafe extern "system" fn window_proc(
 
                     // Task T-37-1: dropped — a refused post costs one click of FR-100 that
                     // is not heard, and nothing of the press itself, which is already done.
+                    let _ = post_to(Role::Ui, sound_message_for(press));
+                }
+            }
+
+            // ⭐ **Решение 208.228 — the second hotkey, «Переключить раскладку».** The callback
+            // recognised it, suppressed it and posted `hook::WM_APP_SWITCH_KEY`; here the layout of
+            // the window in front goes to the next one of the program's cycle by the road of a press
+            // over nothing (FR-50, the late verdict of Q-208-20, the tones of FR-100) — and nothing
+            // else: no word is converted, the selection is not probed, the clipboard is not touched,
+            // the buffer is not flushed (§2 of the design, FR-11). The menu mask first, while `Alt`
+            // is still held; a late verdict still waiting was answered above, by the arm every press
+            // takes. SEC-05: the input window only — a forgery buys one switch of the layout, what
+            // the system's `Alt+Shift` gives anybody.
+            if message == crate::hook::WM_APP_SWITCH_KEY && is_input_window(hwnd) {
+                crate::inject::send_switch_menu_mask();
+
+                if let Some(took) = crate::inject::settle_late_verdict_now() {
+                    let _ = set_late_verdict_timer(false);
+                    let _ = post_to(Role::Ui, sound_message_for(late_press(took)));
+                }
+
+                let (_, excluded) = crate::guard::state_now();
+
+                if let Some(press) =
+                    switch_key_outcome(excluded, crate::inject::switch_on_empty_press)
+                {
                     let _ = post_to(Role::Ui, sound_message_for(press));
                 }
             }

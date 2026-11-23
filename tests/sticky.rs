@@ -324,8 +324,9 @@ fn the_publication_of_the_configuration_takes_the_shortcut_after_the_hotkey() {
     let app = code_of("app.rs");
     let publish = body_of(&app, "pub fn publish_configuration(");
 
+    // Решение 208.228: both hotkeys go out in one store, and the shortcut follows them both.
     let hotkey = publish
-        .find("crate::hook::set_hotkey(")
+        .find("crate::hook::set_hotkeys(")
         .expect("the publication publishes the hotkey");
     let follow = publish
         .find("crate::sticky::follow_hotkey(")
