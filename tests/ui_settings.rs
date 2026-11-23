@@ -639,3 +639,64 @@ fn the_head_of_the_menu_says_the_state_in_small_letters() {
         );
     }
 }
+
+/// **Z16 (208.210): a tab of a section holds its whole label, the chosen one in its bold** — on a
+/// screen of 800 × 600 the sections stand in a row of tabs, and the chosen «Общие», drawn bold in a
+/// tab measured for the regular type, was cut to «Общ…» with room to spare. Every section chosen in
+/// turn (a state of the catalogue each), in the languages of C3, on the small screen and in the
+/// least window, measured by DirectWrite in the weight each tab is drawn in.
+#[test]
+fn a_tab_of_a_section_holds_its_label_in_the_weight_it_is_drawn_in() {
+    use lang_switcher::ui::layout::Part;
+    use lang_switcher::ui::text::{Measure, Style, Wrap};
+    use lang_switcher::ui::tokens::{Role, SECTION_PAD};
+
+    with_product_strings();
+    // The work area of an 800 × 600 screen over a taskbar of 48, and the least window.
+    let sizes = [window_size(800.0, 552.0), client_size(620.0, 500.0)];
+    let mut cut = Vec::new();
+    let mut tabs_seen = 0;
+    for language in LANGUAGES {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("DirectWrite");
+        for (state, window) in lang_switcher::ui::windows::catalogue(language)
+            .into_iter()
+            .filter(|(name, _)| name.starts_with("settings"))
+        {
+            for size in sizes {
+                let k = fit::k_for(language.tag(), size.class);
+                let layout = fit::emergency(&window, size, k, rtl, &text);
+                let pad = SECTION_PAD.h.at(layout.b);
+                for item in &layout.items {
+                    let Part::Section { current, label, .. } = &item.part else {
+                        continue;
+                    };
+                    tabs_seen += 1;
+                    let role = if *current { Role::Strong } else { Role::Body };
+                    let style = Style::of(role, layout.b, layout.size.h);
+                    let need = text.measure(label, style, Wrap::OneLine, f32::MAX).width;
+                    let room = item.rect.w - pad * 2.0;
+                    if need > room + 0.01 {
+                        cut.push(format!(
+                            "{} {state} {:.0}x{:.0}: «{label}» {role:?} needs {need:.1}, has {room:.1}",
+                            language.tag(),
+                            size.w,
+                            size.h
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(tabs_seen > 0, "the states show their sections");
+    assert!(
+        cut.is_empty(),
+        "labels cut in their tabs:\n{}",
+        cut.join("\n")
+    );
+}

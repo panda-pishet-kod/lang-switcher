@@ -2742,6 +2742,10 @@ impl<I: Copy> Placer<'_, I> {
     #[allow(clippy::too_many_arguments)]
     fn sections(&mut self, id: I, items: &[String], current: usize, x: f32, y: f32, w: f32) -> f32 {
         let style = self.style(Role::Body);
+        // A tab is as wide as its label in the bold it is drawn in when chosen, every tab alike, so
+        // the chosen one shows all of it and the row stands still when the choice moves (Z16,
+        // 208.210: «Общ…» on a screen of 800 × 600).
+        let chosen = self.style(Role::Strong);
         let (v, h) = (self.em(SECTION_PAD.v), self.em(SECTION_PAD.h));
         let gap = self.em(SECTION_GAP);
         let item_h = style.line_height() + v * 2.0;
@@ -2750,7 +2754,7 @@ impl<I: Copy> Placer<'_, I> {
 
         for (index, label) in items.iter().enumerate() {
             let width = if narrow {
-                (self.width_of(style, label) + h * 2.0).min(w)
+                (self.width_of(chosen, label) + h * 2.0).min(w)
             } else {
                 w
             };
