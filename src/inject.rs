@@ -1739,8 +1739,18 @@ pub fn menu_mask(modifiers: u16) -> Option<[INPUT; 2]> {
 /// mask. A hotkey without `Alt` sends nothing. FR-45: a mask the system did not take whole is
 /// counted like any other discrepancy.
 pub fn send_menu_mask() {
-    let (_, modifiers) = crate::hook::hotkey();
+    send_menu_mask_of(crate::hook::hotkey().1);
+}
 
+/// The menu mask of **the second hotkey**, «Переключить раскладку» (решение 208.228) — on
+/// `hook::WM_APP_SWITCH_KEY`, first, for the reason [`send_menu_mask`] gives: an `Alt+F12` that only
+/// switches still leaves the window a lone `Alt`.
+pub fn send_switch_menu_mask() {
+    send_menu_mask_of(crate::hook::switch_hotkey().1);
+}
+
+/// The mask for a hotkey of `modifiers` — one body for both keys.
+fn send_menu_mask_of(modifiers: u16) {
     let Some(events) = menu_mask(modifiers) else {
         return;
     };
