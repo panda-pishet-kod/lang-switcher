@@ -1482,7 +1482,7 @@ pub const IDS_GROUP_GENERAL: u16 = 3001;
 pub const IDS_AUTOSTART: u16 = 3002;
 /// The label of the language combo box.
 pub const IDS_LANGUAGE_LABEL: u16 = 3003;
-/// «Нашли ошибку в переводе?» — the quiet button under the language, task T-120-22 (решение
+/// «Нашли ошибку в переводе?» — the button under the language, task T-120-22 (решение
 /// 208.169, С12); it opens the wizard on the page of the idea. Block 3280…3295 (`app.rc`).
 pub const IDS_TRANSLATION_REPORT: u16 = 3289;
 // ⚠ **3004 is retired, not free** — task Т-31-3, решение 99.4. It was `IDS_LANGUAGE_RESTART`,
@@ -1599,7 +1599,7 @@ pub const IDS_STATUS_HOTKEY: u16 = 3285;
 pub const IDS_STATUS_AUTOSTART_ON: u16 = 3286;
 /// «Запуск при входе в систему: выключен».
 pub const IDS_STATUS_AUTOSTART_OFF: u16 = 3287;
-/// «Подробности для автора» — the quiet button that opens the lines of the developer.
+/// «Подробности для автора» — the button that opens the lines of the developer.
 pub const IDS_STATUS_DETAILS: u16 = 3288;
 /// «Копировать» — the window of «Подробности для автора» puts its lines on the clipboard (T-120-21,
 /// C6 (а)); 3295, the reserve the controller named.

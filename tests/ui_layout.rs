@@ -979,7 +979,7 @@ fn every_window() -> Vec<Window<Id>> {
             }]),
         ]),
         buttons: vec![
-            button(Id::Copy, "Copy", ButtonKind::Quiet),
+            button(Id::Copy, "Copy", ButtonKind::Normal),
             button(Id::Close, "Close", ButtonKind::Primary),
         ],
     };
@@ -1698,7 +1698,7 @@ fn the_wizard_has_its_progress_its_row_and_its_check_boxes_with_a_line() {
     let window = Window {
         kind: WindowKind::Wizard,
         buttons: vec![
-            button(Id::Cancel, "Cancel", ButtonKind::Quiet),
+            button(Id::Cancel, "Cancel", ButtonKind::Normal),
             button(Id::Back, "Back", ButtonKind::Normal),
             button(Id::Next, "Next", ButtonKind::Primary),
         ],

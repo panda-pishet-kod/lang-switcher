@@ -437,7 +437,7 @@ fn every_section_shows_its_subtitle_and_the_eyebrow_of_its_own() {
 }
 
 /// **T-120-22 Б: «Нашли ошибку в переводе?» stands under «Язык интерфейса» in every language but
-/// Russian** — the language the others are translated from. A quiet button, the very next element
+/// Russian** — the language the others are translated from. A usual button, the very next element
 /// after the choice of the language and before the theme.
 #[test]
 fn the_translation_button_stands_under_the_language_in_every_language_but_russian() {
@@ -465,8 +465,8 @@ fn the_translation_button_stands_under_the_language_in_every_language_but_russia
             settings::text_in(language, settings::IDS_TRANSLATION_REPORT)
         );
         assert!(
-            choice < at && between.contains("kind: Quiet") && between.contains(&label),
-            "{language:?}: the quiet {label} under the language and above the theme: {between}"
+            choice < at && between.contains("kind: Normal") && between.contains(&label),
+            "{language:?}: the button {label} under the language and above the theme: {between}"
         );
     }
 }

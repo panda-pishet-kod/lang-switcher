@@ -88,7 +88,7 @@ pub fn catalogue(word: &dyn Fn(&str) -> String, b: f32, measure: &dyn Measure) -
         true,
         narrow,
         Class::Ordinary,
-        button(word("IDS_LOG_SAVE"), ButtonKind::Quiet, false),
+        button(word("IDS_LOG_SAVE"), ButtonKind::Normal, false),
     );
     node(
         "Кнопка со знаком ↗",

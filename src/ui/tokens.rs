@@ -636,8 +636,9 @@ pub const NARROW_ART: Em = Em(4.6);
 pub const PAIR_MIN_HALF: Em = Em(15.0);
 /// Между блоками.
 pub const BLOCK_GAP: Em = Em(1.0);
-/// Панель — точка узора (`line2`).
-pub const PANEL_DOT: Pt = Pt(1.2);
+/// Панель — точка узора (`line2`), диаметр: в макете `radial-gradient(… 1.2px …)` — радиус 1,2 px
+/// (AUDIT-180b п. 5, решение 208.227).
+pub const PANEL_DOT: Pt = Pt(2.4);
 /// Панель — шаг узора.
 pub const PANEL_DOT_STEP: Pt = Pt(18.0);
 /// Рисунок в панели — диаметр круга.
@@ -707,6 +708,9 @@ pub const FIELD_PAD: Pad = Pad::em(0.45, 0.7);
 pub const MULTILINE_PAD: Pad = Pad::em(0.55, 0.75);
 /// Сегмент — поля ячейки.
 pub const SEGMENT_PAD: Pad = Pad::em(0.35, 0.9);
+/// ◆ Сегмент под мышью — заливка внутри дорожки, на столько от её края: рамка дорожки цела
+/// (AUDIT-180b п. 3, решение 208.227).
+pub const SEGMENT_HOVER_INSET: Pt = Pt(2.0);
 /// Группа строк — поля.
 pub const ROW_GROUP_PAD: Pad = Pad::em(0.15, 1.0);
 /// Группа строк — строка, сверху и снизу; между строками линия `line`.
