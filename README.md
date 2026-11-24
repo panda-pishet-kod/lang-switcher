@@ -153,9 +153,25 @@ letter frequencies are in the program, not the texts.
 ## The hotkey
 
 `Pause/Break` by default. In the settings window you can set another key, alone or with `Ctrl`,
-`Alt` and `Shift` (`Ctrl+F12`, `Alt+Shift+K`), or a **double tap of `Shift`** — two short taps in a
-row. No `Pause` key? Try `Fn+Pause`, a combination such as `Ctrl+F12`, `CapsLock` or the double
-`Shift`.
+`Alt` and `Shift` (`Ctrl+F12`, `Alt+Shift+K`), a **double tap of `Shift`** — two short taps in a
+row — or a **tap of `Ctrl+Alt`**. No `Pause` key? Try `Fn+Pause`, a combination such as `Ctrl+F12`,
+`CapsLock` or the double `Shift`. While the one key is `Pause`, the section «Hotkey» says so under
+the field — «No Pause key? A double Shift works too.» — and the welcome letter says the same, with
+the way there: «Settings → Hotkey».
+
+**A tap of `Ctrl+Alt`.** Press `Ctrl` and the left `Alt` together and let both go: the tap counts
+when the last of them is up within 0.4 s of the first press and no other key or mouse button came
+between. Only the left `Alt` counts, with either `Ctrl`; the right `Alt` never does — in Russian,
+Polish, German and many other layouts it is `Alt Gr`, which Windows reads as `Ctrl+Alt`. Before the
+tap is set, the program warns that it can get in the way where `Ctrl+Alt` is needed for itself —
+VMware releases the mouse with it; remote desktop, virtual machines and games use it — and offers
+«Set it anyway» or «Choose another key». After «Set it anyway» the warning stays under the field in
+small grey letters. The tap can be either of the two keys described below.
+
+**Combinations Windows uses.** `Alt+Shift`, `Ctrl+Shift` and `Win+Space` switch the input language
+in Windows, so the capture refuses them and says so. A combination Windows gives to one language in
+its «Hot keys for input languages» — `Ctrl+Shift` or the left `Alt+Shift` with a digit — is
+accepted, with a grey note under the field: while Lang Switcher is running, Lang Switcher gets it.
 
 In the settings file `%APPDATA%\Lang_Switcher\config.toml`:
 
@@ -163,8 +179,10 @@ In the settings file `%APPDATA%\Lang_Switcher\config.toml`:
 [hotkey]
 key       = "F12"
 modifiers = ["Ctrl"]    # any of "Ctrl", "Alt", "Shift"; [] for the key alone
-trigger   = "press"     # press, or double_tap (with key = "Shift" only)
+trigger   = "press"     # press; double_tap (with key = "Shift" only); tap (Ctrl+Alt)
 ```
+
+A tap of `Ctrl+Alt` is `key = "LeftAlt"`, `modifiers = ["Ctrl"]`, `trigger = "tap"`.
 
 **One key or two.** «One key», the default, fixes the typed word and switches the layout, as before.
 With «Two keys» in the section «Hotkey» each key has one job. «Fix typed text» only fixes: with
@@ -173,17 +191,20 @@ layout of the program and leaves the text, the selection and the clipboard as th
 and a space it switches the layout for the next word. The second key is set the way the first one is;
 the double tap of `Shift` can belong to one of the two. The second key alone can also be a single tap
 of the left or the right `Ctrl`: the program first says what that can break — `Ctrl` shortcuts,
-games, remote desktop — and offers «Set it anyway» or «Choose another key».
+games, remote desktop — and offers «Set it anyway» or «Choose another key»; after «Set it anyway»
+the warning stays under the field in grey until the key is changed. «Remove» beside «Set» of the
+second key clears it back to «Not set»; «Two keys» stays.
 
 ```toml
 [switch_hotkey]
 enabled = true          # «Two keys»; false — one key (the second key is kept for later)
 key     = "ScrollLock"  # names as in [hotkey]; "LeftCtrl" or "RightCtrl" with trigger = "tap"
-trigger = "press"       # press, double_tap (Shift) or tap (a single Ctrl)
+trigger = "press"       # press, double_tap (Shift) or tap (a single Ctrl, or Ctrl+Alt)
 ```
 
 An older version of the program does not know this section: it works with one key and forgets the
-second one when it saves its settings.
+second one when it saves its settings. Nor does it know a tap of `Ctrl+Alt`: version 1.6.1 uses
+`Pause` instead and says under the field that it does not recognize the key.
 
 ## Security and trust
 
