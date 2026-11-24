@@ -4,7 +4,9 @@ Every published version of Lang Switcher, newest first. The full text of each re
 SHA-256, what was measured and what was not — is on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases)
 page. Dates are the days the releases were published (UTC).
 
-## 1.8.0 — не выпущено
+## 1.8.0 — 2026-11-24
+
+*A new look, a second hotkey and the layout flag on the tray icon.*
 
 - 1.7.0 was not released on its own: what it was to bring — the flag of the layout on the tray icon and a small
   update window — comes in 1.8.0 together with the new look of every window of the program.
