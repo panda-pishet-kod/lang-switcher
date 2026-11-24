@@ -28,6 +28,14 @@
       * a language whose cap of that kind is 0 -- the letter does not fit even without a text: a
         person of that language sees the en table instead
       * a language the caps file does not name
+    and since 1.8.1 (decision 208.242, the finding of the window of the author's cards), about the
+    shape of an entry. Every released version reads an [[item]] into id, type, date, version, link
+    and its language tables, each with a title and a text, and refuses the WHOLE feed over anything
+    else -- no news and no update reach anybody -- so this script refuses it first:
+      * a field of an entry other than id, type, date, version and link, or one given twice
+      * a line of an entry that is not "key = value"
+      * a table under an entry that is not a language -- [item.image], [[item.x]], [item.ru.x]
+      * a language table given twice, or without its title or its text
 
     A refusal writes nothing: the file on disk is left exactly as it was, and the exit code is
     non-zero.
@@ -73,6 +81,12 @@ if (-not $KeyDir) { $KeyDir = $env:LANGSW_NEWS_KEYS }
 
 $BODY_CAP = 192 * 1024
 $NEWS_KEPT = 3
+
+# 1.8.1 (decision 208.242): the fields of an entry a released version knows -- RawItem of src\feed.rs.
+# Every other key of an entry goes to its `#[serde(flatten)] languages`, must be a table with a title
+# and a text, and refuses the whole feed when it is not.
+$ItemFields = @('id', 'type', 'date', 'version', 'link')
+$WholeFeed = 'every released version refuses the whole feed over it: no news and no update reach anybody'
 
 function Fail([string]$why) {
     Write-Host ''
@@ -249,7 +263,7 @@ foreach ($line in $lines) {
 
     if ($trimmed -eq '[[item]]') {
         if ($current) { $items += $current }
-        $current = [pscustomobject]@{ Id = $null; Type = $null; Version = $null; Languages = @() }
+        $current = [pscustomobject]@{ Id = $null; Type = $null; Version = $null; Languages = @(); Fields = @{}; Texts = @{} }
         $language = $null
         $section = 'item'
         continue
@@ -262,7 +276,11 @@ foreach ($line in $lines) {
     if ($trimmed -match '^\[item\.([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\]$') {
         if (-not $current) { Fail 'a language table before the first [[item]]' }
         $language = $Matches[1]
+        if ($current.Languages -ccontains $language) {
+            Fail ("entry {0}: [item.{1}] is given twice -- {2}" -f $current.Id, $language, $WholeFeed)
+        }
         $current.Languages += $language
+        $current.Texts[$language] = [pscustomobject]@{ Title = $false; Text = $false }
         $section = 'language'
         Test-Language $current $language
         continue
@@ -280,6 +298,15 @@ foreach ($line in $lines) {
         $stops++
         if ($stops -gt 1) { Fail ("{0} [stop] tables -- the format has one" -f $stops) }
         $section = 'stop'; $language = $null; continue
+    }
+
+    # 1.8.1 (decision 208.242): any other table under an entry. A released version reads it as a
+    # language with a title and a text, and the feed with it as no feed at all. Until 1.8.1 it fell
+    # to "another table" below and was signed without a word.
+    if ($trimmed -match '^\[\[?\s*item\s*\.') {
+        $why = "entry {0}: {1} is not a language table -- an entry has id, type, date, version, link " +
+            "and [item.<tag>] with a title and a text; {2}"
+        Fail ($why -f $current.Id, $trimmed, $WholeFeed)
     }
 
     if ($trimmed -match '^\[') { $language = $null; $section = 'other'; continue }
@@ -302,6 +329,10 @@ foreach ($line in $lines) {
     # is and one of 160 makes it grow; an Urdu one of 150 does not. Published entries of 1.2.0 are
     # 116 at most.
     if ($section -eq 'language') {
+        # 1.8.1: a released version refuses the whole feed over a language table without its title
+        # or its text, so both are noted here and asked for after the parse.
+        if ($trimmed -cmatch '^title\s*=') { $current.Texts[$language].Title = $true; continue }
+        if ($trimmed -cmatch '^text\s*=') { $current.Texts[$language].Text = $true }
         if ($trimmed -match '^text\s*=\s*"""(.*)$') {
             $rest = $Matches[1]
             $close = $rest.IndexOf('"""')
@@ -331,9 +362,28 @@ foreach ($line in $lines) {
 
     if ($section -eq 'top' -and $trimmed -match '^schema\s*=\s*(\d+)') { $schema = [int]$Matches[1]; continue }
 
-    if ($section -eq 'item' -and $trimmed -match '^id\s*=\s*(\d+)') { $current.Id = [int]$Matches[1]; continue }
-    if ($section -eq 'item' -and $trimmed -match '^type\s*=\s*"([a-z]+)"') { $current.Type = $Matches[1]; continue }
-    if ($section -eq 'item' -and $trimmed -match '^version\s*=\s*"([^"]+)"') { $current.Version = $Matches[1]; continue }
+    # 1.8.1 (decision 208.242): a field of an entry is one of the five a released version knows. Any
+    # other key -- a typo such as `url =`, a new one such as `layout =` -- is read by it as a language
+    # table and the whole feed is refused; until 1.8.1 this loop let it through without a word.
+    if ($section -eq 'item') {
+        if ($trimmed -notmatch '^([^=]+?)\s*=') {
+            Fail ("entry {0}: the line '{1}' is not 'key = value' -- {2}" -f $current.Id, $trimmed, $WholeFeed)
+        }
+        $key = $Matches[1]
+        if ($ItemFields -cnotcontains $key) {
+            $why = "entry {0}: unknown field '{1}' -- an entry has {2} and its language tables " +
+                "[item.<tag>]; {3}"
+            Fail ($why -f $current.Id, $key, ($ItemFields -join ', '), $WholeFeed)
+        }
+        if ($current.Fields.ContainsKey($key)) {
+            Fail ("entry {0} gives {1} twice -- {2}" -f $current.Id, $key, $WholeFeed)
+        }
+        $current.Fields[$key] = $true
+        if ($trimmed -match '^id\s*=\s*(\d+)') { $current.Id = [int]$Matches[1] }
+        elseif ($trimmed -match '^type\s*=\s*"([a-z]+)"') { $current.Type = $Matches[1] }
+        elseif ($trimmed -match '^version\s*=\s*"([^"]+)"') { $current.Version = $Matches[1] }
+        continue
+    }
 }
 
 if ($current) { $items += $current }
@@ -371,6 +421,14 @@ foreach ($item in $items) {
     foreach ($needed in @('ru', 'en')) {
         if ($item.Languages -notcontains $needed) {
             Fail ("entry {0} has no [{1}] text -- FR-102 makes ru and en obligatory" -f $item.Id, $needed)
+        }
+    }
+
+    foreach ($tag in $item.Languages) {
+        foreach ($part in @('Title', 'Text')) {
+            if (-not $item.Texts[$tag].$part) {
+                Fail ("entry {0} [{1}] has no {2} -- {3}" -f $item.Id, $tag, $part.ToLowerInvariant(), $WholeFeed)
+            }
         }
     }
 
