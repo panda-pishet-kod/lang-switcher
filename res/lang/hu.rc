@@ -88,7 +88,7 @@ BEGIN
     IDS_STATE_NO_FAILURES   "nincs hiba a kiosztás kiválasztásakor"
     IDS_STATE_FAILURES      "hibák a kiosztás kiválasztásakor: {0}"
     IDS_STATE_JOINED        "{0} · {1}"
-    IDS_STATE_LAYOUTS       "Kiosztások a munkamenetben: {0} · közzétett kivételek: {1} · naplóbejegyzések: {2}"
+    IDS_STATE_LAYOUTS       "Kiosztások a munkamenetben: {0} · aktív kivételek: {1} · naplóbejegyzések: {2}"
     IDS_STATE_AUTOSTART     "Automatikus indítás a rendszerleíró adatbázisban (HKCU\\…\\Run): {0}"
     IDS_AUTOSTART_PRESENT   "igen, {0}"
     IDS_AUTOSTART_ABSENT    "nem"

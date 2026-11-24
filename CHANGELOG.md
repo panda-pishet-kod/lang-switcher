@@ -4,6 +4,11 @@ Every published version of Lang Switcher, newest first. The full text of each re
 SHA-256, what was measured and what was not — is on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases)
 page. Dates are the days the releases were published (UTC).
 
+## 1.8.1 — не выпущено
+
+- The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
+  Hungarian line of the state in «Diagnostics» counts the active exclusions, no longer the «published» ones.
+
 ## 1.8.0 — 2026-11-24
 
 *A new look, a second hotkey and the layout flag on the tray icon.*
