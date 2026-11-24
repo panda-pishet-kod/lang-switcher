@@ -150,21 +150,7 @@ pub struct Untranslated {
 ///     why: "строки второй клавиши стоят английскими в 64 языках до волны",
 /// }
 /// ```
-pub const UNTRANSLATED: &[Untranslated] = &[Untranslated {
-    ids: &[
-        "IDS_CAPTURE_WINDOWS_SWITCH",
-        "IDS_NOTE_WINDOWS_KEY",
-        "IDS_CTRLALT_WARN_TITLE",
-        "IDS_CTRLALT_WARN_TEXT",
-        "IDS_NO_PAUSE_HINT",
-        "IDS_HOTKEY_NO_PAUSE",
-    ],
-    languages: &[],
-    category: Some(Category::Wave),
-    until: "последняя волна перевода 1.8.0 (строки 3380…3385)",
-    decision: Some("208.237, 208.240"),
-    why: "строки фазы 2 правок 208.236 (Windows, касание Ctrl+Alt, Pause) стоят английскими в 64 языках до волны",
-}];
+pub const UNTRANSLATED: &[Untranslated] = &[];
 
 /// The record of `records` that excuses the string `id` of the language `tag`, if there is one.
 pub fn untranslated<'a>(
