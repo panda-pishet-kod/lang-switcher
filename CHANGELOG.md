@@ -14,12 +14,31 @@ page. Dates are the days the releases were published (UTC).
 - The settings window shows its sections in a column on the left — General, Hotkey, Layouts, Exclusions,
   Diagnostics — each with a line on what it holds. A change in it takes effect at once and is saved: «OK», «Cancel»
   and «Apply» gave way to one «Close».
+- A list with more rows than it shows — a drop-down such as «Interface language» or the pairs of layouts, and the
+  lists in «Layouts» and «Exclusions» of the settings — scrolls with the wheel, the keys and its scroll bar: the thumb
+  can be dragged with the mouse, and a click on the bar beside the thumb turns a page.
 - One key or two: «Hotkey» has «One key | Two keys». «One key», the default, is what it was. With «Two keys»
   «Fix typed text» only fixes — with nothing typed or selected it does nothing and knocks — and «Switch layout»
   only switches the layout, leaving the text, the selection and the clipboard alone: after a word and a space it
   switches for the next word. The second key can also be a single tap of the left or the right Ctrl, after a
   warning of what that can break, with «Set it anyway» or «Choose another key». The settings file has the new
   section `[switch_hotkey]`; an older version works with one key and forgets the second when it saves.
+- «Remove» beside «Set» of the second key clears it back to «Not set»; «Two keys» stays. After «Set it anyway» the
+  warning stays under the field in small grey letters, without its title and buttons, until the key is changed or
+  removed.
+- A tap of Ctrl+Alt can be either key, with one key or two: both pressed together, in either order, and the last let go
+  within 0.4 s of the first press, with no other key or mouse button between. Only the left Alt counts, with either
+  Ctrl; the right Alt (Alt Gr) never does, on any layout. It is set after the warning «A Ctrl+Alt tap can get in the
+  way» — VMware releases the mouse with it; remote desktop, virtual machines and games use it — with «Set it anyway»
+  or «Choose another key», and the grey note after. The field names it «Ctrl + Alt». The settings file keeps it as
+  `key = "LeftAlt"`, `modifiers = ["Ctrl"]`, `trigger = "tap"`, in `[hotkey]` or `[switch_hotkey]`; 1.6.1 does not
+  know it and uses Pause instead, with the note that the key name is not recognized.
+- Alt+Shift, Ctrl+Shift and Win+Space are refused as a hotkey with a reason of their own: «Windows switches the input
+  language with this combination — choose another.» A combination Windows gives to one language in its «Hot keys for
+  input languages» — Ctrl+Shift or the left Alt+Shift with a digit — is accepted, and a grey note under the field says
+  that while Lang Switcher is running, Lang Switcher gets it.
+- No Pause key? With «One key» and Pause as the key, «Hotkey» says under the field «No Pause key? A double Shift works
+  too.», and the welcome letter says the same with the way there — «Settings → Hotkey».
 - The menu of the icon starts with a line of the program's state; its items have icons, «Suspend» shows the hotkey
   and «Start when I sign in» is a switch that leaves the menu open. The items and their order are the same.
 - The windows open at two thirds of the work area of the screen, from 900 × 540 to 1280 × 720, and cannot be made
