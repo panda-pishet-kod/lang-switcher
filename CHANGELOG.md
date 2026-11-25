@@ -14,9 +14,6 @@ page. Dates are the days the releases were published (UTC).
   file from the `/langswitcher/cards/` folder of the author's site, no larger than 1 MB, its size and SHA-256
   signed in the news file and checked before the picture is opened; it is deleted when the term is over. With
   letters and news turned off there are no cards. Earlier versions do not see cards at all.
-
-## 1.8.1 — не выпущено
-
 - The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
   Hungarian line of the state in «Diagnostics» counts the active exclusions, no longer the «published» ones.
 

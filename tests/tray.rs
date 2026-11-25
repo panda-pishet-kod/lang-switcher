@@ -5561,10 +5561,12 @@ fn the_version_of_the_about_box_comes_out_of_the_version_resource() {
     // hand**, and that is what makes it the honest red before a version bump.
     // Stage E119 (the flag of the layout, the window «Обновлено») is `1.8.0.0` on the branch
     // `release/1.8.0`: 1.7.0 does not go out on its own (решения 208.143, 208.144).
+    // Stage E121 (the author's cards) is `1.9.0.0` on the branch `release/1.9.0`, together with
+    // the fixes of 1.8.1: 1.8.1 does not go out on its own (решения 208.245, 208.247).
     assert_eq!(
         version,
-        Some((1, 8, 0, 0)),
-        "app.rc must declare FILEVERSION 1,8,0,0 — version 1.8.0, the fourth field always 0 (решение 192.3)"
+        Some((1, 9, 0, 0)),
+        "app.rc must declare FILEVERSION 1,9,0,0 — version 1.9.0, the fourth field always 0 (решение 192.3)"
     );
 
     // The test binary itself carries no resources, so the about window of *this* process

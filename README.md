@@ -41,7 +41,7 @@ languages.
 
 [Program page](https://panda-pishet-kod.dev/en/langswitcher/) · [Keyboard layout converter](https://panda-pishet-kod.dev/en/keyboard-layout-converter/) · [Questions and answers](https://panda-pishet-kod.dev/en/langswitcher/docs/) · [No Pause/Break key on your laptop?](https://panda-pishet-kod.dev/en/langswitcher/docs/hotkey/)
 
-**Status:** version **1.8.0**, not released yet (the released one is 1.6.1); the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
+**Status:** version **1.9.0**; the interface speaks **66 languages** (see [Languages](#interface-languages-and-keyboard-layouts)).
 What changed in each version is in [CHANGELOG.md](CHANGELOG.md) and on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases) page.
 
 ## How it works
