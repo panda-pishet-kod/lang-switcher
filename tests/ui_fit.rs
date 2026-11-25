@@ -1139,7 +1139,9 @@ fn feed_letters(
     use lang_switcher::ui::windows::letter;
     letter::states_with(language, item)
         .into_iter()
-        .filter(|(name, _)| name == "letter news" || name == "letter update")
+        .filter(|(name, _)| {
+            name == "letter news" || name == "letter update" || name == "letter card"
+        })
         .map(|(name, window)| (name, window.map(&letter::Id::number)))
         .collect()
 }
@@ -1236,13 +1238,17 @@ fn print_the_caps_of_the_feed() {
          that show the whole text. Printed by the\r\n# instrument of fitting (tests/ui_fit.rs, \
          print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE);\r\n# read by \
          tools/sign-news.ps1, which refuses a longer text of that kind. 0 -- the letter does not\r\n# \
-         fit even without a text in that language yet.\r\n",
+         fit even without a text in that language yet.\r\n# Since 1.9.0 (stage E121, decision \
+         208.244 p. 9) a fourth column, card: the words of an author's card of\r\n# the view full \
+         (C1) -- its heading and at most two lines of the caption in the strip under the\r\n# \
+         picture, 900 x 540. A card of the view panel (B) stands where a news item does: the \
+         column news.\r\n",
     );
     for language in Language::ALL {
-        let [update, news] =
+        let [update, news, card] =
             lang_switcher::letters::FeedKind::ALL.map(|kind| cap_of(language, &faces, kind));
-        println!("{}\t{update}\t{news}", language.tag());
-        text.push_str(&format!("{}\t{update}\t{news}\r\n", language.tag()));
+        println!("{}\t{update}\t{news}\t{card}", language.tag());
+        text.push_str(&format!("{}\t{update}\t{news}\t{card}\r\n", language.tag()));
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools")

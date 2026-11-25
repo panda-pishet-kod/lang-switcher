@@ -4,69 +4,72 @@
 # instrument of fitting (tests/ui_fit.rs, print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE);
 # read by tools/sign-news.ps1, which refuses a longer text of that kind. 0 -- the letter does not
 # fit even without a text in that language yet.
-ru	270	880
-en	202	900
-uk	249	763
-de	324	965
-fr	343	903
-es	266	890
-pt	262	862
-it	265	907
-pl	249	887
-cs	261	911
-tr	238	794
-el	236	830
-he	223	763
-ar	314	867
-hi	244	846
-bn	242	836
-ur	244	861
-pa	235	822
-mr	302	796
-te	181	778
-ta	177	660
-fa	244	823
-gu	233	799
-th	290	792
-kn	295	793
-or	237	771
-ml	239	731
-uz	183	812
-uz-Cyrl	170	754
-ne	160	768
-as	230	800
-az	240	801
-km	235	774
-kk	226	754
-sr	246	810
-sr-Latn	250	822
-ug	249	883
-bg	299	841
-hy	163	665
-lo	271	743
-be	237	768
-tt	231	762
-ka	168	582
-mk	239	862
-vi	220	756
-nl	225	825
-ro	237	836
-hu	179	880
-sv	238	814
-sq	237	790
-da	227	766
-fi	216	808
-hr	235	834
-sk	295	852
-nb	220	780
-lt	299	840
-sl	230	814
-bs	303	884
-lv	244	806
-et	223	780
-cy	156	754
-mt	260	901
-is	236	857
-lb	305	859
-mi	246	872
-nn	225	786
+# Since 1.9.0 (stage E121, decision 208.244 p. 9) a fourth column, card: the words of an author's card of
+# the view full (C1) -- its heading and at most two lines of the caption in the strip under the
+# picture, 900 x 540. A card of the view panel (B) stands where a news item does: the column news.
+ru	270	880	126
+en	202	900	134
+uk	249	763	105
+de	324	965	109
+fr	343	903	121
+es	266	890	116
+pt	262	862	114
+it	265	907	115
+pl	249	887	104
+cs	261	911	113
+tr	238	794	94
+el	236	830	98
+he	223	763	88
+ar	314	867	97
+hi	244	846	102
+bn	242	836	106
+ur	244	861	103
+pa	235	822	96
+mr	302	796	100
+te	181	778	107
+ta	177	660	103
+fa	244	823	105
+gu	233	799	101
+th	290	792	100
+kn	295	793	99
+or	237	771	95
+ml	239	731	101
+uz	183	812	111
+uz-Cyrl	170	754	103
+ne	160	768	92
+as	230	800	98
+az	240	801	104
+km	235	774	98
+kk	226	754	84
+sr	246	810	110
+sr-Latn	250	822	112
+ug	249	883	101
+bg	299	841	101
+hy	163	665	100
+lo	271	743	91
+be	237	768	106
+tt	231	762	96
+ka	168	582	96
+mk	239	862	104
+vi	220	756	81
+nl	225	825	82
+ro	237	836	103
+hu	179	880	111
+sv	238	814	93
+sq	237	790	98
+da	227	766	85
+fi	216	808	83
+hr	235	834	90
+sk	295	852	96
+nb	220	780	89
+lt	299	840	98
+sl	230	814	88
+bs	303	884	86
+lv	244	806	103
+et	223	780	91
+cy	156	754	90
+mt	260	901	117
+is	236	857	95
+lb	305	859	90
+mi	246	872	100
+nn	225	786	88

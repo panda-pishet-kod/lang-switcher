@@ -341,7 +341,16 @@ impl Content for LetterView {
 /// the feed for `letters::sample_entry_in` — an entry of the longest text the feed allows in that
 /// language (`tools\feed-caps.tsv`) — «Спасибо» with its snooze.
 pub fn states(language: Language) -> Vec<(String, Window<Id>)> {
-    states_with(language, &letters::sample_entry_in(language))
+    let mut all = states_with(language, &letters::sample_entry_in(language));
+    // ⭐ Stage Э121: the card of the view В1 is measured with the words of its own cap (the column
+    // card of `tools\feed-caps.tsv`), not with a news item's.
+    all.retain(|(name, _)| name != "letter card");
+    all.extend(
+        states_with(language, &letters::sample_card_in(language))
+            .into_iter()
+            .filter(|(name, _)| name == "letter card"),
+    );
+    all
 }
 
 /// [`states`] with `item` for the entry of the feed — for the instrument that measures the cap of
@@ -358,12 +367,22 @@ pub fn states_with(language: Language, item: &letters::FeedItem) -> Vec<(String,
         ("letter thanks", Letter::Thanks),
         ("letter news", Letter::News(item.id)),
         ("letter update", Letter::Update),
+        // ⭐ Stage Э121: the author's card of the view В1 — its strip is what the column card of the
+        // caps measures; the picture is no part of the layout's measure, so none is held.
+        ("letter card", Letter::Card(item.id)),
     ]
     .into_iter()
     .map(|(name, letter)| {
+        let mut plan = letters::plan_in(language, letter, &context(true));
+        if matches!(letter, Letter::Card(_)) {
+            plan.photo = Some(Photo {
+                key: 0,
+                place: PhotoPlace::Whole,
+            });
+        }
         let view = LetterView {
             letter,
-            plan: letters::plan_in(language, letter, &context(true)),
+            plan,
             key: "Pause".to_owned(),
             tick: letters::DEMO_STILL,
             language,

@@ -4235,7 +4235,8 @@ pub fn sample_entry_in(language: Language) -> FeedItem {
         // One entry stands in both letters of the catalogue: it is as long as the smaller of the
         // two caps, so neither letter is measured with more than its kind lets through. Each kind
         // at its own cap is the gate's (`every_entry_of_its_cap_fits_its_letter`).
-        let cap = FeedKind::ALL
+        // The letters of the feed only: a card has a cap of its own ([`sample_card_in`]).
+        let cap = [FeedKind::Update, FeedKind::News]
             .iter()
             .map(|kind| feed_cap(language, *kind))
             .min()
@@ -4250,6 +4251,30 @@ pub fn sample_entry_in(language: Language) -> FeedItem {
     {
         let _ = language;
         sample_entry()
+    }
+}
+
+/// ⭐ **The words of an author's card in `language`, as long as its cap lets through** — stage Э121:
+/// the heading and the words of [`sample_entry_in`], the words held to the column card of
+/// `tools\feed-caps.tsv` (the view В1). Without the feature `testing`, [`sample_entry`].
+pub fn sample_card_in(language: Language) -> FeedItem {
+    #[cfg(feature = "testing")]
+    {
+        let mut item = sample_entry_in(language);
+        if let Some(cap) = feed_cap(language, FeedKind::Card).filter(|cap| *cap > 0) {
+            item.text = sample_text(language, cap);
+        }
+        item
+    }
+    #[cfg(not(feature = "testing"))]
+    {
+        // No caps of the feed in this build: the words of the card are the first sixty characters
+        // of [`sample_entry`] — under the least cap of the column card the instrument printed (81),
+        // so the strip of В1 is measured with words a card may have in every language.
+        let _ = language;
+        let mut item = sample_entry();
+        item.text = item.text.chars().take(60).collect();
+        item
     }
 }
 
@@ -4308,17 +4333,24 @@ pub fn sample_text(language: Language, points: usize) -> String {
 pub enum FeedKind {
     Update,
     News,
+    /// ⭐ The words of an author's card of the view В1 (stage Э121, решение 208.244 п. 9): the
+    /// heading and at most two lines of the caption in the strip under the picture, in the eye of
+    /// 900 × 540 — measured by the card in that view. A card of the view Б stands where a news item
+    /// does, and its cap is the news item's.
+    Card,
 }
 
 #[cfg(feature = "testing")]
 impl FeedKind {
-    pub const ALL: [Self; 2] = [Self::Update, Self::News];
+    pub const ALL: [Self; 3] = [Self::Update, Self::News, Self::Card];
 
-    /// The column of `tools\feed-caps.tsv` and the `type` of the entry.
+    /// The column of `tools\feed-caps.tsv` and the `type` of the entry; for a card, the name of
+    /// its column.
     pub fn name(self) -> &'static str {
         match self {
             Self::Update => "update",
             Self::News => "news",
+            Self::Card => "card",
         }
     }
 }
@@ -4341,6 +4373,8 @@ pub fn feed_cap(language: Language, kind: FeedKind) -> Option<usize> {
             match kind {
                 FeedKind::Update => update,
                 FeedKind::News => news,
+                // Stage Э121: the fourth column, absent from a file printed before it.
+                FeedKind::Card => cells.next()?,
             }
             .trim()
             .parse()

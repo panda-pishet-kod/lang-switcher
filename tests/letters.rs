@@ -4413,6 +4413,16 @@ fn the_line_over_the_heading_of_a_letter_has_no_version() {
 
     for language in [Language::Ru, Language::En, Language::Ar] {
         for (name, window) in letter::states(language) {
+            // Stage Э121: the card of the view В1 has no head at all — the strip of the mock-up
+            // (208.244, C3 of T-121-5): the heading and the words of the card; the caption of the
+            // window says whose letter it is.
+            if name == "letter card" {
+                assert!(
+                    matches!(&window.body, Node::Rows(_)),
+                    "{name}: the strip of В1"
+                );
+                continue;
+            }
             let Node::Column(parts) = &window.body else {
                 panic!("{name}: the body is a column");
             };
@@ -5888,7 +5898,7 @@ fn card_picture(w: u32, h: u32) -> impl Fn(u32, u32) -> [u8; 3] {
         let (tx, base, th) = (w as f32 * 0.5, h as f32 * 0.84, h as f32 * 0.42);
         let up = base - y as f32;
         if up > 0.0 && up < th && (x as f32 - tx).abs() < (th - up) * 0.36 {
-            colour = if (up / th * 6.0) as u32 % 2 == 0 {
+            colour = if ((up / th * 6.0) as u32).is_multiple_of(2) {
                 [31, 122, 74]
             } else {
                 [43, 148, 96]
