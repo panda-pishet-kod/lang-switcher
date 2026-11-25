@@ -878,7 +878,7 @@ fn the_tick_asks_about_the_update_before_it_moves_the_version_and_knocks_once() 
             < at("if initialise(&mut stored, today, &version)")
     );
     assert!(
-        at("if updated {") < at("let due = with_feed("),
+        at("if updated {") < at("let due = with_cards("),
         "the update comes before any letter"
     );
 }
@@ -2063,7 +2063,7 @@ fn the_one_that_asks_a_person_to_write_goes_where_they_can_and_the_news_stays_on
     let thanks = plan_arm(
         &source,
         "Letter::Thanks => LetterPlan {",
-        "Letter::Update | Letter::News(_) =>",
+        "Letter::Update | Letter::News(_) | Letter::Card(_) =>",
     );
     let perform = squeezed_code(
         letters_function_body(&source, "fn act(")
@@ -5576,4 +5576,284 @@ fn the_letters_list_has_the_head_of_the_mock_up_and_its_cards_half_a_block_apart
         "the card is not padded with LETTER_CARD_PAD: {label:?} in {:?}",
         cards[0]
     );
+}
+
+// =========================================================================================
+// The author's cards — stage Э121, task T-121-2 (решение 208.244 пп. 3–4)
+// =========================================================================================
+
+/// One card of the feed, in its term from the 31st of December to the 10th of January.
+fn card(id: u64) -> lang_switcher::cards::FeedCard {
+    lang_switcher::cards::FeedCard {
+        id,
+        from: day(2026, 12, 31),
+        to: day(2027, 1, 10),
+        view: lang_switcher::cards::CardView::Full,
+        image: None,
+        title: "С Новым годом!".to_owned(),
+        text: "Спасибо, что весь год были с Lang Switcher.".to_owned(),
+        link: "https://panda-pishet-kod.dev/langswitcher/?lang=ru".to_owned(),
+    }
+}
+
+/// **A card knocks in its term, once, and before a news item** — not a day before its first day,
+/// not a day after its last; behind the quiet moment and the one letter a day, as a news item.
+#[test]
+fn a_card_is_due_once_in_its_term_and_before_the_news() {
+    let cards = [card(1)];
+    let news = [news(5)];
+    let feed = FeedView {
+        update: None,
+        news: &news,
+    };
+    let state = settled("1.9.0");
+    let due = |state: &Letters, today, quiet| {
+        letters::due_with_cards(state, today, "1.9.0", feed, &cards, quiet)
+    };
+
+    assert_eq!(
+        due(&state, day(2026, 12, 30), true),
+        Some(Letter::News(5)),
+        "not before its term"
+    );
+    assert_eq!(
+        due(&state, day(2026, 12, 31), true),
+        Some(Letter::Card(1)),
+        "its first day — and before the news"
+    );
+    assert_eq!(
+        due(&state, day(2027, 1, 10), true),
+        Some(Letter::Card(1)),
+        "its last day"
+    );
+    assert_eq!(
+        due(&state, day(2027, 1, 11), true),
+        Some(Letter::News(5)),
+        "not after its term"
+    );
+    assert_eq!(
+        due(&state, day(2027, 1, 1), false),
+        None,
+        "a quiet moment, as a news item"
+    );
+
+    let mut spent = state.clone();
+    spent.last_letter = Some(day(2027, 1, 1));
+    assert_eq!(due(&spent, day(2027, 1, 1), true), None, "one letter a day");
+
+    // Shown — once and for good: no reminders, not a week later, not on the last day.
+    let mut shown = state.clone();
+    letters::after_shown(&mut shown, Letter::Card(1), day(2027, 1, 1), "1.9.0");
+    assert_eq!(shown.card_shown_on(1), Some(day(2027, 1, 1)));
+    assert_eq!(
+        shown.last_letter,
+        Some(day(2027, 1, 1)),
+        "a card spends the day"
+    );
+    assert_eq!(
+        shown.first_feed_letter,
+        Some(day(2027, 1, 1)),
+        "a card is a letter of the feed"
+    );
+    for later in [day(2027, 1, 2), day(2027, 1, 8), day(2027, 1, 10)] {
+        assert_eq!(
+            due(&shown, later, true),
+            Some(Letter::News(5)),
+            "the card does not come back on {later}"
+        );
+    }
+    assert!(
+        shown.reminders.is_empty() && shown.first_shown.is_empty(),
+        "nothing of a news item is counted for a card"
+    );
+}
+
+/// **The sentry of the stage: with no card the schedule is the one of 1768334** — `due` and
+/// `due_with_cards` with no card answer alike on every day and every state of a year.
+#[test]
+fn with_no_card_the_schedule_is_the_one_before_the_cards() {
+    let news = [news(5)];
+    let feed = FeedView {
+        update: None,
+        news: &news,
+    };
+    let mut state = settled("1.9.0");
+
+    for offset in 0..400 {
+        let today = day(2026, 9, 1).plus_days(offset);
+        for quiet in [false, true] {
+            assert_eq!(
+                letters::due_with_cards(&state, today, "1.9.0", feed, &[], quiet),
+                letters::due(&state, today, "1.9.0", feed, quiet),
+                "{today} quiet={quiet}"
+            );
+        }
+        if let Some(letter) = letters::due(&state, today, "1.9.0", feed, true) {
+            letters::after_shown(&mut state, letter, today, "1.9.0");
+        }
+    }
+}
+
+/// **A feed turned off shows no card** — `[letters] feed = false`, as it shows no news: not in the
+/// schedule, not in «Последние письма».
+#[test]
+fn a_feed_turned_off_shows_no_card() {
+    let _strings = with_product_strings();
+    let cards = [card(1)];
+    let mut state = settled("1.9.0");
+    state.feed = false;
+    let today = day(2027, 1, 1);
+
+    assert_eq!(letters::card_due(&state, today, &cards), None);
+    assert_ne!(
+        letters::due_with_cards(&state, today, "1.9.0", FeedView::EMPTY, &cards, true),
+        Some(Letter::Card(1))
+    );
+    assert!(
+        letters::list_entries_with_cards(&state, Some(today), "1.9.0", FeedView::EMPTY, &cards)
+            .is_empty()
+    );
+}
+
+/// **«Последние письма» keep a card for its term** — after the update and before the news, «не
+/// прочитано» until it is shown and «прочитано» after; no «Прочитано» button; gone after the term.
+#[test]
+fn a_card_stands_in_the_recent_letters_for_its_term() {
+    let _strings = with_product_strings();
+    let cards = [card(1)];
+    let news = [news(5)];
+    let feed = FeedView {
+        update: None,
+        news: &news,
+    };
+    let mut state = settled("1.9.0");
+    let list = |state: &Letters, today| {
+        letters::list_entries_with_cards(state, Some(today), "1.9.0", feed, &cards)
+    };
+
+    let before = list(&state, day(2026, 12, 30));
+    assert_eq!(before.len(), 1, "not before its term: {before:?}");
+
+    let during = list(&state, day(2027, 1, 2));
+    assert_eq!(during.len(), 2);
+    assert_eq!(during[0].card, Some(1), "the card before the news");
+    assert_eq!(during[0].news, None);
+    assert!(
+        !during[0].unread,
+        "a card has no «Прочитано» — it is closed, not read"
+    );
+    assert_eq!(during[0].title, "С Новым годом!");
+    assert!(
+        during[0].meta.contains("не прочитано"),
+        "{}",
+        during[0].meta
+    );
+
+    letters::after_shown(&mut state, Letter::Card(1), day(2027, 1, 2), "1.9.0");
+    let after = list(&state, day(2027, 1, 3));
+    assert!(after[0].meta.ends_with("· прочитано"), "{}", after[0].meta);
+
+    assert_eq!(
+        list(&state, day(2027, 1, 11)).len(),
+        1,
+        "gone after its term"
+    );
+    assert_eq!(
+        letters::list_entries(&state, Some(day(2027, 1, 2)), "1.9.0", feed).len(),
+        1,
+        "the list with no card is the list of before"
+    );
+}
+
+/// **The words of a card are a news item's, and closing is for good** — «Письмо от автора»,
+/// «Новость от автора», the date of its first day, its heading and words; «Читать на сайте» and
+/// «Закрыть», no «Позже», no «Прочитано», no line about reminders. Not one string of its own.
+#[test]
+fn the_letter_of_a_card_says_the_news_and_closes_for_good() {
+    let _strings = with_product_strings();
+    let context = |item| letters::PlanContext {
+        version: "1.9.0".to_owned(),
+        hotkey: String::new(),
+        snooze_offered: true,
+        item: Some(item),
+    };
+    let item = letters::card_item(&card(1));
+    let plan = letters::plan_in(Language::Ru, Letter::Card(1), &context(&item));
+
+    assert_eq!(plan.caption, settings::text(settings::IDS_LETTER_CAPTION));
+    assert_eq!(plan.title, settings::text(settings::IDS_NEWS_LETTER_TITLE));
+    assert_eq!(
+        plan.subtitle,
+        letters::format_date_in(Language::Ru, day(2026, 12, 31))
+    );
+    assert_eq!(plan.panel_title, "С Новым годом!");
+    assert_eq!(plan.foot, "", "no line about reminders");
+    assert_eq!(plan.left, None, "no «Позже»");
+    let right = plan.right.as_ref().expect("«Читать на сайте»");
+    assert_eq!(right.label, settings::text(settings::IDS_NEWS_OPEN_LINK));
+    assert_eq!(right.action, letters::Action::OpenLink);
+    let accent = plan.accent.as_ref().expect("«Закрыть»");
+    assert_eq!(accent.label, settings::text(settings::IDS_CLOSE));
+    assert_eq!(accent.action, letters::Action::Close);
+    assert!(
+        plan.all_buttons()
+            .all(|button| button.action != letters::Action::MarkRead)
+    );
+
+    // No link — no «Читать на сайте».
+    let mut bare = card(1);
+    bare.link = String::new();
+    let item = letters::card_item(&bare);
+    let plan = letters::plan_in(Language::Ru, Letter::Card(1), &context(&item));
+    assert_eq!(plan.right, None);
+}
+
+/// **The knock of a card** — the words of a news item, «Открыть письмо» and «Закрыть»; «Закрыть»
+/// and the ✕ count the card as shown, for good.
+#[test]
+fn the_knock_of_a_card_closes_it_for_good() {
+    use lang_switcher::corner::EndBy;
+    let _strings = with_product_strings();
+
+    assert_eq!(
+        letters::toast_strings(Letter::Card(1)),
+        Some((settings::IDS_TOAST_TITLE, settings::IDS_TOAST_NEWS))
+    );
+    let knock = letters::notice_content_in(Language::Ru, Letter::Card(1)).expect("a card knocks");
+    assert_eq!(knock.title, settings::text(settings::IDS_NEWS_LETTER_TITLE));
+    assert_eq!(
+        knock.second.map(|(label, _)| label),
+        Some(settings::text(settings::IDS_CLOSE))
+    );
+
+    for by in [EndBy::Second, EndBy::Close] {
+        assert_eq!(
+            letters::notice_end(Some(Letter::Card(1)), by, true),
+            letters::NoticeEnd::Later
+        );
+    }
+    assert_eq!(
+        letters::notice_end(Some(Letter::Card(1)), EndBy::Main, true),
+        letters::NoticeEnd::Open
+    );
+}
+
+/// **A card done with is forgotten** — past its term or gone from the feed, its «shown» leaves
+/// `[letters]`; a card in its term keeps it.
+#[test]
+fn a_card_done_with_is_forgotten() {
+    let mut state = settled("1.9.0");
+    letters::after_shown(&mut state, Letter::Card(1), day(2027, 1, 1), "1.9.0");
+    letters::after_shown(&mut state, Letter::Card(2), day(2027, 1, 1), "1.9.0");
+
+    let cards = [card(1), card(2)];
+    letters::forget_cards(&mut state, &cards, day(2027, 1, 10));
+    assert_eq!(state.cards_shown.len(), 2, "both in their term");
+
+    letters::forget_cards(&mut state, &cards[..1], day(2027, 1, 10));
+    assert_eq!(state.card_shown_on(2), None, "gone from the feed");
+    assert!(state.card_shown_on(1).is_some());
+
+    letters::forget_cards(&mut state, &cards, day(2027, 1, 11));
+    assert!(state.cards_shown.is_empty(), "past the term");
 }

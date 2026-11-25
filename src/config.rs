@@ -841,6 +841,18 @@ pub struct Letters {
     /// from.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub first_shown: letters::NewsMap<letters::Date>,
+
+    /// ⭐ **The day each of the author's cards was shown** — stage Э121, task T-121-2 (решение
+    /// 208.244 п. 3): a card knocks once in its term, and «Закрыть», the cross and Esc close it for
+    /// good, so being here is the whole of its state — shown, never again by itself. Forgotten with
+    /// the card: when the feed no longer carries it or its term is over
+    /// ([`crate::letters::forget_cards`]).
+    ///
+    /// ⚠ Not in the печать of section 7 and **no schema of its own**, as `update_noticed` before it:
+    /// a map like `first_shown`, and an older build reads past the key; if it drops the key on a
+    /// write, the cost is one more knock of a card in its term.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cards_shown: letters::NewsMap<letters::Date>,
 }
 
 impl Default for Letters {
@@ -867,6 +879,7 @@ impl Default for Letters {
             read_ids: Vec::new(),
             reminders: BTreeMap::new(),
             first_shown: BTreeMap::new(),
+            cards_shown: BTreeMap::new(),
         }
     }
 }
@@ -923,6 +936,22 @@ impl Letters {
         if self.first_feed_letter.is_none() {
             self.first_feed_letter = Some(day);
         }
+    }
+
+    /// The day this card was shown, if it has been — stage Э121.
+    pub fn card_shown_on(&self, id: u64) -> Option<letters::Date> {
+        self.cards_shown.get(&letters::key_of(id)).copied()
+    }
+
+    /// Records the day a card was shown; the first day stays.
+    pub fn set_card_shown(&mut self, id: u64, day: letters::Date) {
+        self.cards_shown.entry(letters::key_of(id)).or_insert(day);
+    }
+
+    /// Forgets every card that is not in `kept` — the way [`Self::retain_news`] forgets news.
+    pub fn retain_cards(&mut self, kept: &[u64]) {
+        self.cards_shown
+            .retain(|key, _| letters::id_of(key).is_some_and(|id| kept.contains(&id)));
     }
 
     /// Forgets every news item that is not in `kept` — FR-101: the news the feed no longer

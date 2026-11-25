@@ -59,7 +59,8 @@ fn art_of(letter: Letter) -> Art {
     match letter {
         Letter::Welcome => Art::Hello,
         Letter::Thanks => Art::Thanks,
-        Letter::News(_) => Art::News,
+        // A card without its picture is the plain template of a news item (А) — the panda of the news.
+        Letter::News(_) | Letter::Card(_) => Art::News,
         Letter::Update => Art::Update,
     }
 }

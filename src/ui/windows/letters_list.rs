@@ -184,7 +184,11 @@ impl Content for Product {
             // asked for it; nothing about it is recorded as a letter that came by itself.
             Event::Pressed(Id::Open(index)) => {
                 if let Some(entry) = self.list.entries.get(index) {
-                    let letter = entry.news.map_or(Letter::Update, Letter::News);
+                    // Stage Э121: a card's entry opens its card.
+                    let letter = match (entry.card, entry.news) {
+                        (Some(card), _) => Letter::Card(card),
+                        (None, news) => news.map_or(Letter::Update, Letter::News),
+                    };
                     let item = letters::item_of(letter);
                     letters::show_letter(self.owner, letter, item.as_ref(), true);
                 }

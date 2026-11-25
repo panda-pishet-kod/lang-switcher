@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::cards::FeedCard;
 use crate::settings::Letters;
 
 // =========================================================================================
@@ -370,6 +371,9 @@ pub enum Letter {
     News(u64),
     /// «Спасибо» — thirty days after the first run.
     Thanks,
+    /// ⭐ The author's card, by its number — stage Э121 (решение 208.244): «Письмо от автора» with
+    /// a picture of his, knocked once in its term and closed for good.
+    Card(u64),
 }
 
 /// What the state of `[letters] thanks` can be — FR-101.
@@ -548,6 +552,21 @@ pub fn due(
     feed: FeedView<'_>,
     quiet: bool,
 ) -> Option<Letter> {
+    due_with_cards(state, today, version, feed, &[], quiet)
+}
+
+/// [`due`] with the author's cards — stage Э121, task T-121-2. A card is a letter of the day like a
+/// news item, behind the same two gates (a quiet moment, one letter a day), and it goes **before**
+/// the news: a card has a term and a greeting late is no greeting, a news item waits a day. With no
+/// card this is [`due`] exactly — the sentry of the stage.
+pub fn due_with_cards(
+    state: &Letters,
+    today: Date,
+    version: &str,
+    feed: FeedView<'_>,
+    cards: &[FeedCard],
+    quiet: bool,
+) -> Option<Letter> {
     if !state.welcome_shown {
         return Some(Letter::Welcome);
     }
@@ -565,6 +584,10 @@ pub fn due(
     // only from the menu entry «Доступна версия X…» ([`pending`]) or from its row of «Последние
     // письма» ([`list_entries`]), and both stand from the seventh day ([`update_fallback_is_open`]).
     let _ = version;
+
+    if let Some(id) = card_due(state, today, cards) {
+        return Some(Letter::Card(id));
+    }
 
     if let Some(id) = news_due(state, today, feed) {
         return Some(Letter::News(id));
@@ -665,6 +688,47 @@ pub fn news_due(state: &Letters, today: Date, feed: FeedView<'_>) -> Option<u64>
             }
         })
         .map(|item| item.id)
+}
+
+/// ⭐ **Which card is due** — stage Э121, task T-121-2 (решение 208.244 п. 3): the first card in its
+/// term that has not been shown. **Once**: a card shown is done with — there are no reminders, and
+/// «Закрыть», the cross and Esc close it for good. Nothing while the feed is off (`[letters] feed =
+/// false`): a feed turned off shows no card, as it shows no news.
+pub fn card_due(state: &Letters, today: Date, cards: &[FeedCard]) -> Option<u64> {
+    if !state.feed {
+        return None;
+    }
+
+    cards
+        .iter()
+        .find(|card| card.in_term(today) && state.card_shown_on(card.id).is_none())
+        .map(|card| card.id)
+}
+
+/// The entry a card is shown as — the words of the plain template (А): the heading and the text
+/// of the card, the first day of its term for the date under the title, its link. The view and the
+/// picture are not words: the window takes them from the card itself (`LetterPlan::card`).
+pub fn card_item(card: &FeedCard) -> FeedItem {
+    FeedItem {
+        id: card.id,
+        date: Some(card.from),
+        title: card.title.clone(),
+        text: card.text.clone(),
+        link: card.link.clone(),
+        version: None,
+    }
+}
+
+/// Forgets the cards that are done with — stage Э121: no longer in the feed, or past their term.
+/// Their «shown» goes from `[letters]`; the picture goes from the disk by [`crate::cards::sweep`].
+pub fn forget_cards(state: &mut Letters, cards: &[FeedCard], today: Date) {
+    let kept: Vec<u64> = cards
+        .iter()
+        .filter(|card| today <= card.to)
+        .map(|card| card.id)
+        .collect();
+
+    state.retain_cards(&kept);
 }
 
 /// Whether «Спасибо» is due — FR-101: thirty days after the first run, and not once the letter
@@ -831,6 +895,11 @@ pub fn after_shown(state: &mut Letters, letter: Letter, today: Date, version: &s
         }
         Letter::Thanks => {
             state.thanks = Thanks::Done;
+        }
+        // Stage Э121: a card shown is done with — once in its term, no reminders.
+        Letter::Card(id) => {
+            state.set_card_shown(id, today);
+            state.note_feed_letter(today);
         }
     }
 }
@@ -1320,12 +1389,37 @@ pub fn plan_in(language: Language, letter: Letter, context: &PlanContext<'_>) ->
             ..LetterPlan::default()
         },
 
-        // The two letters out of the feed. A letter with no entry behind it is a window that must
-        // not open: the plan comes back empty and the caller refuses.
-        Letter::Update | Letter::News(_) => {
+        // The letters out of the feed. A letter with no entry behind it is a window that must not
+        // open: the plan comes back empty and the caller refuses.
+        Letter::Update | Letter::News(_) | Letter::Card(_) => {
             let Some(item) = context.item else {
                 return LetterPlan::default();
             };
+
+            // ⭐ The author's card — stage Э121, task T-121-2 (решение 208.244 пп. 3–4): the window
+            // of a news item («Письмо от автора», «Новость от автора», the date — the first day of
+            // the term — the card's own heading and words), but closing it is for good: «Закрыть»
+            // and no «Позже», no «Прочитано», no line about reminders. «Читать на сайте» when the
+            // card has a link the gate lets through. Not one string of its own (C6). The view and
+            // the picture are laid over this by the window (`LetterPlan::card`).
+            if matches!(letter, Letter::Card(_)) {
+                return LetterPlan {
+                    caption,
+                    eyebrow,
+                    title: text(IDS_NEWS_LETTER_TITLE),
+                    subtitle: item
+                        .date
+                        .map(|day| format_date_in(language, day))
+                        .unwrap_or_default(),
+                    panel_title: item.title.clone(),
+                    panel_text: item.text.clone(),
+                    right: links::is_allowed(&item.link).then(|| {
+                        Button::link(text(IDS_NEWS_OPEN_LINK), Action::OpenLink, &item.link)
+                    }),
+                    accent: Some(Button::live(text(IDS_CLOSE), Action::Close)),
+                    ..LetterPlan::default()
+                };
+            }
 
             let released = item
                 .date
@@ -3089,6 +3183,8 @@ pub struct Entry {
     pub excerpt: String,
     /// The identifier of the news item, for the «Прочитано» button; `None` for the update.
     pub news: Option<u64>,
+    /// ⭐ The number of the author's card the entry is (stage Э121); `None` for every other entry.
+    pub card: Option<u64>,
     /// Whether the entry still has something to mark as read.
     pub unread: bool,
 }
@@ -3109,6 +3205,19 @@ pub fn list_entries(
     version: &str,
     feed: FeedView<'_>,
 ) -> Vec<Entry> {
+    list_entries_with_cards(state, today, version, feed, &[])
+}
+
+/// [`list_entries`] with the author's cards — stage Э121, task T-121-2 (решение 208.244 п. 3): a
+/// card stands in the list **for its term**, after the update and before the news, newest first,
+/// «прочитано» once shown; it has no «Прочитано» button — it is closed, not read. No day, no card.
+pub fn list_entries_with_cards(
+    state: &Letters,
+    today: Option<Date>,
+    version: &str,
+    feed: FeedView<'_>,
+    cards: &[FeedCard],
+) -> Vec<Entry> {
     use crate::settings::{
         IDS_ENTRY_FALLBACK_MARK, IDS_ENTRY_READ_MARK, IDS_ENTRY_UNREAD_MARK, IDS_FALLBACK_TITLE,
         format_text, text,
@@ -3125,6 +3234,28 @@ pub fn list_entries(
             meta: format_text(IDS_ENTRY_FALLBACK_MARK, &[announced, version]),
             excerpt: first_line(&update.text),
             news: None,
+            card: None,
+            unread: false,
+        });
+    }
+
+    let in_term = |card: &&FeedCard| state.feed && today.is_some_and(|today| card.in_term(today));
+    for card in cards.iter().rev().filter(in_term) {
+        let shown = state.card_shown_on(card.id).is_some();
+
+        entries.push(Entry {
+            title: card.title.clone(),
+            meta: format_text(
+                if shown {
+                    IDS_ENTRY_READ_MARK
+                } else {
+                    IDS_ENTRY_UNREAD_MARK
+                },
+                &[&format_date(card.from)],
+            ),
+            excerpt: first_line(&card.text),
+            news: None,
+            card: Some(card.id),
             unread: false,
         });
     }
@@ -3144,6 +3275,7 @@ pub fn list_entries(
             ),
             excerpt: first_line(&item.text),
             news: Some(item.id),
+            card: None,
             unread: !read,
         });
     }
@@ -3177,6 +3309,26 @@ thread_local! {
     /// answers «nothing due» for an empty one.
     static FEED: RefCell<(Option<FeedItem>, Vec<FeedItem>)> =
         const { RefCell::new((None, Vec::new())) };
+
+    /// ⭐ The author's cards of the last good read — stage Э121, beside [`FEED`] and published with
+    /// it ([`publish_cards`]). Empty while the feed carries no `[[card]]`, and then not one rule of
+    /// the cards does anything.
+    static CARDS: RefCell<Vec<FeedCard>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Publishes the cards of a read of the feed — stage Э121, on the UI thread, with [`publish_feed`].
+pub fn publish_cards(cards: Vec<FeedCard>) {
+    CARDS.with_borrow_mut(|stored| *stored = cards);
+}
+
+/// Lends the published cards — stage Э121.
+pub fn with_cards<R>(body: impl FnOnce(&[FeedCard]) -> R) -> R {
+    CARDS.with_borrow(|cards| body(cards))
+}
+
+/// The published card of this number, if the feed carries it.
+pub fn card_of(id: u64) -> Option<FeedCard> {
+    with_cards(|cards| cards.iter().find(|card| card.id == id).cloned())
 }
 
 /// The entry a letter out of the feed is about, taken from the published feed by its own name.
@@ -3189,6 +3341,7 @@ pub fn item_of(letter: Letter) -> Option<FeedItem> {
     match letter {
         Letter::Update => with_feed(|feed| feed.update.cloned()),
         Letter::News(id) => with_feed(|feed| feed.news.iter().find(|item| item.id == id).cloned()),
+        Letter::Card(id) => card_of(id).as_ref().map(card_item),
         Letter::Welcome | Letter::Thanks => None,
     }
 }
@@ -4027,7 +4180,9 @@ pub mod testing {
 pub fn list_entries_now() -> Vec<Entry> {
     let stored = state_now();
     let version = version_string();
-    with_feed(|feed| list_entries(&stored, today(), &version, feed))
+    with_cards(|cards| {
+        with_feed(|feed| list_entries_with_cards(&stored, today(), &version, feed, cards))
+    })
 }
 
 /// The entry of a feed in Russian, near the longest the order of the feed allows — the first line
@@ -4197,6 +4352,7 @@ pub fn sample_entries(language: Language) -> Vec<Entry> {
         }),
         excerpt: first_line(&item.text),
         news,
+        card: None,
         unread,
     };
     // The row of the update has the words of its letter, as `list_entries` gives them.
@@ -4207,6 +4363,7 @@ pub fn sample_entries(language: Language) -> Vec<Entry> {
             .replace("{1}", "1.8.0"),
         excerpt: first_line(&item.text),
         news: None,
+        card: None,
         unread: false,
     };
     vec![
@@ -4398,6 +4555,7 @@ pub fn take_feed() {
     };
 
     publish_feed(fresh.update.clone(), fresh.news.clone());
+    publish_cards(fresh.cards.clone());
 
     let view = FeedView {
         update: fresh.update.as_ref(),
@@ -4411,6 +4569,8 @@ pub fn take_feed() {
         // TZ E104 §0 п. 20: the day the feed first named a newer version, for the fallback.
         notice_update(state, &version, view, today);
         forget_expired(state, view);
+        // Stage Э121: the cards the feed no longer carries, or past their term, are forgotten.
+        forget_cards(state, &fresh.cards, today);
     });
 
     crate::tray::refresh_unread_mark();
@@ -4493,6 +4653,7 @@ pub fn restore_feed() {
     };
 
     publish_feed(kept.update.clone(), kept.news.clone());
+    publish_cards(kept.cards.clone());
 
     if let Some(today) = today() {
         let mut moved = stored;
@@ -4566,7 +4727,9 @@ pub fn tick(owner: HWND) {
     let announced = ANNOUNCED.with_borrow(|announced| *announced);
     let quiet = moment_is_quiet();
 
-    let due = with_feed(|feed| due(&stored, today, &version, feed, quiet));
+    let due = with_cards(|cards| {
+        with_feed(|feed| due_with_cards(&stored, today, &version, feed, cards, quiet))
+    });
 
     let Some(letter) = due else {
         return;
@@ -4609,11 +4772,8 @@ pub fn open_announced(owner: HWND) {
 /// Shows one letter and records that it was shown — the one place [`after_shown`] is called
 /// from, so that «shown» and «on the screen» cannot come apart.
 fn show(owner: HWND, letter: Letter, today: Date, version: &str, activate: bool) -> bool {
-    let item = with_feed(|feed| match letter {
-        Letter::Update => feed.update.cloned(),
-        Letter::News(id) => feed.news.iter().find(|item| item.id == id).cloned(),
-        _ => None,
-    });
+    // The entry by the one body that names it — a card's too (stage Э121).
+    let item = item_of(letter);
 
     // The version an «Обновление» records is the one it announced, not the one running.
     let recorded = match letter {
@@ -4654,7 +4814,9 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
         // нет, письмо открывает только сам человек (пункт меню, строка «Последних писем»).
         Letter::Welcome | Letter::Update => None,
         Letter::Thanks => Some((IDS_TOAST_TITLE, IDS_TOAST_THANKS)),
-        Letter::News(_) => Some((IDS_TOAST_TITLE, IDS_TOAST_NEWS)),
+        // Stage Э121: a card knocks with the words of a news item — «Новость от автора»; not one
+        // string of its own (решение 208.244 п. 4).
+        Letter::News(_) | Letter::Card(_) => Some((IDS_TOAST_TITLE, IDS_TOAST_NEWS)),
     }
 }
 
@@ -4671,7 +4833,7 @@ pub const fn toast_strings(letter: Letter) -> Option<(u16, u16)> {
 /// come in a week and in two ([`after_shown`]).
 pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::corner::Content> {
     use crate::settings::{
-        IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
+        IDS_CLOSE, IDS_CORNER_LETTER, IDS_LETTERS_OPEN, IDS_NEWS_LATER, IDS_NEWS_LETTER_TITLE,
         IDS_THANKS_SNOOZE, IDS_THANKS_TITLE,
     };
 
@@ -4693,6 +4855,8 @@ pub fn notice_content_in(language: Language, letter: Letter) -> Option<crate::co
         second: match letter {
             Letter::Thanks => Some((text(IDS_THANKS_SNOOZE), crate::corner::Action::Close)),
             Letter::News(_) => Some((text(IDS_NEWS_LATER), crate::corner::Action::Close)),
+            // Stage Э121: the card's own «Закрыть» — for good, as in its letter ([`notice_end`]).
+            Letter::Card(_) => Some((text(IDS_CLOSE), crate::corner::Action::Close)),
             Letter::Welcome | Letter::Update => None,
         },
         picture: false,
@@ -4708,7 +4872,8 @@ pub enum NoticeEnd {
     /// «Через неделю», or the ✕ of a knock that offered it: «Спасибо» is put off by a week.
     Week,
     /// «Позже», or the ✕ of the knock of «Новость»: the letter counts as shown — its reminders come
-    /// in a week and in two, as after the letter's own «Позже».
+    /// in a week and in two, as after the letter's own «Позже». «Закрыть», or the ✕ of the knock of
+    /// a card: the card counts as shown, and that is for good (stage Э121).
     Later,
     /// The ✕ of a knock without its second button: the letter is left to the schedule — it opens
     /// by itself at the next quiet moment (FR-101).
@@ -4726,6 +4891,9 @@ pub fn notice_end(letter: Option<Letter>, by: crate::corner::EndBy, second: bool
         (EndBy::Main, _) => NoticeEnd::Open,
         (EndBy::Second | EndBy::Close, Some(Letter::Thanks)) if second => NoticeEnd::Week,
         (EndBy::Second | EndBy::Close, Some(Letter::News(_))) if second => NoticeEnd::Later,
+        // Stage Э121 (решение 208.244 п. 3): «Закрыть» and the ✕ of a card's knock close it for good
+        // — counted as shown by the same body, and a card shown never comes back by itself.
+        (EndBy::Second | EndBy::Close, Some(Letter::Card(_))) if second => NoticeEnd::Later,
         (EndBy::Second | EndBy::Close, _) => NoticeEnd::Schedule,
     }
 }
