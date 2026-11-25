@@ -257,10 +257,13 @@ fn only_the_newest_cards_are_kept() {
 /// and the letters of the file the same as the parse of 1.8.0 makes of it.
 #[test]
 fn a_feed_without_cards_has_none() {
+    // `.gitattributes` checks the fixture out with CRLF: the part before `\n[[card]]` then ends in
+    // a lone `\r`, which TOML refuses — it is trimmed, so the part reads the same as with LF.
     let body = WITH_CARDS
         .split("\n[[card]]")
         .next()
-        .expect("the part before the cards");
+        .expect("the part before the cards")
+        .trim_end_matches('\r');
     let read = feed::parse_body(body, "ru").expect("it parses");
 
     assert!(read.cards.is_empty());
