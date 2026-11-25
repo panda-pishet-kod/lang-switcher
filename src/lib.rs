@@ -15,6 +15,7 @@
 pub mod app;
 pub mod appeal;
 pub mod buffer;
+pub mod cards;
 pub mod convert;
 pub mod corner;
 pub mod diag;

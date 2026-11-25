@@ -43,6 +43,7 @@ fn offering(version: &str) -> feed::Feed {
         news: Vec::new(),
         download: feed::Table::Read(download_of(version)),
         stop: feed::Table::Absent,
+        cards: Vec::new(),
     }
 }
 

@@ -1,0 +1,61 @@
+schema = 1
+
+[[item]]
+id = 20
+type = "update"
+date = 2026-12-01
+version = "1.9.0"
+link = "https://panda-pishet-kod.dev/langswitcher/download/?lang=ru"
+[item.ru]
+title = "Вышла версия 1.9.0"
+text = "Открытки автора."
+[item.en]
+title = "Version 1.9.0 is out"
+text = "The author's cards."
+
+[[item]]
+id = 21
+type = "news"
+date = 2026-12-02
+link = ""
+[item.ru]
+title = "Новость"
+text = "Текст новости."
+[item.en]
+title = "News"
+text = "The text of the news."
+
+[[card]]
+id = 1
+from = 2026-12-31
+to = 2027-01-10
+view = "panel"
+side = "end"
+link = "https://panda-pishet-kod.dev/langswitcher/?lang=ru"
+image = "https://panda-pishet-kod.dev/langswitcher/cards/2027-panel.jpg"
+sha256 = "00112233445566778899aabbccddeeff00112233445566778899AABBCCDDEEFF"
+size = 524288
+[card.ru]
+title = "С Новым годом!"
+text = "Спасибо, что весь год были с Lang Switcher."
+[card.en]
+title = "Happy New Year!"
+text = "Thank you for being with Lang Switcher all year."
+[card.ar]
+title = "سنة جديدة سعيدة!"
+text = "شكرًا لأنك كنت مع Lang Switcher طوال العام."
+
+[[card]]
+id = 2
+from = 2027-01-01
+to = 2027-01-07
+view = "full"
+image = "https://panda-pishet-kod.dev/langswitcher/cards/2027-full.png"
+sha256 = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
+size = 1048576
+[card.ru]
+title = "С Рождеством!"
+text = "Тёплых праздников."
+[card.en]
+title = "Merry Christmas!"
+text = "Warm holidays."

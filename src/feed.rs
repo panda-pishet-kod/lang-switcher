@@ -32,6 +32,7 @@
 //! dropped with one line in the journal and no trace in the interface at all: a person must
 //! never be shown a letter this program cannot prove is the author's.
 
+use crate::cards::{CARDS_KEPT, CardImage, CardView, FeedCard, IMAGE_CAP};
 use crate::letters::{Date, FeedItem, NEWS_KEPT};
 
 /// The two public keys a signature is accepted from — the working one and the reserve.
@@ -123,6 +124,10 @@ pub struct Feed {
     /// working key is revoked for good. Honoured only in a feed signed with the **reserve**
     /// key (TZ E104 §0 п. 16), and that is the updater's rule, not the parser's.
     pub stop: Table<Stop>,
+    /// ⭐ The author's cards — stage Э121, task T-121-1: at most [`CARDS_KEPT`] of the records
+    /// `[[card]]`, the ones with the greatest numbers, **oldest first**. A record of the wrong shape
+    /// costs itself and not the file ([`cards_of`]).
+    pub cards: Vec<FeedCard>,
 }
 
 /// A top-level table of the feed that one reader needs and another does not — what was
@@ -345,6 +350,7 @@ pub fn parse_body(body: &str, language: &str) -> Result<Feed, Refusal> {
         news,
         download: table_of(document.download, download_of),
         stop: table_of(document.stop, stop_of),
+        cards: cards_of(document.card, language),
     })
 }
 
@@ -1330,6 +1336,97 @@ struct RawFeed {
     download: Option<toml::Value>,
     #[serde(default)]
     stop: Option<toml::Value>,
+    /// ⭐ `[[card]]` — stage Э121, taken as raw TOML and read card by card ([`cards_of`]): a card
+    /// of the wrong shape must cost itself, never the letters of the file.
+    #[serde(default)]
+    card: Option<toml::Value>,
+}
+
+/// One `[[card]]` as written — stage Э121, task T-121-1. Every field but the number and the term
+/// may be left out.
+///
+/// ⚠ **The languages are raw TOML, and that is the lesson of `[[item]]`** (the finding of the
+/// window of the cards, п. 1): `RawItem` takes every key it does not know as a language and refuses
+/// the whole feed when it is not one, so not one field can ever be added to an `[[item]]`. Here a
+/// key this build does not know is simply not a language it reads — a later version may give the
+/// card a field, and this one reads the card past it.
+#[derive(serde::Deserialize)]
+struct RawCard {
+    id: u64,
+    from: Date,
+    to: Date,
+    #[serde(default)]
+    view: String,
+    #[serde(default)]
+    side: String,
+    #[serde(default)]
+    link: String,
+    #[serde(default)]
+    image: String,
+    #[serde(default)]
+    sha256: String,
+    #[serde(default)]
+    size: u64,
+    /// Everything else in the record — the language tables among it.
+    #[serde(flatten)]
+    rest: std::collections::BTreeMap<String, toml::Value>,
+}
+
+/// **The cards of the feed** — every `[[card]]` read on its own, the bad ones skipped, the newest
+/// [`CARDS_KEPT`] kept in the order of their numbers. Nothing for a file without the array, or with
+/// something that is not an array of tables under its name.
+fn cards_of(raw: Option<toml::Value>, language: &str) -> Vec<FeedCard> {
+    let Some(toml::Value::Array(records)) = raw else {
+        return Vec::new();
+    };
+
+    let mut cards: Vec<FeedCard> = records
+        .into_iter()
+        .filter_map(|record| record.try_into::<RawCard>().ok())
+        .filter_map(|raw| card_of(raw, language))
+        .collect();
+
+    cards.sort_unstable_by_key(|card| card.id);
+    cards.dedup_by_key(|card| card.id);
+
+    if cards.len() > CARDS_KEPT {
+        cards.drain(..cards.len() - CARDS_KEPT);
+    }
+
+    cards
+}
+
+/// One card checked: a term that runs forward, words in a language this program shows (its own,
+/// else English, else Russian — as an entry's), the picture only when the record names the whole of
+/// it — an address, the sum and a size from one byte to [`IMAGE_CAP`]. Whether the address is the
+/// author's is the download's question, not the shape's.
+fn card_of(mut raw: RawCard, language: &str) -> Option<FeedCard> {
+    if raw.to < raw.from {
+        return None;
+    }
+
+    let words: RawText = [language, "en", "ru"]
+        .into_iter()
+        .find_map(|tag| raw.rest.remove(tag)?.try_into::<RawText>().ok())?;
+
+    let image = crate::cards::sum_of(&raw.sha256)
+        .filter(|_| !raw.image.is_empty() && raw.size > 0 && raw.size <= IMAGE_CAP)
+        .map(|sha256| CardImage {
+            url: raw.image,
+            sha256,
+            size: raw.size,
+        });
+
+    Some(FeedCard {
+        id: raw.id,
+        from: raw.from,
+        to: raw.to,
+        view: CardView::of(&raw.view, &raw.side),
+        image,
+        title: words.title,
+        text: words.text,
+        link: raw.link,
+    })
 }
 
 /// `[download]` as written: four fields, all of them obligatory.
@@ -1376,20 +1473,12 @@ fn table_of<R: serde::de::DeserializeOwned, T>(
 /// case, and a size that is not zero. Whether the address is the author's and the version
 /// newer is the updater's question ([`crate::update::decide`]), not the shape's.
 fn download_of(raw: RawDownload) -> Option<Download> {
-    let digits = raw.sha256.as_bytes();
-
-    if digits.len() != 64 || raw.size == 0 || raw.version.is_empty() || raw.url.is_empty() {
+    if raw.size == 0 || raw.version.is_empty() || raw.url.is_empty() {
         return None;
     }
 
-    let mut sha256 = [0u8; 32];
-
-    for (byte, pair) in sha256.iter_mut().zip(digits.chunks_exact(2)) {
-        let high = char::from(pair[0]).to_digit(16)?;
-        let low = char::from(pair[1]).to_digit(16)?;
-
-        *byte = u8::try_from(high * 16 + low).ok()?;
-    }
+    // One reading of the sixty-four digits for the installer and the picture of a card.
+    let sha256 = crate::cards::sum_of(&raw.sha256)?;
 
     Some(Download {
         version: raw.version,
