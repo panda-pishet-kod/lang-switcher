@@ -9,6 +9,12 @@ page. Dates are the days the releases were published (UTC).
 - The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
   Hungarian line of the state in «Diagnostics» counts the active exclusions, no longer the «published» ones.
 
+Known issues:
+
+- After a mouse click in a text field of Microsoft Edge, a layout switch — by Lang Switcher or by Windows' own keys —
+  sometimes does not reach Edge: Windows counts the new layout as on, and Edge types in the previous one until it is
+  restarted. This is Edge's own behavior: it happens with Lang Switcher stopped too.
+
 ## 1.8.0 — 2026-11-24
 
 *A new look, a second hotkey and the layout flag on the tray icon.*

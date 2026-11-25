@@ -275,8 +275,9 @@ There is no other network activity. The details are in section 9 of the specific
 
 ## Known issues
 
-- When the language indicator (ENG/РУС) at the clock is hidden and Lang Switcher shows a list of layouts of its own,
-  Microsoft Edge sometimes does not get the chosen layout: Windows counts it as on, and Edge types in the previous one.
+- After a mouse click in a text field of Microsoft Edge, a layout switch — by Lang Switcher or by Windows' own keys —
+  sometimes does not reach Edge: Windows counts the new layout as on, and Edge types in the previous one until it is
+  restarted. This is Edge's own behavior: it happens with Lang Switcher stopped too.
 - In Windows 11 Notepad, after the right Alt has been pressed alone on the English layout, a tap of Ctrl+Alt opens the
   keytips of the Notepad menu — Notepad does so without Lang Switcher too: the word to be fixed stays as it was, and the
   next word typed goes into the keytips. A restart of Windows ends it; until then, choose another key in the settings.
