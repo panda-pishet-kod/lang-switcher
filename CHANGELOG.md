@@ -16,6 +16,9 @@ page. Dates are the days the releases were published (UTC).
   letters and news turned off there are no cards. Earlier versions do not see cards at all.
 - The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
   Hungarian line of the state in «Diagnostics» counts the active exclusions, no longer the «published» ones.
+- In an AnyDesk or RustDesk window the word is fixed with keys: Lang Switcher erases it and types the same keys again
+  in the new layout. Before, AnyDesk put the fix in front of the word it did not erase, and RustDesk could type
+  garbage instead of it. Selected text in these windows is not converted: the hotkey only switches the layout there.
 
 Known issues:
 
