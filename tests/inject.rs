@@ -3480,8 +3480,9 @@ mod resolver_live {
 // ---------------------------------------------------------------------------------------
 
 /// The session window of AnyDesk 9.8.4 — written out here, as the console's class is, so that a test
-/// cannot follow the module into a wrong spelling.
-const ANYDESK_VIEWER: &str = "ad_win#2";
+/// cannot follow the module into a wrong spelling. **With its line feed**: `GetClassNameW` answers
+/// nine code units, the last `U+000A` (stand of stage E122).
+const ANYDESK_VIEWER: &str = "ad_win#2\n";
 
 /// The session window of RustDesk 1.5.3.
 const RUSTDESK_VIEWER: &str = "RustdeskMultiWindow";
@@ -3506,7 +3507,8 @@ fn is_scan_backspace(event: &Event, up: bool) -> bool {
 fn the_viewers_of_anydesk_and_rustdesk_resolve_auto_to_keystrokes() {
     for class in [
         ANYDESK_VIEWER,
-        "ad_win#3",
+        "ad_win#2",
+        "ad_win#3\n",
         "AD_WIN#2",
         "ad_win#10",
         RUSTDESK_VIEWER,
@@ -3527,6 +3529,10 @@ fn the_viewers_of_anydesk_and_rustdesk_resolve_auto_to_keystrokes() {
 fn only_the_two_viewers_take_the_keystroke_path() {
     for class in [
         "ad_win#",
+        "ad_win#\n",
+        "ad_win#2\n\n",
+        "ad_win#2 ",
+        "ad_win#\n2",
         "ad_win#x",
         "ad_win#2a",
         "ad_win2",

@@ -1344,7 +1344,7 @@ pub const CLASSIC_CONSOLE_CLASS: &str = CONSOLE_WINDOW_CLASSES[0];
 
 /// ⭐ **The windows of remote desktop viewers whose replacement under `auto` is typed by keys** —
 /// stage E122, решения 208.250 и 208.251: the session window of AnyDesk (`ad_win#` and a number;
-/// `ad_win#2` in AnyDesk 9.8.4) and of RustDesk (`RustdeskMultiWindow`, RustDesk 1.5.3). Compared by
+/// `ad_win#2` and a line feed in AnyDesk 9.8.4) and of RustDesk (`RustdeskMultiWindow`, RustDesk 1.5.3). Compared by
 /// [`is_remote_viewer`].
 ///
 /// With the program on the controlling side, the viewer is the window in front, and what it passes
@@ -1379,8 +1379,13 @@ const ANYDESK_VIEWER_PREFIX: &str = "ad_win#";
 const RUSTDESK_VIEWER_CLASS: &str = "RustdeskMultiWindow";
 
 /// ⭐ **Whether `class` is a window of [`REMOTE_VIEWER_CLASSES`]** — stage E122. `RustdeskMultiWindow`
-/// itself, or `ad_win#` followed by one or more decimal digits and nothing else; case-insensitively,
-/// as every class of FR-42а.
+/// itself, or `ad_win#` followed by one or more decimal digits and, at most, one line feed;
+/// case-insensitively, as every class of FR-42а.
+///
+/// ⚠ **The line feed is AnyDesk's own, measured.** `GetClassNameW` answers the session window of
+/// AnyDesk 9.8.4 with nine code units, `ad_win#2` and `U+000A` (stand of stage E122, Windows 11 and
+/// Windows 10). A rule of «digits and nothing else» did not know the window, and the press went the
+/// path of FR-42: `приветghbdtn`, 4 of 4.
 pub fn is_remote_viewer(class: &str) -> bool {
     if class.eq_ignore_ascii_case(RUSTDESK_VIEWER_CLASS) {
         return true;
@@ -1388,11 +1393,18 @@ pub fn is_remote_viewer(class: &str) -> bool {
 
     let prefix = ANYDESK_VIEWER_PREFIX.len();
 
-    class
+    if !class
         .get(..prefix)
         .is_some_and(|head| head.eq_ignore_ascii_case(ANYDESK_VIEWER_PREFIX))
-        && class.len() > prefix
-        && class[prefix..].bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+
+    let number = class[prefix..]
+        .strip_suffix('\n')
+        .unwrap_or(&class[prefix..]);
+
+    !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// **What a press really runs** — the method of FR-42 and FR-42а resolved, and the one path the
