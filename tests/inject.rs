@@ -3490,13 +3490,18 @@ const RUSTDESK_VIEWER: &str = "RustdeskMultiWindow";
 /// The scan code of `Backspace` — set 1, main block.
 const SCAN_BACKSPACE: u16 = 0x0E;
 
-/// Whether `event` is a `Backspace` of the keystroke path going down or up: named by its scan code
-/// — `KEYEVENTF_SCANCODE`, `wVk` zero, no extended flag — as the keys after it are.
+/// Whether `event` is a `Backspace` of the keystroke path going down or up: the virtual key **and**
+/// its scan code — `wVk = VK_BACK`, `wScan = 0E` — and **no** `KEYEVENTF_SCANCODE`, no extended flag
+/// (stage E122, the controller's word on C7). The scan code is for the viewers, which drop a key with
+/// `wScan = 0`; the virtual key is for the press with Pause: the tail of the Pause key (`E1 9D C5`)
+/// arriving in the middle of the packet turned a `KEYEVENTF_SCANCODE 0E` into `vk = 00`, and RustDesk
+/// legacy and the console lost it (`gпривет`, 3 of 3).
 fn is_scan_backspace(event: &Event, up: bool) -> bool {
-    event.vk == 0
+    event.vk == VK_BACK.0
         && event.scan == SCAN_BACKSPACE
-        && event.flags & KEYEVENTF_SCANCODE.0 != 0
+        && event.flags & KEYEVENTF_SCANCODE.0 == 0
         && event.flags & KEYEVENTF_EXTENDEDKEY.0 == 0
+        && event.flags & KEYEVENTF_UNICODE.0 == 0
         && (event.flags & KEYEVENTF_KEYUP.0 != 0) == up
 }
 
@@ -3553,10 +3558,11 @@ fn only_the_two_viewers_take_the_keystroke_path() {
     }
 }
 
-/// **⭐ The red «до» of stage E122 (2).** The backspaces of the keystroke path go by their scan code,
-/// as the keys after them do: AnyDesk did not pass on a `Backspace` with `wScan = 0` (the form probe
-/// of `reports\ANYDESK-RESEARCH.md`), and the delivery measured 2 of 2 in RustDesk translate and
-/// legacy sent `0E` by `KEYEVENTF_SCANCODE`.
+/// **⭐ The red «до» of stage E122 (2), and (3).** The backspaces of the keystroke path carry their
+/// scan code: AnyDesk did not pass on a `Backspace` with `wScan = 0` (the form probe of
+/// `reports\ANYDESK-RESEARCH.md`: «код + wScan» reached the remote side). And they keep their virtual
+/// key: the form `KEYEVENTF_SCANCODE 0E` of `b2ca9b3` lost its first event to the tail of Pause —
+/// see [`is_scan_backspace`].
 #[test]
 fn the_backspaces_of_the_keystroke_path_go_by_their_scan_code() {
     let strokes = ghbdtn();
@@ -3583,8 +3589,9 @@ fn the_backspaces_of_the_keystroke_path_go_by_their_scan_code() {
 }
 
 /// A press in the window of a viewer is the press of the classic console, whole: the switch before
-/// the one packet, and **every** event of that packet a key named by its scan code — not one event
-/// with `wScan = 0`, not one `KEYEVENTF_UNICODE` — with the signature of FR-03.
+/// the one packet, and **every** event of that packet a key with its scan code — the backspaces as
+/// `VK_BACK` with `0E`, the keys by `KEYEVENTF_SCANCODE`; not one event with `wScan = 0`, not one
+/// `KEYEVENTF_UNICODE` — with the signature of FR-03.
 #[test]
 fn a_press_in_a_viewer_switches_first_and_sends_only_scan_codes() {
     for class in [ANYDESK_VIEWER, RUSTDESK_VIEWER] {
@@ -3600,12 +3607,23 @@ fn a_press_in_a_viewer_switches_first_and_sends_only_scan_codes() {
         let packet = &bench.sent()[0];
         assert_eq!(packet.len(), 6 * 2 + 6 * 2, "{class}");
         assert!(
-            packet.iter().all(|event| event.vk == 0
-                && event.scan != 0
-                && event.flags & KEYEVENTF_SCANCODE.0 != 0
+            packet.iter().all(|event| event.scan != 0
                 && event.flags & KEYEVENTF_UNICODE.0 == 0
                 && event.extra == INJECTED_SIGNATURE),
-            "{class}: keys by scan code only — {packet:?}"
+            "{class}: every event a key with its scan code — {packet:?}"
+        );
+        assert!(
+            packet[..12]
+                .iter()
+                .enumerate()
+                .all(|(index, event)| is_scan_backspace(event, index % 2 == 1)),
+            "{class}: the backspaces as VK_BACK with 0E — {packet:?}"
+        );
+        assert!(
+            packet[12..]
+                .iter()
+                .all(|event| event.vk == 0 && event.flags & KEYEVENTF_SCANCODE.0 != 0),
+            "{class}: the keys by scan code — {packet:?}"
         );
         assert_eq!(
             packet[12..]

@@ -4533,11 +4533,24 @@ pub fn wants_selection_path() -> bool {
 ///
 /// Case-insensitively, because window class names are case-insensitive to Windows itself — the
 /// comparison `inject::resolve_auto` and `guard::class_is_edit` both make.
+///
+/// # ⭐ Stage E122 — the windows of the viewers of AnyDesk and RustDesk
+///
+/// [`crate::inject::is_remote_viewer`] refuses here as a console does (the controller's word on the
+/// selected text, 2026-11-26). What the viewer passes on of the chords of FR-61 is not the chords:
+/// in RustDesk translate the `C` of `Ctrl+C` reached the remote side without its `Ctrl`, and the
+/// selected word was replaced by `c` (2 of 2); in AnyDesk the `C` did not arrive at all. The press
+/// over an empty buffer in those windows is the switch of the layout, as in a console; selected
+/// text there is not converted. Counted with the consoles, in [`CONSOLE_REFUSALS`].
 pub fn console_refuses_selection(class: Option<&str>) -> bool {
     let console = match class {
-        Some(class) => crate::inject::CONSOLE_WINDOW_CLASSES
-            .iter()
-            .any(|console| class.eq_ignore_ascii_case(console)),
+        // ⭐ Stage E122: the windows of the viewers of AnyDesk and RustDesk too — see below.
+        Some(class) => {
+            crate::inject::CONSOLE_WINDOW_CLASSES
+                .iter()
+                .any(|console| class.eq_ignore_ascii_case(console))
+                || crate::inject::is_remote_viewer(class)
+        }
         // No window, or a class that cannot be read. NFR-13: examined, and answered as "not a
         // console" for the reason the section above gives.
         None => false,

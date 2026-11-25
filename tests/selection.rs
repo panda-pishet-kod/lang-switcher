@@ -4755,6 +4755,43 @@ fn an_ordinary_window_class_leaves_the_sixth_reason_alone() {
     assert_eq!(after.handovers, before.handovers);
 }
 
+/// **⭐ Stage E122 — the windows of the viewers of AnyDesk and RustDesk refuse the selection path as
+/// the consoles do** (the controller's word on the selected text, 2026-11-26). In those windows the
+/// `Ctrl+C` of FR-61 reached the remote side without its `Ctrl` in RustDesk translate, and the
+/// selected word was replaced by `c` (2 of 2); the press over an empty buffer is the switch of the
+/// layout there, as in a console. The class is the one `inject::is_remote_viewer` names — AnyDesk's
+/// with its line feed — and TightVNC, RDP and the main window of RustDesk keep the path.
+#[test]
+fn the_viewers_of_anydesk_and_rustdesk_refuse_the_selection_path() {
+    let _serialised = serialised();
+
+    for class in ["ad_win#2\n", "ad_win#2", "AD_WIN#3", "RustdeskMultiWindow"] {
+        let before = selection::path_counters();
+
+        assert!(
+            selection::console_refuses_selection(Some(class)),
+            "{class:?}: no Ctrl+C into the window of a viewer"
+        );
+        assert_eq!(
+            selection::path_counters().console_refusals,
+            before.console_refusals + 1,
+            "{class:?}: counted with the consoles"
+        );
+    }
+
+    for class in [
+        "TvnWindowClass",
+        "TscShellContainerClass",
+        "FLUTTER_RUNNER_WIN",
+        "ad_win#",
+    ] {
+        assert!(
+            !selection::console_refuses_selection(Some(class)),
+            "{class:?} is not a viewer of the list: the path runs"
+        );
+    }
+}
+
 /// **П-3, the structural half — where the sixth reason stands in the branch, and what it costs.**
 ///
 /// Two statements at once, and both are prices:

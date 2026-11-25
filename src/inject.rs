@@ -1169,8 +1169,8 @@ pub fn build_packet(
 const SCAN_LEFT_SHIFT: u16 = 0x2A;
 
 /// The scan code of `Backspace` — set 1, main block — the erasure of the keystroke path (stage
-/// E122): named by its scan code, as the keys after it are, because the viewer of AnyDesk does not
-/// pass on a key with `wScan = 0` (see [`REMOTE_VIEWER_CLASSES`]).
+/// E122): sent with `VK_BACK` by [`backspace_event`], because the viewer of AnyDesk does not pass on
+/// a key with `wScan = 0` (see [`REMOTE_VIEWER_CLASSES`]).
 const SCAN_BACKSPACE: u16 = 0x0E;
 
 /// How many `INPUT` structures the keystroke packet of `strokes` after `erase` backspaces takes.
@@ -1227,17 +1227,17 @@ pub fn keys_repeat_the_conversion(strokes: &[Keystroke], target: &LayoutMap) -> 
 ///
 /// ```text
 /// Backspace down, Backspace up       × N — the characters on the screen, OnScreen, as FR-41;
-///                                     KEYEVENTF_SCANCODE 0E (stage E122)
+///                                     VK_BACK with wScan 0E (stage E122)
 /// [Shift down]                        ours, only before a key the user typed with Shift
 /// key down, key up                    KEYEVENTF_SCANCODE, the extended flag of FR-05
 /// [Shift up]                          ours, at once — before the next key
 /// ```
 ///
-/// ⭐ **Every event is a key named by its scan code — stage E122.** The windows of the viewers of
+/// ⭐ **Every event carries its scan code — stage E122.** The windows of the viewers of
 /// [`REMOTE_VIEWER_CLASSES`] pass on to the remote side what a keyboard would send and nothing else:
-/// AnyDesk dropped every key with `wScan = 0` (`Shift` 0 of 14, `Backspace` 1 of 1), and the
-/// backspaces of this packet, virtual keys until 1.9.0, went by their scan code from then on. The
-/// classic console takes either form: the system gives it `VK_BACK` for `0E` in every layout.
+/// AnyDesk dropped every key with `wScan = 0` (`Shift` 0 of 14, `Backspace` 1 of 1). So the
+/// backspaces of this packet, `VK_BACK` with `wScan = 0` until 1.9.0, carry `0E` beside their virtual
+/// key from then on — [`backspace_event`] says why the virtual key stays given.
 ///
 /// **Not one `KEYEVENTF_UNICODE` event.** The layout of the console decides what each key gives,
 /// and the switch of FR-50 has already been made when this packet goes out — that order is
@@ -1266,8 +1266,8 @@ pub fn build_keystrokes(
     let mut written = 0;
 
     for _ in 0..erase {
-        out[written] = scan_event(SCAN_BACKSPACE, false, false);
-        out[written + 1] = scan_event(SCAN_BACKSPACE, false, true);
+        out[written] = backspace_event(false);
+        out[written + 1] = backspace_event(true);
         written += 2;
     }
 
@@ -1616,13 +1616,13 @@ pub fn effective_method(configured: ReplacementMethod) -> Delivery {
 /// user's own typing, `hook::classify` would let it into the buffer, and the next hotkey press
 /// would convert the program's own output — for ever.
 ///
-/// # The four builders of this program
+/// # The five builders of this program
 ///
 /// This comment used to say that the two functions of this module were the only places an
 /// `INPUT` is built and that there was deliberately no third. That stopped being true at task
 /// T-07-2 and stayed on the page, which is the worst state an inventory can be in: the next
-/// reader greps by it and stops one place short. Stage Э96 added the fourth, and the heading moved
-/// with it in the same commit. The list, in full:
+/// reader greps by it and stops one place short. Stage Э96 added the fourth, stage E122 the fifth,
+/// and the heading moved with each in the same commit. The list, in full:
 ///
 /// 1. [`key_event`] — this function. Every virtual key the program sends: the `Backspace` pairs
 ///    of FR-41, the `Shift+Left` selection of FR-42 and the modifier packets of FR-40 steps 3
@@ -1635,6 +1635,8 @@ pub fn effective_method(configured: ReplacementMethod) -> Delivery {
 ///    not an invitation to merge the two: doing so is a refactor of its own, with its own task.
 /// 4. [`scan_event`] — stage Э96: every key of the keystroke path of the classic console, the
 ///    user's keys again by their scan codes and the `Shift` around a key that had it.
+/// 5. [`backspace_event`] — stage E122: the backspaces of that same keystroke path, the virtual
+///    key **and** its scan code.
 ///
 /// # What actually holds the invariant
 ///
@@ -1716,6 +1718,40 @@ fn unicode_event(unit: u16, up: bool) -> INPUT {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(0),
                 wScan: unit,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: INJECTED_SIGNATURE,
+            },
+        },
+    }
+}
+
+/// ⭐ **One `Backspace` of the keystroke path — `VK_BACK` with `wScan = 0E`, no
+/// `KEYEVENTF_SCANCODE`** (stage E122, the fifth builder of [`key_event`]'s inventory).
+///
+/// Both halves are measured. **The scan code:** the viewer of AnyDesk drops a key with `wScan = 0`
+/// (the form probe of `reports\ANYDESK-RESEARCH.md`: `Backspace` with the code alone did not reach
+/// the remote side, with the code and `wScan` it did). **The virtual key, given and not derived:**
+/// the form `KEYEVENTF_SCANCODE 0E` lost its first event to the hotkey Pause — the tail of that key
+/// (`E1 9D C5`) arrived in the middle of the packet, the first scan code was read in the state of
+/// the prefix `E1` and came out as `vk = 00` (and the tail as a press of NumLock), and RustDesk
+/// legacy and the classic console dropped it: `gпривет`, 3 of 3 (stand of stage E122, witness of
+/// the hook). Given `VK_BACK`, nothing is derived from the scan code: the same packet went 3 of 3.
+///
+/// The signature of FR-03 on both edges, as on every event of this program — see [`key_event`].
+fn backspace_event(up: bool) -> INPUT {
+    let flags = if up {
+        KEYEVENTF_KEYUP
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: BACKSPACE,
+                wScan: SCAN_BACKSPACE,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: INJECTED_SIGNATURE,
