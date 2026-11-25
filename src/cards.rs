@@ -227,3 +227,232 @@ pub fn size_fits(view: CardView, w: u32, h: u32) -> bool {
     view.pixels()
         .is_some_and(|(most_w, most_h)| w > 0 && h > 0 && w <= most_w && h <= most_h)
 }
+
+// =========================================================================================
+// The picture on the disk — task T-121-3 (решение 208.244 п. 8)
+// =========================================================================================
+
+/// The folder of the pictures inside the program's own folder of `%APPDATA%`.
+pub const FOLDER_NAME: &str = "cards";
+
+/// What the file of a picture is called: the digits of its sum and `.card`. The name says which
+/// bytes it must hold, and a file of the same name with other bytes is no picture ([`kept`]).
+pub const FILE_EXTENSION: &str = "card";
+
+/// The folder of the pictures in an arbitrary application data directory —
+/// `%APPDATA%\Lang_Switcher\cards` for the product ([`folder`]).
+pub fn folder_in(app_data: &std::path::Path) -> std::path::PathBuf {
+    app_data.join(crate::CONFIG_DIR_NAME).join(FOLDER_NAME)
+}
+
+/// The standard folder of the pictures — [`folder_in`] over `%APPDATA%`, `None` without it.
+pub fn folder() -> Option<std::path::PathBuf> {
+    std::env::var_os("APPDATA").map(|app_data| folder_in(std::path::Path::new(&app_data)))
+}
+
+/// The file of `image` in `folder`.
+pub fn path_in(folder: &std::path::Path, image: &CardImage) -> std::path::PathBuf {
+    let digits: String = image
+        .sha256
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+
+    folder.join(format!("{digits}.{FILE_EXTENSION}"))
+}
+
+/// **The address the pictures are taken from** — [`crate::links::CARDS_URL`]. Under the `testing`
+/// feature only, the stand's: the folder `cards/` beside the feed the doors of the stand name
+/// ([`crate::update::Places::of_this_machine`]), so that a guest without a network has its cards.
+pub fn folder_url() -> String {
+    #[cfg(feature = "testing")]
+    if let Some(stand) = stand_folder_url() {
+        return stand;
+    }
+
+    crate::links::CARDS_URL.to_owned()
+}
+
+/// The folder `cards/` beside the feed of the doors of the stand; `None` when the doors name no feed.
+#[cfg(feature = "testing")]
+fn stand_folder_url() -> Option<String> {
+    let places = crate::update::Places::of_this_machine()?;
+
+    if places.feed_url == crate::links::FEED_URLS[0] {
+        return None;
+    }
+
+    let (base, _) = places.feed_url.rsplit_once('/')?;
+
+    Some(format!("{base}/{FOLDER_NAME}/"))
+}
+
+/// Why a picture was not kept — the journal is told one fact and no value (SEC-07).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// The address is not a file in the folder of the cards.
+    Address,
+    /// The host did not answer, or answered with more than the record named.
+    Network,
+    /// Not the size the record named.
+    Size,
+    /// Not the sum the record named.
+    Sum,
+    /// Not a PNG or a JPEG.
+    Format,
+    /// Larger in pixels than the view is made at.
+    Pixels,
+    /// The file could not be written.
+    Disk,
+}
+
+/// **Whether these bytes are the picture `image` names, for `view`** — in the order of решение
+/// 208.244 п. 8: the size; then the sum, **before** a byte of the picture is parsed — the header
+/// is read only out of bytes the signature of the feed stands behind; then the format and the size
+/// in pixels out of the header ([`sniff`], [`size_fits`]). The decoder of Windows is reached only
+/// after all of it, by the window.
+pub fn check(
+    bytes: &[u8],
+    image: &CardImage,
+    view: CardView,
+) -> Result<(Format, u32, u32), Refused> {
+    if bytes.len() as u64 != image.size || image.size > IMAGE_CAP {
+        return Err(Refused::Size);
+    }
+
+    let mut hasher = crate::feed::Sha256::new().ok_or(Refused::Sum)?;
+    if !hasher.update(bytes) || hasher.finish() != Some(image.sha256) {
+        return Err(Refused::Sum);
+    }
+
+    let (format, w, h) = sniff(bytes).ok_or(Refused::Format)?;
+
+    if !size_fits(view, w, h) {
+        return Err(Refused::Pixels);
+    }
+
+    Ok((format, w, h))
+}
+
+/// **The picture of a card, if it is on the disk and whole** — read back and checked again
+/// ([`check`]) every time: a file somebody changed, cut or replaced is no picture, and the card
+/// shows the plain template (А). `None` for a card with no picture, or a view with none.
+pub fn kept(card: &FeedCard, folder: &std::path::Path) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+
+    let image = card.image.as_ref()?;
+    let file = std::fs::File::open(path_in(folder, image)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(IMAGE_CAP + 1).read_to_end(&mut bytes).ok()?;
+
+    check(&bytes, image, card.view).ok().map(|_| bytes)
+}
+
+/// **One `GET` of a picture**, through the one body of the network of this program
+/// ([`crate::feed::get`]): the bytes, at most `cap`; `None` for every refusal, and for more.
+pub fn get_picture(url: &str, cap: u64) -> Option<Vec<u8>> {
+    let target = crate::feed::target_of(url)?;
+    let mut bytes = Vec::new();
+
+    crate::feed::get(&target, cap, &mut |chunk| {
+        bytes.extend_from_slice(chunk);
+        true
+    })?;
+
+    Some(bytes)
+}
+
+/// **The pictures of a good read of the feed**, on the thread of the feed — task T-121-3.
+///
+/// Each card whose picture is due today ([`FeedCard::picture_is_due`]: from
+/// [`DOWNLOAD_AHEAD_DAYS`] days before the term to its end) and is not already whole on the disk
+/// ([`kept`]) is asked for **once**: the address only in `folder_url`, no more than the size the
+/// record names, then [`check`], then the file, written whole or not at all. What did not come is
+/// asked again at the next read, the next day. Then [`sweep`].
+///
+/// **Nothing at all without a card**: no request, no folder, no file — the sentry of the stage. The
+/// request itself is `get`, so that a test can count it; the product passes [`get_picture`].
+pub fn fetch_pictures(
+    cards: &[FeedCard],
+    today: Date,
+    folder: &std::path::Path,
+    folder_url: &str,
+    get: &mut dyn FnMut(&str, u64) -> Option<Vec<u8>>,
+) -> Vec<(u64, Result<(), Refused>)> {
+    let mut outcomes = Vec::new();
+
+    for card in cards.iter().filter(|card| card.picture_is_due(today)) {
+        let Some(image) = card.image.as_ref() else {
+            continue;
+        };
+
+        if kept(card, folder).is_some() {
+            continue;
+        }
+
+        let outcome = fetch_one(card, image, folder, folder_url, get);
+
+        crate::diag::record(
+            crate::diag::Operation::from_name(if outcome.is_ok() {
+                "card picture kept"
+            } else {
+                "card picture refused"
+            }),
+            crate::diag::OsCode::NONE,
+        );
+        outcomes.push((card.id, outcome));
+    }
+
+    sweep(cards, today, folder);
+
+    outcomes
+}
+
+/// One picture: the address, the request, the checks, the file.
+fn fetch_one(
+    card: &FeedCard,
+    image: &CardImage,
+    folder: &std::path::Path,
+    folder_url: &str,
+    get: &mut dyn FnMut(&str, u64) -> Option<Vec<u8>>,
+) -> Result<(), Refused> {
+    if !crate::update::address_is_ours(&image.url, folder_url) {
+        return Err(Refused::Address);
+    }
+
+    let bytes = get(&image.url, image.size).ok_or(Refused::Network)?;
+
+    check(&bytes, image, card.view)?;
+
+    crate::settings::write_bytes_to(&path_in(folder, image), &bytes)
+        .map(|_| ())
+        .map_err(|_| Refused::Disk)
+}
+
+/// **Deletes what no card needs** — every file of the folder but the pictures of the cards whose
+/// term is not over (решение 208.244 п. 8: «после срока файл стереть»), and the folder itself when
+/// nothing is left in it. A folder that is not there is left not there.
+pub fn sweep(cards: &[FeedCard], today: Date, folder: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+
+    let needed: Vec<std::path::PathBuf> = cards
+        .iter()
+        .filter(|card| today <= card.to)
+        .filter_map(|card| card.image.as_ref())
+        .map(|image| path_in(folder, image))
+        .collect();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if !needed.contains(&path) {
+            crate::sandbox::guard_path(&path);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    // Removed only when empty — `remove_dir` refuses a folder with anything in it.
+    let _ = std::fs::remove_dir(folder);
+}

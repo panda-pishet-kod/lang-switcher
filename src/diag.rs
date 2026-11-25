@@ -888,6 +888,12 @@ static OPERATIONS: &[(&str, Kind)] = &[
     // shell (`ui::host`); the window stands with the empty icon of Windows. The name of the call
     // and its code; appended at the end so that no index above it moves.
     ("LoadImageW(caption)", Kind::Window),
+    // Stage Э121, task T-121-3: the picture of an author's card — «refused» when it did not come
+    // or did not pass a check (the address, the size, the sum, the format, the pixels, the disk),
+    // «kept» when it was written. Facts and no value — not an address, not a byte of the picture;
+    // appended at the end so that no index above them moves.
+    ("card picture refused", Kind::Process),
+    ("card picture kept", Kind::Process),
 ];
 
 /// The vocabulary of the debug channel — **finding Н43, task T-41-11**.

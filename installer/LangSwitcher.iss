@@ -420,6 +420,10 @@ Type: files; Name: "{userappdata}\Lang_Switcher\config.toml.*.tmp"
 ; of the author's file and not a setting of the user's: it goes always, as the journal does.
 Type: files; Name: "{userappdata}\Lang_Switcher\news.toml"
 Type: files; Name: "{userappdata}\Lang_Switcher\news.toml.*.tmp"
+; Stage E121, task T-121-3 (decision 208.244 p. 8): the pictures of the author's cards --
+; cards.rs, FOLDER_NAME = "cards" -- copies of the author's files, as news.toml is: the folder
+; goes always, whole.
+Type: filesandordirs; Name: "{userappdata}\Lang_Switcher\cards"
 ; Stage E104 (TZ E104 p. 17, SPEC section 13 p. 7): the folder of the updater -- its state, its
 ; journal, the copies of the installer -- goes whole, and the data folder with it when nothing
 ; else is in it. The task of the scheduler goes in [Code] (CurUninstallUpdater), before the files.

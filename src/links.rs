@@ -395,6 +395,13 @@ pub fn changelog_url(language: Language) -> &'static str {
 /// a `[download]` against it).
 pub const UPDATE_FILES_URL: &str = "https://panda-pishet-kod.dev/langswitcher/files/";
 
+/// ⭐ **The one folder the picture of an author's card is taken from** — stage Э121, task T-121-3
+/// (решение 208.244 п. 8): the author's site, `/langswitcher/cards/`, and nowhere else. A whole
+/// literal, for ворота 3 of `tools\verify-perimeter.ps1`; [`crate::cards::fetch_pictures`] holds
+/// the address a `[[card]]` names against it, by the updater's own check
+/// ([`crate::update::address_is_ours`]).
+pub const CARDS_URL: &str = "https://panda-pishet-kod.dev/langswitcher/cards/";
+
 /// Whether this address is one of the placeholders — the one test every button that opens
 /// a link is behind.
 pub fn is_placeholder(url: &str) -> bool {

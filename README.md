@@ -270,6 +270,14 @@ How it works, in detail:
   repeat twice. The program waits for the answer no longer than 15 seconds. If the site does not
   answer, the wizard offers to send the same text by email to `lang.switcher@panda-pishet-kod.dev`
   or to save it to a file.
+- **A picture of an author's card** (since 1.9.0). A card is a letter from the author with a picture,
+  shown once in its term. Only when the news file names one does the program download its picture —
+  one PNG or JPEG, one `GET` request after a good read of the news file, only from the
+  `/langswitcher/cards/` folder of the same site, no sooner than a week before the term and no larger
+  than 1 MB. Its size and SHA-256 must match the ones signed in the news file before the picture is
+  opened at all. It is kept in `%APPDATA%\Lang_Switcher\cards\` and deleted when the term is over;
+  the uninstaller removes the folder. With no card in the news file there is no such request, and
+  with letters and news turned off there are no cards.
 
 There is no other network activity. The details are in section 9 of the specification (in Russian).
 

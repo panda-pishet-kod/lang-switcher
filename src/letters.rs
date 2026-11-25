@@ -4502,6 +4502,9 @@ pub fn start_feed_read(owner: HWND, language: String, first: bool) {
             // on the feed's own thread, and before the nudge — the UI thread never waits on a disk.
             let answer = answer.map(|(fresh, document)| {
                 keep_feed_document(&document);
+                // ⭐ Stage Э121, task T-121-3: the pictures of the cards, on this same thread and
+                // after the read — no thread of their own; with no card, no request and no file.
+                keep_card_pictures(&fresh.cards);
                 fresh
             });
 
@@ -4611,6 +4614,30 @@ fn keep_feed_document(document: &str) {
     }
 }
 
+/// **The pictures of the cards of a good read** — stage Э121, task T-121-3, on the thread of the
+/// feed: [`crate::cards::fetch_pictures`] into `%APPDATA%\Lang_Switcher\cards`, by the one body of
+/// the network ([`crate::cards::get_picture`]).
+fn keep_card_pictures(cards: &[FeedCard]) {
+    let (Some(today), Some(folder)) = (today(), crate::cards::folder()) else {
+        return;
+    };
+
+    crate::cards::fetch_pictures(
+        cards,
+        today,
+        &folder,
+        &crate::cards::folder_url(),
+        &mut crate::cards::get_picture,
+    );
+}
+
+/// Deletes the pictures no card of `cards` needs — stage Э121, at the start ([`restore_feed`]).
+fn sweep_card_pictures(cards: &[FeedCard]) {
+    if let (Some(today), Some(folder)) = (today(), crate::cards::folder()) {
+        crate::cards::sweep(cards, today, &folder);
+    }
+}
+
 /// **The kept feed, read again** — task T-119-9, решение 208.98: the document of
 /// [`keep_feed_document`] goes through [`feed::read_document`] with the author's keys **every
 /// time**, exactly as an answer of the site does. A file that is spoilt, cut, foreign or signed by
@@ -4635,12 +4662,15 @@ pub fn restore_feed() {
     let stored = state_now();
 
     if !stored.feed {
+        // Stage Э121: a feed turned off keeps no picture of a card.
+        sweep_card_pictures(&[]);
         return;
     }
 
     let Some(document) =
         settings::kept_feed_path().and_then(|path| std::fs::read_to_string(path).ok())
     else {
+        sweep_card_pictures(&[]);
         return;
     };
 
@@ -4649,11 +4679,14 @@ pub fn restore_feed() {
             crate::diag::Operation::from_name("kept feed refused"),
             crate::diag::OsCode::NONE,
         );
+        sweep_card_pictures(&[]);
         return;
     };
 
     publish_feed(kept.update.clone(), kept.news.clone());
     publish_cards(kept.cards.clone());
+    // Stage Э121: a picture whose term ended while no read came is deleted at the start.
+    sweep_card_pictures(&kept.cards);
 
     if let Some(today) = today() {
         let mut moved = stored;
