@@ -36,6 +36,26 @@
       * a line of an entry that is not "key = value"
       * a table under an entry that is not a language -- [item.image], [[item.x]], [item.ru.x]
       * a language table given twice, or without its title or its text
+    and since 1.9.0 (stage E121, decision 208.244), about the author's cards -- [[card]], a top-level
+    array every released version skips (tests\feed_cards.rs reads it with the frozen parse of 1.8.0):
+      * a field of a card other than id, from, to, view, side, link, image, sha256 and size, one
+        given twice, a line that is not "key = value", or a table under a card that is not a language
+      * no id, identifiers that repeat or descend, more than three cards -- the program keeps three
+      * a term that is not two dates YYYY-MM-DD, `from` after `to`, or a term already over
+      * a view other than panel (B: the picture in place of the panel) or full (C1: the whole
+        window); a side other than start or end; a side of a full card
+      * no image, an image not under https://panda-pishet-kod.dev/langswitcher/cards/ by plain path
+        segments, or no file of its name in the folder cards\ beside this file
+      * a picture that is not a PNG or a JPEG by its signature, not exactly 1000 x 1440 (panel) or
+        2560 x 1280 (full) pixels by its header, or over 1 MB
+      * a card without ru or en, a language table without its title or its text, a language with
+        no cap; a text over the cap of its view -- panel: the column news of tools\feed-caps.tsv
+        (the text stands where a news item's does), full: the column card
+    THE SUM AND THE SIZE of a card's picture are this script's own: it reads the file in cards\,
+    writes `sha256 = "<64 digits>"` and `size = <bytes>` right under the card's `image` line --
+    those the author wrote are replaced -- and signs that.
+    THE ORDER OF PUBLISHING: the pictures (the folder cards\) first, the feed after them. A feed that
+    names a picture not yet on the site leaves the card in the plain template until the next read.
 
     A refusal writes nothing: the file on disk is left exactly as it was, and the exit code is
     non-zero.
@@ -88,6 +108,16 @@ $NEWS_KEPT = 3
 $ItemFields = @('id', 'type', 'date', 'version', 'link')
 $WholeFeed = 'every released version refuses the whole feed over it: no news and no update reach anybody'
 
+# 1.9.0 (stage E121, decision 208.244): the author's cards -- the fields of [[card]] (RawCard of
+# src\feed.rs), how many the program keeps (cards::CARDS_KEPT), the one folder of the pictures
+# (links::CARDS_URL), the cap of a picture (cards::IMAGE_CAP) and its size in pixels by the view
+# (cards::PANEL_PIXELS, cards::FULL_PIXELS).
+$CardFields = @('id', 'from', 'to', 'view', 'side', 'link', 'image', 'sha256', 'size')
+$CARDS_KEPT = 3
+$CardsPrefix = 'https://panda-pishet-kod.dev/langswitcher/cards/'
+$CARD_IMAGE_CAP = 1024 * 1024
+$CardPixels = @{ panel = @(1000, 1440); full = @(2560, 1280) }
+
 function Fail([string]$why) {
     Write-Host ''
     Write-Host ("  REFUSED: {0}" -f $why)
@@ -130,15 +160,33 @@ function Read-Caps {
         $number++
         $row = $raw.Trim()
         if ($row -eq '' -or $row.StartsWith('#')) { continue }
-        if ($row -notmatch '^([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\t(\d+)\t(\d+)$') {
-            Fail ("{0}, line {1}: not 'tag<TAB>update<TAB>news': {2}" -f $CapsFile, $number, $raw)
+        # 1.9.0 (stage E121): a fourth column, card -- the cap of the words of a card of the view
+        # full (C1), measured by the same instrument; a file printed before it has three.
+        if ($row -notmatch '^([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\t(\d+)\t(\d+)(?:\t(\d+))?$') {
+            Fail ("{0}, line {1}: not 'tag<TAB>update<TAB>news<TAB>card': {2}" -f $CapsFile, $number, $raw)
         }
-        $Caps[$Matches[1]] = [pscustomobject]@{ update = [int]$Matches[2]; news = [int]$Matches[3]; Line = $number }
+        $card = $null
+        if ($Matches[4]) { $card = [int]$Matches[4] }
+        $Caps[$Matches[1]] = [pscustomobject]@{ update = [int]$Matches[2]; news = [int]$Matches[3]; card = $card; Line = $number }
     }
 }
 
 # The cap of the kind of `entry` in `tag`: an entry of another type has no cap and is refused.
 function Cap-Of($entry, [string]$tag) {
+    # 1.9.0 (stage E121): a card's text is held to the cap of its view -- panel (B) stands where a
+    # news item's text does, full (C1) is the strip under the picture, the column card.
+    if ($entry.Type -eq 'card') {
+        if (@('panel', 'full') -cnotcontains $entry.View) {
+            Fail ("card {0} [{1}]: the view must come before the languages and be panel or full, found '{2}'" -f $entry.Id, $tag, $entry.View)
+        }
+        if ($entry.View -eq 'panel') { return $Caps[$tag].news }
+        if ($null -eq $Caps[$tag].card) {
+            $why = "card {0} [{1}]: {2} has no column card -- print the caps again with the instrument " +
+                "of fitting (print_the_caps_of_the_feed with LANGSW_FEED_CAPS_WRITE)"
+            Fail ($why -f $entry.Id, $tag, $CapsFile)
+        }
+        return $Caps[$tag].card
+    }
     if (@('update', 'news') -notcontains $entry.Type) {
         Fail ("entry {0} [{1}]: the type must come before the languages and be news or update, found '{2}'" -f $entry.Id, $tag, $entry.Type)
     }
@@ -165,13 +213,87 @@ function Test-Text($entry, [string]$tag, [string]$body) {
     $points = @((($body -replace "[`r`n]", '').Trim()).EnumerateRunes()).Count
     $cap = Cap-Of $entry $tag
     if ($points -gt $cap) {
-        $letter = if ($entry.Type -eq 'update') { 'Obnovlenie' } else { 'Novost' }
+        $letter = if ($entry.Type -eq 'update') { 'Obnovlenie' } elseif ($entry.Type -eq 'card') { 'Pismo ot avtora (card)' } else { 'Novost' }
         $why = "entry {0} ({1}) [{2}]: the text is {3} characters (code points, line breaks not counted), " +
             "the cap of {1} is {4} ({5}, line {6}) -- a longer text makes the letter '{7}' lower the " +
             "type size of the program; shorten the text"
         Fail ($why -f $entry.Id, $entry.Type, $tag, $points, $cap, $CapsFile, $Caps[$tag].Line, $letter)
     }
     $script:TextsChecked++
+}
+
+# 1.9.0 (stage E121): the format and the size in pixels of a picture out of its header, the way the
+# program reads them (cards::sniff): PNG -- the signature and IHDR; JPEG -- the markers up to the
+# first frame header (SOF0..SOF15 but DHT, JPG, DAC), every segment skipped by its length. $null for
+# anything else.
+function Get-PictureSize([byte[]]$b) {
+    $png = @(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    $isPng = $b.Length -ge 24
+    for ($i = 0; $isPng -and $i -lt 8; $i++) { if ($b[$i] -ne $png[$i]) { $isPng = $false } }
+    if ($isPng) {
+        if ([System.Text.Encoding]::ASCII.GetString($b, 12, 4) -cne 'IHDR') { return $null }
+        $w = ([long]$b[16] -shl 24) -bor ([long]$b[17] -shl 16) -bor ([long]$b[18] -shl 8) -bor [long]$b[19]
+        $h = ([long]$b[20] -shl 24) -bor ([long]$b[21] -shl 16) -bor ([long]$b[22] -shl 8) -bor [long]$b[23]
+        return [pscustomobject]@{ Format = 'PNG'; W = $w; H = $h }
+    }
+    if ($b.Length -ge 4 -and $b[0] -eq 0xFF -and $b[1] -eq 0xD8) {
+        $at = 2
+        while ($at + 3 -lt $b.Length) {
+            while ($at + 1 -lt $b.Length -and $b[$at] -eq 0xFF -and $b[$at + 1] -eq 0xFF) { $at++ }
+            if ($b[$at] -ne 0xFF) { return $null }
+            $marker = [int]$b[$at + 1]
+            if (($marker -ge 0xD0 -and $marker -le 0xD7) -or $marker -eq 0x01) { $at += 2; continue }
+            if ($marker -eq 0xD9 -or $marker -eq 0xDA) { return $null }
+            $length = ([int]$b[$at + 2] -shl 8) -bor [int]$b[$at + 3]
+            if ($length -lt 2) { return $null }
+            if ($marker -ge 0xC0 -and $marker -le 0xCF -and @(0xC4, 0xC8, 0xCC) -notcontains $marker) {
+                if ($at + 8 -ge $b.Length) { return $null }
+                $h = ([int]$b[$at + 5] -shl 8) -bor [int]$b[$at + 6]
+                $w = ([int]$b[$at + 7] -shl 8) -bor [int]$b[$at + 8]
+                return [pscustomobject]@{ Format = 'JPEG'; W = $w; H = $h }
+            }
+            $at += 2 + $length
+        }
+    }
+    return $null
+}
+
+# 1.9.0 (stage E121): the picture of a card -- the address in the one folder, the file of its name in
+# cards\ beside the feed, its signature of a format, its size in pixels for the view, at most 1 MB.
+# Answers the sum and the size this script writes into the card.
+function Test-CardPicture($card, [string]$value) {
+    if ($value -notmatch '^"([^"]*)"$') { Fail ("card {0}: image must be a quoted address, found {1}" -f $card.Id, $value) }
+    $url = $Matches[1]
+    if (-not $url.StartsWith($CardsPrefix, [System.StringComparison]::Ordinal)) {
+        Fail ("card {0}: image must start with {1} -- the program takes a picture from that folder of that host and from nowhere else; found {2}" -f $card.Id, $CardsPrefix, $url)
+    }
+    $rest = $url.Substring($CardsPrefix.Length)
+    if (($rest -notmatch '^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$') -or (@($rest -split '/') -contains '..') -or (@($rest -split '/') -contains '.') -or $rest.Length -gt 200) {
+        Fail ("card {0}: image must name a file under {1} by plain path segments; found {2}" -f $card.Id, $CardsPrefix, $url)
+    }
+    if (@('panel', 'full') -cnotcontains $card.View) {
+        Fail ("card {0}: the view must come before the image and be panel or full, found '{1}'" -f $card.Id, $card.View)
+    }
+    $file = Join-Path $SiteDir ('cards\' + ($rest -replace '/', '\'))
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+        Fail ("card {0}: no picture at {1} -- put the file in the folder cards\ beside the feed; it is published first, the feed after it" -f $card.Id, $file)
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($file)
+    if ($bytes.Length -eq 0 -or $bytes.Length -gt $CARD_IMAGE_CAP) {
+        Fail ("card {0}: the picture is {1} bytes, the limit is {2} (1 MB)" -f $card.Id, $bytes.Length, $CARD_IMAGE_CAP)
+    }
+    $picture = Get-PictureSize $bytes
+    if ($null -eq $picture) { Fail ("card {0}: {1} is not a PNG or a JPEG by its signature and header" -f $card.Id, $file) }
+    $want = $CardPixels[$card.View]
+    if ($picture.W -ne $want[0] -or $picture.H -ne $want[1]) {
+        $why = "card {0}: the picture of a {1} card is {2} x {3} pixels, found {4} x {5} -- twice the largest " +
+            "window; the program makes it smaller below 200 %"
+        Fail ($why -f $card.Id, $card.View, $want[0], $want[1], $picture.W, $picture.H)
+    }
+    $sum = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+    $card.Image = $url
+    Write-Host ("  card {0,-4} picture {1}, {2} x {3}, {4} bytes  ok" -f $card.Id, $picture.Format, $picture.W, $picture.H, $bytes.Length)
+    return @($sum, $bytes.Length)
 }
 
 Write-Host '======================================================================'
@@ -181,6 +303,8 @@ Write-Host ("File      {0}" -f $Path)
 Write-Host ("Key       {0}" -f $(if ($Reserve) { 'RESERVE' } else { 'working' }))
 
 if (-not (Test-Path -LiteralPath $Path)) { Fail ("no such file: {0}" -f $Path) }
+# 1.9.0 (stage E121): the folder of the feed -- the pictures of the cards lie in cards\ beside it.
+$SiteDir = Split-Path -Parent ([System.IO.Path]::GetFullPath($Path))
 
 # --- 1. The body, in the bytes it will be signed in --------------------------------------------
 $text = [System.IO.File]::ReadAllText($Path, [System.Text.UTF8Encoding]::new($false))
@@ -234,8 +358,14 @@ $TextsChecked = 0
 $collecting = $false
 $awaitFirst = $false
 $gathered = New-Object System.Collections.Generic.List[string]
+# 1.9.0 (stage E121): the cards, and the lines of the document as they will be signed -- the same
+# lines, but for the sum and the size of each card's picture, which this script writes itself.
+$cards = @()
+$out = New-Object System.Collections.Generic.List[string]
 
 foreach ($line in $lines) {
+    $out.Add($line)
+
     # STAGE E120 (decision 208.194): a text of several lines is gathered WHOLE before anything else
     # reads the line -- inside it a blank line, a '#' or a '[' is text, not a comment or a table --
     # and measured against the cap of its language when its closing quotes come. Until E120 only
@@ -262,11 +392,33 @@ foreach ($line in $lines) {
     if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
 
     if ($trimmed -eq '[[item]]') {
-        if ($current) { $items += $current }
-        $current = [pscustomobject]@{ Id = $null; Type = $null; Version = $null; Languages = @(); Fields = @{}; Texts = @{} }
+        if ($current) { if ($current.IsCard) { $cards += $current } else { $items += $current } }
+        $current = [pscustomobject]@{ Id = $null; Type = $null; Version = $null; Languages = @(); Fields = @{}; Texts = @{}; IsCard = $false }
         $language = $null
         $section = 'item'
         continue
+    }
+
+    # 1.9.0 (stage E121): a card of the author -- a top-level array of its own (decision 208.244 p. 5).
+    if ($trimmed -eq '[[card]]') {
+        if ($current) { if ($current.IsCard) { $cards += $current } else { $items += $current } }
+        $current = [pscustomobject]@{ Id = $null; Type = 'card'; View = $null; Side = $null; From = $null; To = $null; Image = $null; Languages = @(); Fields = @{}; Texts = @{}; IsCard = $true }
+        $language = $null
+        $section = 'card'
+        continue
+    }
+    if ($trimmed -match '^\[card\.([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\]$') {
+        if (-not $current -or -not $current.IsCard) { Fail ("[card.{0}] outside a card" -f $Matches[1]) }
+        $language = $Matches[1]
+        if ($current.Languages -ccontains $language) { Fail ("card {0}: [card.{1}] is given twice" -f $current.Id, $language) }
+        $current.Languages += $language
+        $current.Texts[$language] = [pscustomobject]@{ Title = $false; Text = $false }
+        $section = 'language'
+        Test-Language $current $language
+        continue
+    }
+    if ($trimmed -match '^\[\[?\s*card\s*\.') {
+        Fail ("card {0}: {1} is not a language table -- a card has the fields {2} and [card.<tag>] with a title and a text" -f $current.Id, $trimmed, ($CardFields -join ', '))
     }
 
     # STAGE E108 (T-108-2): a tag is two or three letters and, for the second Serbian and the second
@@ -275,6 +427,7 @@ foreach ($line in $lines) {
     # the count without a word.
     if ($trimmed -match '^\[item\.([A-Za-z]{2,3}(?:-[A-Za-z]{4})?)\]$') {
         if (-not $current) { Fail 'a language table before the first [[item]]' }
+        if ($current.IsCard) { Fail ("card {0}: [item.{1}] under a card -- a card's languages are [card.<tag>]" -f $current.Id, $Matches[1]) }
         $language = $Matches[1]
         if ($current.Languages -ccontains $language) {
             Fail ("entry {0}: [item.{1}] is given twice -- {2}" -f $current.Id, $language, $WholeFeed)
@@ -362,6 +515,37 @@ foreach ($line in $lines) {
 
     if ($section -eq 'top' -and $trimmed -match '^schema\s*=\s*(\d+)') { $schema = [int]$Matches[1]; continue }
 
+    # 1.9.0 (stage E121): a field of a card. The sum and the size are this script's: the lines the
+    # author wrote are dropped, and the ones this script reads off the picture go under `image`.
+    if ($section -eq 'card') {
+        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$') {
+            Fail ("card {0}: the line '{1}' is not 'key = value'" -f $current.Id, $trimmed)
+        }
+        $key = $Matches[1]
+        $value = $Matches[2]
+        if ($CardFields -cnotcontains $key) {
+            Fail ("card {0}: unknown field '{1}' -- a card has {2} and its language tables [card.<tag>]" -f $current.Id, $key, ($CardFields -join ', '))
+        }
+        if ($current.Fields.ContainsKey($key)) { Fail ("card {0} gives {1} twice" -f $current.Id, $key) }
+        $current.Fields[$key] = $true
+        switch -CaseSensitive ($key) {
+            'id' { if ($value -match '^\d+$') { $current.Id = [long]$value } else { Fail ("card: id must be a whole number, found {0}" -f $value) } }
+            'from' { $current.From = $value }
+            'to' { $current.To = $value }
+            'view' { if ($value -match '^"([a-z]+)"$') { $current.View = $Matches[1] } else { Fail ("card {0}: view must be a quoted word, found {1}" -f $current.Id, $value) } }
+            'side' { if ($value -match '^"([a-z]+)"$') { $current.Side = $Matches[1] } else { Fail ("card {0}: side must be a quoted word, found {1}" -f $current.Id, $value) } }
+        }
+        if ($key -eq 'sha256' -or $key -eq 'size') {
+            $out.RemoveAt($out.Count - 1)
+        }
+        if ($key -eq 'image') {
+            $picture = Test-CardPicture $current $value
+            $out.Add(('sha256 = "{0}"' -f $picture[0]))
+            $out.Add(('size = {0}' -f $picture[1]))
+        }
+        continue
+    }
+
     # 1.8.1 (decision 208.242): a field of an entry is one of the five a released version knows. Any
     # other key -- a typo such as `url =`, a new one such as `layout =` -- is read by it as a language
     # table and the whole feed is refused; until 1.8.1 this loop let it through without a word.
@@ -386,7 +570,7 @@ foreach ($line in $lines) {
     }
 }
 
-if ($current) { $items += $current }
+if ($current) { if ($current.IsCard) { $cards += $current } else { $items += $current } }
 
 if ($collecting) { Fail ("entry {0} [{1}]: a text opened with three quotes is never closed" -f $current.Id, $language) }
 
@@ -437,6 +621,75 @@ foreach ($item in $items) {
 
 Write-Host '  every entry has ru and en     ok'
 Write-Host '  identifiers unique, ascending ok'
+
+# --- 2a. The author's cards (1.9.0, stage E121, decision 208.244) -----------------------------------
+if ($cards.Count -gt $CARDS_KEPT) { Fail ("{0} cards, the program keeps {1}" -f $cards.Count, $CARDS_KEPT) }
+
+$seenCards = @{}
+$previousCard = -1
+$day = {
+    param($card, [string]$name, [string]$value)
+    if ($value -notmatch '^"?(\d{4}-\d{2}-\d{2})"?$') { Fail ("card {0}: {1} must be a date YYYY-MM-DD, found '{2}'" -f $card.Id, $name, $value) }
+    $parsed = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact($Matches[1], 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+        Fail ("card {0}: {1} {2} is no day of the calendar" -f $card.Id, $name, $value)
+    }
+    return $parsed
+}
+
+foreach ($card in $cards) {
+    if ($null -eq $card.Id) { Fail 'a card with no id' }
+    if ($seenCards.ContainsKey($card.Id)) { Fail ("card id {0} appears twice" -f $card.Id) }
+    if ($card.Id -le $previousCard) { Fail ("card id {0} does not follow {1}: identifiers must ascend" -f $card.Id, $previousCard) }
+    $seenCards[$card.Id] = $true
+    $previousCard = $card.Id
+
+    if ($null -eq $card.From -or $null -eq $card.To) { Fail ("card {0} has no term -- from and to" -f $card.Id) }
+    $from = & $day $card 'from' $card.From
+    $to = & $day $card 'to' $card.To
+    if ($from -gt $to) { Fail ("card {0}: the term runs backwards, {1} after {2}" -f $card.Id, $card.From, $card.To) }
+    if ($to -lt [datetime]::Today) { Fail ("card {0}: the term is over -- it ended on {1}" -f $card.Id, $card.To) }
+
+    if (@('panel', 'full') -cnotcontains $card.View) { Fail ("card {0}: view must be panel or full, found '{1}'" -f $card.Id, $card.View) }
+    if ($card.View -eq 'full' -and $null -ne $card.Side) { Fail ("card {0}: a full card has no side" -f $card.Id) }
+    if ($null -ne $card.Side -and @('start', 'end') -cnotcontains $card.Side) { Fail ("card {0}: side must be start or end, found '{1}'" -f $card.Id, $card.Side) }
+    if ($null -eq $card.Image) { Fail ("card {0} has no image -- the views panel and full are its picture" -f $card.Id) }
+
+    foreach ($needed in @('ru', 'en')) {
+        if ($card.Languages -notcontains $needed) { Fail ("card {0} has no [{1}] text -- ru and en are obligatory" -f $card.Id, $needed) }
+    }
+    foreach ($tag in $card.Languages) {
+        foreach ($part in @('Title', 'Text')) {
+            if (-not $card.Texts[$tag].$part) { Fail ("card {0} [{1}] has no {2}" -f $card.Id, $tag, $part.ToLowerInvariant()) }
+        }
+    }
+
+    Write-Host ("  card  {0,-4} {1,-5} {2} -- {3}  languages: {4}" -f $card.Id, $card.View, $card.From, $card.To, ($card.Languages -join ' '))
+}
+
+if ($cards.Count -gt 0) {
+    # The document as it is signed: the same lines, the sum and the size of each picture this
+    # script's own. The cap of the body is asked again of it.
+    $text = $out -join "`n"
+    $body = [System.Text.UTF8Encoding]::new($false).GetBytes($text)
+    if ($body.Length -gt $BODY_CAP) { Fail ("the body is {0} bytes, the limit is {1}" -f $body.Length, $BODY_CAP) }
+    # One sum and one size per card in what is signed -- the ones read off the pictures.
+    $sums = @(); $sizes = 0; $others = 0; $inCard = $false
+    foreach ($signed in $out) {
+        $t = $signed.Trim()
+        if ($t -eq '[[card]]') { $inCard = $true; continue }
+        if ($t.StartsWith('[')) { $inCard = $false; continue }
+        if (-not $inCard) { continue }
+        if ($t -cmatch '^sha256 = "([0-9a-f]{64})"$') { $sums += $Matches[1] }
+        elseif ($t -cmatch '^size = \d+$') { $sizes++ }
+        elseif ($t -match '^(sha256|size)\s*=') { $others++ }
+    }
+    if ($sums.Count -ne $cards.Count -or $sizes -ne $cards.Count -or $others -ne 0) {
+        Fail ("the signed body has {0} sums and {1} sizes of its own for {2} card(s), {3} of the author's" -f $sums.Count, $sizes, $cards.Count, $others)
+    }
+    foreach ($sum in $sums) { Write-Host ("  signed: sha256 = {0}" -f $sum) }
+    Write-Host ("  {0} card(s): the sum and the size written from cards\  ok" -f $cards.Count)
+}
 
 # --- 2b. The tables of the updater (stage E104, TZ E104 p. 16) --------------------------------------
 # What the updater installs is what this script lets through, so every rule of p. 16 is a refusal
