@@ -2840,7 +2840,7 @@ fn the_classic_console_packet_carries_no_unicode_event() {
     assert_eq!(
         stream
             .iter()
-            .filter(|event| event.is_backspace(false))
+            .filter(|event| is_scan_backspace(event, false))
             .count(),
         6,
         "the six characters on the screen are erased, as FR-41 erases them"
@@ -2888,8 +2888,8 @@ fn the_classic_console_releases_switches_and_then_sends_one_packet() {
     );
 }
 
-/// The keystroke packet itself: the six backspaces of FR-41, then the six keys of the run **by
-/// their scan codes** — `KEYEVENTF_SCANCODE`, `wVk` zero, the extended flag as recorded (none, for
+/// The keystroke packet itself: the six backspaces of FR-41 (by the scan code `0E` since stage
+/// E122), then the six keys of the run **by their scan codes** — `KEYEVENTF_SCANCODE`, `wVk` zero, the extended flag as recorded (none, for
 /// the main block), down and up — no `Shift` for a word typed without one, and the signature of
 /// FR-03 on every event, so that the keys coming back through the hook are the program's own and
 /// the next press still converts what the user typed (FR-32; the third press of П4).
@@ -2910,7 +2910,7 @@ fn the_classic_console_packet_is_the_backspaces_then_the_users_keys_by_scan_code
 
     for (index, event) in packet[..12].iter().enumerate() {
         assert!(
-            event.is_backspace(index % 2 == 1),
+            is_scan_backspace(event, index % 2 == 1),
             "event {index} erases — {event:?}"
         );
     }
@@ -3144,7 +3144,7 @@ fn the_second_press_in_the_classic_console_takes_the_same_path_back() {
     assert_eq!(
         packet
             .iter()
-            .filter(|event| event.is_backspace(false))
+            .filter(|event| is_scan_backspace(event, false))
             .count(),
         6
     );
@@ -3469,6 +3469,168 @@ mod resolver_live {
 
         // SAFETY: `window` is the live window created above, owned by this thread.
         unsafe { DestroyWindow(window) }.expect("DestroyWindow");
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Stage E122 — the windows of AnyDesk and RustDesk take the keystroke path of the classic console
+// (решения 208.250, 208.251). A viewer passes on keys with their scan codes and loses or mangles
+// the rest: `Shift` and `Backspace` with `wScan = 0` did not reach the remote side of AnyDesk (0 of
+// 14), and RustDesk translate/legacy typed `825b` for the `KEYEVENTF_UNICODE` of `привет`.
+// ---------------------------------------------------------------------------------------
+
+/// The session window of AnyDesk 9.8.4 — written out here, as the console's class is, so that a test
+/// cannot follow the module into a wrong spelling.
+const ANYDESK_VIEWER: &str = "ad_win#2";
+
+/// The session window of RustDesk 1.5.3.
+const RUSTDESK_VIEWER: &str = "RustdeskMultiWindow";
+
+/// The scan code of `Backspace` — set 1, main block.
+const SCAN_BACKSPACE: u16 = 0x0E;
+
+/// Whether `event` is a `Backspace` of the keystroke path going down or up: named by its scan code
+/// — `KEYEVENTF_SCANCODE`, `wVk` zero, no extended flag — as the keys after it are.
+fn is_scan_backspace(event: &Event, up: bool) -> bool {
+    event.vk == 0
+        && event.scan == SCAN_BACKSPACE
+        && event.flags & KEYEVENTF_SCANCODE.0 != 0
+        && event.flags & KEYEVENTF_EXTENDEDKEY.0 == 0
+        && (event.flags & KEYEVENTF_KEYUP.0 != 0) == up
+}
+
+/// **⭐ The red «до» of stage E122 (1).** Under `auto` the session windows of AnyDesk (`ad_win#` and a
+/// number: `#2` is the session window of 9.8.4, `#3` its other windows) and of RustDesk get the
+/// keystroke path, case-insensitively, as every class of FR-42а.
+#[test]
+fn the_viewers_of_anydesk_and_rustdesk_resolve_auto_to_keystrokes() {
+    for class in [
+        ANYDESK_VIEWER,
+        "ad_win#3",
+        "AD_WIN#2",
+        "ad_win#10",
+        RUSTDESK_VIEWER,
+        "rustdeskmultiwindow",
+    ] {
+        assert_eq!(
+            inject::resolve_auto(Some(class)),
+            inject::Delivery::Keystrokes,
+            "{class}: the viewer passes on keys by their scan codes, and only them"
+        );
+    }
+}
+
+/// The list is closed, as FR-42а's always was: a class that only looks like a viewer's, the main
+/// window of RustDesk (`FLUTTER_RUNNER_WIN`) and the viewers nobody asked for — TightVNC works
+/// without the keys, RDP gains nothing from them — keep the path of FR-42.
+#[test]
+fn only_the_two_viewers_take_the_keystroke_path() {
+    for class in [
+        "ad_win#",
+        "ad_win#x",
+        "ad_win#2a",
+        "ad_win2",
+        "ad_win",
+        "xad_win#2",
+        "RustdeskMultiWindow2",
+        "XRustdeskMultiWindow",
+        "FLUTTER_RUNNER_WIN",
+        "FLUTTERVIEW",
+        "TvnWindowClass",
+        "TscShellContainerClass",
+    ] {
+        assert_eq!(
+            inject::resolve_auto(Some(class)),
+            ReplacementMethod::Selection,
+            "{class} is not a viewer of the list"
+        );
+    }
+}
+
+/// **⭐ The red «до» of stage E122 (2).** The backspaces of the keystroke path go by their scan code,
+/// as the keys after them do: AnyDesk did not pass on a `Backspace` with `wScan = 0` (the form probe
+/// of `reports\ANYDESK-RESEARCH.md`), and the delivery measured 2 of 2 in RustDesk translate and
+/// legacy sent `0E` by `KEYEVENTF_SCANCODE`.
+#[test]
+fn the_backspaces_of_the_keystroke_path_go_by_their_scan_code() {
+    let strokes = ghbdtn();
+    let mut bench = Bench::new();
+
+    inject::replace_in_with(
+        &mut bench,
+        &strokes,
+        &russian(),
+        inject::OnScreen::as_typed(&strokes),
+        0,
+        inject::Delivery::Keystrokes,
+    )
+    .expect("sized");
+
+    let packet = &bench.sent()[0];
+
+    for (index, event) in packet[..12].iter().enumerate() {
+        assert!(
+            is_scan_backspace(event, index % 2 == 1),
+            "event {index} erases by the scan code of Backspace — {event:?}"
+        );
+    }
+}
+
+/// A press in the window of a viewer is the press of the classic console, whole: the switch before
+/// the one packet, and **every** event of that packet a key named by its scan code — not one event
+/// with `wScan = 0`, not one `KEYEVENTF_UNICODE` — with the signature of FR-03.
+#[test]
+fn a_press_in_a_viewer_switches_first_and_sends_only_scan_codes() {
+    for class in [ANYDESK_VIEWER, RUSTDESK_VIEWER] {
+        let mut bench = Bench::new();
+        press_in_a_window_of(class, &mut bench);
+
+        assert!(
+            matches!(bench.log[..], [Step::Held(_), Step::Switch, Step::Send(_)]),
+            "{class}: release (nothing held), switch, packet — {:?}",
+            bench.log
+        );
+
+        let packet = &bench.sent()[0];
+        assert_eq!(packet.len(), 6 * 2 + 6 * 2, "{class}");
+        assert!(
+            packet.iter().all(|event| event.vk == 0
+                && event.scan != 0
+                && event.flags & KEYEVENTF_SCANCODE.0 != 0
+                && event.flags & KEYEVENTF_UNICODE.0 == 0
+                && event.extra == INJECTED_SIGNATURE),
+            "{class}: keys by scan code only — {packet:?}"
+        );
+        assert_eq!(
+            packet[12..]
+                .iter()
+                .filter(|event| event.flags & KEYEVENTF_KEYUP.0 == 0)
+                .map(|event| event.scan)
+                .collect::<Vec<_>>(),
+            GHBDTN,
+            "{class}: the user's keys again"
+        );
+    }
+}
+
+/// The other paths are not touched by stage E122: the packets of FR-41 and FR-42 keep their
+/// `Backspace`, `Shift` and `Left` as virtual keys with `wScan = 0`, exactly as before.
+#[test]
+fn the_other_paths_keep_their_keys_as_virtual_keys() {
+    for class in [TERMINAL, "Notepad"] {
+        let mut bench = Bench::new();
+        press_in_a_window_of(class, &mut bench);
+
+        let packet = &bench.sent()[0];
+        let keys: Vec<&Event> = packet.iter().filter(|event| !event.is_unicode()).collect();
+
+        assert!(!keys.is_empty(), "{class}: the packet erases");
+        assert!(
+            keys.iter().all(|event| event.vk != 0
+                && event.scan == 0
+                && event.flags & KEYEVENTF_SCANCODE.0 == 0),
+            "{class}: virtual keys with wScan = 0 — {keys:?}"
+        );
     }
 }
 
@@ -5070,7 +5232,7 @@ fn only_the_method_backspace_is_sent_by_the_selection_in_notepad() {
         bench
             .stream()
             .iter()
-            .filter(|e| e.is_backspace(false))
+            .filter(|e| is_scan_backspace(e, false))
             .count(),
         6,
         "the keys of the classic console are not rerouted"

@@ -1168,6 +1168,11 @@ pub fn build_packet(
 /// matter; that it is **ours** and balanced inside the packet does — see [`build_keystrokes`].
 const SCAN_LEFT_SHIFT: u16 = 0x2A;
 
+/// The scan code of `Backspace` — set 1, main block — the erasure of the keystroke path (stage
+/// E122): named by its scan code, as the keys after it are, because the viewer of AnyDesk does not
+/// pass on a key with `wScan = 0` (see [`REMOTE_VIEWER_CLASSES`]).
+const SCAN_BACKSPACE: u16 = 0x0E;
+
 /// How many `INPUT` structures the keystroke packet of `strokes` after `erase` backspaces takes.
 ///
 /// `erase * 2` for the backspaces, as FR-41 counts them; two for every key (down, up), and two more
@@ -1221,11 +1226,18 @@ pub fn keys_repeat_the_conversion(strokes: &[Keystroke], target: &LayoutMap) -> 
 /// that is [`InjectError::OutputTooSmall`] and nothing is written — [`build_replacement`]'s rule.
 ///
 /// ```text
-/// Backspace down, Backspace up       × N — the characters on the screen, OnScreen, as FR-41
+/// Backspace down, Backspace up       × N — the characters on the screen, OnScreen, as FR-41;
+///                                     KEYEVENTF_SCANCODE 0E (stage E122)
 /// [Shift down]                        ours, only before a key the user typed with Shift
 /// key down, key up                    KEYEVENTF_SCANCODE, the extended flag of FR-05
 /// [Shift up]                          ours, at once — before the next key
 /// ```
+///
+/// ⭐ **Every event is a key named by its scan code — stage E122.** The windows of the viewers of
+/// [`REMOTE_VIEWER_CLASSES`] pass on to the remote side what a keyboard would send and nothing else:
+/// AnyDesk dropped every key with `wScan = 0` (`Shift` 0 of 14, `Backspace` 1 of 1), and the
+/// backspaces of this packet, virtual keys until 1.9.0, went by their scan code from then on. The
+/// classic console takes either form: the system gives it `VK_BACK` for `0E` in every layout.
 ///
 /// **Not one `KEYEVENTF_UNICODE` event.** The layout of the console decides what each key gives,
 /// and the switch of FR-50 has already been made when this packet goes out — that order is
@@ -1254,8 +1266,8 @@ pub fn build_keystrokes(
     let mut written = 0;
 
     for _ in 0..erase {
-        out[written] = key_event(BACKSPACE, false, false);
-        out[written + 1] = key_event(BACKSPACE, false, true);
+        out[written] = scan_event(SCAN_BACKSPACE, false, false);
+        out[written + 1] = scan_event(SCAN_BACKSPACE, false, true);
         written += 2;
     }
 
@@ -1330,6 +1342,59 @@ pub const CONSOLE_WINDOW_CLASSES: [&str; 2] =
 /// separates them reads as a name and not as an index.
 pub const CLASSIC_CONSOLE_CLASS: &str = CONSOLE_WINDOW_CLASSES[0];
 
+/// ⭐ **The windows of remote desktop viewers whose replacement under `auto` is typed by keys** —
+/// stage E122, решения 208.250 и 208.251: the session window of AnyDesk (`ad_win#` and a number;
+/// `ad_win#2` in AnyDesk 9.8.4) and of RustDesk (`RustdeskMultiWindow`, RustDesk 1.5.3). Compared by
+/// [`is_remote_viewer`].
+///
+/// With the program on the controlling side, the viewer is the window in front, and what it passes
+/// on to the remote side is not what the window got:
+///
+/// * **AnyDesk** (`reports\ANYDESK-RESEARCH.md`) drops every injected key with `wScan = 0` — the
+///   `Shift` of FR-42 reached the remote side 0 times of 14 — so nothing was selected, and the
+///   insertion landed in front of the word: `приветghbdtn` 13 of 13, in all three keyboard modes.
+/// * **RustDesk** (`reports\REMOTE-DESKTOP-RESEARCH.md`) takes the low byte of a `KEYEVENTF_UNICODE`
+///   unit for a key in its modes translate and legacy: `привет` came out as `825b`; in map (the
+///   default) the characters are lost.
+///
+/// What both pass on is a key with its scan code — and the keystroke path of the classic console is
+/// exactly that ([`build_keystrokes`]): the layout of the viewer's window switched first, then
+/// `Backspace` × N and the user's keys again, by their scan codes. The prototype of that packet
+/// measured 2 of 2 in RustDesk translate and in legacy, the next word Russian. The keys mean what
+/// the layout of the side that turns them into characters makes of them, so the path does not
+/// switch the layout of a remote machine whose viewer sends scan codes (AnyDesk Remote, RustDesk
+/// map): there the next word stays in the old layout.
+///
+/// ⚠ **Closed, as [`CONSOLE_WINDOW_CLASSES`] is.** TightVNC works on the path of FR-42 already, and
+/// in RDP the keys would add nothing (mstsc gives the program's keys their scan codes itself); a
+/// viewer nobody measured is not here.
+pub const REMOTE_VIEWER_CLASSES: [&str; 2] = [ANYDESK_VIEWER_PREFIX, RUSTDESK_VIEWER_CLASS];
+
+/// The class of the session window of AnyDesk without its number — `ad_win#2` in 9.8.4; the number
+/// is the program's own (`ad_win#3` is another window of it), so it is any number.
+const ANYDESK_VIEWER_PREFIX: &str = "ad_win#";
+
+/// The class of the session window of RustDesk. Its main window is `FLUTTER_RUNNER_WIN` and is not a
+/// viewer.
+const RUSTDESK_VIEWER_CLASS: &str = "RustdeskMultiWindow";
+
+/// ⭐ **Whether `class` is a window of [`REMOTE_VIEWER_CLASSES`]** — stage E122. `RustdeskMultiWindow`
+/// itself, or `ad_win#` followed by one or more decimal digits and nothing else; case-insensitively,
+/// as every class of FR-42а.
+pub fn is_remote_viewer(class: &str) -> bool {
+    if class.eq_ignore_ascii_case(RUSTDESK_VIEWER_CLASS) {
+        return true;
+    }
+
+    let prefix = ANYDESK_VIEWER_PREFIX.len();
+
+    class
+        .get(..prefix)
+        .is_some_and(|head| head.eq_ignore_ascii_case(ANYDESK_VIEWER_PREFIX))
+        && class.len() > prefix
+        && class[prefix..].bytes().all(|byte| byte.is_ascii_digit())
+}
+
 /// **What a press really runs** — the method of FR-42 and FR-42а resolved, and the one path the
 /// configuration does not name: the keys of the classic console (stage Э96, decision 160.8).
 ///
@@ -1347,7 +1412,8 @@ pub enum Delivery {
     Selection,
     /// ⭐ Stage Э96: the switch of FR-50 **first**, then one packet — `N` × `Backspace` and the keys
     /// the user pressed, again, by their scan codes. `auto` in a window of
-    /// [`CLASSIC_CONSOLE_CLASS`] only. See [`build_keystrokes`].
+    /// [`CLASSIC_CONSOLE_CLASS`] and, since stage E122, of [`REMOTE_VIEWER_CLASSES`] only. See
+    /// [`build_keystrokes`].
     Keystrokes,
 }
 
@@ -1379,7 +1445,9 @@ impl PartialEq<ReplacementMethod> for Delivery {
 /// **FR-42а: the pure half of the choice.** The delivery a window of class `class` gets under
 /// `method = "auto"` — since stage Э96 three answers, not two: the classic console
 /// ([`CLASSIC_CONSOLE_CLASS`]) gets [`Delivery::Keystrokes`], Windows Terminal
-/// [`Delivery::Backspace`], every other window [`Delivery::Selection`].
+/// [`Delivery::Backspace`], every other window [`Delivery::Selection`]. Since stage E122 the
+/// windows of the viewers of AnyDesk and RustDesk ([`REMOTE_VIEWER_CLASSES`]) get
+/// [`Delivery::Keystrokes`] too.
 ///
 /// `None` means the class could not be read at all — no foreground window, or a
 /// `GetClassNameW` refusal ([`foreground_window_class`] documents both) — and an empty string
@@ -1401,6 +1469,8 @@ impl PartialEq<ReplacementMethod> for Delivery {
 pub fn resolve_auto(class: Option<&str>) -> Delivery {
     match class {
         Some(class) if class.eq_ignore_ascii_case(CLASSIC_CONSOLE_CLASS) => Delivery::Keystrokes,
+        // Stage E122: the windows of the viewers of AnyDesk and RustDesk.
+        Some(class) if is_remote_viewer(class) => Delivery::Keystrokes,
         Some(class)
             if CONSOLE_WINDOW_CLASSES
                 .iter()
