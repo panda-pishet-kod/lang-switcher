@@ -22,18 +22,18 @@
 
 use crate::ui::canvas::Rect;
 use crate::ui::scene::{Art, ButtonKind, FieldKind, ListItem, Node, Surface, Window, WindowKind};
-use crate::ui::scene::{MenuState, OnPicture, Trailing};
+use crate::ui::scene::{MenuState, OnPicture, PhotoPlace, Trailing};
 use crate::ui::text::{Align, Measure, Style, Wrap};
 use crate::ui::tokens::{
     self, BLOCK_GAP, BLOCK_PAD, BLOCK_ROW_GAP, BRAND_FROM_BOTTOM, BRAND_FROM_EDGE, BUTTON_GAP,
-    BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CHECK, CHOICE_PAD,
-    CLASS_LARGE_FROM, CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em,
-    FIELD_LABEL_GAP, FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP,
-    LETTER_CARD_PAD, LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD,
-    NARROW_ART, NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE,
-    ROW_GROUP_PAD, ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART,
-    TOGGLE, TOGGLE_MIN, TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN,
-    WIZARD_BUTTON_ROW_ABOVE,
+    BUTTON_MIN_HEIGHT, BUTTON_PAD, BUTTON_PRIMARY_WEIGHT, BUTTON_ROW_ABOVE, CARD_BAND_SHARE,
+    CARD_STRIP_GAP, CARD_STRIP_LINES, CARD_STRIP_PAD_V, CHECK, CHOICE_PAD, CLASS_LARGE_FROM,
+    CLASS_ORDINARY_FROM, CONTENT_MAX_WIDTH, CONTENT_PAD, CONTROL_GAP, Em, FIELD_LABEL_GAP,
+    FIELD_PAD, FIELD_TEXT_LINES, FRAME_MIN, HEADER_SUBTITLE_GAP, HEADER_TITLE_GAP, LETTER_CARD_PAD,
+    LINE, LIST_BAR, LIST_PAD, LIST_ROW_PAD, LIST_VISIBLE_ROWS, MULTILINE_PAD, NARROW_ART,
+    NARROW_PAD, NESTED_PAD, NOTE_PAD, PAIR_MIN_HALF, PANEL_ART, PANEL_SHARE, ROW_GROUP_PAD,
+    ROW_GROUP_ROW, Role, SECTION_GAP, SECTION_PAD, SEGMENT_PAD, SETTINGS_ART, TOGGLE, TOGGLE_MIN,
+    TWO_COLUMNS_FROM, WINDOW_MAX, WINDOW_MIN, WINDOW_OPEN_MIN, WIZARD_BUTTON_ROW_ABOVE,
 };
 use crate::ui::tokens::{
     ART_RING, BADGE_GAP, CHOICE_ICON_PLATE, CHOICE_IN_LIST_PAD, CHOICE_NEXT_GAP, TYPE_FLOOR,
@@ -143,6 +143,21 @@ pub fn window_size(area_w: f32, area_h: f32) -> WindowSize {
     }
 }
 
+/// The side of the picture of a card the line of the theme runs along — toward the content (§3: the
+/// frame of the picture is the colour of the theme). `Start` and `End` are of the line before the
+/// mirror of a language read right to left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhotoEdge {
+    /// The picture at the start of the line: the line at its end side.
+    End,
+    /// The picture at the end of the line: the line at its start side.
+    Start,
+    /// The picture over the text: the line under it.
+    Bottom,
+    /// The picture of the whole window: the line is the strip's.
+    None,
+}
+
 /// The state a status line reports (passport §6: the dot `accent`, `ink3` or `warn`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -156,6 +171,14 @@ pub enum Status {
 pub enum Part {
     /// The panel with the picture.
     Panel,
+    /// ⭐ The picture of an author's card (stage Э121): held by `ui::photo` under `key`; `whole` —
+    /// the picture of the whole window (В1), whose middle is never cut; `edge` — the side of the
+    /// rectangle the line of the theme runs along, toward the content.
+    Photo {
+        key: u64,
+        whole: bool,
+        edge: PhotoEdge,
+    },
     /// A picture of the panda in its circle.
     Art(Art),
     Surface(Surface),
@@ -341,6 +364,7 @@ impl Part {
     pub fn name(&self) -> &'static str {
         match self {
             Part::Panel => "panel",
+            Part::Photo { .. } => "card picture",
             Part::Art(_) => "picture",
             Part::Surface(_) => "surface",
             Part::Text { .. } => "text",
@@ -584,7 +608,9 @@ fn lay_out_in<I: Copy>(
         h: size.h,
         one_column: size.w < TWO_COLUMNS_FROM.0,
         kind: window.kind,
-        art: window.art,
+        // The author's picture of a card is no circle beside the heading of a narrow window: it
+        // stands as a band over the text (Б) or over the whole window (В1) — stage Э121.
+        art: window.art.filter(|art| !matches!(art, Art::Photo(_))),
         plain,
         picture: None,
         sections_at: None,
@@ -835,12 +861,64 @@ impl<I: Copy> Placer<'_, I> {
                 h: h - size.h,
             };
         }
+        // ⭐ Stage Э121: the picture of a card over the whole window (В1) is a layout of its own.
+        if let Some(Art::Photo(photo)) = window.art
+            && photo.place == PhotoPlace::Whole
+        {
+            return self.photo_window(window, size, photo.key);
+        }
         // One column under the width of two (208.168: 880), whatever the class of type sizes.
         let narrow = size.w < TWO_COLUMNS_FROM.0;
         let (mut area_x, mut area_w) = (0.0, size.w);
         let mut brand_line: Vec<Placed<I>> = Vec::new();
 
-        if let (Some(art), false) = (window.art, narrow) {
+        // ⭐ Stage Э121, the view Б of a card: the author's picture in place of the panel — no dots,
+        // no circle, no line of the brand over it — at the start or the end of the line (the mirror
+        // of a language read right to left changes the sides; the picture is not turned). A narrow
+        // window has no panel: the picture is a band over the text, the text under it.
+        let mut band = 0.0;
+        let photo = match window.art {
+            Some(Art::Photo(photo)) => Some(photo),
+            _ => None,
+        };
+        if let Some(photo) = photo {
+            if narrow {
+                band = (size.h * CARD_BAND_SHARE.0).round();
+                self.push(
+                    Part::Photo {
+                        key: photo.key,
+                        whole: false,
+                        edge: PhotoEdge::Bottom,
+                    },
+                    Rect::new(0.0, 0.0, size.w, band),
+                    None,
+                );
+            } else {
+                let panel = size.w * PANEL_SHARE.0;
+                let at_end = photo.place == PhotoPlace::End;
+                self.push(
+                    Part::Photo {
+                        key: photo.key,
+                        whole: false,
+                        edge: if at_end {
+                            PhotoEdge::Start
+                        } else {
+                            PhotoEdge::End
+                        },
+                    },
+                    Rect::new(
+                        if at_end { size.w - panel } else { 0.0 },
+                        0.0,
+                        panel,
+                        size.h,
+                    ),
+                    None,
+                );
+                (area_x, area_w) = (if at_end { 0.0 } else { panel }, size.w - panel);
+            }
+        }
+
+        if let (Some(art), false, None) = (window.art, narrow, photo) {
             let panel = size.w * PANEL_SHARE.0;
             self.push(Part::Panel, Rect::new(0.0, 0.0, panel, size.h), None);
             let circle = match window.kind {
@@ -942,7 +1020,7 @@ impl<I: Copy> Placer<'_, I> {
         let pad = if narrow { NARROW_PAD } else { CONTENT_PAD };
         let column = (area_w - self.em(pad.h) * 2.0).min(self.em(CONTENT_MAX_WIDTH));
         let x = area_x + (area_w - column) / 2.0;
-        let (top, bottom) = (self.em(pad.v), size.h - self.em(pad.v));
+        let (top, bottom) = (band + self.em(pad.v), size.h - self.em(pad.v));
 
         // The row of buttons stands at the bottom, the same on every step; the body takes the rest.
         let mut floor = bottom;
@@ -999,6 +1077,105 @@ impl<I: Copy> Placer<'_, I> {
             w: self.over,
             h: if self.scroll { 0.0 } else { least - room },
         }
+    }
+
+    /// ⭐ **The view В1 of an author's card** — stage Э121 (решение 208.244 п. 1, the mock-up
+    /// `ZAMYSEL-otkrytki-maket.html`): the author's picture over the whole window, and under it a
+    /// strip of the window's colour with a line of the theme over it — the words of the card at the
+    /// start of the line, the row of buttons at its end, both in the middle of the strip's height.
+    /// The strip is as high as its words or its buttons need, the picture takes the rest.
+    ///
+    /// The words are the heading and **at most [`CARD_STRIP_LINES`] lines** of the caption: what is
+    /// over that is the shortfall of the window (208.244 п. 9), so the instrument of fitting can
+    /// measure the cap of the column card of `tools\feed-caps.tsv` by this very layout.
+    fn photo_window(&mut self, window: &Window<I>, size: WindowSize, key: u64) -> Shortfall {
+        let narrow = size.w < TWO_COLUMNS_FROM.0;
+        let pad = if narrow { NARROW_PAD } else { CONTENT_PAD };
+        let (pv, ph) = (self.em(CARD_STRIP_PAD_V), self.em(pad.h));
+        let gap = self.em(CARD_STRIP_GAP);
+
+        let is_primary = |node: &&Node<I>| {
+            matches!(
+                node,
+                Node::Button {
+                    kind: ButtonKind::Primary,
+                    ..
+                }
+            )
+        };
+        let mut order: Vec<&Node<I>> = window
+            .buttons
+            .iter()
+            .filter(|node| !is_primary(node))
+            .collect();
+        order.extend(window.buttons.iter().filter(is_primary));
+        let row = self.row_width(&order);
+        let row_h = order
+            .iter()
+            .map(|node| self.button_size(node).1)
+            .fold(0.0_f32, f32::max);
+
+        let words_w = (size.w - ph * 2.0 - gap - row).max(0.0);
+        let words_h = self.height(&window.body, words_w, None);
+        let strip = words_h.max(row_h) + pv * 2.0;
+        let top = size.h - strip;
+
+        self.push(
+            Part::Photo {
+                key,
+                whole: true,
+                edge: PhotoEdge::None,
+            },
+            Rect::new(0.0, 0.0, size.w, top.max(0.0)),
+            None,
+        );
+        self.push(Part::Divider, Rect::new(0.0, top, size.w, LINE.0), None);
+        self.node(
+            &window.body,
+            ph,
+            top + (strip - words_h) / 2.0,
+            words_w,
+            None,
+        );
+        self.button_row(
+            &order,
+            size.w - ph - row,
+            top + (strip - row_h) / 2.0,
+            row,
+            true,
+        );
+
+        // The heading and two lines of the caption: the words of the body by their roles.
+        let allowed = match &window.body {
+            Node::Rows(children) | Node::Column(children) => {
+                let gap = if matches!(window.body, Node::Rows(_)) {
+                    BLOCK_ROW_GAP
+                } else {
+                    BLOCK_GAP
+                };
+                let line = |role: Role| self.style(role).line_height();
+                let lines: f32 = children
+                    .iter()
+                    .map(|child| match child {
+                        Node::Text(Role::Strong, _) => line(Role::Strong),
+                        Node::Text(role, _) => line(*role) * CARD_STRIP_LINES as f32,
+                        _ => 0.0,
+                    })
+                    .sum();
+                lines + self.em(gap) * children.len().saturating_sub(1) as f32
+            }
+            _ => words_h,
+        };
+
+        // On a small screen (the narrow class) the strip grows with its words, and only the picture
+        // gives way to it — down to half the window; the cap of two lines is the eye's (208.197).
+        let h = if size.class == Class::Narrow {
+            strip - size.h * 0.5
+        } else {
+            words_h - allowed - 0.5
+        };
+
+        Shortfall { w: self.over, h }
     }
 
     /// The body of a small screen (208.198): the head, when the body opens with one, stands still at

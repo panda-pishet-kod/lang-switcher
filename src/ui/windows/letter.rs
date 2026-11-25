@@ -14,8 +14,8 @@ use crate::settings::Language;
 use crate::theme::{KEY_PLACEHOLDER, ThemeSetting};
 use crate::ui::host::{Content, Reply};
 use crate::ui::scene::{
-    Art, Brand, ButtonKind, Event, Node, OnPicture, Role, Surface, Window, WindowKind, linked,
-    strong,
+    Art, Brand, ButtonKind, Event, Node, OnPicture, Photo, PhotoPlace, Role, Surface, Window,
+    WindowKind, linked, strong,
 };
 use ::windows::Win32::Foundation::HWND;
 
@@ -264,15 +264,40 @@ impl Content for LetterView {
                 .iter()
                 .map(|main| button(main, ButtonKind::Primary)),
         );
+        // ⭐ Stage Э121: the picture of an author's card in place of the panel with the panda (Б) —
+        // no line of the brand over it — or over the whole window (В1), the heading and the words
+        // of the card in the strip under it; with no picture, the panda of the news (А).
+        let photo = plan.photo;
+        let whole = matches!(
+            photo,
+            Some(Photo {
+                place: PhotoPlace::Whole,
+                ..
+            })
+        );
+        let body = if whole {
+            Node::Rows(
+                [
+                    (Role::Strong, &plan.panel_title),
+                    (Role::Small, &plan.panel_text),
+                ]
+                .into_iter()
+                .filter(|(_, words)| !words.is_empty())
+                .map(|(role, words)| Node::Text(role, words.clone()))
+                .collect(),
+            )
+        } else {
+            Node::Column(self.body())
+        };
         Window {
             kind: WindowKind::Ordinary,
-            art: Some(art_of(self.letter)),
-            brand: Some(Brand {
+            art: Some(photo.map_or(art_of(self.letter), Art::Photo)),
+            brand: photo.is_none().then(|| Brand {
                 name: "Panda Koder".to_owned(),
                 address: site(),
                 link: Id::Site,
             }),
-            body: Node::Column(self.body()),
+            body,
             buttons,
             // A button whose address is still a placeholder or not one of the program's own is
             // drawn and not pressed (task T-41-1, finding С52): it keeps its place and its word.

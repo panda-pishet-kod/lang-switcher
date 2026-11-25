@@ -119,3 +119,37 @@ pub fn held(key: u64) -> Option<Held> {
             .map(|(_, held)| held.clone())
     })
 }
+
+/// **The picture of a card for its window** — stage Э121, task T-121-5: where the view of the card
+/// puts it (the start or the end of the line for Б, the whole window for В1), and the picture read
+/// back from `folder`, checked again ([`crate::cards::kept`]) and held for the windows of this
+/// thread. `None` — the plain template (А): a card of that view, one with no picture, or a picture
+/// that is not on the disk or not whole.
+pub fn of_card(
+    card: &crate::cards::FeedCard,
+    folder: &std::path::Path,
+) -> Option<crate::ui::scene::Photo> {
+    use crate::cards::{CardSide, CardView};
+    use crate::ui::scene::{Photo, PhotoPlace};
+
+    let place = match card.view {
+        CardView::Panel(CardSide::Start) => PhotoPlace::Start,
+        CardView::Panel(CardSide::End) => PhotoPlace::End,
+        CardView::Full => PhotoPlace::Whole,
+        CardView::Text => return None,
+    };
+    let image = card.image.as_ref()?;
+    let bytes = crate::cards::kept(card, folder)?;
+    let (format, w, h) = crate::cards::sniff(&bytes)?;
+    let key = hold(
+        key_of(&image.sha256),
+        Held {
+            bytes: Rc::from(bytes),
+            format,
+            w,
+            h,
+        },
+    );
+
+    Some(Photo { key, place })
+}

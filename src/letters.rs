@@ -1236,6 +1236,10 @@ pub struct LetterPlan {
     pub right: Option<Button>,
     /// The main button — the rightmost, the one Enter presses.
     pub accent: Option<Button>,
+    /// ⭐ The picture of an author's card and where it stands (stage Э121) — laid over the plan by
+    /// the window that shows the card ([`show_letter`]), and only when the picture is on the disk
+    /// and whole (`ui::photo::of_card`); none — the plain template of a news item (А).
+    pub photo: Option<crate::ui::scene::Photo>,
 }
 
 impl LetterPlan {
@@ -3754,7 +3758,7 @@ fn show_letter_in(
 ) -> bool {
     let stored = state_now();
 
-    let plan = plan_in(
+    let mut plan = plan_in(
         language,
         letter,
         &PlanContext {
@@ -3764,6 +3768,13 @@ fn show_letter_in(
             item,
         },
     );
+
+    // ⭐ Stage Э121: a card shows its picture when it is on the disk and whole — read back and
+    // checked again here, every time the window is built; otherwise the plain template (А).
+    if let Letter::Card(id) = letter {
+        plan.photo =
+            card_of(id).and_then(|card| crate::ui::photo::of_card(&card, &crate::cards::folder()?));
+    }
 
     if plan.title.is_empty() {
         return false;

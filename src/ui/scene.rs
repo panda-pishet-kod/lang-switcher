@@ -97,12 +97,37 @@ pub enum Art {
     /// The scene of the window of the settings — the panda, a switch and gears (`settings.svg` of
     /// the site window, S-95, variant А of the mock-up; 208.163, AUDIT-180 Н1).
     Settings,
+    /// ⭐ The picture of an author's card (stage Э121, решение 208.244 пп. 1–2) — not a drawing of
+    /// `res\art` but the author's own picture, held by `ui::photo` under its key: in place of the
+    /// panel (Б) or over the whole window (В1).
+    Photo(Photo),
+}
+
+/// The picture of an author's card in a window: the key it is held under (`ui::photo`) and where.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Photo {
+    pub key: u64,
+    pub place: PhotoPlace,
+}
+
+/// Where the picture of a card stands. Start and end are of the line of the language: in a language
+/// read right to left they change places, and the picture itself is never mirrored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhotoPlace {
+    /// Б — in place of the panel, at the start of the line.
+    Start,
+    /// Б — in place of the panel, at the end of the line.
+    End,
+    /// В1 — the whole window, the words and the buttons in a strip under it.
+    Whole,
 }
 
 impl Art {
     /// The name of the drawing in `res\art`.
     pub const fn name(self) -> &'static str {
         match self {
+            // Not a drawing: the canvas draws the author's picture itself (`Painter::photo`).
+            Art::Photo(_) => "photo",
             Art::About => "about",
             Art::Avatar => "avatar",
             Art::Hello => "hello",

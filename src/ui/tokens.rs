@@ -623,6 +623,17 @@ pub const CLASS_ORDINARY_FROM: SizePt = SizePt::pt(900.0, 540.0);
 pub const CLASS_LARGE_FROM: SizePt = SizePt::pt(1280.0, 690.0);
 /// Две колонки — панель, доля ширины окна.
 pub const PANEL_SHARE: Share = Share(0.38);
+/// ⭐ Открытка автора (Э121, макет `ZAMYSEL-otkrytki-maket.html`): вид Б в узком окне — картинка
+/// полосой сверху, доля высоты окна.
+pub const CARD_BAND_SHARE: Share = Share(0.34);
+/// ⭐ Открытка, вид В1: полоса цвета окна под картинкой — поля (по вертикали; по горизонтали — поля
+/// колонки содержимого, `CONTENT_PAD` и `NARROW_PAD`).
+pub const CARD_STRIP_PAD_V: Em = Em(0.9);
+/// ⭐ Открытка, вид В1: между словами полосы и кнопками.
+pub const CARD_STRIP_GAP: Em = Em(1.2);
+/// ⭐ Открытка, вид В1: подпись — не больше строк в эталоне 900 × 540 (208.244 п. 9); больше — окно
+/// «не помещается», это мерит прибор (`tests\ui_fit.rs`, столбец card).
+pub const CARD_STRIP_LINES: usize = 2;
 /// Колонка содержимого — не шире.
 pub const CONTENT_MAX_WIDTH: Em = Em(40.0);
 /// Колонка содержимого — поля.

@@ -22,7 +22,7 @@
 //! Knows nothing of particular windows.
 
 use crate::ui::canvas::{Painter, Rect};
-use crate::ui::layout::{Part, Status};
+use crate::ui::layout::{Part, PhotoEdge, Status};
 use crate::ui::scene::{ButtonKind, LINK_BEGIN, Surface};
 use crate::ui::text::{Align, Direction, Measure, Style, Text, Wrap};
 use crate::ui::tokens::shape::{CHECK_TICK, CHEVRON, FILL_STEPS, RADIO_DOT};
@@ -221,6 +221,34 @@ pub fn draw(painter: &mut Painter, look: &Look, part: &Part, rect: Rect, state: 
                 rect.right() - line
             };
             painter.fill_rect(Rect::new(edge, rect.y, line, rect.h), 0.0, c(Color::Line));
+        }
+        // ⭐ The picture of an author's card (stage Э121): the ground of the window under it, the
+        // picture over it (`Painter::photo`), the line of the theme on the side of the content.
+        Part::Photo { key, whole, edge } => {
+            painter.fill_rect(rect, 0.0, c(Color::Bg));
+            let keep = if *whole {
+                crate::cards::FULL_MIDDLE_PIXELS.0 as f32 / crate::cards::FULL_PIXELS.0 as f32
+            } else {
+                0.0
+            };
+            painter.photo(rect, *key, keep);
+            let side = match edge {
+                PhotoEdge::End => Some(!look.rtl),
+                PhotoEdge::Start => Some(look.rtl),
+                PhotoEdge::Bottom | PhotoEdge::None => None,
+            };
+            match (side, edge) {
+                (Some(right), _) => {
+                    let x = if right { rect.right() - line } else { rect.x };
+                    painter.fill_rect(Rect::new(x, rect.y, line, rect.h), 0.0, c(Color::Line));
+                }
+                (None, PhotoEdge::Bottom) => painter.fill_rect(
+                    Rect::new(rect.x, rect.bottom() - line, rect.w, line),
+                    0.0,
+                    c(Color::Line),
+                ),
+                _ => {}
+            }
         }
         Part::Art(art) => {
             // The ring of `bg` around the picture (§3), the picture inside it.

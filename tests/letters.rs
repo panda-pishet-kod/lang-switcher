@@ -12,6 +12,9 @@
 
 #[path = "support/excused.rs"]
 mod excused;
+#[path = "support/pictures.rs"]
+#[cfg(feature = "testing")]
+mod pictures;
 use lang_switcher::letters::{
     self, Date, FeedItem, FeedView, Letter, REMINDERS_PER_NEWS, Thanks, links,
 };
@@ -5856,4 +5859,207 @@ fn a_card_done_with_is_forgotten() {
 
     letters::forget_cards(&mut state, &cards, day(2027, 1, 11));
     assert!(state.cards_shown.is_empty(), "past the term");
+}
+
+/// A New Year picture with no words, `w` × `h`: the night sky from navy to blue, stars, the moon, a
+/// hill of snow with its outline, a fir tree — the colours of the mock-up of the cards.
+#[cfg(feature = "testing")]
+fn card_picture(w: u32, h: u32) -> impl Fn(u32, u32) -> [u8; 3] {
+    move |x, y| {
+        let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+        let m = w.min(h) as f32;
+        let mix = |a: f32, b: f32, t: f32| (a + (b - a) * t) as u8;
+        let mut colour = [
+            mix(20.0, 58.0, fy),
+            mix(32.0, 90.0, fy),
+            mix(74.0, 158.0, fy),
+        ];
+        // Stars: a hash of the pixel, one in four hundred.
+        let hash = (x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)) % 400;
+        if hash == 0 && fy < 0.7 {
+            colour = [255, 255, 255];
+        }
+        // The moon.
+        let (mx, my) = (w as f32 * 0.78, h as f32 * 0.18);
+        if ((x as f32 - mx).powi(2) + (y as f32 - my).powi(2)).sqrt() < m * 0.07 {
+            colour = [255, 244, 200];
+        }
+        // A fir tree in the middle of the picture.
+        let (tx, base, th) = (w as f32 * 0.5, h as f32 * 0.84, h as f32 * 0.42);
+        let up = base - y as f32;
+        if up > 0.0 && up < th && (x as f32 - tx).abs() < (th - up) * 0.36 {
+            colour = if (up / th * 6.0) as u32 % 2 == 0 {
+                [31, 122, 74]
+            } else {
+                [43, 148, 96]
+            };
+        }
+        // The snow and its outline.
+        let hill = 0.8 + 0.025 * (fx * 11.0 + 1.0).sin();
+        if fy > hill {
+            colour = if fy < hill + 0.006 {
+                [28, 27, 24]
+            } else {
+                [233, 238, 248]
+            };
+        }
+        colour
+    }
+}
+
+/// **The pictures of C3 of T-121-5** — the author's card in the views Б (the picture at the start
+/// and at the end of the line) and В1 (the whole window), and the plain template А, drawn in memory
+/// by the drawing of the shell itself: Russian straight and Hebrew mirrored, both themes, the eye of
+/// 208.197 (900 × 540) at 100 % and 125 %, and the small screen (620 × 500) at 100 %. Printed only
+/// when `LANGSW_CARDS_DIR` names a folder.
+#[cfg(feature = "testing")]
+#[test]
+fn print_the_cards() {
+    use lang_switcher::cards::{CardSide, CardView, FULL_PIXELS, PANEL_PIXELS};
+    use lang_switcher::ui::canvas::{Canvas, Mode};
+    use lang_switcher::ui::elements::{self, Look, State};
+    use lang_switcher::ui::fit;
+    use lang_switcher::ui::host::Content as _;
+    use lang_switcher::ui::layout::{client_size, lay_out};
+    use lang_switcher::ui::photo::{self, Held};
+    use lang_switcher::ui::scene::{Photo, PhotoPlace};
+    use lang_switcher::ui::text::{Direction, Text};
+    use lang_switcher::ui::tokens::{Color, Theme};
+    use lang_switcher::ui::windows::letter::{self, LetterView};
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    let Some(folder) = std::env::var_os("LANGSW_CARDS_DIR") else {
+        return;
+    };
+    let _guard = with_product_strings();
+    // SAFETY: the apartment of this test's thread, for the whole test.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut art = lang_switcher::ui::art::Art::new();
+    let folder = Path::new(&folder);
+    std::fs::create_dir_all(folder).expect("the folder of the pictures");
+
+    let held = |(w, h): (u32, u32)| {
+        let bytes = pictures::png(w, h, card_picture(w, h));
+        Held {
+            bytes: std::rc::Rc::from(bytes),
+            format: lang_switcher::cards::Format::Png,
+            w,
+            h,
+        }
+    };
+    let panel_key = photo::hold(0xB0, held(PANEL_PIXELS));
+    let full_key = photo::hold(0xC1, held(FULL_PIXELS));
+
+    let views = [
+        (
+            "B-start",
+            CardView::Panel(CardSide::Start),
+            Some(Photo {
+                key: panel_key,
+                place: PhotoPlace::Start,
+            }),
+        ),
+        (
+            "B-end",
+            CardView::Panel(CardSide::End),
+            Some(Photo {
+                key: panel_key,
+                place: PhotoPlace::End,
+            }),
+        ),
+        (
+            "C1",
+            CardView::Full,
+            Some(Photo {
+                key: full_key,
+                place: PhotoPlace::Whole,
+            }),
+        ),
+        ("A", CardView::Text, None),
+    ];
+
+    for language in [Language::Ru, Language::He] {
+        let rtl = language.is_rtl();
+        let direction = if rtl {
+            Direction::RightToLeft
+        } else {
+            Direction::LeftToRight
+        };
+        let text = Text::new(language.tag(), direction).expect("the text of the language");
+        let mut card = card(1);
+        if language == Language::He {
+            card.title = "שנה טובה!".to_owned();
+            card.text = "תודה שהייתם עם Lang Switcher כל השנה. שהמילים בשנת 2027 יוקלדו מהפעם הראשונה. — Panda Koder".to_owned();
+        } else {
+            card.title = "С Новым годом!".to_owned();
+            card.text = "Спасибо, что весь год были с Lang Switcher. Пусть в 2027-м слова набираются с первого раза, а раскладка не отвлекает от главного. — Panda Koder".to_owned();
+        }
+        let item = letters::card_item(&card);
+
+        for (name, _view, photo) in views {
+            let mut plan = letters::plan_in(
+                language,
+                Letter::Card(1),
+                &letters::PlanContext {
+                    version: "1.9.0".to_owned(),
+                    hotkey: String::new(),
+                    snooze_offered: true,
+                    item: Some(&item),
+                },
+            );
+            plan.photo = photo;
+            let window = LetterView {
+                letter: Letter::Card(1),
+                plan,
+                key: "Pause".to_owned(),
+                tick: letters::DEMO_STILL,
+                language,
+                theme: lang_switcher::theme::ThemeSetting::Light,
+            };
+            let window = window.describe().map(&letter::Id::number);
+
+            for (w, h, scale) in [
+                (900.0_f32, 540.0_f32, 1.0_f32),
+                (900.0, 540.0, 1.25),
+                (620.0, 500.0, 1.0),
+            ] {
+                if w < 900.0 && (rtl || name == "B-end") {
+                    continue;
+                }
+                let size = client_size(w, h);
+                let k = fit::k_for(language.tag(), size.class);
+                let layout = lay_out(&window, size, k, rtl, &text);
+                for theme in [Theme::Light, Theme::Dark] {
+                    let look = Look {
+                        theme,
+                        rtl,
+                        b: layout.b,
+                        h: size.h,
+                        text: &text,
+                    };
+                    let mut canvas =
+                        Canvas::in_memory(size.w, size.h, scale, Mode::Direct2D).expect("a canvas");
+                    canvas.frame_with(Some(&mut art), |painter| {
+                        painter.clear(Color::Bg.get(theme));
+                        for item in &layout.items {
+                            elements::draw(painter, &look, &item.part, item.rect, State::NORMAL);
+                        }
+                    });
+                    let file = folder.join(format!(
+                        "card-{name}-{}-{}x{}-{}-{}.png",
+                        language.tag(),
+                        w as u32,
+                        h as u32,
+                        (scale * 100.0) as u32,
+                        if theme == Theme::Dark {
+                            "dark"
+                        } else {
+                            "light"
+                        },
+                    ));
+                    canvas.save_png(&file).expect("the picture is written");
+                }
+            }
+        }
+    }
 }

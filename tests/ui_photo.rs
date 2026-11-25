@@ -226,3 +226,76 @@ fn a_thread_holds_the_two_newest_pictures() {
     assert!(photo::held(10).is_none());
     assert!(photo::held(11).is_some() && photo::held(12).is_some());
 }
+
+/// **A card shows its picture only when it is on the disk and whole** — `of_card` places it by the
+/// view of the card (Б at the start or the end, В1 the whole window) and holds the bytes read back;
+/// a card of the plain template, a picture not there or changed on the disk — none (А).
+#[test]
+fn a_card_shows_its_picture_only_when_it_is_whole_on_the_disk() {
+    use lang_switcher::cards::{self, CardImage, CardSide, CardView, FeedCard};
+    use lang_switcher::letters::Date;
+    use lang_switcher::ui::scene::PhotoPlace;
+
+    let place = std::env::temp_dir()
+        .join("langsw-e121-photo")
+        .join(std::process::id().to_string());
+    let _ = std::fs::remove_dir_all(&place);
+    let bytes = pictures::png(40, 20, halves(40));
+    let mut hasher = lang_switcher::letters::feed::Sha256::new().expect("CNG");
+    assert!(hasher.update(&bytes));
+    let sha256 = hasher.finish().expect("a sum");
+    let day = |d| Date::from_ymd(2027, 1, d).expect("a day");
+    let card = |view| FeedCard {
+        id: 1,
+        from: day(1),
+        to: day(10),
+        view,
+        image: Some(CardImage {
+            url: format!("{}1.png", lang_switcher::links::CARDS_URL),
+            sha256,
+            size: bytes.len() as u64,
+        }),
+        title: "t".to_owned(),
+        text: "x".to_owned(),
+        link: String::new(),
+    };
+
+    let full = card(CardView::Full);
+    assert_eq!(photo::of_card(&full, &place), None, "not downloaded yet");
+    cards::fetch_pictures(
+        std::slice::from_ref(&full),
+        day(1),
+        &place,
+        lang_switcher::links::CARDS_URL,
+        &mut |_, _| Some(bytes.clone()),
+    );
+
+    for (view, expected) in [
+        (CardView::Panel(CardSide::Start), PhotoPlace::Start),
+        (CardView::Panel(CardSide::End), PhotoPlace::End),
+        (CardView::Full, PhotoPlace::Whole),
+    ] {
+        let shown = photo::of_card(&card(view), &place).expect("the picture is whole");
+        assert_eq!(shown.place, expected);
+        assert_eq!(shown.key, photo::key_of(&sha256));
+        let held = photo::held(shown.key).expect("held");
+        assert_eq!((held.format, held.w, held.h), (Format::Png, 40, 20));
+    }
+    assert_eq!(
+        photo::of_card(&card(CardView::Text), &place),
+        None,
+        "А has no picture"
+    );
+
+    let file = cards::path_in(&place, full.image.as_ref().expect("a picture"));
+    let mut changed = bytes.clone();
+    changed[50] ^= 0xFF;
+    std::fs::write(&file, &changed).expect("the test's own file");
+    assert_eq!(
+        photo::of_card(&full, &place),
+        None,
+        "changed on the disk — А"
+    );
+
+    let _ = std::fs::remove_dir_all(&place);
+}
