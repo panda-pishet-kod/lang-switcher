@@ -1063,6 +1063,64 @@ impl Painter<'_, '_> {
         }
     }
 
+    /// ⭐ **The picture of an author's card over `rect`** — stage Э121, task T-121-4: the picture
+    /// held under `key` ([`crate::ui::photo::held`]), cover and centred, `keep` the share of its
+    /// width that is never cut ([`crate::ui::photo::fit`]); decoded by WIC straight to the pixels of
+    /// the frame and no larger than the part of the picture it shows. The bitmap is kept for the
+    /// render target it was made for and remade when the target or the size changes. Nothing is
+    /// drawn for a picture not held or one WIC refused, nor in the plain look of GDI: the colour
+    /// under it shows.
+    pub fn photo(&mut self, rect: Rect, key: u64, keep: f32) {
+        let Some(held) = crate::ui::photo::held(key) else {
+            return;
+        };
+        let Some(fit) = crate::ui::photo::fit(held.w, held.h, rect.w, rect.h, keep) else {
+            return;
+        };
+        let (x, y, w, h) = fit.place;
+        let (_, _, source_w, source_h) = fit.source;
+        let pixels =
+            |points: f32, most: u32| ((points * self.scale).round().max(1.0) as u32).min(most);
+        let size = (pixels(w, source_w), pixels(h, source_h));
+
+        let Kind::Direct2D { target, .. } = self.kind else {
+            return;
+        };
+        let cache = (target.as_raw() as usize, key, size.0, size.1);
+        let bitmap = PHOTOS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            if let Some((_, bitmap)) = kept.iter().find(|(known, _)| *known == cache) {
+                return Some(bitmap.clone());
+            }
+            let made = bitmap_of_photo(target, &held, fit.source, size);
+            #[cfg(feature = "testing")]
+            PHOTO_BITMAPS[usize::from(made.is_err())]
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let bitmap = made.ok()?;
+            kept.retain(|(known, _)| known.0 != cache.0 || known.1 != cache.1);
+            kept.push((cache, bitmap.clone()));
+            Some(bitmap)
+        });
+        if let Some(bitmap) = bitmap {
+            let at = D2D_RECT_F {
+                left: rect.x + x,
+                top: rect.y + y,
+                right: rect.x + x + w,
+                bottom: rect.y + y + h,
+            };
+            // SAFETY: inside a frame; the bitmap belongs to this target.
+            unsafe {
+                target.DrawBitmap(
+                    &bitmap,
+                    Some(&at),
+                    1.0,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
+            }
+        }
+    }
+
     /// The program's own icon (FR-90, the icon resource of `app.rc`) in `rect`, at the pixels of the
     /// frame: the header of the window in the corner. Its bitmap is kept for the render target it
     /// was made for and remade when the target or the size changes.
@@ -1806,6 +1864,97 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     /// The flags of layouts made into bitmaps: by target, layout, side and the dark taskbar.
     static FLAGS: std::cell::RefCell<FlagBitmaps> = const { std::cell::RefCell::new(Vec::new()) };
+    /// ⭐ The pictures of the cards made into bitmaps (stage Э121): by target, picture and pixels;
+    /// one size per picture and target — a new size replaces the old.
+    static PHOTOS: std::cell::RefCell<PhotoBitmaps> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The pictures of the cards kept for a frame: (target, key, width, height) and the bitmap.
+type PhotoBitmaps = Vec<((usize, u64, u32, u32), ID2D1Bitmap)>;
+
+/// The bitmaps of pictures of cards made and refused since the start, for the tests (the testing
+/// build).
+#[cfg(feature = "testing")]
+static PHOTO_BITMAPS: [std::sync::atomic::AtomicUsize; 2] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+
+/// How many bitmaps of pictures of cards were made and how many refused (the testing build).
+#[cfg(feature = "testing")]
+pub fn photo_bitmaps() -> (usize, usize) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (
+        PHOTO_BITMAPS[0].load(Relaxed),
+        PHOTO_BITMAPS[1].load(Relaxed),
+    )
+}
+
+/// **A bitmap of `target` from the checked bytes of a picture** — stage Э121, task T-121-4. The
+/// decoder is the one of the format the header named, chosen by its container and never guessed
+/// from the bytes; the size of its first frame must be the size the header gave
+/// ([`crate::cards::sniff`]) before a pixel is decoded; then the part `source` is cut, brought to
+/// `size` pixels in one step (the Fant filter of WIC: a picture made for 200 % made smaller without
+/// stairs) and put in premultiplied BGRA. COM is entered for the call, as for the icons.
+fn bitmap_of_photo(
+    target: &ID2D1RenderTarget,
+    held: &crate::ui::photo::Held,
+    source: (u32, u32, u32, u32),
+    size: (u32, u32),
+) -> WinResult<ID2D1Bitmap> {
+    use ::windows::Win32::Graphics::Imaging::{
+        GUID_ContainerFormatJpeg, GUID_ContainerFormatPng, WICBitmapInterpolationModeFant,
+        WICDecodeMetadataCacheOnDemand, WICRect,
+    };
+
+    // Entered first, so that it is left last, after every interface of WIC below is let go.
+    let _com = ComEntered::enter()?;
+    let bytes = held.bytes.clone();
+    let container = match held.format {
+        crate::cards::Format::Png => GUID_ContainerFormatPng,
+        crate::cards::Format::Jpeg => GUID_ContainerFormatJpeg,
+    };
+    let part = |value: u32| {
+        i32::try_from(value).map_err(|_| Error::from(::windows::Win32::Foundation::E_INVALIDARG))
+    };
+    let rect = WICRect {
+        X: part(source.0)?,
+        Y: part(source.1)?,
+        Width: part(source.2)?,
+        Height: part(source.3)?,
+    };
+
+    // SAFETY: COM is entered on this thread above; `bytes` outlives the stream and every
+    // interface made from it — all of them are let go before this function returns, and the
+    // bitmap Direct2D makes is a copy of the pixels.
+    unsafe {
+        let wic: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+        let stream = wic.CreateStream()?;
+        stream.InitializeFromMemory(&bytes)?;
+        let decoder = wic.CreateDecoder(&container, std::ptr::null())?;
+        decoder.Initialize(&stream, WICDecodeMetadataCacheOnDemand)?;
+        let frame = decoder.GetFrame(0)?;
+        let (mut w, mut h) = (0u32, 0u32);
+        frame.GetSize(&mut w, &mut h)?;
+        if (w, h) != (held.w, held.h) {
+            return Err(Error::from(::windows::Win32::Foundation::E_INVALIDARG));
+        }
+        let clipper = wic.CreateBitmapClipper()?;
+        clipper.Initialize(&frame, &rect)?;
+        let scaler = wic.CreateBitmapScaler()?;
+        scaler.Initialize(&clipper, size.0, size.1, WICBitmapInterpolationModeFant)?;
+        let converter = wic.CreateFormatConverter()?;
+        converter.Initialize(
+            &scaler,
+            &GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            None,
+            0.0,
+            WICBitmapPaletteTypeMedianCut,
+        )?;
+        target.CreateBitmapFromWicBitmap(&converter, None)
+    }
 }
 
 /// The flags kept for a frame: (target, layout, side, dark taskbar) and the bitmap.
@@ -1829,6 +1978,7 @@ fn forget_bitmaps_of(target: usize) {
         }
     });
     let _ = FLAGS.try_with(|kept| kept.borrow_mut().retain(|(key, _)| key.0 != target));
+    let _ = PHOTOS.try_with(|kept| kept.borrow_mut().retain(|(key, _)| key.0 != target));
 }
 
 /// How many bitmaps the thread keeps for render targets (the testing build).
@@ -1836,6 +1986,7 @@ fn forget_bitmaps_of(target: usize) {
 pub fn kept_bitmaps() -> usize {
     APP_ICON.with(|kept| usize::from(kept.borrow().is_some()))
         + FLAGS.with(|kept| kept.borrow().len())
+        + PHOTOS.with(|kept| kept.borrow().len())
 }
 
 /// The program's icon at `side` pixels, made by Windows from its resource; the caller destroys it.
