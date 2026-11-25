@@ -4,6 +4,17 @@ Every published version of Lang Switcher, newest first. The full text of each re
 SHA-256, what was measured and what was not — is on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases)
 page. Dates are the days the releases were published (UTC).
 
+## 1.9.0 — не выпущено
+
+- The author's cards: a letter from the author with a picture — a holiday greeting, say — comes once in its
+  term, by the same knock in the corner as a news item. The picture stands in place of the panda or over the whole
+  window, with the words and the buttons under it. «Close», the cross or Esc close it for good; until the term is
+  over it stays in «Recent letters». If the picture did not come, the card is shown as an ordinary news letter.
+- The picture of a card is the one more network request of the program: only when the news file names a card, one
+  file from the `/langswitcher/cards/` folder of the author's site, no larger than 1 MB, its size and SHA-256
+  signed in the news file and checked before the picture is opened; it is deleted when the term is over. With
+  letters and news turned off there are no cards. Earlier versions do not see cards at all.
+
 ## 1.8.1 — не выпущено
 
 - The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
