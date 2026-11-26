@@ -16,6 +16,9 @@ page. Dates are the days the releases were published (UTC).
   letters and news turned off there are no cards. Earlier versions do not see cards at all.
 - The Persian hint under «Layout flag in the tray» names the program with the Persian word, not the Arabic one. The
   Hungarian line of the state in «Diagnostics» counts the active exclusions, no longer the «published» ones.
+- In a classic console just opened (`conhost`: Windows PowerShell 5.1, `cmd`), a word typed in the first fraction
+  of a second is no longer lost: the console is ready for typing the moment it comes to the front. Before, a word
+  typed that early stayed as it was, and the hotkey only switched the layout.
 
 Known issues:
 
