@@ -889,12 +889,42 @@ static EXCLUDED_VERDICTS: AtomicU32 = AtomicU32::new(0);
 /// Two relaxed atomics — one fetch-add and one compare-and-swap — and one `PostMessageW`, which
 /// queues and returns. No allocation, no lock, no I/O. This runs on the input thread, in its
 /// message loop, with the hook callback long returned.
+///
+/// ⭐ **Stage E123: a classic console window is answered here and not probed** — see
+/// [`verdict_without_probe`], which also says what that costs on this thread (a class name and the
+/// name of a process; the line above about allocation is about every other window).
 pub fn note_focus_moved() {
+    note_focus_moved_for(foreground_window());
+}
+
+/// [`note_focus_moved`] about the window `foreground` — public so that a test can name the window
+/// rather than inherit whatever the desktop it runs on has in front (stage E123: a classic console
+/// in front of `cargo test` would otherwise answer the tests of the probe road with its own verdict).
+/// `None` is a focus change with no window to name: it takes the probe road, as every window but a
+/// classic console does.
+pub fn note_focus_moved_for(foreground: Option<HWND>) {
     FOCUS_CHANGES.fetch_add(1, Ordering::Relaxed);
 
     // Order matters: the state is published **before** the probe is asked for, so a watcher
     // thread that answers instantly cannot have its verdict overwritten by this transition.
     let generation = enter_pending();
+
+    ask_for_verdict(generation, foreground);
+}
+
+/// **The verdict for the generation a focus change has just opened** — the half
+/// [`note_focus_moved_for`] and [`note_focus_moved_keeping_buffer_for`] share.
+///
+/// A classic console window gets it at once ([`verdict_without_probe`], stage E123); every other
+/// window is asked about on the watcher thread, and a request that reaches nobody resolves to FR-73.
+fn ask_for_verdict(generation: u32, foreground: Option<HWND>) {
+    if let Some(verdict) = foreground.and_then(verdict_without_probe) {
+        // The generation is the one the caller has just opened, on this very thread: nothing can
+        // have published under it yet, and a probe of an earlier generation still running on the
+        // watcher thread is turned away by `publish` when it lands.
+        publish(verdict, generation);
+        return;
+    }
 
     if !request_probe() {
         // The watcher thread has no window — it has not created one yet, or it is already gone.
@@ -945,22 +975,22 @@ pub fn note_focus_moved() {
 /// road at all. See `watchdog::take_typing_induced_flush`, where all five conditions of FR-14
 /// stand together.
 pub fn note_focus_moved_keeping_buffer() {
+    note_focus_moved_keeping_buffer_for(foreground_window());
+}
+
+/// [`note_focus_moved_keeping_buffer`] about the window `foreground` — public for the reason
+/// [`note_focus_moved_for`] is.
+///
+/// The verdict comes by the same half [`note_focus_moved_for`] uses ([`ask_for_verdict`]): a
+/// classic console window at once (stage E123), every other window from the watcher thread, and a
+/// request that reaches no watcher window as FR-73 — with no watcher window there is nobody to
+/// answer, and FR-73 puts an undeterminable field on the side that records.
+pub fn note_focus_moved_keeping_buffer_for(foreground: Option<HWND>) {
     FOCUS_CHANGES.fetch_add(1, Ordering::Relaxed);
 
     let generation = enter_probe_keeping_field();
 
-    if !request_probe() {
-        // The same answer [`note_focus_moved`] gives, for the same reason: with no watcher
-        // window there is nobody to answer, and FR-73 puts an undeterminable field on the side
-        // that records.
-        publish(
-            Probe {
-                field: Field::Undetermined,
-                excluded: false,
-            },
-            generation,
-        );
-    }
+    ask_for_verdict(generation, foreground);
 }
 
 /// Opens a new focus generation and leaves the published state alone — the probe half of
@@ -1529,25 +1559,12 @@ fn determine() -> Probe {
     // excluded" for FR-84, which is what each of them does with a name it does not know.
     let process = process_name_of(window);
 
-    // ---- FR-84: the exclusion list ---------------------------------------------------
+    // ---- FR-84 and level 1: the name of the process ------------------------------------
     //
-    // Решение 172.20: and for a frame of the Store, the program inside it — the one rule and the
-    // one look into a frame the capture of «Выбрать окно программы» takes. The look is made only
-    // for such a frame; every other window is answered from `process` alone, as before.
-    if program_is_excluded(process.as_deref(), || frame_content_name(window)) {
-        return Probe {
-            field: Field::Undetermined,
-            excluded: true,
-        };
-    }
-
-    // ---- Level 1: the process behind the active window -------------------------------
-    if process.as_deref().is_some_and(is_credential_process_name) {
-        LEVEL1_VERDICTS.fetch_add(1, Ordering::Relaxed);
-        return Probe {
-            field: Field::Password,
-            excluded: false,
-        };
+    // One body with the verdict of a classic console window (stage E123, [`verdict_without_probe`]),
+    // so that the two roads cannot come to differ on either list.
+    if let Some(verdict) = verdict_by_process(window, process.as_deref()) {
+        return verdict;
     }
 
     // ---- Level 2: a classic `Edit`, asked for its mask character ----------------------
@@ -1580,6 +1597,107 @@ fn determine() -> Probe {
         field,
         excluded: false,
     }
+}
+
+/// **FR-84 and level 1 of FR-72 — what the name of the foreground process decides on its own.**
+/// `None` when neither list holds it, and the levels that ask the control go on.
+///
+/// Split out of [`determine`] by stage E123 so that the verdict of a classic console window
+/// ([`verdict_without_probe`]) answers both lists through the same lines rather than a copy:
+///
+/// * **FR-84** — an excluded process ends the probe with [`Field::Undetermined`] and the exclusion
+///   bit (the reasons are in [`determine`]). Решение 172.20: for a frame of the Store, the program
+///   inside it — the one rule and the one look into a frame the capture of «Выбрать окно
+///   программы» takes. The look is made only for such a frame; every other window is answered
+///   from `process` alone;
+/// * **level 1** — a credential process is a password field, [`Field::Password`].
+fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
+    if program_is_excluded(process, || frame_content_name(window)) {
+        return Some(Probe {
+            field: Field::Undetermined,
+            excluded: true,
+        });
+    }
+
+    if process.is_some_and(is_credential_process_name) {
+        LEVEL1_VERDICTS.fetch_add(1, Ordering::Relaxed);
+        return Some(Probe {
+            field: Field::Password,
+            excluded: false,
+        });
+    }
+
+    None
+}
+
+/// **The top-level classes of the desktop of explorer** — `Progman`, and `WorkerW`, which stands in
+/// front of it when the desktop is shown (`Win+D`) or behind a slideshow wallpaper. Stage E123,
+/// variant (б1): answered by [`verdict_without_probe`] without the probe.
+pub const DESKTOP_WINDOW_CLASSES: [&str; 2] = ["Progman", "WorkerW"];
+
+/// ⭐ **The verdict of a console window, without the probe — stage E123 (2026-11-26).**
+/// `None` for every other window but the desktop of explorer (see the end of this note): it is
+/// probed as before.
+///
+/// A window of one of the two console host classes of FR-42а ([`crate::inject::CONSOLE_WINDOW_CLASSES`]:
+/// `ConsoleWindowClass` — conhost — and `CASCADIA_HOSTING_WINDOW_CLASS` — Windows Terminal) is
+/// answered at once, on the thread that noted the focus change: FR-84 and level 1 by the name of the
+/// process ([`verdict_by_process`] — the same body [`determine`] runs; for Windows Terminal that
+/// process is the terminal, as it was for the probe), and otherwise [`Field::Ordinary`]. Levels 2 and
+/// 3 are not asked, because they have nothing to say there:
+///
+/// * level 2 is for an `Edit`, and neither console window is one;
+/// * level 3 — UI Automation — answered `IsPassword` false for both hosts every time it was asked,
+///   **at a password prompt too** (stage E123, `Test_VM`, the probe of the candidate `5f05637` run
+///   with the prompt on the screen, records `vmlab\out\e123\pw-w11b-*`): `Read-Host -AsSecureString`
+///   and `runas` in Windows Terminal, `runas` in conhost — `ordinary` each time. A password prompt in a
+///   console (`ssh`, `sudo`, `Read-Host -AsSecureString`) is not seen by it — §10 record 30 — so
+///   answering without it takes no protection away. Windows Terminal is in the rule by that
+///   measurement (word of the controller, 2026-11-26).
+///
+/// **Why, measured** (stage E123, `Test_VM` and `Test_VM10`, records `vmlab\out\e123`): in a console
+/// that has just come to the front, the probe answered 210–700 ms after the window (Windows 11) and
+/// about 270 ms after it (Windows 10) — the window raises `EVENT_SYSTEM_FOREGROUND` and 50–80 ms
+/// later `EVENT_OBJECT_FOCUS`, and the probe waits its turn behind those of the desktop the Run box
+/// left. Every stroke of that interval is lost to [`Field::Pending`]: a word typed 0.3 s after the
+/// console was asked for was not converted in 9 rounds of 10 (0.96.0: 4 of 4), and the press over the
+/// empty buffer switched the layout — the owner's «ничего, со звуком удачи» (решение 208.254). In a
+/// Windows Terminal just opened the same interval was ≈ 390–420 ms (Windows 11, sampled).
+///
+/// ⭐ **And the desktop of explorer — variant (б1) of the controller** ([`DESKTOP_WINDOW_CLASSES`]).
+/// Between the Run box closing and the console it started coming to the front, the desktop holds
+/// the focus for a moment, and its probe of UI Automation held the watcher thread for ≈ 100–350 ms
+/// — the thread the events of the console's window arrive on (§6.1), so the console was announced
+/// only when that probe ended, and the strokes in between were lost all the same (sampled,
+/// `vmlab\out\e123\samp-w11-b6-*`). The desktop has no password field to protect; answering it here
+/// leaves the watcher thread free for the console.
+///
+/// # Threading
+///
+/// The thread that noted the focus change — the input thread — and outside the hook callback, which
+/// names nothing of this module (`tests\guard.rs`). What it costs there is what level 1 costs on the
+/// watcher thread: a class name, `OpenProcess` and `QueryFullProcessImageNameW`; no message is sent
+/// into the window and no UI Automation is touched.
+fn verdict_without_probe(window: HWND) -> Option<Probe> {
+    let class = class_name(window);
+
+    let answered_here = crate::inject::CONSOLE_WINDOW_CLASSES
+        .iter()
+        .chain(DESKTOP_WINDOW_CLASSES.iter())
+        .any(|known| class.eq_ignore_ascii_case(known));
+
+    if !answered_here {
+        return None;
+    }
+
+    let process = process_name_of(window);
+
+    Some(
+        verdict_by_process(window, process.as_deref()).unwrap_or(Probe {
+            field: Field::Ordinary,
+            excluded: false,
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------------------

@@ -2802,8 +2802,11 @@ fn a_move_out_of_a_password_element_in_one_window_returns_buffering() {
          verdict never changes and the program never records again"
     );
 
-    // ...which is what the input thread answers with, on the `WM_APP_FLUSH` that event posts.
-    guard::note_focus_moved();
+    // ...which is what the input thread answers with, on the `WM_APP_FLUSH` that event posts. About no window of the
+    // desktop the test runs on (stage E123): a console or the desktop in front of `cargo test` is answered without the
+    // probe, and reading its class and process would only widen the moment of `Pending` the FR-14 test next door, under
+    // another lock, can catch.
+    guard::note_focus_moved_for(None);
 
     assert_ne!(
         guard::field(),

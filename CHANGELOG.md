@@ -22,6 +22,9 @@ page. Dates are the days the releases were published (UTC).
 - With the double Shift as the hotkey, in an AnyDesk or RustDesk window the remote computer gets only the first tap.
   Before, when Lang Switcher ran on both computers, both copies fixed the word, and in AnyDesk it could come out wrong.
   A capital typed with that second Shift still reaches the remote computer as a capital.
+- In a console just opened — the classic console (`conhost`: Windows PowerShell 5.1, `cmd`) and Windows Terminal —
+  a word typed in the first fraction of a second is no longer lost: the console is ready for typing the moment it
+  comes to the front. Before, a word typed that early stayed as it was, and the hotkey only switched the layout.
 
 Known issues:
 

@@ -229,7 +229,7 @@ fn a_focus_change_with_no_watcher_thread_ends_in_the_fr73_default() {
 
     let before = guard::counters();
 
-    guard::note_focus_moved();
+    guard::note_focus_moved_for(None);
 
     assert_eq!(
         guard::field(),
@@ -321,7 +321,7 @@ fn a_refused_probe_request_does_not_cancel_one_that_was_accepted() {
     // ordering that used to lose.
     stage::arm_one_accepted_request_under_the_next_refusal();
 
-    guard::note_focus_moved();
+    guard::note_focus_moved_for(None);
 
     let standing = stage::probe_requests();
 
@@ -335,7 +335,7 @@ fn a_refused_probe_request_does_not_cancel_one_that_was_accepted() {
     // waiting for nobody is a request a forged `WM_APP_PROBE` could spend.
     stage::clear_probe_requests();
 
-    guard::note_focus_moved();
+    guard::note_focus_moved_for(None);
 
     assert_eq!(
         stage::probe_requests(),
@@ -373,7 +373,7 @@ fn a_focus_change_caused_by_typing_asks_for_the_probe_and_keeps_the_buffer() {
 
     let before = guard::counters();
 
-    guard::note_focus_moved_keeping_buffer();
+    guard::note_focus_moved_keeping_buffer_for(None);
 
     assert!(
         guard::buffering_allowed(),
@@ -419,6 +419,307 @@ fn a_focus_change_caused_by_typing_asks_for_the_probe_and_keeps_the_buffer() {
         );
 
         stage::clear_probe_requests();
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Stage E123 — a classic console window is answered without the probe
+// ---------------------------------------------------------------------------------------
+
+/// **A classic console window gets its verdict at once** — stage E123 (2026-11-26, решение
+/// 208.254, вариант (а) контролёра).
+///
+/// The window is this test's own, of class `ConsoleWindowClass` registered by this process, and
+/// message-only (`HWND_MESSAGE`): it has a class like any window, can never come to the front and is
+/// on nobody's screen. The verdict is read through the real `GetClassNameW` and the real name of
+/// this process, exactly as the input thread reads them for the console in front.
+mod classic_console {
+    use std::sync::{OnceLock, PoisonError};
+
+    use lang_switcher::guard::{self, Field};
+
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, HWND_MESSAGE, RegisterClassW,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW,
+    };
+    use windows::core::{PCWSTR, w};
+
+    use super::GLOBAL_STATE;
+
+    /// The plainest possible window procedure.
+    ///
+    /// # Safety
+    ///
+    /// Called by the system with the arguments of a live window's message, which are exactly what
+    /// `DefWindowProcW` takes.
+    unsafe extern "system" fn plain_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+    }
+
+    /// Registers `class` once per process — a class name is per process, and two tests asking for
+    /// it must not fail on the second registration.
+    fn registered(class: PCWSTR, once: &'static OnceLock<()>) {
+        once.get_or_init(|| {
+            // SAFETY: `None` asks for the handle of the running executable — the documented use.
+            let instance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW");
+
+            let description = WNDCLASSW {
+                lpfnWndProc: Some(plain_proc),
+                hInstance: instance.into(),
+                lpszClassName: class,
+                ..Default::default()
+            };
+
+            // SAFETY: `description` is a live, fully initialised `WNDCLASSW` whose two pointers —
+            // the window procedure and the static class name — outlive the call and the class.
+            // NFR-13: a zero atom is the documented failure and is examined.
+            let atom = unsafe { RegisterClassW(&description) };
+            assert_ne!(
+                atom,
+                0,
+                "RegisterClassW: {}",
+                std::io::Error::last_os_error()
+            );
+        });
+    }
+
+    /// A message-only window of `class`, destroyed when the value is dropped.
+    struct Window(HWND);
+
+    impl Window {
+        fn of(class: PCWSTR, once: &'static OnceLock<()>) -> Self {
+            registered(class, once);
+
+            // SAFETY: `None` asks for the handle of the running executable — the documented use.
+            let instance = unsafe { GetModuleHandleW(None) }.expect("GetModuleHandleW");
+
+            // SAFETY: the class name is the one registered above; `HWND_MESSAGE` as the parent asks
+            // for a message-only window; every other argument is a plain value or a null option.
+            // NFR-13: the `Result` is examined.
+            let handle = unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    class,
+                    PCWSTR::null(),
+                    WINDOW_STYLE(0),
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(HWND_MESSAGE),
+                    None,
+                    Some(instance.into()),
+                    None,
+                )
+            }
+            .expect("a message-only window of our own class");
+
+            Self(handle)
+        }
+    }
+
+    impl Drop for Window {
+        fn drop(&mut self) {
+            // SAFETY: `self.0` came from a successful `CreateWindowExW` on this thread and is
+            // destroyed exactly once — this type is neither `Copy` nor `Clone`.
+            let _ = unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    static CONSOLE_CLASS: OnceLock<()> = OnceLock::new();
+    static TERMINAL_CLASS: OnceLock<()> = OnceLock::new();
+    static OTHER_CLASS: OnceLock<()> = OnceLock::new();
+
+    fn console() -> Window {
+        Window::of(w!("ConsoleWindowClass"), &CONSOLE_CLASS)
+    }
+
+    fn terminal() -> Window {
+        Window::of(w!("CASCADIA_HOSTING_WINDOW_CLASS"), &TERMINAL_CLASS)
+    }
+
+    static PROGMAN_CLASS: OnceLock<()> = OnceLock::new();
+    static WORKERW_CLASS: OnceLock<()> = OnceLock::new();
+
+    fn progman() -> Window {
+        Window::of(w!("Progman"), &PROGMAN_CLASS)
+    }
+
+    fn workerw() -> Window {
+        Window::of(w!("WorkerW"), &WORKERW_CLASS)
+    }
+
+    fn other() -> Window {
+        Window::of(w!("LangSwE123NotAConsole"), &OTHER_CLASS)
+    }
+
+    /// The name of this process, as FR-84 compares it.
+    fn own_name() -> String {
+        std::env::current_exe()
+            .expect("a running test binary has a path")
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("and a name")
+            .to_owned()
+    }
+
+    /// ⭐ **The verdict is there at once, and no probe ran** — on both roads of a focus change.
+    ///
+    /// Measured before (stage E123, `Test_VM`, `Test_VM10`): the probe of a console that had just
+    /// come to the front answered 210–700 ms late, and the word typed in between was lost. A test
+    /// process has no watcher thread, so the probe road ends in FR-73's `Undetermined` here — and
+    /// that is what tells the two roads apart: `Ordinary` can come from nowhere but the class.
+    #[test]
+    fn a_classic_console_window_is_answered_at_once_and_not_probed() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        // Section 7's default: nothing excluded.
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        let console = console();
+        let before = guard::counters();
+
+        guard::note_focus_moved_for(Some(console.0));
+
+        assert_eq!(
+            guard::field(),
+            Field::Ordinary,
+            "E123: a classic console window is an ordinary field the moment it has the focus"
+        );
+        assert!(
+            guard::buffering_allowed(),
+            "and its strokes are recorded at once"
+        );
+        assert!(!guard::excluded());
+
+        let after = guard::counters();
+        assert_eq!(after.focus_changes, before.focus_changes + 1);
+        assert_eq!(after.ordinary_verdicts, before.ordinary_verdicts + 1);
+        assert_eq!(
+            after.probes, before.probes,
+            "the probe of FR-72 did not run"
+        );
+
+        // The road of FR-14 — a focus event of the user's own typing — answers the same.
+        guard::note_focus_moved_keeping_buffer_for(Some(console.0));
+
+        assert_eq!(guard::field(), Field::Ordinary);
+        assert_eq!(guard::counters().probes, before.probes);
+
+        // Control: a window of any other class takes the probe road, which in a test process ends
+        // in FR-73 — the class, and not the window being ours, is what decided above.
+        let other = other();
+
+        guard::note_focus_moved_for(Some(other.0));
+
+        assert_eq!(
+            guard::field(),
+            Field::Undetermined,
+            "a window that is not a classic console is probed, as before"
+        );
+    }
+
+    /// **FR-84 is answered on the console as it is everywhere** — the exclusion of the process
+    /// behind the console window stands without the probe (the shared body `verdict_by_process`).
+    #[test]
+    fn an_excluded_program_in_a_classic_console_stays_excluded() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        let console = console();
+
+        assert_eq!(guard::publish_exclusions(&[own_name()]), 1);
+
+        guard::note_focus_moved_for(Some(console.0));
+
+        let excluded = guard::excluded();
+        let field = guard::field();
+        let buffering = guard::buffering_allowed();
+
+        // Section 7's default put back before anything is asserted — process-global state.
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        assert!(
+            excluded,
+            "FR-84: the excluded program behind the console is excluded"
+        );
+        assert_eq!(
+            field,
+            Field::Undetermined,
+            "FR-84 ends the verdict as the probe ends it"
+        );
+        assert!(
+            !buffering,
+            "FR-84: nothing is recorded in an excluded program"
+        );
+    }
+
+    /// **Windows Terminal is answered the same way** — the second console host class of FR-42а
+    /// (stage E123, word of the controller after the measurement: at a password prompt in Windows
+    /// Terminal the probe of UI Automation answered `ordinary` every time, so it protects nothing
+    /// there, and a terminal just opened lost ≈ 0.4 s of strokes to it).
+    #[test]
+    fn a_windows_terminal_window_is_answered_at_once_and_not_probed() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        let terminal = terminal();
+        let before = guard::counters();
+
+        guard::note_focus_moved_for(Some(terminal.0));
+
+        assert_eq!(
+            guard::field(),
+            Field::Ordinary,
+            "E123: a Windows Terminal window is an ordinary field the moment it has the focus"
+        );
+        assert!(guard::buffering_allowed());
+
+        let after = guard::counters();
+        assert_eq!(after.ordinary_verdicts, before.ordinary_verdicts + 1);
+        assert_eq!(
+            after.probes, before.probes,
+            "the probe of FR-72 did not run"
+        );
+    }
+
+    /// **The desktop of explorer is answered at once too** — stage E123, variant (б1) of the
+    /// controller. Between the Run box closing and a console it starts coming to the front, the
+    /// desktop holds the focus for a moment; its probe of UI Automation held the watcher thread for
+    /// ≈ 100–350 ms, and the events of the console's window waited behind it (sampled, `Test_VM`).
+    /// The desktop has no password field to protect, so it needs no probe; both of its top-level
+    /// classes — `Progman`, and `WorkerW` that stands in for it behind a slideshow wallpaper.
+    #[test]
+    fn the_desktop_of_explorer_is_answered_at_once_and_not_probed() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        for desktop in [progman(), workerw()] {
+            let before = guard::counters();
+
+            guard::note_focus_moved_for(Some(desktop.0));
+
+            assert_eq!(
+                guard::field(),
+                Field::Ordinary,
+                "E123 (б1): the desktop is an ordinary field the moment it has the focus"
+            );
+
+            let after = guard::counters();
+            assert_eq!(after.ordinary_verdicts, before.ordinary_verdicts + 1);
+            assert_eq!(
+                after.probes, before.probes,
+                "the probe of FR-72 did not run"
+            );
+        }
     }
 }
 
@@ -2273,10 +2574,18 @@ fn the_capture_is_one_body_in_guard_and_reads_no_title() {
         "172.20: the capture asks for the content of a frame"
     );
 
+    // Stage E123: `determine` answers FR-84 through `verdict_by_process`, the body it shares with
+    // the verdict of a classic console window — so the rule is asked there, and `determine` asks
+    // that body.
     let determine = top_level_body(&guard_source, "fn determine(");
+    let by_process = top_level_body(&guard_source, "fn verdict_by_process(");
     assert!(
-        !code_lines_with(determine, "program_is_excluded(").is_empty()
-            && !code_lines_with(determine, "frame_content_name(window)").is_empty(),
+        !code_lines_with(determine, "verdict_by_process(window, process.as_deref())").is_empty(),
+        "E123: determine answers FR-84 and level 1 through the shared body"
+    );
+    assert!(
+        !code_lines_with(by_process, "program_is_excluded(").is_empty()
+            && !code_lines_with(by_process, "frame_content_name(window)").is_empty(),
         "172.20: determine answers FR-84 through the one rule and the one look into a frame"
     );
 
