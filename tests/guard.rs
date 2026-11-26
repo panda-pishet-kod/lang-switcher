@@ -534,10 +534,15 @@ mod classic_console {
     }
 
     static CONSOLE_CLASS: OnceLock<()> = OnceLock::new();
+    static TERMINAL_CLASS: OnceLock<()> = OnceLock::new();
     static OTHER_CLASS: OnceLock<()> = OnceLock::new();
 
     fn console() -> Window {
         Window::of(w!("ConsoleWindowClass"), &CONSOLE_CLASS)
+    }
+
+    fn terminal() -> Window {
+        Window::of(w!("CASCADIA_HOSTING_WINDOW_CLASS"), &TERMINAL_CLASS)
     }
 
     fn other() -> Window {
@@ -641,6 +646,36 @@ mod classic_console {
         assert!(
             !buffering,
             "FR-84: nothing is recorded in an excluded program"
+        );
+    }
+
+    /// **Windows Terminal is answered the same way** — the second console host class of FR-42а
+    /// (stage E123, word of the controller after the measurement: at a password prompt in Windows
+    /// Terminal the probe of UI Automation answered `ordinary` every time, so it protects nothing
+    /// there, and a terminal just opened lost ≈ 0.4 s of strokes to it).
+    #[test]
+    fn a_windows_terminal_window_is_answered_at_once_and_not_probed() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        let terminal = terminal();
+        let before = guard::counters();
+
+        guard::note_focus_moved_for(Some(terminal.0));
+
+        assert_eq!(
+            guard::field(),
+            Field::Ordinary,
+            "E123: a Windows Terminal window is an ordinary field the moment it has the focus"
+        );
+        assert!(guard::buffering_allowed());
+
+        let after = guard::counters();
+        assert_eq!(after.ordinary_verdicts, before.ordinary_verdicts + 1);
+        assert_eq!(
+            after.probes, before.probes,
+            "the probe of FR-72 did not run"
         );
     }
 }

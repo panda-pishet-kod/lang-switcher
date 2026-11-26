@@ -1630,19 +1630,24 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
     None
 }
 
-/// ⭐ **The verdict of a classic console window, without the probe — stage E123 (2026-11-26).**
+/// ⭐ **The verdict of a console window, without the probe — stage E123 (2026-11-26).**
 /// `None` for every other window: it is probed as before.
 ///
-/// A window of class `ConsoleWindowClass` ([`crate::inject::CLASSIC_CONSOLE_CLASS`]) is answered
-/// at once, on the thread that noted the focus change: FR-84 and level 1 by the name of the process
-/// ([`verdict_by_process`] — the same body [`determine`] runs), and otherwise [`Field::Ordinary`].
-/// Levels 2 and 3 are not asked, because they have nothing to say there:
+/// A window of one of the two console host classes of FR-42а ([`crate::inject::CONSOLE_WINDOW_CLASSES`]:
+/// `ConsoleWindowClass` — conhost — and `CASCADIA_HOSTING_WINDOW_CLASS` — Windows Terminal) is
+/// answered at once, on the thread that noted the focus change: FR-84 and level 1 by the name of the
+/// process ([`verdict_by_process`] — the same body [`determine`] runs; for Windows Terminal that
+/// process is the terminal, as it was for the probe), and otherwise [`Field::Ordinary`]. Levels 2 and
+/// 3 are not asked, because they have nothing to say there:
 ///
-/// * level 2 is for an `Edit`, and the console window is not one and has no child;
-/// * level 3 — UI Automation — answered `IsPassword` false for the console every time it was asked
-///   (the verdict on the stand was `ordinary` in every round of stage E123), and a password prompt
-///   in a console (`ssh`, `sudo`, `Read-Host -AsSecureString`) is not seen by it at all — §10
-///   record 30.
+/// * level 2 is for an `Edit`, and neither console window is one;
+/// * level 3 — UI Automation — answered `IsPassword` false for both hosts every time it was asked,
+///   **at a password prompt too** (stage E123, `Test_VM`, the probe of the candidate `5f05637` run
+///   with the prompt on the screen, records `vmlab\out\e123\pw-w11b-*`): `Read-Host -AsSecureString`
+///   and `runas` in Windows Terminal, `runas` in conhost — `ordinary` each time. A password prompt in a
+///   console (`ssh`, `sudo`, `Read-Host -AsSecureString`) is not seen by it — §10 record 30 — so
+///   answering without it takes no protection away. Windows Terminal is in the rule by that
+///   measurement (word of the controller, 2026-11-26).
 ///
 /// **Why, measured** (stage E123, `Test_VM` and `Test_VM10`, records `vmlab\out\e123`): in a console
 /// that has just come to the front, the probe answered 210–700 ms after the window (Windows 11) and
@@ -1650,7 +1655,8 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
 /// later `EVENT_OBJECT_FOCUS`, and the probe waits its turn behind those of the desktop the Run box
 /// left. Every stroke of that interval is lost to [`Field::Pending`]: a word typed 0.3 s after the
 /// console was asked for was not converted in 9 rounds of 10 (0.96.0: 4 of 4), and the press over the
-/// empty buffer switched the layout — the owner's «ничего, со звуком удачи» (решение 208.254).
+/// empty buffer switched the layout — the owner's «ничего, со звуком удачи» (решение 208.254). In a
+/// Windows Terminal just opened the same interval was ≈ 390–420 ms (Windows 11, sampled).
 ///
 /// # Threading
 ///
@@ -1659,7 +1665,12 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
 /// watcher thread: a class name, `OpenProcess` and `QueryFullProcessImageNameW`; no message is sent
 /// into the window and no UI Automation is touched.
 fn verdict_without_probe(window: HWND) -> Option<Probe> {
-    if !class_name(window).eq_ignore_ascii_case(crate::inject::CLASSIC_CONSOLE_CLASS) {
+    let class = class_name(window);
+
+    if !crate::inject::CONSOLE_WINDOW_CLASSES
+        .iter()
+        .any(|console| class.eq_ignore_ascii_case(console))
+    {
         return None;
     }
 
