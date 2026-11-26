@@ -5696,3 +5696,79 @@ fn the_field_change_and_the_pause_zero_the_short_memory() {
         .expect("a wipe");
     assert!(edge < wipe, "the pause wipes the buffer and the memory");
 }
+
+/// ⭐ **Stage Э122, решение 208.253, п. 3 — the capital under a `Shift` held back from a viewer is
+/// recorded as a capital.** In the window of AnyDesk or RustDesk the press of `Shift` that may be the
+/// second tap of a pair is not passed on, and a letter typed under it is sent after it by the input
+/// thread; the buffer records what the user typed — the letter with its `Shift` — so the conversion
+/// gives the capital back. Driven through `classify`, as the callback drives it, with the check of
+/// defect D on, as the product has it: the system has not seen the held-back `Shift` — no key is
+/// physically held here — and `hook::with_held_back_shift` is what the product's probe adds to the
+/// system's answer. Before it the first letter of the word came back small (`Ghbdtn` → `привет` on
+/// the stand, 3 of 3). Outside a viewer the `Shift` reaches the system and the probe sees it held.
+#[test]
+fn a_capital_under_a_shift_held_back_from_a_viewer_is_recorded_with_its_shift() {
+    const SCAN_LSHIFT: u16 = 0x2A;
+
+    fn shift_is_physically_held() -> Physical {
+        Physical {
+            shift_left: true,
+            ..nothing_is_physically_held()
+        }
+    }
+
+    for viewer in [false, true] {
+        let mut recorder = fresh();
+
+        // What the system says, and the product's composition on top of it.
+        if viewer {
+            recorder.verify_held_with(|| hook::with_held_back_shift(nothing_is_physically_held()));
+        } else {
+            recorder.verify_held_with(|| hook::with_held_back_shift(shift_is_physically_held()));
+        }
+
+        buffer::install_recorder(recorder);
+
+        let mode = Mode {
+            hotkey_vk: 0x10,
+            hotkey_double_tap: true,
+            viewer_in_front: viewer,
+            ..armed()
+        };
+        let mut state = HotkeyState::default();
+        let events = [
+            (VK_LSHIFT, SCAN_LSHIFT, Edge::Down, 0),
+            (VK_LSHIFT, SCAN_LSHIFT, Edge::Up, 80),
+            (VK_LSHIFT, SCAN_LSHIFT, Edge::Down, 160),
+            (VK_A, SCAN_A, Edge::Down, 200),
+            (VK_A, SCAN_A, Edge::Up, 260),
+            (VK_LSHIFT, SCAN_LSHIFT, Edge::Up, 300),
+        ];
+
+        for (vk, scan, edge, time) in events {
+            hook::classify(
+                mode,
+                &mut state,
+                KeyEvent {
+                    vk,
+                    edge,
+                    extra_info: FOREIGN_SIGNATURE,
+                    scan,
+                    flags: 0,
+                    time: SOME_TIME + time,
+                },
+                || 0,
+                || 0,
+            );
+        }
+
+        let mods = buffer::with(|recorder| recorder.stroke(0).map(|stroke| stroke.mods()))
+            .expect("installed")
+            .expect("the letter was recorded");
+
+        assert!(
+            mods.contains(StrokeMods::SHIFT),
+            "viewer in front: {viewer} — the letter typed under the second Shift is a capital"
+        );
+    }
+}

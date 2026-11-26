@@ -960,6 +960,10 @@ pub fn classify(
     held: impl FnOnce() -> u16,
     mouse: impl FnOnce() -> u32,
 ) -> Outcome {
+    // Stage Э122: the buffer checks `Shift` against the system while this stroke is recorded — a
+    // `Shift` held back from a viewer is held ([`with_held_back_shift`]).
+    publish_held_back_shift(state);
+
     let outcome = classify_stroke(mode, state, key, held, mouse);
 
     hold_back(state, key, outcome)
@@ -1874,6 +1878,13 @@ static HOTKEY_YIELDS: AtomicBool = AtomicBool::new(false);
 /// Written by the input thread ([`set_viewer_in_front`]), read by the callback of the same thread.
 static VIEWER_IN_FRONT: AtomicBool = AtomicBool::new(false);
 
+thread_local! {
+    /// ⭐ The sides — left, right — of a `Shift` held back from a viewer, as [`classify`] published
+    /// them at the start of the stroke under way (stage Э122, [`with_held_back_shift`]). The thread
+    /// of the callback only.
+    static HELD_BACK_SHIFT: Cell<(bool, bool)> = const { Cell::new((false, false)) };
+}
+
 /// Panics inside the callback since the last one that returned normally — FR-99.
 static CONSECUTIVE_PANICS: AtomicU32 = AtomicU32::new(0);
 
@@ -2709,14 +2720,60 @@ pub fn physical_modifiers() -> crate::buffer::Physical {
         )
     };
 
-    crate::buffer::Physical {
+    with_held_back_shift(crate::buffer::Physical {
         ctrl: is_held(ctrl),
         alt_left: is_held(alt_left),
         alt_right: is_held(alt_right),
         win: is_held(win_left) || is_held(win_right),
         shift_left: is_held(shift_left),
         shift_right: is_held(shift_right),
+    })
+}
+
+/// ⭐ **The `Shift` held back from a viewer is held** — stage Э122, решение 208.253, п. 3.
+///
+/// The system has not seen that press yet — the callback held it back ([`HotkeyState::kept_shift`]),
+/// or it waits for the input thread ([`HotkeyState::resend`]) — while the user holds it. The buffer
+/// checks its belief of `Shift` against [`physical_modifiers`] on the first letter of a word (the
+/// repair of defect D, task T-39-3), and without this it lowered the `Shift` and recorded the capital
+/// as a small letter: `Ghbdtn` came back `привет` on the stand, 3 of 3, while the viewer got `G`.
+/// So the side of that `Shift` answers «held» on top of what the system says.
+///
+/// The sides are those [`classify`] published as it began the stroke under way — the state before
+/// it — on this thread ([`publish_held_back_shift`]).
+pub fn with_held_back_shift(physical: crate::buffer::Physical) -> crate::buffer::Physical {
+    let (left, right) = HELD_BACK_SHIFT.with(Cell::get);
+
+    crate::buffer::Physical {
+        shift_left: physical.shift_left || left,
+        shift_right: physical.shift_right || right,
+        ..physical
     }
+}
+
+/// Publishes the sides of a `Shift` held back from a viewer, for [`with_held_back_shift`] — stage
+/// Э122. Its press and release in the queue for the input thread, in order, then the held press.
+fn publish_held_back_shift(state: &HotkeyState) {
+    let mut sides = (false, false);
+    let mut mark = |vk: u16, down: bool| {
+        if vk == VK_RSHIFT.0 {
+            sides.1 = down;
+        } else if is_shift(vk) {
+            sides.0 = down;
+        }
+    };
+
+    if let Some(queue) = state.resend {
+        for stroke in queue.strokes() {
+            mark(stroke.vk, !stroke.up);
+        }
+    }
+
+    if let Some(kept) = state.kept_shift {
+        mark(kept.vk, true);
+    }
+
+    HELD_BACK_SHIFT.with(|cell| cell.set(sides));
 }
 
 /// The modifiers the user is holding, as the set [`classify`] compares with the hotkey's —
