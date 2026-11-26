@@ -289,6 +289,16 @@ There is no other network activity. The details are in section 9 of the specific
 - In Windows 11 Notepad, after the right Alt has been pressed alone on the English layout, a tap of Ctrl+Alt opens the
   keytips of the Notepad menu — Notepad does so without Lang Switcher too: the word to be fixed stays as it was, and the
   next word typed goes into the keytips. A restart of Windows ends it; until then, choose another key in the settings.
+- Remote desktop. In an AnyDesk or RustDesk window on your own computer, Lang Switcher fixes a word with keys: it erases
+  it and types the same keys again in the new layout. The keys become letters on the computer whose layout the
+  remote-desktop program uses. In AnyDesk with the keyboard layout set to Auto or Local, and in RustDesk in the translate
+  and legacy modes, that is your computer, and the word is fixed. In AnyDesk Remote and in RustDesk map (RustDesk's
+  default), it is the remote computer, and the word stays as it was; there, run Lang Switcher on the remote computer and
+  add `AnyDesk.exe` or `rustdesk.exe` to the exclusions on yours. Selected text in AnyDesk and RustDesk windows is not
+  converted: the hotkey only switches the layout there. For Windows Remote Desktop Connection, run Lang Switcher on the
+  remote computer; for TightVNC, on yours. If Lang Switcher runs on both computers, a double Shift in an AnyDesk or
+  RustDesk window reaches the remote computer only as its first tap, and one copy fixes the word: yours. In AnyDesk the
+  first word after connecting is sometimes fixed only in part, and a second press does not bring the fixed word back.
 
 ## Reporting a problem or an idea
 
