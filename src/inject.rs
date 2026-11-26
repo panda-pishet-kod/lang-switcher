@@ -1612,7 +1612,8 @@ pub fn foreground_is_viewer() -> bool {
     // SAFETY: as in `effective_method` above.
     let foreground = unsafe { GetForegroundWindow() };
 
-    !foreground.is_invalid() && window_class(foreground).is_some_and(|class| is_remote_viewer(&class))
+    !foreground.is_invalid()
+        && window_class(foreground).is_some_and(|class| is_remote_viewer(&class))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1795,9 +1796,7 @@ const HELD_EXTENDED: u32 = 0x01;
 /// thread answered — each as it was typed, press or release ([`pressed_event`]).
 ///
 /// Answers the events and how many of them are filled.
-pub fn held_back_events(
-    resend: crate::hook::Resend,
-) -> ([INPUT; crate::hook::RESEND_MAX], usize) {
+pub fn held_back_events(resend: crate::hook::Resend) -> ([INPUT; crate::hook::RESEND_MAX], usize) {
     let mut events = [pressed_event(VIRTUAL_KEY(0), 0, false, false); crate::hook::RESEND_MAX];
     let strokes = resend.strokes();
 

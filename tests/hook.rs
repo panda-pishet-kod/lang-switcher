@@ -4722,7 +4722,11 @@ fn in_a_viewer_the_remote_computer_gets_the_first_tap_of_a_double_shift_only() {
 
         println!("{vk:#04x}: {stream:?}");
 
-        assert_eq!(fired, vec![3], "the double press fires here, on the second release");
+        assert_eq!(
+            fired,
+            vec![3],
+            "the double press fires here, on the second release"
+        );
         assert_eq!(
             stream,
             vec![(vk, Edge::Down), (vk, Edge::Up)],
@@ -4809,7 +4813,11 @@ fn every_shift_a_viewer_gets_has_its_release() {
         ),
         (
             "two double presses in a row",
-            [double_press(VK_LSHIFT), later(double_press(VK_LSHIFT), 1_000)].concat(),
+            [
+                double_press(VK_LSHIFT),
+                later(double_press(VK_LSHIFT), 1_000),
+            ]
+            .concat(),
         ),
     ];
 
@@ -4838,7 +4846,11 @@ fn a_capital_typed_on_the_second_press_reaches_the_viewer_as_typed() {
 
     let letter = hook::classify(mode, &mut state, events[3], || 0, || 0);
 
-    assert_eq!(letter.decision, Decision::Suppress, "the letter waits for its Shift");
+    assert_eq!(
+        letter.decision,
+        Decision::Suppress,
+        "the letter waits for its Shift"
+    );
     assert!(letter.resend, "and the input thread is asked to send both");
     assert_eq!(
         state.resend.map(|resend| resend.strokes().to_vec()),
@@ -4943,7 +4955,10 @@ fn strokes_typed_before_the_input_thread_answers_wait_behind_the_held_ones() {
     );
 
     stream.extend(sent(&resend));
-    assert_eq!(stream[..2], [(VK_LSHIFT, Edge::Down), (VK_LSHIFT, Edge::Up)]);
+    assert_eq!(
+        stream[..2],
+        [(VK_LSHIFT, Edge::Down), (VK_LSHIFT, Edge::Up)]
+    );
     assert_whole(&stream, "a slow input thread");
 
     // A full queue: the strokes beyond it pass as they come.
@@ -4957,7 +4972,13 @@ fn strokes_typed_before_the_input_thread_answers_wait_behind_the_held_ones() {
 
     for index in 0..hook::RESEND_MAX as u32 {
         let edge = if index % 2 == 0 { Edge::Up } else { Edge::Down };
-        let outcome = hook::classify(mode, &mut state, stroke(VK_A, edge, 300 + index), || 0, || 0);
+        let outcome = hook::classify(
+            mode,
+            &mut state,
+            stroke(VK_A, edge, 300 + index),
+            || 0,
+            || 0,
+        );
 
         if outcome.decision == Decision::Pass {
             passed += 1;
@@ -4968,7 +4989,10 @@ fn strokes_typed_before_the_input_thread_answers_wait_behind_the_held_ones() {
         state.resend.map(|resend| resend.strokes().len()),
         Some(hook::RESEND_MAX)
     );
-    assert_eq!(passed, 2, "the two strokes beyond the queue pass as they come");
+    assert_eq!(
+        passed, 2,
+        "the two strokes beyond the queue pass as they come"
+    );
 }
 
 #[test]
@@ -4986,7 +5010,10 @@ fn outside_a_viewer_the_double_shift_holds_nothing_back() {
             let (stream, _, outcomes) = reaching_the_viewer(mode, &events);
             let typed: Vec<(u16, Edge)> = events.iter().map(|key| (key.vk, key.edge)).collect();
 
-            assert_eq!(stream, typed, "{what}: every stroke passes as before (п. 4)");
+            assert_eq!(
+                stream, typed,
+                "{what}: every stroke passes as before (п. 4)"
+            );
             assert!(
                 outcomes.iter().all(|outcome| !outcome.resend),
                 "{what}: nothing is sent"
@@ -5081,7 +5108,9 @@ fn the_viewer_is_asked_on_the_input_thread_and_the_keys_are_sent_there() {
         let at = hook_rs
             .find(signature)
             .expect("the function must be in this file");
-        let end = hook_rs[at..].find("\n}\n").expect("a top-level function closes");
+        let end = hook_rs[at..]
+            .find("\n}\n")
+            .expect("a top-level function closes");
         let body = &hook_rs[at..at + end];
 
         for call in [
@@ -5101,7 +5130,9 @@ fn the_viewer_is_asked_on_the_input_thread_and_the_keys_are_sent_there() {
     let at = hook_rs
         .find("WM_APP_RESEND => {")
         .expect("the arm of the input thread");
-    let end = hook_rs[at..].find("Some(LRESULT(0))").expect("the arm answers");
+    let end = hook_rs[at..]
+        .find("Some(LRESULT(0))")
+        .expect("the arm answers");
     let arm = &hook_rs[at..at + end];
 
     assert!(arm.contains("take_resend()") && arm.contains("crate::inject::send_held_back(resend)"));

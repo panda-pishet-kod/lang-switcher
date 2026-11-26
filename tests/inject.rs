@@ -3596,7 +3596,12 @@ fn the_backspaces_of_the_keystroke_path_go_by_their_scan_code() {
 fn the_keys_held_back_from_a_viewer_go_out_as_they_were_pressed() {
     use lang_switcher::hook::{HeldKey, Resend};
 
-    let held = |vk: u16, scan: u16, flags: u32, up: bool| HeldKey { vk, scan, flags, up };
+    let held = |vk: u16, scan: u16, flags: u32, up: bool| HeldKey {
+        vk,
+        scan,
+        flags,
+        up,
+    };
     let strokes = [
         held(VK_LSHIFT.0, 0x2A, 0, false),
         held(0x41, 0x1E, 0, false),
@@ -3635,12 +3640,19 @@ fn the_keys_held_back_from_a_viewer_go_out_as_they_were_pressed() {
 
         assert_eq!(ki.wVk.0, key.vk, "{index}: the virtual key as typed");
         assert_eq!(ki.wScan, key.scan, "{index}: the scan code as typed");
-        assert_eq!(ki.dwFlags, expected, "{index}: by its virtual key, edge and extension as typed");
+        assert_eq!(
+            ki.dwFlags, expected,
+            "{index}: by its virtual key, edge and extension as typed"
+        );
         assert_eq!(ki.dwExtraInfo, INJECTED_SIGNATURE, "{index}: FR-03");
         assert_eq!(ki.time, 0, "{index}: stamped by the system");
     }
 
-    assert_eq!(inject::held_back_events(Resend::default()).1, 0, "nothing waits, nothing goes");
+    assert_eq!(
+        inject::held_back_events(Resend::default()).1,
+        0,
+        "nothing waits, nothing goes"
+    );
 }
 
 /// A press in the window of a viewer is the press of the classic console, whole: the switch before
