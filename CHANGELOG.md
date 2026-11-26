@@ -19,6 +19,9 @@ page. Dates are the days the releases were published (UTC).
 - In an AnyDesk or RustDesk window the word is fixed with keys: Lang Switcher erases it and types the same keys again
   in the new layout. Before, AnyDesk put the fix in front of the word it did not erase, and RustDesk could type
   garbage instead of it. Selected text in these windows is not converted: the hotkey only switches the layout there.
+- With the double Shift as the hotkey, in an AnyDesk or RustDesk window the remote computer gets only the first tap.
+  Before, when Lang Switcher ran on both computers, both copies fixed the word, and in AnyDesk it could come out wrong.
+  A capital typed with that second Shift still reaches the remote computer as a capital.
 
 Known issues:
 
