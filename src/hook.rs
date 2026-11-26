@@ -246,6 +246,22 @@ pub const WM_APP_HOTKEY: u32 = WM_APP + 3;
 /// carries no parameters that are read. The input window alone answers it (`app::window_proc`).
 pub const WM_APP_SWITCH_KEY: u32 = WM_APP + 34;
 
+/// ⭐ Message the callback posts to the input thread's window when **a `Shift` held back from a
+/// remote-desktop viewer has to reach it after all** — stage Э122, решение 208.253 (see
+/// [`HotkeyState::kept_shift`]).
+///
+/// `WM_APP + 36`, the next free number of the program-wide row: `+ 35` is [`WM_APP_MENU_MASK`].
+///
+/// The callback cannot send it itself: section 6.1 puts `SendInput` outside the callback, and
+/// `SendInput` calls this process's own hook back. The keys travel in [`HotkeyState::resend`] — a
+/// thread-local of the input thread, which is the thread of the callback — and never in the
+/// message (SEC-01, SEC-07).
+///
+/// SEC-05: any process at the same integrity level can post this too, and what it buys is the
+/// keys the callback itself held back a moment before, once: the slot is taken whole, and an empty
+/// slot sends nothing.
+pub const WM_APP_RESEND: u32 = WM_APP + 36;
+
 /// Message the callback posts to the UI thread's window when FR-99 has disarmed buffering,
 /// so that the tray icon can show the "приостановлена" state FR-99 asks for.
 ///
@@ -423,6 +439,14 @@ pub struct Mode {
     /// nothing at all, which is the contract section 6.3 gives that module and which
     /// `tests\guard.rs` pins by reading this file.
     pub hotkey_yields: bool,
+    /// ⭐ **The window in front is a remote-desktop viewer — AnyDesk or RustDesk** (stage Э122,
+    /// решение 208.253; [`crate::inject::is_remote_viewer`]). There the second tap of the double
+    /// press of `Shift` is held back ([`HotkeyState::kept_shift`]).
+    ///
+    /// A published value like [`Self::hotkey_yields`]: the input thread reads the class of the
+    /// window in front on every layout probe — a change of window or focus, and the release of
+    /// every modifier, the first tap among them — and stores it through [`set_viewer_in_front`].
+    pub viewer_in_front: bool,
     /// **The second hotkey, «Переключить раскладку»** — `[switch_hotkey]`, решение 208.228;
     /// [`SwitchKey::NONE`] in the mode of one key and while no second key is set.
     ///
@@ -550,6 +574,85 @@ pub struct HotkeyState {
     pub chord_taps: Taps,
     /// The count of mouse buttons pressed when the tap of `Ctrl+Alt` began — as [`Self::taps_mouse`].
     pub chord_mouse: u32,
+    /// ⭐ **The `Shift` held back from a remote-desktop viewer** — stage Э122, решение 208.253.
+    ///
+    /// With Lang Switcher on both computers, the double press of `Shift` typed into an AnyDesk or a
+    /// RustDesk window reached both copies, and both converted the word. So in a viewer
+    /// ([`Mode::viewer_in_front`]) the press that may be the **second tap** of a pair is not passed
+    /// on: the remote computer gets the first tap only. What then happens to the held press:
+    ///
+    /// * it **comes up** — the double press, or a hold that was no tap: the release is not passed
+    ///   on either, and the remote computer has seen nothing of this `Shift`;
+    /// * **another key goes down** under it — a capital letter: the key is held back too, and both
+    ///   go to the input thread to be sent in their order, `Shift` first ([`Self::resend`]);
+    /// * it **repeats** after it can no longer be a tap: the repeat is passed on — the system and
+    ///   the viewer take it for the press itself, and the release passes after it.
+    ///
+    /// Every `Shift` the remote computer gets this way has its release (решение 208.253, п. 2).
+    pub kept_shift: Option<HeldKey>,
+    /// ⭐ **The strokes held back for the input thread to send** — [`WM_APP_RESEND`], stage Э122:
+    /// the held `Shift` and the key under it, and **every stroke after them until the input thread
+    /// has sent them** — so a release typed quickly does not overtake its own press. Taken whole
+    /// by the input thread; `None` again once sent.
+    pub resend: Option<Resend>,
+}
+
+/// ⭐ One stroke held back by the callback — its code, scan code, `LLKHF_` flags and edge, enough to
+/// send it again as it was typed (stage Э122).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeldKey {
+    /// `KBDLLHOOKSTRUCT.vkCode`.
+    pub vk: u16,
+    /// `KBDLLHOOKSTRUCT.scanCode` — the viewers drop a key without one (stage Э122).
+    pub scan: u16,
+    /// `KBDLLHOOKSTRUCT.flags` — `LLKHF_EXTENDED` is what the sending reads.
+    pub flags: u32,
+    /// A release, not a press.
+    pub up: bool,
+}
+
+impl HeldKey {
+    /// The stroke `key` is.
+    pub fn of(key: KeyEvent) -> Self {
+        Self {
+            vk: key.vk,
+            scan: key.scan,
+            flags: key.flags,
+            up: matches!(key.edge, Edge::Up),
+        }
+    }
+}
+
+/// ⭐ How many strokes may wait for the input thread — stage Э122. The thread answers in
+/// microseconds; a queue this long would take a busy thread and a fast hand together. A stroke
+/// with no room left is passed on as it comes.
+pub const RESEND_MAX: usize = 16;
+
+/// ⭐ The strokes the input thread sends for a `Shift` held back from a viewer, in their order —
+/// stage Э122: the press of the `Shift`, the press of the key under it (unless the hook swallows that
+/// key as a hotkey), and whatever came after them before they were sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Resend {
+    strokes: [HeldKey; RESEND_MAX],
+    count: usize,
+}
+
+impl Resend {
+    /// The strokes, in order.
+    pub fn strokes(&self) -> &[HeldKey] {
+        &self.strokes[..self.count]
+    }
+
+    /// Appends `stroke`; `false` when there is no room.
+    pub fn push(&mut self, stroke: HeldKey) -> bool {
+        if self.count == RESEND_MAX {
+            return false;
+        }
+
+        self.strokes[self.count] = stroke;
+        self.count += 1;
+        true
+    }
 }
 
 /// **The double press of `Shift`, as a rule of times — task T-95-1, вопрос 159.**
@@ -656,6 +759,12 @@ impl Taps {
     pub fn waiting(&self) -> bool {
         self.first_at.is_some()
     }
+
+    /// Whether the `Shift` that is down may still be a tap at `time` — stage Э122: a held-back
+    /// `Shift` that repeats after this is a hold, and is let go.
+    pub fn may_still_tap(&self, time: u32) -> bool {
+        self.pressed_at.is_some_and(|pressed| within(pressed, time))
+    }
 }
 
 /// Whether `time` is within [`DOUBLE_TAP_MS`] of `start` — forwards only, see [`Taps`].
@@ -691,6 +800,9 @@ pub struct Outcome {
     /// [`WM_APP_MENU_MASK`] (решение 208.237 п. 2): the menu mask goes out while `Alt` is held, and its
     /// release is no lone `Alt` to the window in front.
     pub mask_menu: bool,
+    /// ⭐ **Keys are held back for the input thread to send** — the `PostMessageW` of
+    /// [`WM_APP_RESEND`] (stage Э122); the keys are in [`HotkeyState::resend`].
+    pub resend: bool,
 }
 
 impl Outcome {
@@ -701,6 +813,7 @@ impl Outcome {
         probe_layout: false,
         fire_switch: false,
         mask_menu: false,
+        resend: false,
     };
 }
 
@@ -836,7 +949,90 @@ pub fn is_emergency_key(vk: u16, message: u32) -> bool {
 ///
 /// FR-96 is not here: it is handled before this function is even called. See
 /// [`keyboard_hook_proc`].
+///
+/// ⭐ Stage Э122: last of all, a `Shift` held back from a remote-desktop viewer is let go if this
+/// stroke asks for it, and a stroke typed while held-back strokes wait for the input thread waits
+/// behind them — [`hold_back`].
 pub fn classify(
+    mode: Mode,
+    state: &mut HotkeyState,
+    key: KeyEvent,
+    held: impl FnOnce() -> u16,
+    mouse: impl FnOnce() -> u32,
+) -> Outcome {
+    let outcome = classify_stroke(mode, state, key, held, mouse);
+
+    hold_back(state, key, outcome)
+}
+
+/// ⭐ **A `Shift` held back from a viewer, and the strokes after it** — stage Э122, решение 208.253
+/// ([`HotkeyState::kept_shift`]). Whatever the mode is now, so that no held press outlives its key:
+///
+/// * the **release of that `Shift`** is not passed on — the remote computer never got its press;
+/// * **another key going down** under it is held back with it when it would have been passed on,
+///   and both go to the input thread in their order, `Shift` first: a capital letter stays a
+///   capital (решение 208.253, п. 3). A key swallowed anyway — a hotkey — sends the `Shift` alone;
+/// * **while held-back strokes wait** for the input thread, every stroke that would have been
+///   passed on waits behind them, so the order is the order typed: a release that came before the
+///   thread answered does not reach the viewer ahead of its own press (no key left down there).
+///
+/// Our own strokes (FR-03) are none of this: they are the sending itself.
+fn hold_back(state: &mut HotkeyState, key: KeyEvent, outcome: Outcome) -> Outcome {
+    if key.extra_info == INJECTED_SIGNATURE {
+        return outcome;
+    }
+
+    let held_back = Outcome {
+        decision: Decision::Suppress,
+        resend: true,
+        ..outcome
+    };
+    let passes = matches!(outcome.decision, Decision::Pass);
+
+    if let Some(kept) = state.kept_shift {
+        match key.edge {
+            Edge::Up if key.vk == kept.vk => {
+                state.kept_shift = None;
+
+                return Outcome {
+                    decision: Decision::Suppress,
+                    ..outcome
+                };
+            }
+            Edge::Down if key.vk != kept.vk => {
+                state.kept_shift = None;
+
+                let queue = state.resend.get_or_insert_with(Resend::default);
+                let shift = HeldKey { up: false, ..kept };
+
+                if queue.push(shift) && (!passes || queue.push(HeldKey::of(key))) {
+                    return held_back;
+                }
+
+                // No room: the key goes as it comes, and what waits is sent.
+                return Outcome {
+                    resend: true,
+                    ..outcome
+                };
+            }
+            _ => return outcome,
+        }
+    }
+
+    match state.resend.as_mut() {
+        Some(queue) if passes => {
+            if queue.push(HeldKey::of(key)) {
+                held_back
+            } else {
+                outcome
+            }
+        }
+        _ => outcome,
+    }
+}
+
+/// The decision of [`classify`] before a held-back `Shift` is looked at (stage Э122).
+fn classify_stroke(
     mode: Mode,
     state: &mut HotkeyState,
     key: KeyEvent,
@@ -999,6 +1195,7 @@ pub fn classify(
                 probe_layout: false,
                 fire_switch: first_press && !fix_pressed,
                 mask_menu: false,
+                resend: false,
             }
         }
 
@@ -1139,12 +1336,18 @@ fn tap_stroke(
     let (mut mouse_source, mut mouse_memo) = (Some(mouse), None);
     let mut mouse = || *mouse_memo.get_or_insert_with(|| mouse_source.take().map_or(0, |f| f()));
 
+    // Stage Э122: the second tap of a pair, held back from a viewer — [`keep_shift`].
+    let mut keep = false;
+
     let fire = match (is_shift(key.vk), key.edge) {
         (true, Edge::Down) => {
             state.ctrl_taps.interrupt();
 
             if pair {
+                let repeat = state.shift_held == key.vk;
+
                 shift_pressed(state, key, &mut held, &mut mouse);
+                keep = keep_shift(mode, state, key, repeat);
             } else if state.shift_held != key.vk {
                 state.shift_held = key.vk;
             }
@@ -1193,10 +1396,53 @@ fn tap_stroke(
     );
 
     Outcome {
+        decision: if keep {
+            Decision::Suppress
+        } else {
+            Decision::Pass
+        },
         fire_hotkey: fix && !mode.hotkey_yields,
         fire_switch: switch && !mode.hotkey_yields,
         mask_menu: mask && !mode.hotkey_yields,
         ..ordinary_stroke(key)
+    }
+}
+
+/// ⭐ **Whether this press of `Shift` is held back from a viewer** — stage Э122, решение 208.253
+/// ([`HotkeyState::kept_shift`]); called after [`shift_pressed`] has counted it.
+///
+/// * a **new press that may be the second tap** of a pair — one tap made, this one within its
+///   window and clean — in a viewer, in a process that is not excluded (FR-84): held back;
+/// * the **repeat** of the held-back press: held back while it may still be a tap, and let go after
+///   — passed on, the press the remote computer gets;
+/// * anything else — the first tap, a press outside a viewer — is passed on as before (п. 4).
+///
+/// The recording of the press is [`tap_stroke`]'s as ever: the buffer sees `Shift` held.
+fn keep_shift(mode: Mode, state: &mut HotkeyState, key: KeyEvent, repeat: bool) -> bool {
+    match state.kept_shift {
+        Some(kept) if kept.vk == key.vk => {
+            if state.taps.may_still_tap(key.time) {
+                return true;
+            }
+
+            state.kept_shift = None;
+            false
+        }
+        // The other `Shift` under the held one — [`hold_back`] sends both.
+        Some(_) => false,
+        None => {
+            let second = !repeat
+                && mode.viewer_in_front
+                && !mode.hotkey_yields
+                && state.taps.pressing()
+                && state.taps.waiting();
+
+            if second {
+                state.kept_shift = Some(HeldKey::of(key));
+            }
+
+            second
+        }
     }
 }
 
@@ -1624,6 +1870,10 @@ static FAIL_SAFE: AtomicBool = AtomicBool::new(false);
 /// [`Mode::hotkey_yields`].
 static HOTKEY_YIELDS: AtomicBool = AtomicBool::new(false);
 
+/// ⭐ The window in front is a remote-desktop viewer — stage Э122, [`Mode::viewer_in_front`].
+/// Written by the input thread ([`set_viewer_in_front`]), read by the callback of the same thread.
+static VIEWER_IN_FRONT: AtomicBool = AtomicBool::new(false);
+
 /// Panics inside the callback since the last one that returned normally — FR-99.
 static CONSECUTIVE_PANICS: AtomicU32 = AtomicU32::new(0);
 
@@ -1692,6 +1942,8 @@ thread_local! {
             chord_both: false,
             chord_taps: Taps::NONE,
             chord_mouse: 0,
+            kept_shift: None,
+            resend: None,
         })
     };
 }
@@ -2095,6 +2347,29 @@ pub fn hotkey_yields() -> bool {
     HOTKEY_YIELDS.load(Ordering::Relaxed)
 }
 
+/// ⭐ Publishes whether the window in front is a remote-desktop viewer — stage Э122,
+/// [`Mode::viewer_in_front`]. Called by the input thread on every layout probe
+/// (`app::window_proc`, `watchdog::WM_APP_LAYOUT`), never from the callback.
+pub fn set_viewer_in_front(viewer: bool) {
+    VIEWER_IN_FRONT.store(viewer, Ordering::Relaxed);
+}
+
+/// Whether the window in front is a remote-desktop viewer, as last published — stage Э122.
+pub fn viewer_in_front() -> bool {
+    VIEWER_IN_FRONT.load(Ordering::Relaxed)
+}
+
+/// ⭐ **Takes the keys held back for the input thread** — stage Э122, [`WM_APP_RESEND`]. The slot is
+/// emptied: a second message, or a forged one, finds nothing to send (SEC-05).
+pub fn take_resend() -> Option<Resend> {
+    HOTKEY_STATE.with(|cell| {
+        let mut state = cell.get();
+        let resend = state.resend.take();
+        cell.set(state);
+        resend
+    })
+}
+
 /// Publishes `general.enabled` — FR-90, FR-95. Called by the UI thread.
 ///
 /// # Point 3 of task T-13-4 — the resumption asks for a fresh `CapsLock`
@@ -2212,6 +2487,8 @@ pub fn current_mode() -> Mode {
         // thread), which does not show at the percentiles NFR-01 is written in; the
         // testability does show, in every row of `tests\hook.rs`.
         hotkey_yields: hotkey_yields(),
+        // Stage Э122: a fifth relaxed load, on the terms of the fourth above.
+        viewer_in_front: viewer_in_front(),
         switch: SwitchKey::from_word(switch_vk, switch_set),
     }
 }
@@ -2293,6 +2570,16 @@ pub fn handle_input_message(message: u32, _wparam: WPARAM, _lparam: LPARAM) -> O
         // That is the same shape `WM_APP_FAIL_SAFE` above relies on `with_tray` for.
         WM_APP_SEED_CAPS => {
             crate::buffer::set_caps_lock(caps_lock_on);
+
+            Some(LRESULT(0))
+        }
+
+        // ⭐ Stage Э122: the keys the callback held back from a viewer, sent in their order — the
+        // slot is taken whole, so a forgery sends nothing (SEC-05, argued at the constant).
+        WM_APP_RESEND => {
+            if let Some(resend) = take_resend() {
+                let _ = crate::inject::send_held_back(resend);
+            }
 
             Some(LRESULT(0))
         }
@@ -3307,6 +3594,12 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
     // Решение 208.237 п. 2: both keys of the tap of `Ctrl+Alt` are down — the menu mask, now.
     if outcome.mask_menu {
         post_quiet(WM_APP_MENU_MASK);
+    }
+
+    // Stage Э122: a `Shift` held back from a viewer and the key under it — the input thread sends
+    // them (section 6.1: nothing is sent from here). Before the probe below: the keys come first.
+    if outcome.resend {
+        post_quiet(WM_APP_RESEND);
     }
 
     // FR-21, task T-03-3c. One `PostMessageW` and nothing else, on the same terms as the one

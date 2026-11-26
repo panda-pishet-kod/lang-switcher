@@ -3588,6 +3588,61 @@ fn the_backspaces_of_the_keystroke_path_go_by_their_scan_code() {
     }
 }
 
+/// ⭐ **Решение 208.253, п. 3.** The strokes the hook held back from a viewer — the `Shift`, the capital
+/// under it, what came after them — go out as they were typed, in their order: each the virtual key
+/// **with** its scan code, the extended flag it had and its edge — no `KEYEVENTF_SCANCODE`, no
+/// `KEYEVENTF_UNICODE`, no `wScan = 0` the viewers drop — and with the signature of FR-03.
+#[test]
+fn the_keys_held_back_from_a_viewer_go_out_as_they_were_pressed() {
+    use lang_switcher::hook::{HeldKey, Resend};
+
+    let held = |vk: u16, scan: u16, flags: u32, up: bool| HeldKey { vk, scan, flags, up };
+    let strokes = [
+        held(VK_LSHIFT.0, 0x2A, 0, false),
+        held(0x41, 0x1E, 0, false),
+        // `LLKHF_EXTENDED`: a right `Ctrl` typed while they waited.
+        held(VK_RCONTROL.0, 0x1D, 0x01, false),
+        held(VK_RCONTROL.0, 0x1D, 0x01, true),
+        held(0x41, 0x1E, 0, true),
+        held(VK_LSHIFT.0, 0x2A, 0, true),
+    ];
+    let mut resend = Resend::default();
+
+    for stroke in strokes {
+        assert!(resend.push(stroke));
+    }
+
+    let (events, count) = inject::held_back_events(resend);
+
+    assert_eq!(count, strokes.len(), "one event a stroke");
+
+    for (index, (event, key)) in events[..count].iter().zip(strokes).enumerate() {
+        assert_eq!(
+            event.r#type,
+            windows::Win32::UI::Input::KeyboardAndMouse::INPUT_KEYBOARD
+        );
+        // SAFETY: the type is checked above — `INPUT_KEYBOARD`, the `ki` member.
+        let ki = unsafe { event.Anonymous.ki };
+        let mut expected = windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0);
+
+        if key.flags & 0x01 != 0 {
+            expected |= KEYEVENTF_EXTENDEDKEY;
+        }
+
+        if key.up {
+            expected |= KEYEVENTF_KEYUP;
+        }
+
+        assert_eq!(ki.wVk.0, key.vk, "{index}: the virtual key as typed");
+        assert_eq!(ki.wScan, key.scan, "{index}: the scan code as typed");
+        assert_eq!(ki.dwFlags, expected, "{index}: by its virtual key, edge and extension as typed");
+        assert_eq!(ki.dwExtraInfo, INJECTED_SIGNATURE, "{index}: FR-03");
+        assert_eq!(ki.time, 0, "{index}: stamped by the system");
+    }
+
+    assert_eq!(inject::held_back_events(Resend::default()).1, 0, "nothing waits, nothing goes");
+}
+
 /// A press in the window of a viewer is the press of the classic console, whole: the switch before
 /// the one packet, and **every** event of that packet a key with its scan code — the backspaces as
 /// `VK_BACK` with `0E`, the keys by `KEYEVENTF_SCANCODE`; not one event with `wScan = 0`, not one

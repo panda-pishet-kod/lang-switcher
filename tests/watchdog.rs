@@ -1224,6 +1224,11 @@ fn the_private_messages_of_this_process_are_all_distinct() {
         watchdog::WM_APP_RECHECK_FOREGROUND,
         // Stage E116 (1.6.0), error O-1: the layout handed to the UI thread for a window of its own.
         lang_switcher::app::WM_APP_OWN_LAYOUT,
+        // Decisions 208.228 and 208.237: the second hotkey and the menu mask of the tap of
+        // `Ctrl+Alt`. Stage Э122, решение 208.253: the keys held back from a viewer.
+        lang_switcher::hook::WM_APP_SWITCH_KEY,
+        lang_switcher::hook::WM_APP_MENU_MASK,
+        lang_switcher::hook::WM_APP_RESEND,
     ];
 
     for (index, message) in messages.iter().enumerate() {

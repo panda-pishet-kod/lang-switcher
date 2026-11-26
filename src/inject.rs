@@ -1605,6 +1605,16 @@ pub fn effective_method(configured: ReplacementMethod) -> Delivery {
     }
 }
 
+/// ⭐ **Whether the window in front is a viewer of AnyDesk or RustDesk** ([`is_remote_viewer`]) — stage
+/// Э122, решение 208.253: what the input thread publishes to the hook on every layout probe
+/// (`hook::set_viewer_in_front`). No window, or a class that cannot be read, is no viewer.
+pub fn foreground_is_viewer() -> bool {
+    // SAFETY: as in `effective_method` above.
+    let foreground = unsafe { GetForegroundWindow() };
+
+    !foreground.is_invalid() && window_class(foreground).is_some_and(|class| is_remote_viewer(&class))
+}
+
 // ---------------------------------------------------------------------------------------
 // Building one `INPUT` — FR-03
 // ---------------------------------------------------------------------------------------
@@ -1635,8 +1645,9 @@ pub fn effective_method(configured: ReplacementMethod) -> Delivery {
 ///    not an invitation to merge the two: doing so is a refactor of its own, with its own task.
 /// 4. [`scan_event`] — stage Э96: every key of the keystroke path of the classic console, the
 ///    user's keys again by their scan codes and the `Shift` around a key that had it.
-/// 5. [`backspace_event`] — stage E122: the backspaces of that same keystroke path, the virtual
-///    key **and** its scan code.
+/// 5. [`pressed_event`] — stage E122: the virtual key **and** its scan code — the backspaces of
+///    that same keystroke path ([`backspace_event`]) and, решение 208.253, the `Shift` and the key
+///    the hook held back from a viewer ([`held_back_events`]).
 ///
 /// # What actually holds the invariant
 ///
@@ -1740,24 +1751,86 @@ fn unicode_event(unit: u16, up: bool) -> INPUT {
 ///
 /// The signature of FR-03 on both edges, as on every event of this program — see [`key_event`].
 fn backspace_event(up: bool) -> INPUT {
-    let flags = if up {
-        KEYEVENTF_KEYUP
-    } else {
-        KEYBD_EVENT_FLAGS(0)
-    };
+    pressed_event(BACKSPACE, SCAN_BACKSPACE, false, up)
+}
+
+/// ⭐ One keyboard `INPUT` naming a key **by its virtual key and its scan code**, no
+/// `KEYEVENTF_SCANCODE` — the body of [`backspace_event`], and since решение 208.253 the strokes the
+/// hook held back from a viewer ([`send_held_back`]). Both halves for the reasons
+/// [`backspace_event`] gives: the viewers drop a key without a scan code, and a virtual key given
+/// is not read out of a scan code the tail of `Pause` may spoil.
+///
+/// The signature of FR-03 on both edges, as on every event of this program — see [`key_event`].
+fn pressed_event(vk: VIRTUAL_KEY, scan: u16, extended: bool, up: bool) -> INPUT {
+    let mut flags = KEYBD_EVENT_FLAGS(0);
+
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
 
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: BACKSPACE,
-                wScan: SCAN_BACKSPACE,
+                wVk: vk,
+                wScan: scan,
                 dwFlags: flags,
                 time: 0,
                 dwExtraInfo: INJECTED_SIGNATURE,
             },
         },
     }
+}
+
+/// `LLKHF_EXTENDED` of `KBDLLHOOKSTRUCT.flags` — bit 0, the flag the hook's record of a key keeps
+/// (FR-05).
+const HELD_EXTENDED: u32 = 0x01;
+
+/// ⭐ **The strokes the hook held back from a viewer, in their order** — stage Э122, решение 208.253:
+/// the press of the `Shift`, the press of the key under it, and whatever was typed before the input
+/// thread answered — each as it was typed, press or release ([`pressed_event`]).
+///
+/// Answers the events and how many of them are filled.
+pub fn held_back_events(
+    resend: crate::hook::Resend,
+) -> ([INPUT; crate::hook::RESEND_MAX], usize) {
+    let mut events = [pressed_event(VIRTUAL_KEY(0), 0, false, false); crate::hook::RESEND_MAX];
+    let strokes = resend.strokes();
+
+    for (event, stroke) in events.iter_mut().zip(strokes) {
+        *event = pressed_event(
+            VIRTUAL_KEY(stroke.vk),
+            stroke.scan,
+            stroke.flags & HELD_EXTENDED != 0,
+            stroke.up,
+        );
+    }
+
+    (events, strokes.len())
+}
+
+/// ⭐ Sends [`held_back_events`] — on `hook::WM_APP_RESEND`, at the input thread (stage Э122). FR-45:
+/// a packet the system did not take whole is counted like any other. Answers the events taken.
+pub fn send_held_back(resend: crate::hook::Resend) -> u32 {
+    let (events, count) = held_back_events(resend);
+
+    if count == 0 {
+        return 0;
+    }
+
+    let accepted = send_input(&events[..count]);
+
+    record_discrepancy(Dispatched {
+        calls: 1,
+        requested: count,
+        accepted: usize::try_from(accepted).unwrap_or(0),
+    });
+
+    accepted
 }
 
 /// One keyboard `INPUT` naming a **physical key by its scan code** — the keystroke path of the

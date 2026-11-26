@@ -3866,6 +3866,13 @@ unsafe extern "system" fn window_proc(
                 // reading each, no state carried between them.
                 if message == crate::watchdog::WM_APP_LAYOUT {
                     crate::buffer::set_caps_lock(crate::hook::caps_lock_on);
+
+                    // ⭐ Stage Э122, решение 208.253: whether the window in front is a viewer of
+                    // AnyDesk or RustDesk — the callback holds back the second tap of a double
+                    // `Shift` there. The same occasions: a change of window or focus, and the
+                    // release of a modifier — the first tap among them, so the second finds it
+                    // fresh. One `GetForegroundWindow` and one `GetClassNameW`, on this thread.
+                    crate::hook::set_viewer_in_front(crate::inject::foreground_is_viewer());
                 }
             }
 

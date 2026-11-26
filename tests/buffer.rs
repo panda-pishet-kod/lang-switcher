@@ -2202,6 +2202,7 @@ fn armed() -> Mode {
         hotkey_double_tap: false,
         hotkey_tap: false,
         hotkey_yields: false,
+        viewer_in_front: false,
         switch: hook::SwitchKey::NONE,
     }
 }

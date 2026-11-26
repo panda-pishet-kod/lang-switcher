@@ -51,6 +51,7 @@ fn armed() -> Mode {
         hotkey_double_tap: false,
         hotkey_tap: false,
         hotkey_yields: false,
+        viewer_in_front: false,
         switch: hook::SwitchKey::NONE,
     }
 }
@@ -74,6 +75,7 @@ fn passed_on() -> Outcome {
         probe_layout: false,
         fire_switch: false,
         mask_menu: false,
+        resend: false,
     }
 }
 
@@ -141,6 +143,7 @@ fn the_hook_starts_disarmed_until_the_configuration_is_published() {
         hotkey_double_tap: false,
         hotkey_tap: false,
         hotkey_yields: false,
+        viewer_in_front: false,
         switch: hook::SwitchKey::NONE,
     };
 
@@ -1261,9 +1264,14 @@ fn every_private_message_of_this_module_is_gated_on_state_the_sender_cannot_writ
             "WM_APP_HOTKEY | WM_APP_SWITCH_KEY => {",
             "WM_APP_FAIL_SAFE => {",
             "WM_APP_SEED_CAPS => {",
+            "WM_APP_RESEND => {",
         ],
-        "three arms, and a fourth would have to be argued here before it is added"
+        "four arms, and a fifth would have to be argued here before it is added"
     );
+
+    // ⭐ Stage Э122, решение 208.253: `WM_APP_RESEND` sends the keys the callback itself held back
+    // from a viewer a moment before, out of a slot it takes whole — a forgery finds the slot empty
+    // and sends nothing. Argued at its constant.
 
     // The one this task is about. The other two are argued at their constants and neither can
     // be driven by what the message carries: `WM_APP_HOTKEY` converts text the sender cannot
@@ -4577,4 +4585,524 @@ fn the_tap_of_ctrl_and_alt_is_published_in_the_word_of_either_key() {
 
     hook::set_hotkeys(restore.0, restore.1);
     assert_eq!(hook::hotkeys(), restore);
+}
+
+// -------------------------------------------------------------------------------------
+// Stage Э122, решение 208.253 — the second tap of a double `Shift` stays out of a viewer
+// -------------------------------------------------------------------------------------
+
+/// The scan codes of the two `Shift` keys and of `A` — the physical half the sending reads.
+const SCAN_LSHIFT: u16 = 0x2A;
+const SCAN_RSHIFT: u16 = 0x36;
+const SCAN_A: u16 = 0x1E;
+
+/// The double press of `Shift` with the window of a viewer of AnyDesk or RustDesk in front.
+fn armed_on_double_shift_in_a_viewer() -> Mode {
+    Mode {
+        viewer_in_front: true,
+        ..armed_on_double_shift()
+    }
+}
+
+/// A stroke of the user at `time`, with its scan code.
+fn stroke(vk: u16, edge: Edge, time: u32) -> KeyEvent {
+    let scan = match vk {
+        VK_LSHIFT => SCAN_LSHIFT,
+        VK_RSHIFT => SCAN_RSHIFT,
+        VK_A => SCAN_A,
+        _ => 0,
+    };
+
+    KeyEvent {
+        scan,
+        time,
+        ..user_key(vk, edge)
+    }
+}
+
+/// What the viewer — and the computer behind it — gets of `events` in `mode`, in order: every stroke
+/// passed on, and in the place of a stroke that asked for it, the presses the input thread sends
+/// (`hook::WM_APP_RESEND` is answered right after the callback returns). Beside it the index of
+/// every event that fired a key, and every outcome.
+fn reaching_the_viewer(
+    mode: Mode,
+    events: &[KeyEvent],
+) -> (Vec<(u16, Edge)>, Vec<usize>, Vec<Outcome>) {
+    let mut state = HotkeyState::default();
+    let (mut stream, mut fired, mut all) = (Vec::new(), Vec::new(), Vec::new());
+
+    for (index, &key) in events.iter().enumerate() {
+        let outcome = hook::classify(mode, &mut state, key, || 0, || 0);
+
+        if outcome.decision == Decision::Pass {
+            stream.push((key.vk, key.edge));
+        }
+
+        if outcome.resend {
+            let resend = state
+                .resend
+                .take()
+                .expect("an outcome that asks to send has the keys in the slot");
+
+            stream.extend(sent(&resend));
+        } else {
+            assert_eq!(
+                state.resend, None,
+                "event {index}: keys in the slot, and no message for them"
+            );
+        }
+
+        if outcome.fire_hotkey || outcome.fire_switch {
+            fired.push(index);
+        }
+
+        all.push(outcome);
+    }
+
+    (stream, fired, all)
+}
+
+/// Every press in `stream` has its release after it, and no release comes without its press — no
+/// key is left down on the remote computer (решение 208.253, п. 2).
+fn assert_whole(stream: &[(u16, Edge)], what: &str) {
+    let mut down: Vec<u16> = Vec::new();
+
+    for &(vk, edge) in stream {
+        match edge {
+            Edge::Down => {
+                if !down.contains(&vk) {
+                    down.push(vk);
+                }
+            }
+            Edge::Up => {
+                let at = down.iter().position(|&held| held == vk);
+
+                assert!(
+                    at.is_some(),
+                    "{what}: a release of {vk:#04x} with no press before it: {stream:?}"
+                );
+                down.remove(at.unwrap());
+            }
+        }
+    }
+
+    assert!(
+        down.is_empty(),
+        "{what}: left down on the remote computer: {down:x?} in {stream:?}"
+    );
+}
+
+/// A double press: `Shift` down at 0, up at 80, down at 160, up at 240.
+fn double_press(vk: u16) -> Vec<KeyEvent> {
+    vec![
+        stroke(vk, Edge::Down, 0),
+        stroke(vk, Edge::Up, 80),
+        stroke(vk, Edge::Down, 160),
+        stroke(vk, Edge::Up, 240),
+    ]
+}
+
+/// One tap, then the second press of `Shift` held for a capital `A`.
+fn tap_then_capital() -> Vec<KeyEvent> {
+    vec![
+        stroke(VK_LSHIFT, Edge::Down, 0),
+        stroke(VK_LSHIFT, Edge::Up, 80),
+        stroke(VK_LSHIFT, Edge::Down, 160),
+        stroke(VK_A, Edge::Down, 200),
+        stroke(VK_A, Edge::Up, 260),
+        stroke(VK_LSHIFT, Edge::Up, 300),
+    ]
+}
+
+#[test]
+fn in_a_viewer_the_remote_computer_gets_the_first_tap_of_a_double_shift_only() {
+    for vk in [VK_LSHIFT, VK_RSHIFT] {
+        let (stream, fired, outcomes) =
+            reaching_the_viewer(armed_on_double_shift_in_a_viewer(), &double_press(vk));
+
+        println!("{vk:#04x}: {stream:?}");
+
+        assert_eq!(fired, vec![3], "the double press fires here, on the second release");
+        assert_eq!(
+            stream,
+            vec![(vk, Edge::Down), (vk, Edge::Up)],
+            "the remote computer gets the first tap and nothing of the second"
+        );
+        assert_eq!(
+            outcomes[2].decision,
+            Decision::Suppress,
+            "the second press is held back"
+        );
+        assert_eq!(
+            outcomes[3].decision,
+            Decision::Suppress,
+            "and so is its release"
+        );
+    }
+
+    // The second hotkey — «Переключить раскладку» — on the double press: the same.
+    let switch = Mode {
+        viewer_in_front: true,
+        ..armed_on_two((VK_PAUSE, 0), (0x10, hook::DOUBLE_TAP))
+    };
+    let (stream, fired, outcomes) = reaching_the_viewer(switch, &double_press(VK_LSHIFT));
+
+    assert_eq!(fired, vec![3]);
+    assert!(outcomes[3].fire_switch && !outcomes[3].fire_hotkey);
+    assert_eq!(stream, vec![(VK_LSHIFT, Edge::Down), (VK_LSHIFT, Edge::Up)]);
+}
+
+#[test]
+fn every_shift_a_viewer_gets_has_its_release() {
+    let held = |vk, time| stroke(vk, Edge::Down, time);
+    let up = |vk, time| stroke(vk, Edge::Up, time);
+    let later = |mut events: Vec<KeyEvent>, by: u32| {
+        events.iter_mut().for_each(|key| key.time += by);
+        events
+    };
+
+    let cases: Vec<(&str, Vec<KeyEvent>)> = vec![
+        ("the double press", double_press(VK_LSHIFT)),
+        ("a capital on the second press", tap_then_capital()),
+        (
+            "the second press held, repeating past the window",
+            vec![
+                held(VK_LSHIFT, 0),
+                up(VK_LSHIFT, 80),
+                held(VK_LSHIFT, 160),
+                held(VK_LSHIFT, 400),
+                held(VK_LSHIFT, 600),
+                held(VK_LSHIFT, 630),
+                up(VK_LSHIFT, 700),
+            ],
+        ),
+        (
+            "the second press held too long for a tap, no repeat",
+            vec![
+                held(VK_LSHIFT, 0),
+                up(VK_LSHIFT, 80),
+                held(VK_LSHIFT, 160),
+                up(VK_LSHIFT, 610),
+            ],
+        ),
+        (
+            "the other Shift under the second press",
+            vec![
+                held(VK_LSHIFT, 0),
+                up(VK_LSHIFT, 80),
+                held(VK_LSHIFT, 160),
+                held(VK_RSHIFT, 200),
+                up(VK_RSHIFT, 260),
+                up(VK_LSHIFT, 300),
+            ],
+        ),
+        (
+            "a letter typed before the second press, released under it",
+            vec![
+                held(VK_LSHIFT, 0),
+                up(VK_LSHIFT, 80),
+                held(VK_A, 100),
+                held(VK_LSHIFT, 160),
+                up(VK_A, 180),
+                up(VK_LSHIFT, 240),
+            ],
+        ),
+        (
+            "two double presses in a row",
+            [double_press(VK_LSHIFT), later(double_press(VK_LSHIFT), 1_000)].concat(),
+        ),
+    ];
+
+    for (what, events) in cases {
+        let (stream, fired, _) = reaching_the_viewer(armed_on_double_shift_in_a_viewer(), &events);
+
+        println!("{what}: {stream:?}, fired {fired:?}");
+        assert_whole(&stream, what);
+    }
+}
+
+#[test]
+fn a_capital_typed_on_the_second_press_reaches_the_viewer_as_typed() {
+    let mode = armed_on_double_shift_in_a_viewer();
+    let events = tap_then_capital();
+    let mut state = HotkeyState::default();
+
+    for key in &events[..3] {
+        hook::classify(mode, &mut state, *key, || 0, || 0);
+    }
+
+    assert_eq!(
+        state.resend, None,
+        "nothing to send while the second press may be a tap"
+    );
+
+    let letter = hook::classify(mode, &mut state, events[3], || 0, || 0);
+
+    assert_eq!(letter.decision, Decision::Suppress, "the letter waits for its Shift");
+    assert!(letter.resend, "and the input thread is asked to send both");
+    assert_eq!(
+        state.resend.map(|resend| resend.strokes().to_vec()),
+        Some(vec![
+            hook::HeldKey {
+                vk: VK_LSHIFT,
+                scan: SCAN_LSHIFT,
+                flags: 0,
+                up: false,
+            },
+            hook::HeldKey {
+                vk: VK_A,
+                scan: SCAN_A,
+                flags: 0,
+                up: false,
+            },
+        ]),
+        "the Shift as it was pressed, then the letter as it was pressed"
+    );
+    assert!(!letter.fire_hotkey, "a capital is no double press");
+
+    let (stream, fired, _) = reaching_the_viewer(mode, &events);
+
+    assert_eq!(
+        stream,
+        vec![
+            (VK_LSHIFT, Edge::Down),
+            (VK_LSHIFT, Edge::Up),
+            (VK_LSHIFT, Edge::Down),
+            (VK_A, Edge::Down),
+            (VK_A, Edge::Up),
+            (VK_LSHIFT, Edge::Up),
+        ],
+        "the viewer gets Shift and the letter in the order they were typed"
+    );
+    assert!(fired.is_empty());
+
+    // A key the hook swallows as a hotkey sends the Shift alone: the press of the second key,
+    // `F12` alone, under the held Shift.
+    const VK_F12: u16 = 0x7B;
+    let two = Mode {
+        viewer_in_front: true,
+        ..armed_on_two((0x10, hook::DOUBLE_TAP), (VK_F12, 0))
+    };
+    let mut state = HotkeyState::default();
+
+    for key in &events[..3] {
+        hook::classify(two, &mut state, *key, || 0, || 0);
+    }
+
+    let f12 = hook::classify(two, &mut state, stroke(VK_F12, Edge::Down, 200), || 0, || 0);
+
+    assert_eq!(f12.decision, Decision::Suppress);
+    assert!(f12.resend && f12.fire_switch);
+    assert_eq!(
+        state.resend.map(|resend| sent(&resend)),
+        Some(vec![(VK_LSHIFT, Edge::Down)]),
+        "the Shift alone: the hotkey is not sent"
+    );
+}
+
+/// What the input thread sends of `resend`, as `(code, edge)`.
+fn sent(resend: &hook::Resend) -> Vec<(u16, Edge)> {
+    resend
+        .strokes()
+        .iter()
+        .map(|stroke| (stroke.vk, if stroke.up { Edge::Up } else { Edge::Down }))
+        .collect()
+}
+
+/// ⭐ The input thread answers after the next strokes have come — a busy thread, or keys as fast as
+/// the stand types them. They wait behind the held ones, and the viewer still gets them in the order
+/// typed, every press before its release (решение 208.253, п. 2 and п. 3). A queue with no room left
+/// passes a stroke on as it comes.
+#[test]
+fn strokes_typed_before_the_input_thread_answers_wait_behind_the_held_ones() {
+    let mode = armed_on_double_shift_in_a_viewer();
+    let events = tap_then_capital();
+    let mut state = HotkeyState::default();
+    let mut stream = Vec::new();
+
+    for key in &events {
+        let outcome = hook::classify(mode, &mut state, *key, || 0, || 0);
+
+        if outcome.decision == Decision::Pass {
+            stream.push((key.vk, key.edge));
+        }
+    }
+
+    // Only now does the thread answer.
+    let resend = state.resend.take().expect("the strokes wait in the slot");
+
+    assert_eq!(
+        sent(&resend),
+        vec![
+            (VK_LSHIFT, Edge::Down),
+            (VK_A, Edge::Down),
+            (VK_A, Edge::Up),
+            (VK_LSHIFT, Edge::Up),
+        ],
+        "the release of the letter and of the Shift wait behind their presses"
+    );
+
+    stream.extend(sent(&resend));
+    assert_eq!(stream[..2], [(VK_LSHIFT, Edge::Down), (VK_LSHIFT, Edge::Up)]);
+    assert_whole(&stream, "a slow input thread");
+
+    // A full queue: the strokes beyond it pass as they come.
+    let mut state = HotkeyState::default();
+
+    for key in &events[..4] {
+        hook::classify(mode, &mut state, *key, || 0, || 0);
+    }
+
+    let mut passed = 0;
+
+    for index in 0..hook::RESEND_MAX as u32 {
+        let edge = if index % 2 == 0 { Edge::Up } else { Edge::Down };
+        let outcome = hook::classify(mode, &mut state, stroke(VK_A, edge, 300 + index), || 0, || 0);
+
+        if outcome.decision == Decision::Pass {
+            passed += 1;
+        }
+    }
+
+    assert_eq!(
+        state.resend.map(|resend| resend.strokes().len()),
+        Some(hook::RESEND_MAX)
+    );
+    assert_eq!(passed, 2, "the two strokes beyond the queue pass as they come");
+}
+
+#[test]
+fn outside_a_viewer_the_double_shift_holds_nothing_back() {
+    let excluded_viewer = Mode {
+        hotkey_yields: true,
+        ..armed_on_double_shift_in_a_viewer()
+    };
+
+    for (what, mode) in [
+        ("no viewer in front", armed_on_double_shift()),
+        ("a viewer the user excluded (FR-84)", excluded_viewer),
+    ] {
+        for events in [double_press(VK_LSHIFT), tap_then_capital()] {
+            let (stream, _, outcomes) = reaching_the_viewer(mode, &events);
+            let typed: Vec<(u16, Edge)> = events.iter().map(|key| (key.vk, key.edge)).collect();
+
+            assert_eq!(stream, typed, "{what}: every stroke passes as before (п. 4)");
+            assert!(
+                outcomes.iter().all(|outcome| !outcome.resend),
+                "{what}: nothing is sent"
+            );
+        }
+    }
+
+    // And in a viewer, what is no second tap passes as ever: a capital made on a first press, the
+    // first tap after it, a press after the window of that tap.
+    let lone = [
+        stroke(VK_LSHIFT, Edge::Down, 0),
+        stroke(VK_A, Edge::Down, 40),
+        stroke(VK_A, Edge::Up, 90),
+        stroke(VK_LSHIFT, Edge::Up, 120),
+        stroke(VK_LSHIFT, Edge::Down, 200),
+        stroke(VK_LSHIFT, Edge::Up, 260),
+        stroke(VK_LSHIFT, Edge::Down, 700),
+        stroke(VK_LSHIFT, Edge::Up, 760),
+    ];
+    let (stream, fired, _) = reaching_the_viewer(armed_on_double_shift_in_a_viewer(), &lone);
+    let typed: Vec<(u16, Edge)> = lone.iter().map(|key| (key.vk, key.edge)).collect();
+
+    assert_eq!(stream, typed);
+    assert!(fired.is_empty());
+}
+
+#[test]
+fn our_own_strokes_do_not_let_a_held_shift_go() {
+    let mode = armed_on_double_shift_in_a_viewer();
+    let mut state = HotkeyState::default();
+
+    for key in &double_press(VK_LSHIFT)[..3] {
+        hook::classify(mode, &mut state, *key, || 0, || 0);
+    }
+
+    let ours = KeyEvent {
+        extra_info: INJECTED_SIGNATURE,
+        ..stroke(VK_A, Edge::Down, 200)
+    };
+    let sent = hook::classify(mode, &mut state, ours, || 0, || 0);
+
+    assert_eq!(sent, passed_on(), "FR-03: our own stroke passes untouched");
+    assert_eq!(state.resend, None);
+
+    let release = hook::classify(
+        mode,
+        &mut state,
+        stroke(VK_LSHIFT, Edge::Up, 240),
+        || 0,
+        || 0,
+    );
+
+    assert_eq!(
+        release.decision,
+        Decision::Suppress,
+        "the held Shift is still held back"
+    );
+}
+
+/// The flag of the viewer is published by the input thread on the layout probe — not read in the
+/// callback, which gains no system call (NFR-01 to NFR-05) and sends nothing itself (section 6.1).
+#[test]
+fn the_viewer_is_asked_on_the_input_thread_and_the_keys_are_sent_there() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let read = |file: &str| {
+        std::fs::read_to_string(root.join(file))
+            .expect("the source must be readable")
+            .replace("\r\n", "\n")
+    };
+    let (hook_rs, app_rs) = (read("hook.rs"), read("app.rs"));
+
+    let probe = app_rs
+        .find("if message == crate::watchdog::WM_APP_LAYOUT {")
+        .expect("the probe branch of the input window");
+    let end = app_rs[probe..]
+        .find("\n                }\n")
+        .expect("the branch closes");
+    let branch = &app_rs[probe..probe + end];
+
+    assert!(
+        branch.contains("crate::hook::set_viewer_in_front(crate::inject::foreground_is_viewer());"),
+        "the flag follows the layout probe"
+    );
+
+    for signature in [
+        "unsafe extern \"system\" fn keyboard_hook_proc",
+        "pub fn classify(",
+        "fn hold_back(",
+        "fn keep_shift(",
+        "fn tap_stroke(",
+    ] {
+        let at = hook_rs
+            .find(signature)
+            .expect("the function must be in this file");
+        let end = hook_rs[at..].find("\n}\n").expect("a top-level function closes");
+        let body = &hook_rs[at..at + end];
+
+        for call in [
+            "GetForegroundWindow",
+            "GetClassNameW",
+            "SendInput",
+            "send_held_back",
+            "foreground_is_viewer",
+        ] {
+            assert!(
+                !body.contains(call),
+                "{signature}: {call} has no place in the callback"
+            );
+        }
+    }
+
+    let at = hook_rs
+        .find("WM_APP_RESEND => {")
+        .expect("the arm of the input thread");
+    let end = hook_rs[at..].find("Some(LRESULT(0))").expect("the arm answers");
+    let arm = &hook_rs[at..at + end];
+
+    assert!(arm.contains("take_resend()") && arm.contains("crate::inject::send_held_back(resend)"));
 }
