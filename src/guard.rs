@@ -1630,8 +1630,14 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
     None
 }
 
+/// **The top-level classes of the desktop of explorer** — `Progman`, and `WorkerW`, which stands in
+/// front of it when the desktop is shown (`Win+D`) or behind a slideshow wallpaper. Stage E123,
+/// variant (б1): answered by [`verdict_without_probe`] without the probe.
+pub const DESKTOP_WINDOW_CLASSES: [&str; 2] = ["Progman", "WorkerW"];
+
 /// ⭐ **The verdict of a console window, without the probe — stage E123 (2026-11-26).**
-/// `None` for every other window: it is probed as before.
+/// `None` for every other window but the desktop of explorer (see the end of this note): it is
+/// probed as before.
 ///
 /// A window of one of the two console host classes of FR-42а ([`crate::inject::CONSOLE_WINDOW_CLASSES`]:
 /// `ConsoleWindowClass` — conhost — and `CASCADIA_HOSTING_WINDOW_CLASS` — Windows Terminal) is
@@ -1658,6 +1664,14 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
 /// empty buffer switched the layout — the owner's «ничего, со звуком удачи» (решение 208.254). In a
 /// Windows Terminal just opened the same interval was ≈ 390–420 ms (Windows 11, sampled).
 ///
+/// ⭐ **And the desktop of explorer — variant (б1) of the controller** ([`DESKTOP_WINDOW_CLASSES`]).
+/// Between the Run box closing and the console it started coming to the front, the desktop holds
+/// the focus for a moment, and its probe of UI Automation held the watcher thread for ≈ 100–350 ms
+/// — the thread the events of the console's window arrive on (§6.1), so the console was announced
+/// only when that probe ended, and the strokes in between were lost all the same (sampled,
+/// `vmlab\out\e123\samp-w11-b6-*`). The desktop has no password field to protect; answering it here
+/// leaves the watcher thread free for the console.
+///
 /// # Threading
 ///
 /// The thread that noted the focus change — the input thread — and outside the hook callback, which
@@ -1667,10 +1681,12 @@ fn verdict_by_process(window: HWND, process: Option<&str>) -> Option<Probe> {
 fn verdict_without_probe(window: HWND) -> Option<Probe> {
     let class = class_name(window);
 
-    if !crate::inject::CONSOLE_WINDOW_CLASSES
+    let answered_here = crate::inject::CONSOLE_WINDOW_CLASSES
         .iter()
-        .any(|console| class.eq_ignore_ascii_case(console))
-    {
+        .chain(DESKTOP_WINDOW_CLASSES.iter())
+        .any(|known| class.eq_ignore_ascii_case(known));
+
+    if !answered_here {
         return None;
     }
 

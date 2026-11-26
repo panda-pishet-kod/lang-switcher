@@ -545,6 +545,17 @@ mod classic_console {
         Window::of(w!("CASCADIA_HOSTING_WINDOW_CLASS"), &TERMINAL_CLASS)
     }
 
+    static PROGMAN_CLASS: OnceLock<()> = OnceLock::new();
+    static WORKERW_CLASS: OnceLock<()> = OnceLock::new();
+
+    fn progman() -> Window {
+        Window::of(w!("Progman"), &PROGMAN_CLASS)
+    }
+
+    fn workerw() -> Window {
+        Window::of(w!("WorkerW"), &WORKERW_CLASS)
+    }
+
     fn other() -> Window {
         Window::of(w!("LangSwE123NotAConsole"), &OTHER_CLASS)
     }
@@ -677,6 +688,38 @@ mod classic_console {
             after.probes, before.probes,
             "the probe of FR-72 did not run"
         );
+    }
+
+    /// **The desktop of explorer is answered at once too** — stage E123, variant (б1) of the
+    /// controller. Between the Run box closing and a console it starts coming to the front, the
+    /// desktop holds the focus for a moment; its probe of UI Automation held the watcher thread for
+    /// ≈ 100–350 ms, and the events of the console's window waited behind it (sampled, `Test_VM`).
+    /// The desktop has no password field to protect, so it needs no probe; both of its top-level
+    /// classes — `Progman`, and `WorkerW` that stands in for it behind a slideshow wallpaper.
+    #[test]
+    fn the_desktop_of_explorer_is_answered_at_once_and_not_probed() {
+        let _serialised = GLOBAL_STATE.lock().unwrap_or_else(PoisonError::into_inner);
+
+        assert_eq!(guard::publish_exclusions(&[]), 0);
+
+        for desktop in [progman(), workerw()] {
+            let before = guard::counters();
+
+            guard::note_focus_moved_for(Some(desktop.0));
+
+            assert_eq!(
+                guard::field(),
+                Field::Ordinary,
+                "E123 (б1): the desktop is an ordinary field the moment it has the focus"
+            );
+
+            let after = guard::counters();
+            assert_eq!(after.ordinary_verdicts, before.ordinary_verdicts + 1);
+            assert_eq!(
+                after.probes, before.probes,
+                "the probe of FR-72 did not run"
+            );
+        }
     }
 }
 
