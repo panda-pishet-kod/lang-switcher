@@ -4,7 +4,9 @@ Every published version of Lang Switcher, newest first. The full text of each re
 SHA-256, what was measured and what was not — is on the [Releases](https://github.com/panda-pishet-kod/lang-switcher/releases)
 page. Dates are the days the releases were published (UTC).
 
-## 1.9.0 — не выпущено
+## 1.9.0 — 2026-11-27
+
+*The author's cards.*
 
 - The author's cards: a letter from the author with a picture — a holiday greeting, say — comes once in its
   term, by the same knock in the corner as a news item. The picture stands in place of the panda or over the whole
